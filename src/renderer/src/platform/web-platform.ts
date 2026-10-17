@@ -1,3 +1,4 @@
+import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 
 declare global {
@@ -17,12 +18,25 @@ const ROOT = '/memory'
 
 /**
  * In-memory fallback used when the renderer runs outside Electron (browser tab
- * or `electron-vite dev --rendererOnly`). Sample fixtures get seeded here later.
+ * or `electron-vite dev --rendererOnly`). The built-in sample library is served
+ * from `/samples`, so fixtures are readable through the same `PlatformPort`
+ * contract the Electron runtime uses; user writes stay under {@link ROOT}.
  */
 export function createWebPlatformPort(): PlatformPort {
   const nodes = new Map<string, VirtualNode>([
     [ROOT, { path: ROOT, isDirectory: true, content: '' }]
   ])
+
+  function ensureDirectory(path: string): void {
+    if (path === '' || path === '/' || nodes.has(path)) return
+    ensureDirectory(path.slice(0, path.lastIndexOf('/')))
+    nodes.set(path, { path, isDirectory: true, content: '' })
+  }
+
+  for (const sample of SAMPLE_FIXTURE_FILES) {
+    ensureDirectory(sample.path.slice(0, sample.path.lastIndexOf('/')))
+    nodes.set(sample.path, { path: sample.path, isDirectory: false, content: sample.text })
+  }
 
   function requireNode(path: string): VirtualNode {
     const node = nodes.get(path)
