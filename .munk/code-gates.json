@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "description": "OpenCompare quality gates. Each command is a single argv (no && || | ;). install/build kept separate.",
+  "gates": [
+    {
+      "id": "install",
+      "cwd": ".",
+      "command": "pnpm install"
+    },
+    {
+      "id": "lint",
+      "cwd": ".",
+      "command": "pnpm lint"
+    },
+    {
+      "id": "typecheck",
+      "cwd": ".",
+      "command": "pnpm typecheck"
+    },
+    {
+      "id": "build",
+      "cwd": ".",
+      "command": "pnpm build"
+    },
+    {
+      "id": "build-web",
+      "cwd": ".",
+      "command": "pnpm build:web"
+    },
+    {
+      "id": "test",
+      "cwd": ".",
+      "command": "pnpm test"
+    }
+  ]
+}
