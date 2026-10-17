@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "description": "EXAMPLE ONLY — never executed. Copy/adapt to .munk/code-gates.json. Each command is a single argv (no && || | ;). Split install/build into separate gates.",
+  "gates": [
+    {
+      "id": "install",
+      "cwd": ".",
+      "command": "pnpm install"
+    },
+    {
+      "id": "build",
+      "cwd": ".",
+      "command": "pnpm build"
+    }
+  ]
+}
