@@ -27,6 +27,13 @@ OpenCompare 是对标 Beyond Compare 5 Pro 的现代跨平台桌面对比与三�
 
 `pnpm dev`（Electron 窗口）· `pnpm dev:web`（浏览器 Web 渲染模式）· `pnpm build` · `pnpm build:web` · `pnpm preview:web` · `pnpm typecheck` · `pnpm lint` · `pnpm test`
 
+## 视觉基线（改界面前先读）
+
+- Token 唯一来源：`src/renderer/src/assets/main.css`（`@theme`：表面/文字/边框/主色/危险 + **差异语义色** same·added·removed·modified·conflict、字号、圆角、高度、动效、`@utility transition-ui` / `transition-fast` / `focus-ring` / `tabular`）。
+- 基础组件目录：`src/renderer/src/components/`（Button、SegmentedControl、DropdownMenu、Panel、SplitPane、SessionTabs、StateView、StatusBar、DiffBadge、TreeView、CodeBlock、diffSemantics）。
+- 主屏：`src/renderer/src/workbench/Workbench.tsx`；场景视图 `src/renderer/src/views/`；内置样本 `src/shared/fixtures/`。
+- 组件只引用 token，不写死颜色/尺寸；差异语义色一律走 `--color-diff-*`。
+
 ## Skill 路由
 
 | 场景 | Skill |

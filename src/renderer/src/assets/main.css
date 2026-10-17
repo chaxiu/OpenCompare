@@ -1,1 +1,143 @@
 @import 'tailwindcss';
+
+/*
+ * OpenCompare design tokens — the single source of truth for the dark
+ * industrial workbench. Components reference these tokens only; colours,
+ * type sizes, radii, elevation and motion never appear as literals elsewhere.
+ *
+ * `--color-diff-*` is the product's core visual language (same / added /
+ * removed / modified / conflict) and must be reused by every comparison view.
+ */
+@theme {
+  /* Layered neutral surfaces */
+  --color-surface-base: #0b0d12;
+  --color-surface-sunken: #080a0f;
+  --color-surface-raised: #12151d;
+  --color-surface-overlay: #171b25;
+  --color-surface-hover: #1e2331;
+
+  /* Content */
+  --color-content-primary: #e7eaf2;
+  --color-content-secondary: #a3abbb;
+  --color-content-muted: #6b7583;
+  --color-content-inverse: #0b0d12;
+
+  /* Lines */
+  --color-line-subtle: #1e2431;
+  --color-line-strong: #303847;
+
+  /* Single accent */
+  --color-accent: #4c8dff;
+  --color-accent-strong: #6da4ff;
+  --color-accent-soft: #16233d;
+  --color-focus: #6da4ff;
+
+  /* Danger */
+  --color-danger: #f2555a;
+  --color-danger-strong: #ff757a;
+  --color-danger-soft: #33191e;
+
+  /* Diff semantics */
+  --color-diff-same: #6b7583;
+  --color-diff-added: #3fb950;
+  --color-diff-removed: #f2555a;
+  --color-diff-modified: #d8a13a;
+  --color-diff-conflict: #a371f7;
+  --color-diff-added-soft: #10281a;
+  --color-diff-removed-soft: #2e171a;
+  --color-diff-modified-soft: #2c2210;
+  --color-diff-conflict-soft: #241a37;
+
+  /* Typography — system stacks only, no network fonts */
+  --font-sans:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  /* Radii */
+  --radius-xs: 0.1875rem;
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.4375rem;
+  --radius-lg: 0.625rem;
+
+  /* Elevation */
+  --shadow-panel: 0 10px 24px -18px rgb(0 0 0 / 0.9);
+  --shadow-overlay: 0 18px 44px -18px rgb(0 0 0 / 0.9);
+
+  /* Motion */
+  --duration-fast: 110ms;
+  --duration-base: 170ms;
+  --ease-ui: cubic-bezier(0.22, 0, 0, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-surface-base);
+    color: var(--color-content-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-soft);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-line-strong);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+  }
+}
+
+/* Repeated low-level behaviours shared by every component. */
+@utility transition-ui {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-ui);
+}
+
+@utility transition-fast {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-ui);
+}
+
+@utility focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+
+  &:focus-visible {
+    outline-color: var(--color-focus);
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
