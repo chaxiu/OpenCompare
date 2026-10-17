@@ -4,3 +4,11 @@
 .munk/work-set/
 .munk/work-set-planning/
 .munk/uploads/
+
+node_modules/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+*.log
