@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { JSX } from 'react'
 import {
   AlertTriangle,
@@ -23,6 +23,7 @@ import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
 import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
 import { CodeView } from '@renderer/views/CodeView'
+import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
@@ -82,13 +83,22 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [sessions, setSessions] = useState<readonly LoadedSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [codeMerge, setCodeMerge] = useState<CodeMergeState | null>(null)
+
+  const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
 
   const active = sessions.find((session) => session.id === activeId) ?? null
-  const composition = active
+  const baseComposition = active
     ? { directory: DIRECTORY_SCENE, code: CODE_SCENE, csv: CSV_SCENE, structured: STRUCTURED_SCENE }[
         active.scene
       ].composition
     : null
+  // The code session's conflict count is computed at runtime from the merge
+  // model, not read from the sample answer key.
+  const composition =
+    baseComposition && active?.scene === 'code' && codeMerge
+      ? { ...baseComposition, conflict: codeMerge.unresolved }
+      : baseComposition
 
   async function load(options?: {
     readonly scene?: SceneId
@@ -140,6 +150,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <CodeView
             fixture={CODE_SCENE}
             defaultMode={session.columns === 3 ? 'merge' : 'diff'}
+            onMergeStateChange={handleMergeState}
           />
         )
       case 'csv':
@@ -268,7 +279,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         {active ? (
           <span className="ml-auto flex shrink-0 items-center gap-3">
             {active.stats.map((stat) => (
-              <StatusEntry key={stat.label} label={stat.label} value={stat.value} tone={stat.tone} />
+              <StatusEntry
+                key={stat.label}
+                label={stat.label}
+                value={
+                  active.scene === 'code' && stat.label === '冲突块' && codeMerge
+                    ? codeMerge.unresolved
+                    : stat.value
+                }
+                tone={stat.tone}
+              />
             ))}
           </span>
         ) : null}
