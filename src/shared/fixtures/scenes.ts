@@ -64,6 +64,49 @@ const SHELL_RIGHT = [
   ''
 ].join('\n')
 
+/** Delimited sample, so double-click drilldown can reach the CSV view. */
+const REPORT_LEFT = [
+  'order_id,qty,status',
+  'ORD-1001,3,paid',
+  'ORD-1002,5,pending',
+  'ORD-1003,1,shipped',
+  ''
+].join('\n')
+
+const REPORT_RIGHT = [
+  'order_id,qty,status',
+  'ORD-1001,3,paid',
+  'ORD-1002,8,pending',
+  'ORD-1003,1,shipped',
+  'ORD-1004,2,refunded',
+  ''
+].join('\n')
+
+/** YAML sample, so double-click drilldown can reach the structured view. */
+const DEPLOY_LEFT = ['service:', '  name: baseline', '  replicas: 2', 'profile: production', ''].join(
+  '\n'
+)
+
+const DEPLOY_RIGHT = [
+  'service:',
+  '  name: candidate',
+  '  replicas: 4',
+  '  health:',
+  '    path: /healthz',
+  'profile: staging',
+  ''
+].join('\n')
+
+/**
+ * A non-text sample. The library stores bodies as strings, but the name is what
+ * matters: it exercises the "unsupported drilldown type" path of the directory
+ * view without needing a real binary file on disk.
+ */
+const LOGO_LEFT = '89504e47 0d0a1a0a 49484452 00000010 00010000 00010008 06000000\n'
+
+const LOGO_RIGHT =
+  '89504e47 0d0a1a0a 49484452 00000020 00020000 00010008 06000000 01020304 05060708\n'
+
 const NESTED_LEFT = folder('baseline', 'same', [
   folder('src', 'same', [
     folder('core', 'same', [
@@ -75,6 +118,7 @@ const NESTED_LEFT = folder('baseline', 'same', [
         file('numbers.ts', 'removed', 'export const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))\n')
       ])
     ]),
+    folder('data', 'same', [file('report.csv', 'modified', REPORT_LEFT)]),
     folder('ui', 'same', [
       folder('workbench', 'same', [
         file('Shell.tsx', 'modified', SHELL_LEFT),
@@ -87,6 +131,8 @@ const NESTED_LEFT = folder('baseline', 'same', [
     file('guide.md', 'same', '# OpenCompare guide\n\nLoad the sample fixtures from the toolbar to start.\n'),
     file('changelog.md', 'removed', '# Changelog\n\n## 0.0.1\n\n- scaffold\n')
   ]),
+  folder('config', 'same', [file('deploy.yaml', 'modified', DEPLOY_LEFT)]),
+  folder('assets', 'same', [file('logo.png', 'modified', LOGO_LEFT)]),
   file('package.json', 'same', '{\n  "name": "baseline",\n  "private": true\n}\n'),
   file('README.md', 'removed', '# baseline\n\nDeprecated sample tree.\n')
 ])
@@ -101,6 +147,7 @@ const NESTED_RIGHT = folder('candidate', 'same', [
         file('format.ts', 'added', 'export const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KiB`\n')
       ])
     ]),
+    folder('data', 'same', [file('report.csv', 'modified', REPORT_RIGHT)]),
     folder('ui', 'same', [
       folder('workbench', 'same', [
         file('Shell.tsx', 'modified', SHELL_RIGHT),
@@ -114,6 +161,8 @@ const NESTED_RIGHT = folder('candidate', 'same', [
     file('guide.md', 'same', '# OpenCompare guide\n\nLoad the sample fixtures from the toolbar to start.\n'),
     file('migration.md', 'added', '# Migration\n\nMove deprecated trees into `archive/`.\n')
   ]),
+  folder('config', 'same', [file('deploy.yaml', 'modified', DEPLOY_RIGHT)]),
+  folder('assets', 'same', [file('logo.png', 'modified', LOGO_RIGHT)]),
   file('package.json', 'same', '{\n  "name": "baseline",\n  "private": true\n}\n'),
   file('CHANGELOG.md', 'added', '# Changelog\n\n## 0.1.0\n\n- candidate tree\n')
 ])

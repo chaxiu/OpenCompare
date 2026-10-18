@@ -1,9 +1,9 @@
 import type { JSX } from 'react'
-import type { CsvSceneFixture } from '@shared/fixtures'
+import type { CsvSample } from '@shared/fixtures'
+import type { CsvTable, CsvTables } from '@renderer/workbench/session'
 import { Panel } from '@renderer/components/Panel'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
-import type { CsvTables } from '@renderer/workbench/loadSampleSessions'
 
 function CsvTable({
   header,
@@ -60,39 +60,35 @@ function CsvTable({
 
 /**
  * Scene C — the two reconciliation sides as raw tables. The declared key
- * column is tinted; no diff highlighting happens in this phase.
+ * column is tinted; no diff highlighting happens in this phase. Drilldown
+ * sessions feed ad-hoc left/right samples through the same component.
  */
 export function CsvView({
-  fixture,
+  left,
+  right,
+  keyColumns,
   tables
 }: {
-  readonly fixture: CsvSceneFixture
+  readonly left: CsvSample
+  readonly right: CsvSample
+  readonly keyColumns: readonly string[]
   readonly tables: CsvTables
 }): JSX.Element {
+  const label = (sample: CsvSample, table: CsvTable): string =>
+    `${table.rows.length.toLocaleString('en-US')} 行 · ${sample.delimiter === '\t' ? 'TSV' : 'CSV'}`
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 gap-2 p-2">
       <SplitPane
         panes={[
-          <Panel
-            key="left"
-            title={fixture.left.path}
-            subtitle={`${tables.left.rows.length.toLocaleString('en-US')} 行 · ${fixture.left.delimiter === '\t' ? 'TSV' : 'CSV'}`}
-          >
-            <CsvTable
-              header={tables.left.header}
-              rows={tables.left.rows}
-              keyColumns={fixture.keyColumns}
-            />
+          <Panel key="left" title={left.path} subtitle={label(left, tables.left)}>
+            <CsvTable header={tables.left.header} rows={tables.left.rows} keyColumns={keyColumns} />
           </Panel>,
-          <Panel
-            key="right"
-            title={fixture.right.path}
-            subtitle={`${tables.right.rows.length.toLocaleString('en-US')} 行 · ${fixture.right.delimiter === '\t' ? 'TSV' : 'CSV'}`}
-          >
+          <Panel key="right" title={right.path} subtitle={label(right, tables.right)}>
             <CsvTable
               header={tables.right.header}
               rows={tables.right.rows}
-              keyColumns={fixture.keyColumns}
+              keyColumns={keyColumns}
             />
           </Panel>
         ]}

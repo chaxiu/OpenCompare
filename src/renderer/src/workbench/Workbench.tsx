@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import {
   AlertTriangle,
@@ -12,9 +12,13 @@ import {
   Sparkles,
   Table2
 } from 'lucide-react'
-import { CODE_SCENE, CSV_SCENE, DIRECTORY_SCENE, STRUCTURED_SCENE } from '@shared/fixtures'
-import type { SceneId } from '@shared/fixtures'
+import { CODE_SCENE, CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
+import type { SampleComposition, SceneId } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
+import { createComparisonCache } from '@core/directory/compare'
+import type { DirectoryDiffNode } from '@core/directory/compare'
+import { countTreeFiles, filterDirectoryTree } from '@core/directory/filter'
+import type { DirectoryFilter } from '@core/directory/filter'
 import { ToolbarButton } from '@renderer/components/Button'
 import { DropdownMenu } from '@renderer/components/DropdownMenu'
 import type { DropdownItem } from '@renderer/components/DropdownMenu'
@@ -26,8 +30,14 @@ import { CodeView } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
+import {
+  compareDirectoryRoots,
+  createDirectorySession,
+  createDrilldownSession
+} from './directoryCompare'
+import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
-import type { LoadedSession } from './loadSampleSessions'
+import type { WorkbenchSession } from './session'
 
 type WorkbenchStatus = 'empty' | 'loading' | 'ready' | 'error'
 
@@ -63,7 +73,7 @@ const SAMPLE_MENU: readonly DropdownItem[] = [
   {
     id: 'load-directory',
     label: '目录对比',
-    description: '嵌入双目录树 + 跨层级散乱树 B'
+    description: '运行时双目录差异 + 状态过滤'
   },
   { id: 'load-code', label: '代码 Diff & 3-Way Merge', description: '双栏 Diff + 多冲突块' },
   { id: 'load-csv', label: 'CSV 主键对比', description: '1,240 行乱序主键对账' },
@@ -79,16 +89,25 @@ const SAMPLE_MENU: readonly DropdownItem[] = [
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
 export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
   const [status, setStatus] = useState<WorkbenchStatus>('empty')
-  const [sessions, setSessions] = useState<readonly LoadedSession[]>([])
+  const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [directoryBusy, setDirectoryBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all')
+  const cache = useRef(createComparisonCache())
 
   const active = sessions.find((session) => session.id === activeId) ?? null
-  const composition = active
-    ? { directory: DIRECTORY_SCENE, code: CODE_SCENE, csv: CSV_SCENE, structured: STRUCTURED_SCENE }[
-        active.scene
-      ].composition
-    : null
+
+  /** Diff counts of the directory entries currently visible, filter included. */
+  const directoryCounts = useMemo<SampleComposition | null>(() => {
+    const comparison = active?.scene === 'directory' ? active.directory : undefined
+    if (!comparison) return null
+    const filtered = filterDirectoryTree(comparison.root, directoryFilter)
+    return { ...countTreeFiles(filtered), conflict: 0 }
+  }, [active, directoryFilter])
+
+  const legend = active?.scene === 'directory' ? directoryCounts : (active?.composition ?? null)
 
   async function load(options?: {
     readonly scene?: SceneId
@@ -97,7 +116,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setStatus('loading')
     setError(null)
     try {
-      const loaded = await loadSampleSessions(options)
+      const loaded = await loadSampleSessions(platform, { ...options, cache: cache.current })
       setSessions(loaded)
       setActiveId((current) =>
         current !== null && loaded.some((session) => session.id === current)
@@ -131,21 +150,119 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     if (scene) void load({ scene })
   }
 
-  function renderScene(session: LoadedSession): JSX.Element | null {
+  /** Upserts a session, preserving the tab order it already had. */
+  function upsertSession(session: WorkbenchSession): void {
+    setSessions((current) =>
+      current.some((item) => item.id === session.id)
+        ? current.map((item) => (item.id === session.id ? session : item))
+        : [...current, session]
+    )
+    setActiveId(session.id)
+  }
+
+  /** Runs a real comparison through PlatformPort and refreshes the session. */
+  async function runDirectoryCompare(leftRoot: string, rightRoot: string): Promise<void> {
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const comparison = await compareDirectoryRoots(platform, leftRoot, rightRoot, cache.current)
+      upsertSession(createDirectorySession(comparison))
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  async function pickDirectory(side: 'left' | 'right'): Promise<void> {
+    const chosen = await platform.selectDirectory()
+    if (chosen === null) return
+
+    const comparison = active?.directory
+    const leftRoot = side === 'left' ? chosen : (comparison?.leftRoot ?? DIRECTORY_SAMPLE_PATHS.left)
+    const rightRoot =
+      side === 'right' ? chosen : (comparison?.rightRoot ?? DIRECTORY_SAMPLE_PATHS.right)
+    await runDirectoryCompare(leftRoot, rightRoot)
+  }
+
+  /** Opens a directory-tree file in the matching file-level view. */
+  async function openFile(node: DirectoryDiffNode): Promise<void> {
+    if (node.kind !== 'file') return
+
+    const target = classifyFile(node.name)
+    if (target === null) {
+      setNotice(`暂不支持把 ${node.name} 下钻到文件对比（仅代码 / 文本 · CSV / TSV · JSON / YAML）。`)
+      return
+    }
+
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const [leftText, rightText] = await Promise.all([
+        node.leftPath ? platform.readTextFile(node.leftPath) : Promise.resolve(''),
+        node.rightPath ? platform.readTextFile(node.rightPath) : Promise.resolve('')
+      ])
+      upsertSession(createDrilldownSession(node, target, leftText, rightText))
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  function renderScene(session: WorkbenchSession): JSX.Element | null {
     switch (session.scene) {
       case 'directory':
-        return <DirectoryView fixture={DIRECTORY_SCENE} />
-      case 'code':
-        return (
-          <CodeView
-            fixture={CODE_SCENE}
-            defaultMode={session.columns === 3 ? 'merge' : 'diff'}
+        return session.directory ? (
+          <DirectoryView
+            comparison={session.directory}
+            filter={directoryFilter}
+            onFilterChange={setDirectoryFilter}
+            visibleCounts={directoryCounts ?? { ...session.directory.counts, conflict: 0 }}
+            pickerAvailable={platform.kind === 'electron'}
+            busy={directoryBusy}
+            notice={notice}
+            onPick={(side) => void pickDirectory(side)}
+            onLoadSample={() =>
+              void runDirectoryCompare(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
+            }
+            onOpenFile={(node) => void openFile(node)}
           />
+        ) : null
+      case 'code':
+        return session.adhoc ? (
+          <CodeView pair={session.adhoc.pair} />
+        ) : (
+          <CodeView fixture={CODE_SCENE} defaultMode={session.columns === 3 ? 'merge' : 'diff'} />
         )
-      case 'csv':
-        return session.tables ? <CsvView fixture={CSV_SCENE} tables={session.tables} /> : null
+      case 'csv': {
+        if (session.adhoc) {
+          const { pair, delimiter, tables } = session.adhoc
+          if (!tables) return null
+          return (
+            <CsvView
+              left={{ path: pair.left.path, text: pair.left.text, delimiter: delimiter ?? ',' }}
+              right={{ path: pair.right.path, text: pair.right.text, delimiter: delimiter ?? ',' }}
+              keyColumns={[]}
+              tables={tables}
+            />
+          )
+        }
+        return session.tables ? (
+          <CsvView
+            left={CSV_SCENE.left}
+            right={CSV_SCENE.right}
+            keyColumns={CSV_SCENE.keyColumns}
+            tables={session.tables}
+          />
+        ) : null
+      }
       case 'structured':
-        return <StructuredView fixture={STRUCTURED_SCENE} />
+        return session.adhoc ? (
+          <StructuredView pair={session.adhoc.pair} format={session.adhoc.format} />
+        ) : (
+          <StructuredView fixture={STRUCTURED_SCENE} />
+        )
     }
   }
 
@@ -229,7 +346,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <StateView
             icon={<LoaderCircle aria-hidden className="size-5 animate-spin" />}
             title="正在载入样本…"
-            description="读取内置样本库并解析 CSV / TSV 表格。"
+            description="读取内置样本库，扫描内置样本目录并按大小 / 修改时间 / 内容哈希完成对比，同时解析 CSV / TSV 表格。"
           />
         ) : null}
 
@@ -259,10 +376,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         <StatusEntry label="会话" value={active ? active.id : '—'} />
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <StatusEntry label="运行平台" value={platform.kind} />
-        {composition ? (
+        {legend ? (
           <>
             <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-            <CompositionLegend composition={composition} />
+            <CompositionLegend composition={legend} />
           </>
         ) : null}
         {active ? (
