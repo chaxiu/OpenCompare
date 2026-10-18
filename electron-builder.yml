@@ -1,0 +1,28 @@
+# electron-builder packaging targets.
+#
+# Cross-platform artifacts are built on CI only (see .github/workflows/release.yml);
+# code signing / notarisation stay out of scope, so the published bundles are unsigned.
+# Electron-vite emits the three process bundles into `out/`, which is what gets packed.
+appId: com.opencompare.app
+productName: OpenCompare
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  category: Development
+  target:
+    - AppImage
+    - deb

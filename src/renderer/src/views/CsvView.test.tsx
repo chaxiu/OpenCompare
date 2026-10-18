@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CSV_SCENE } from '@shared/fixtures'
+import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { parseCsvTable } from '@renderer/workbench/session'
 import { CsvView } from './CsvView'
+
+const platform = createWebPlatformPort()
+
+/** Drives the web runtime's hidden file picker with a chosen local file. */
+function chooseFile(name: string, text: string): void {
+  const input = document.querySelector<HTMLInputElement>('input[data-opencompare-picker="file"]')
+  if (!input) throw new Error('no open-file input was created')
+  fireEvent.change(input, { target: { files: [new File([text], name, { type: 'text/csv' })] } })
+}
 
 /**
  * jsdom reports zero-sized elements, which would give the virtualizer no
@@ -46,6 +56,7 @@ function renderSample(): { readonly onAlign: ReturnType<typeof vi.fn> } {
       right={CSV_SCENE.right}
       defaultKeyColumns={CSV_SCENE.keyColumns}
       tables={SAMPLE_TABLES}
+      platform={platform}
       onAlignStateChange={onAlign}
     />
   )
@@ -92,6 +103,7 @@ describe('CsvView', () => {
         right={{ path: '/right.csv', text: '', delimiter: ',' }}
         defaultKeyColumns={[]}
         tables={tables}
+        platform={platform}
         onAlignStateChange={onAlign}
       />
     )
@@ -157,5 +169,40 @@ describe('CsvView', () => {
       sessionId: 'session-csv',
       counts: { same: 0, added: 0, removed: 0, modified: 0 }
     })
+  })
+})
+
+describe('local file entry points', () => {
+  it('opens a local CSV file on one side and re-aligns it by the shared key', async () => {
+    renderSample()
+    expect(screen.getByText('orders.left.csv ↔ orders.right.tsv')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    chooseFile('next-left.csv', 'order_id,qty\nA,1\nB,2\n')
+
+    // The panel follows the opened path and the alignment is recomputed.
+    await waitFor(() => expect(screen.getByText('next-left.csv ↔ orders.right.tsv')).toBeDefined())
+    expect(screen.getByText(/主键 order_id/)).toBeDefined()
+    expect(await screen.findByText(/已打开 \/memory\/next-left\.csv/)).toBeDefined()
+  })
+
+  it('falls back to the first shared column when the opened pair has new headers', async () => {
+    render(
+      <CsvView
+        sessionId="session-csv"
+        left={{ path: '/left.csv', text: '', delimiter: ',' }}
+        right={{ path: '/right.csv', text: '', delimiter: ',' }}
+        defaultKeyColumns={[]}
+        tables={{ left: { header: ['id', 'sku'], rows: [] }, right: { header: ['id', 'sku'], rows: [] } }}
+        platform={platform}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开右文件' }))
+    chooseFile('right.csv', 'sku,qty\nX,1\nY,2\n')
+
+    await waitFor(() => expect(screen.getByText('left.csv ↔ right.csv')).toBeDefined())
+    // The previous key column is gone; the first shared column is re-picked.
+    expect(await screen.findByText(/主键 sku/)).toBeDefined()
   })
 })

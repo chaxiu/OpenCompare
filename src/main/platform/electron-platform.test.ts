@@ -9,13 +9,20 @@ import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import { registerPlatformIpc } from './electron-platform'
 
-const { handlers } = vi.hoisted(() => ({
-  handlers: new Map<string, (...args: unknown[]) => unknown>()
+const { handlers, dialogs } = vi.hoisted(() => ({
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  dialogs: {
+    open: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
+    save: vi.fn(async () => ({ canceled: true, filePath: undefined as string | undefined }))
+  }
 }))
 
 vi.mock('electron', () => ({
   app: { getPath: () => tmpdir() },
-  dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+  dialog: {
+    showOpenDialog: (...args: unknown[]) => dialogs.open(...(args as [])),
+    showSaveDialog: (...args: unknown[]) => dialogs.save(...(args as []))
+  },
   ipcMain: {
     handle: (_channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(_channel, handler)
@@ -32,6 +39,8 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 const platform: PlatformPort = {
   kind: 'electron',
   selectDirectory: async () => null,
+  selectFile: (options) => invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
+  saveFile: (options) => invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
   listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   writeTextFile: (path, content, modifiedMs) =>
@@ -114,5 +123,55 @@ describe('electron real-directory sync', () => {
 
     const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
     expect(second.totalCount).toBe(0)
+  })
+})
+
+describe('native file dialogs', () => {
+  it('opens a file through the native dialog with normalised filters', async () => {
+    dialogs.open.mockResolvedValueOnce({ canceled: false, filePaths: ['/tmp/picked.txt'] })
+
+    const selected = await platform.selectFile({
+      title: '打开本地文件',
+      filters: [{ name: '文本', extensions: ['.txt', 'csv'] }]
+    })
+
+    expect(selected).toBe('/tmp/picked.txt')
+    expect(dialogs.open).toHaveBeenCalledWith({
+      title: '打开本地文件',
+      filters: [{ name: '文本', extensions: ['txt', 'csv'] }],
+      properties: ['openFile']
+    })
+  })
+
+  it('reports a cancelled open dialog as null without throwing', async () => {
+    dialogs.open.mockResolvedValueOnce({ canceled: true, filePaths: [] })
+
+    await expect(platform.selectFile()).resolves.toBeNull()
+  })
+
+  it('writes the returned body through the native save dialog', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'merged.txt')
+    dialogs.save.mockResolvedValueOnce({ canceled: false, filePath: target })
+
+    await expect(
+      platform.saveFile({
+        title: '保存合并结果',
+        defaultPath: 'merged.txt',
+        filters: [{ name: '文本', extensions: ['txt'] }],
+        content: 'merged\n'
+      })
+    ).resolves.toBe(target)
+
+    expect(await readFile(target, 'utf8')).toBe('merged\n')
+    expect(dialogs.save).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '保存合并结果', defaultPath: 'merged.txt' })
+    )
+  })
+
+  it('reports a cancelled save dialog as null', async () => {
+    dialogs.save.mockResolvedValueOnce({ canceled: true, filePath: undefined })
+
+    await expect(platform.saveFile({ content: 'never written' })).resolves.toBeNull()
   })
 })

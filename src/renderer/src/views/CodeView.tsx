@@ -7,6 +7,7 @@ import {
   ChevronUp,
   ClipboardCopy,
   Download,
+  FolderOpen,
   RotateCcw
 } from 'lucide-react'
 import { diffLineTexts, overwriteBlock } from '@core/text/diff'
@@ -19,7 +20,8 @@ import {
   renderMergeText
 } from '@core/text/merge'
 import type { MergeAccept, MergeModel, MergeRange, MergeResolutions } from '@core/text/merge'
-import type { CodeSceneFixture } from '@shared/fixtures'
+import type { CodeSceneFixture, TextSample } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { DiffBadge, DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_ROW_HEIGHT, DiffPane } from '@renderer/components/DiffPane'
@@ -29,6 +31,8 @@ import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
+import { TEXT_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
+import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
@@ -70,9 +74,22 @@ function offsetTop(range: MergeRange): number {
 /* Two-column line + inline character diff                             */
 /* ------------------------------------------------------------------ */
 
-function CodeDiffView({ pair }: { readonly pair: FilePair }): JSX.Element {
+function CodeDiffView({
+  pair,
+  platform
+}: {
+  readonly pair: FilePair
+  readonly platform: PlatformPort
+}): JSX.Element {
+  const [leftPath, setLeftPath] = useState(pair.left.path)
+  const [rightPath, setRightPath] = useState(pair.right.path)
+  // The loaded bodies (reset target) are kept apart from the working copies the
+  // per-block overwrite mutates.
+  const [leftSource, setLeftSource] = useState(pair.left.text)
+  const [rightSource, setRightSource] = useState(pair.right.text)
   const [leftText, setLeftText] = useState(pair.left.text)
   const [rightText, setRightText] = useState(pair.right.text)
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const [active, setActive] = useState(0)
 
   const leftScroll = useRef<HTMLDivElement>(null)
@@ -114,9 +131,34 @@ function CodeDiffView({ pair }: { readonly pair: FilePair }): JSX.Element {
   }
 
   function reset(): void {
-    setLeftText(pair.left.text)
-    setRightText(pair.right.text)
+    setLeftText(leftSource)
+    setRightText(rightSource)
     setActive(0)
+  }
+
+  /** Opens a local file on one side and re-runs the comparison over it. */
+  async function open(side: 'left' | 'right'): Promise<void> {
+    try {
+      const picked = await pickTextFile(
+        platform,
+        side === 'left' ? '打开左侧本地文件' : '打开右侧本地文件',
+        [TEXT_FILE_FILTER]
+      )
+      if (picked === null) return
+      if (side === 'left') {
+        setLeftPath(picked.path)
+        setLeftSource(picked.text)
+        setLeftText(picked.text)
+      } else {
+        setRightPath(picked.path)
+        setRightSource(picked.text)
+        setRightText(picked.text)
+      }
+      setActive(0)
+      setNotice({ text: `已打开 ${picked.path}`, tone: 'ok' })
+    } catch (cause) {
+      setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
+    }
   }
 
   return (
@@ -166,11 +208,37 @@ function CodeDiffView({ pair }: { readonly pair: FilePair }): JSX.Element {
         >
           重置
         </ToolbarButton>
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        <ToolbarButton
+          size="sm"
+          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          onClick={() => void open('left')}
+        >
+          打开左文件
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          onClick={() => void open('right')}
+        >
+          打开右文件
+        </ToolbarButton>
+        {notice ? (
+          <span
+            role="status"
+            className={cx(
+              'text-2xs',
+              notice.tone === 'error' ? 'text-danger' : 'text-diff-added'
+            )}
+          >
+            {notice.text}
+          </span>
+        ) : null}
       </div>
 
       <SplitPane
         panes={[
-          <Panel key="left" title={pair.left.path} subtitle="左">
+          <Panel key="left" title={leftPath} subtitle="左">
             <DiffPane
               rows={diff.rows}
               side="left"
@@ -179,7 +247,7 @@ function CodeDiffView({ pair }: { readonly pair: FilePair }): JSX.Element {
               onScroll={() => syncScroll(leftScroll, rightScroll)}
             />
           </Panel>,
-          <Panel key="right" title={pair.right.path} subtitle="右">
+          <Panel key="right" title={rightPath} subtitle="右">
             <DiffPane
               rows={diff.rows}
               side="right"
@@ -198,25 +266,44 @@ function CodeDiffView({ pair }: { readonly pair: FilePair }): JSX.Element {
 /* Three-way merge with per-block conflict resolution                  */
 /* ------------------------------------------------------------------ */
 
+/** The three merge inputs: each side is a path plus its current body. */
+export interface MergeSides {
+  readonly base: TextSample
+  readonly ours: TextSample
+  readonly theirs: TextSample
+}
+
+export type MergeSideKey = keyof MergeSides
+
+const MERGE_SIDE_LABELS: Record<MergeSideKey, string> = {
+  base: 'base',
+  ours: 'ours',
+  theirs: 'theirs'
+}
+
 function CodeMergeView({
-  fixture,
+  sides,
   model,
   resolutions,
   onResolve,
   activeConflict,
-  onSelectConflict
+  onSelectConflict,
+  platform,
+  onOpenSide
 }: {
-  readonly fixture: CodeSceneFixture
+  readonly sides: MergeSides
   readonly model: MergeModel
   readonly resolutions: MergeResolutions
   readonly onResolve: (id: string, accept: MergeAccept) => void
   readonly activeConflict: number
   readonly onSelectConflict: (index: number) => void
+  readonly platform: PlatformPort
+  readonly onOpenSide: (which: MergeSideKey, picked: PickedTextFile) => void
 }): JSX.Element {
   const baseScroll = useRef<HTMLDivElement>(null)
   const oursScroll = useRef<HTMLDivElement>(null)
   const theirsScroll = useRef<HTMLDivElement>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
 
   const conflictCount = model.conflictIds.length
   const activeIndex = conflictCount === 0 ? -1 : Math.min(activeConflict, conflictCount - 1)
@@ -226,9 +313,9 @@ function CodeMergeView({
     : null
 
   const render = useMemo(() => renderMerge(model, resolutions), [model, resolutions])
-  const baseLines = useMemo(() => splitLines(fixture.merge.base.text), [fixture])
-  const oursLines = useMemo(() => splitLines(fixture.merge.ours.text), [fixture])
-  const theirsLines = useMemo(() => splitLines(fixture.merge.theirs.text), [fixture])
+  const baseLines = useMemo(() => splitLines(sides.base.text), [sides])
+  const oursLines = useMemo(() => splitLines(sides.ours.text), [sides])
+  const theirsLines = useMemo(() => splitLines(sides.theirs.text), [sides])
 
   const previewLines = useMemo<readonly MergeLineView[]>(
     () =>
@@ -245,8 +332,8 @@ function CodeMergeView({
     if (theirsScroll.current) theirsScroll.current.scrollTop = offsetTop(activeBlock.theirsRange)
   }, [activeBlock])
 
-  function flash(message: string): void {
-    setNotice(message)
+  function flash(text: string, tone: 'ok' | 'error' = 'ok'): void {
+    setNotice({ text, tone })
     window.setTimeout(() => setNotice(null), 2400)
   }
 
@@ -255,15 +342,36 @@ function CodeMergeView({
     onSelectConflict((activeIndex + delta + conflictCount) % conflictCount)
   }
 
-  function exportText(): void {
-    const text = renderMergeText(render)
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'merged.txt'
-    anchor.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    flash('已导出合并文本')
+  /** Opens a local file into one of the three merge inputs. */
+  async function openSide(which: MergeSideKey): Promise<void> {
+    try {
+      const picked = await pickTextFile(
+        platform,
+        `打开 ${MERGE_SIDE_LABELS[which]} 本地文件`,
+        [TEXT_FILE_FILTER]
+      )
+      if (picked === null) return
+      onOpenSide(which, picked)
+      flash(`已打开 ${picked.path}`)
+    } catch (cause) {
+      flash(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
+  }
+
+  /** Saves the fully resolved merge result through the platform. */
+  async function saveText(): Promise<void> {
+    try {
+      const path = await platform.saveFile({
+        title: '保存合并结果',
+        defaultPath: 'merged.txt',
+        filters: [TEXT_FILE_FILTER],
+        content: renderMergeText(render)
+      })
+      if (path === null) return
+      flash(`已保存到 ${path}`)
+    } catch (cause) {
+      flash(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
   }
 
   async function copyText(): Promise<void> {
@@ -271,7 +379,7 @@ function CodeMergeView({
       await navigator.clipboard.writeText(renderMergeText(render))
       flash('已复制到剪贴板')
     } catch {
-      flash('复制失败，请手动选择预览文本')
+      flash('复制失败，请手动选择预览文本', 'error')
     }
   }
 
@@ -310,8 +418,29 @@ function CodeMergeView({
             {option.label}
           </ToolbarButton>
         ))}
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        {(Object.keys(MERGE_SIDE_LABELS) as MergeSideKey[]).map((which) => (
+          <ToolbarButton
+            key={which}
+            size="sm"
+            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            onClick={() => void openSide(which)}
+          >
+            打开 {MERGE_SIDE_LABELS[which]}
+          </ToolbarButton>
+        ))}
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          {notice ? <span className="text-2xs text-diff-added">{notice}</span> : null}
+          {notice ? (
+            <span
+              role="status"
+              className={cx(
+                'text-2xs',
+                notice.tone === 'error' ? 'text-danger' : 'text-diff-added'
+              )}
+            >
+              {notice.text}
+            </span>
+          ) : null}
           <ToolbarButton
             size="sm"
             icon={<ClipboardCopy aria-hidden className="size-3.5" />}
@@ -324,7 +453,7 @@ function CodeMergeView({
             size="sm"
             variant="primary"
             icon={<Download aria-hidden className="size-3.5" />}
-            onClick={exportText}
+            onClick={() => void saveText()}
             disabled={render.unresolved > 0}
           >
             导出合并文本
@@ -334,17 +463,17 @@ function CodeMergeView({
 
       <SplitPane
         panes={[
-          <Panel key="base" title={fixture.merge.base.path} subtitle="base">
+          <Panel key="base" title={sides.base.path} subtitle="base">
             <MergePane lines={baseLines.map((text) => ({ text }))} scrollRef={baseScroll} />
           </Panel>,
-          <Panel key="ours" title={fixture.merge.ours.path} subtitle="ours">
+          <Panel key="ours" title={sides.ours.path} subtitle="ours">
             <MergePane
               lines={oursLines.map((text) => ({ text }))}
               activeRange={activeBlock?.oursRange}
               scrollRef={oursScroll}
             />
           </Panel>,
-          <Panel key="theirs" title={fixture.merge.theirs.path} subtitle="theirs">
+          <Panel key="theirs" title={sides.theirs.path} subtitle="theirs">
             <MergePane
               lines={theirsLines.map((text) => ({ text }))}
               activeRange={activeBlock?.theirsRange}
@@ -437,6 +566,7 @@ export function CodeView({
   fixture,
   defaultMode = 'merge',
   pair,
+  platform,
   onMergeStateChange
 }: {
   readonly fixture?: CodeSceneFixture
@@ -444,6 +574,7 @@ export function CodeView({
   readonly defaultMode?: CodeMode
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
+  readonly platform: PlatformPort
   readonly onMergeStateChange?: (state: CodeMergeState) => void
 }): JSX.Element {
   const [mode, setMode] = useState<CodeMode>(defaultMode)
@@ -451,16 +582,19 @@ export function CodeView({
   const effectiveMode: CodeMode = adhoc ? 'diff' : mode
   const diffPair = pair ?? fixture?.diff
 
+  // The merge inputs are editable: opening a local file replaces one side and
+  // the model (conflicts included) is rebuilt from the new bodies.
+  const [mergeSides, setMergeSides] = useState<MergeSides | null>(() =>
+    fixture
+      ? { base: fixture.merge.base, ours: fixture.merge.ours, theirs: fixture.merge.theirs }
+      : null
+  )
   const model = useMemo(
     () =>
-      fixture
-        ? buildMergeModel(
-            fixture.merge.base.text,
-            fixture.merge.ours.text,
-            fixture.merge.theirs.text
-          )
+      mergeSides
+        ? buildMergeModel(mergeSides.base.text, mergeSides.ours.text, mergeSides.theirs.text)
         : null,
-    [fixture]
+    [mergeSides]
   )
   const [resolutions, setResolutions] = useState<MergeResolutions>({})
   const [activeConflict, setActiveConflict] = useState(0)
@@ -471,6 +605,15 @@ export function CodeView({
   useEffect(() => {
     onMergeStateChange?.({ unresolved, total })
   }, [unresolved, total, onMergeStateChange])
+
+  /** Swaps one merge input; the rebuilt model invalidates old acceptances. */
+  function replaceMergeSide(which: MergeSideKey, picked: PickedTextFile): void {
+    setMergeSides((current) =>
+      current ? { ...current, [which]: { path: picked.path, text: picked.text } } : current
+    )
+    setResolutions({})
+    setActiveConflict(0)
+  }
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
@@ -490,22 +633,24 @@ export function CodeView({
             <span className="hidden text-2xs text-content-muted md:inline">
               {mode === 'diff'
                 ? '行级 + 行内字符级 Diff · 同步滚动与逐块覆写'
-                : '按行切分 diff3 · 逐块点选采纳并导出'}
+                : '按行切分 diff3 · 逐块点选采纳并保存结果'}
             </span>
           </>
         )}
       </div>
 
       {effectiveMode === 'diff' && diffPair ? (
-        <CodeDiffView pair={diffPair} />
-      ) : fixture && model ? (
+        <CodeDiffView pair={diffPair} platform={platform} />
+      ) : mergeSides && model ? (
         <CodeMergeView
-          fixture={fixture}
+          sides={mergeSides}
           model={model}
           resolutions={resolutions}
           onResolve={(id, accept) => setResolutions((current) => ({ ...current, [id]: accept }))}
           activeConflict={activeConflict}
           onSelectConflict={setActiveConflict}
+          platform={platform}
+          onOpenSide={replaceMergeSide}
         />
       ) : null}
     </div>

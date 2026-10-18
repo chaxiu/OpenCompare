@@ -8,7 +8,14 @@
 node_modules/
 out/
 dist/
+release/
 coverage/
 *.tsbuildinfo
 .DS_Store
 *.log
+
+# self-test scratch artifacts (Playwright MCP snapshots / screenshots)
+.playwright-mcp/
+/code-view.yml
+/shot1.png
+/structured-bad-error.png

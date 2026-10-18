@@ -6,6 +6,10 @@ const platform: PlatformPort = {
   kind: 'electron',
   selectDirectory: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.selectDirectory) as Promise<string | null>,
+  selectFile: (options) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
+  saveFile: (options) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
   listDirectory: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
   readTextFile: (path) =>

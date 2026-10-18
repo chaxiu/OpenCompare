@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
-import { AlertTriangle, ArrowRight, Braces } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Braces, FolderOpen } from 'lucide-react'
 import { STRUCTURED_STATUSES, diffStructured, filterStructuredChanges } from '@core/structured/diff'
 import type {
   StructuredChange,
@@ -10,6 +10,8 @@ import type {
 } from '@core/structured/diff'
 import type { StructuredFormat } from '@core/structured/parse'
 import type { DiffStatus, StructuredSceneFixture } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
+import { ToolbarButton } from '@renderer/components/Button'
 import { CodeBlock } from '@renderer/components/CodeBlock'
 import { DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_BADGE_CLASSES } from '@renderer/components/diffSemantics'
@@ -18,6 +20,8 @@ import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { StateView } from '@renderer/components/StateView'
 import { cx } from '@renderer/components/utils'
+import { classifyFile } from '@renderer/workbench/fileKinds'
+import { STRUCTURED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair } from '@renderer/workbench/session'
 
 const FORMAT_OPTIONS = [
@@ -147,18 +151,31 @@ interface ComparisonState {
 export function StructuredView({
   fixture,
   pair,
-  format
+  format,
+  platform
 }: {
   readonly fixture?: StructuredSceneFixture
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
   readonly format?: StructuredFormat
+  readonly platform: PlatformPort
 }): JSX.Element {
   const [selected, setSelected] = useState<StructuredFormat>('json')
   const [filter, setFilter] = useState<StructuredFilter>('all')
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
+  // A locally opened pair overrides the sample / drilldown source until the
+  // format switch (or a new session) resets it.
+  const [opened, setOpened] = useState<{ pair: FilePair; format: StructuredFormat } | null>(null)
   const adhoc = pair !== undefined
-  const effective: StructuredFormat = adhoc ? (format ?? 'json') : selected
-  const source = pair ?? (fixture ? (effective === 'json' ? fixture.json : fixture.yaml) : null)
+  const effective: StructuredFormat = opened
+    ? opened.format
+    : adhoc
+      ? (format ?? 'json')
+      : selected
+  const source =
+    opened?.pair ??
+    pair ??
+    (fixture ? (effective === 'json' ? fixture.json : fixture.yaml) : null)
 
   const comparison = useMemo<ComparisonState>(() => {
     if (!source) return { diff: null, error: null }
@@ -173,6 +190,28 @@ export function StructuredView({
     () => (comparison.diff ? filterStructuredChanges(comparison.diff.entries, filter) : []),
     [comparison, filter]
   )
+
+  /** Opens a local JSON / YAML file on one side and re-runs the comparison. */
+  async function open(side: 'left' | 'right'): Promise<void> {
+    try {
+      const picked = await pickTextFile(
+        platform,
+        side === 'left' ? '打开左侧 JSON / YAML 文件' : '打开右侧 JSON / YAML 文件',
+        [STRUCTURED_FILE_FILTER]
+      )
+      if (picked === null) return
+      const next: FilePair = {
+        left: side === 'left' ? { path: picked.path, text: picked.text } : (source?.left ?? { path: picked.path, text: '' }),
+        right: side === 'right' ? { path: picked.path, text: picked.text } : (source?.right ?? { path: picked.path, text: '' })
+      }
+      const nextFormat = classifyFile(picked.path)?.format ?? effective
+      setOpened({ pair: next, format: nextFormat })
+      if (!adhoc) setSelected(nextFormat)
+      setNotice({ text: `已打开 ${picked.path}`, tone: 'ok' })
+    } catch (cause) {
+      setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
+    }
+  }
 
   if (!source) {
     return (
@@ -199,7 +238,10 @@ export function StructuredView({
               label="结构化格式"
               options={FORMAT_OPTIONS}
               value={selected}
-              onChange={setSelected}
+              onChange={(value) => {
+                setSelected(value)
+                setOpened(null)
+              }}
             />
             <span className="hidden text-2xs text-content-muted md:inline">
               键序与注释 / 缩进噪音已忽略 · 按 JSON Pointer 节点路径比对
@@ -213,6 +255,29 @@ export function StructuredView({
           value={filter}
           onChange={setFilter}
         />
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        <ToolbarButton
+          size="sm"
+          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          onClick={() => void open('left')}
+        >
+          打开左文件
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          onClick={() => void open('right')}
+        >
+          打开右文件
+        </ToolbarButton>
+        {notice ? (
+          <span
+            role="status"
+            className={cx('text-2xs', notice.tone === 'error' ? 'text-danger' : 'text-diff-added')}
+          >
+            {notice.text}
+          </span>
+        ) : null}
       </div>
 
       {comparison.diff ? (

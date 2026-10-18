@@ -22,6 +22,7 @@ CSV/TSV 场景的**主键列对齐对比**域：`src/core/csv/` 纯算法对齐�
   - **一键状态过滤**：`全部 / 仅差异 / 新增 / 删除 / 修改 / 相同`，作用于对齐行，视图内行数随之变化。
   - **运行时统计上抛**：CSV 会话状态栏 same/added/removed/modified 来自运行时对齐结果（沿用 `CodeView` 的 `onMergeStateChange` 回调模式），不再用样本 answer key。
   - 同时覆盖**内置千行样本会话**与**目录树下钻打开的 CSV/TSV 会话**（`session.adhoc` 路径）。
+- **本地分列文件入口（`CsvView` 顶栏）**：经 `PlatformPort.selectFile` 分别打开左 / 右本地 `.csv` / `.tsv` 文件，按扩展名决定分隔符（`.tsv` 制表符、`.csv` 逗号），重新解析并按当前主键重对齐；新一对表可能不共享旧主键时从新列重新选取默认主键；取消时对齐结果不变。
 
 ## 验收
 
@@ -37,6 +38,7 @@ CSV/TSV 场景的**主键列对齐对比**域：`src/core/csv/` 纯算法对齐�
 - **ac-runtime-stats**：状态栏 same/added/removed/modified 计数来自运行时对齐结果，且与答案键一致但来源不同（改主键后计数会随之变化）。
 - **ac-modified-cell**：修改行内变动单元格清晰展示「原值 → 新值」并使用 modified 差异语义色；新增行 / 删除行分别以 added / removed 语义色区分。
 - **ac-drilldown-csv**：目录下钻打开的 CSV/TSV 会话进入同一对齐视图；无声明主键时默认选中第一个共有列并可交互修改。
+- **ac-csv-open**：`CsvView` 顶栏可分别打开左 / 右本地 CSV / TSV 文件，重新按主键对齐（对齐行数/主键提示更新）；`.tsv` 按制表符、`.csv` 按逗号分隔；取消时对齐结果不变、无报错。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿（含随新视图更新的 `App.test.tsx`）。
 
 ## 非目标
@@ -49,7 +51,7 @@ CSV/TSV 场景的**主键列对齐对比**域：`src/core/csv/` 纯算法对齐�
 - **不做模糊主键匹配、主键自动推荐、复合键表达式或键归一化**。
 - **不做重复主键的歧义裁决 UI**（只在结果与统计里体现）。
 - **不做 `.xlsx` / Excel、不做超大表分页 / 流式加载 / Web Worker 卸载**。
-- **不改 `src/main/` / `src/preload/` / `PlatformPort` 契约，不改 `src/core/directory`、`src/core/text` 与目录 / 代码 / 结构化视图的行为**。
+- **不改 `src/core/directory`、`src/core/text` 与目录 / 代码 / 结构化视图的行为**；文件对话框能力由 `PlatformPort.selectFile` / `saveFile`（`foundation` 域）提供，本域只做 `CsvView` 顶栏接线，不新增多文件选择 / 目录批量 IO。
 - **不新增第三方依赖**（`@tanstack/react-virtual`、`papaparse` 已在 `package.json`）。
 - **不做快捷键、命令面板、主题切换、浅色皮肤**；不改 `.munk/baseline/**`（由 Delivery 折入）。
 
@@ -66,8 +68,8 @@ CSV/TSV 场景的**主键列对齐对比**域：`src/core/csv/` 纯算法对齐�
 
 ## 最近交付证明
 
-- WI：`wi_ws_274d4a5de8f6c5e4`（千行 CSV/TSV 按指定主键列对齐对比与虚拟列表单元格变动高亮，`kind: feature`）
-- 日期：2026-10-18
-- 结果：self_test passed（13/13 case，0 fail / 0 na；Host code-gates 六门禁 latest.json ok=true）。
-- 覆盖摘要：新建纯算法引擎 `src/core/csv/`（`alignCsvTables` 按列名配对、行状态 `same`/`modified`/`added`/`removed`、`changedColumns` 左值→右值明细、`duplicateKeys` 提示、零 Electron/DOM/React 依赖）；`CsvView.tsx` 由双原始表铺开重写为单表合并对齐视图（统一列集、`useVirtualizer` 固定行高 28px 虚拟滚动、主键选择器候选=左右共有列、六档状态过滤、变动单元格 modified 语义色内联「原值 → 新值」，新增/删除行 added/removed 语义色、单边列缺失侧留空），统计经回调上抛 `Workbench.tsx` 状态栏（沿用 `CodeView` 模式，不再读样本 answer key）；下钻 CSV/TSV 会话（`session.adhoc`）进入同一视图、无声明主键默认第一个共有列。`pnpm test` 11 files / 62 tests 全绿（`src/core/csv/align.test.ts` 10、`CsvView.test.tsx` 5、`App.test.tsx` 9 含 `report.csv` 下钻断言与运行时状态栏计数断言）；样本 answer key 与 fixtures 未改。13 条验收均有对应折叠用例（qa/）。
+- WI：`wi_intake_e60068db55d0fef9`（真实文件 IO 闭环 + GitHub 开源发布基线，`kind: feature`）
+- 日期：2026-10-19
+- 结果：self_test passed。
+- 覆盖摘要：`CsvView.tsx` 顶栏新增「打开左文件 / 打开右文件」，经 `PlatformPort.selectFile` 选本地 `.csv`/`.tsv`（按扩展名定分隔符）后重新 `parseCsvTable` 并按主键重对齐；新一对表无共同旧主键时从新列重选默认主键；每次打开给出「已打开 <路径>」提示，取消不变更对齐。对齐引擎 `src/core/csv/` 与样本兜底路径未改，`CsvView.test.tsx` / `App.test.tsx` 保持绿（`pnpm test` 20 files / 155 tests）。一条验收均有对应折叠用例（qa/）。
 - 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过（沿用既有 tech overview 与 design 基线）。

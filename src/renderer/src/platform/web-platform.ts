@@ -1,5 +1,11 @@
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
-import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
+import type {
+  DirectoryEntry,
+  FileDialogFilter,
+  PlatformPort,
+  SaveFileOptions,
+  SelectFileOptions
+} from '@shared/platform/types'
 
 declare global {
   interface Window {
@@ -20,6 +26,40 @@ const SAMPLE_ROOT = '/samples'
 
 function isSamplePath(path: string): boolean {
   return path === SAMPLE_ROOT || path.startsWith(`${SAMPLE_ROOT}/`)
+}
+
+/** `accept` attribute value for a hidden file input; extensions get their dot. */
+function acceptAttribute(filters: readonly FileDialogFilter[] | undefined): string | undefined {
+  if (!filters || filters.length === 0) return undefined
+  const extensions = filters.flatMap((filter) =>
+    filter.extensions.map((extension) => (extension.startsWith('.') ? extension : `.${extension}`))
+  )
+  return extensions.length === 0 ? undefined : extensions.join(',')
+}
+
+function readBlobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.onerror = () => reject(reader.error ?? new Error('读取所选文件失败。'))
+    reader.readAsText(blob)
+  })
+}
+
+/**
+ * Best-effort download of a saved body, so the browser preview produces a real
+ * artifact. jsdom (and any runtime without the Blob URL API) silently skips it.
+ */
+function triggerDownload(path: string, text: string): void {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = path.slice(path.lastIndexOf('/') + 1) || 'download.txt'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }
 
 /**
@@ -78,9 +118,85 @@ export function createWebPlatformPort(): PlatformPort {
     return path
   }
 
+  function writeNode(path: string, content: string, modifiedMs?: number): void {
+    assertWritable(path)
+    const parent = path.slice(0, path.lastIndexOf('/'))
+    if (parent !== '' && !nodes.has(parent)) ensureDirectoryNode(parent)
+    nodes.set(path, {
+      path,
+      isDirectory: false,
+      content,
+      modifiedMs: typeof modifiedMs === 'number' && Number.isFinite(modifiedMs) ? modifiedMs : 0
+    })
+  }
+
+  /**
+   * Browser file picker. A native `showOpenDialog` has no web equivalent, so a
+   * hidden `<input type="file">` stands in: the picked body is materialised into
+   * the memory file system and its virtual path is returned, keeping the
+   * `selectFile` → `readTextFile` sequence identical to the Electron runtime.
+   * Dismissing the picker resolves `null`.
+   */
+  function selectFile(options?: SelectFileOptions): Promise<string | null> {
+    return new Promise((resolve) => {
+      if (typeof document === 'undefined') {
+        resolve(null)
+        return
+      }
+
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.dataset.opencomparePicker = 'file'
+      if (options?.title !== undefined) input.title = options.title
+      const accept = acceptAttribute(options?.filters)
+      if (accept !== undefined) input.accept = accept
+      input.style.display = 'none'
+      document.body.appendChild(input)
+
+      let settled = false
+      const finish = (value: string | null): void => {
+        if (settled) return
+        settled = true
+        input.remove()
+        resolve(value)
+      }
+
+      input.addEventListener('change', () => {
+        const file = input.files?.[0]
+        if (!file) {
+          finish(null)
+          return
+        }
+        void readBlobText(file)
+          .then((text) => {
+            const path = `${ROOT}/${file.name}`
+            writeNode(path, text, Date.now())
+            finish(path)
+          })
+          .catch(() => finish(null))
+      })
+      input.addEventListener('cancel', () => finish(null))
+      input.click()
+    })
+  }
+
+  async function saveFile(options: SaveFileOptions): Promise<string | null> {
+    const extension = (options.filters?.[0]?.extensions[0] ?? 'txt').replace(/^\./, '')
+    const suggested =
+      options.defaultPath && options.defaultPath.length > 0
+        ? options.defaultPath
+        : `export.${extension}`
+    const target = suggested.startsWith('/') ? suggested : `${ROOT}/${suggested}`
+    writeNode(target, options.content, Date.now())
+    triggerDownload(target, options.content)
+    return target
+  }
+
   return {
     kind: 'web',
     selectDirectory: async () => ROOT,
+    selectFile,
+    saveFile,
     listDirectory: async (path) => {
       const node = requireNode(path)
       if (!node.isDirectory) throw new Error(`Not a directory: ${path}`)
@@ -100,15 +216,7 @@ export function createWebPlatformPort(): PlatformPort {
       return node.content
     },
     writeTextFile: async (path, content, modifiedMs) => {
-      assertWritable(path)
-      const parent = path.slice(0, path.lastIndexOf('/'))
-      if (parent !== '' && !nodes.has(parent)) ensureDirectoryNode(parent)
-      nodes.set(path, {
-        path,
-        isDirectory: false,
-        content,
-        modifiedMs: typeof modifiedMs === 'number' && Number.isFinite(modifiedMs) ? modifiedMs : 0
-      })
+      writeNode(path, content, modifiedMs)
     },
     exists: async (path) => nodes.has(path),
     ensureDirectory: async (path) => {

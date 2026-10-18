@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { AlertTriangle, Check } from 'lucide-react'
+import { AlertTriangle, Check, FolderOpen } from 'lucide-react'
 import type { CsvSample } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
 import { alignCsvTables, commonCsvColumns } from '@core/csv/align'
 import type { CsvAlignCounts, CsvAlignedCell, CsvAlignedRow, CsvColumnRef } from '@core/csv/align'
+import { ToolbarButton } from '@renderer/components/Button'
 import { DiffDot } from '@renderer/components/DiffBadge'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { cx } from '@renderer/components/utils'
+import { classifyFile } from '@renderer/workbench/fileKinds'
+import { DELIMITED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
+import { parseCsvTable } from '@renderer/workbench/session'
 import type { CsvTables } from '@renderer/workbench/session'
 
 /** Row alignment counts reported up to the workbench status bar. */
@@ -186,6 +191,7 @@ export function CsvView({
   right,
   defaultKeyColumns,
   tables,
+  platform,
   onAlignStateChange
 }: {
   readonly sessionId: string
@@ -194,17 +200,28 @@ export function CsvView({
   /** Declared primary keys; empty for a drilldown session. */
   readonly defaultKeyColumns: readonly string[]
   readonly tables: CsvTables
+  readonly platform: PlatformPort
   readonly onAlignStateChange?: (state: CsvAlignState) => void
 }): JSX.Element {
-  const candidates = useMemo(() => commonCsvColumns(tables.left, tables.right), [tables])
+  // Opening a local file swaps one side; the parsed tables follow it, so the
+  // alignment is always recomputed from the current bodies.
+  const [leftSide, setLeftSide] = useState<CsvSample>(left)
+  const [rightSide, setRightSide] = useState<CsvSample>(right)
+  const [currentTables, setCurrentTables] = useState<CsvTables>(tables)
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
+
+  const candidates = useMemo(
+    () => commonCsvColumns(currentTables.left, currentTables.right),
+    [currentTables]
+  )
   const [keyColumns, setKeyColumns] = useState<readonly string[]>(() =>
     initialKeys(defaultKeyColumns, candidates)
   )
   const [filter, setFilter] = useState<CsvRowFilter>('all')
 
   const align = useMemo(
-    () => alignCsvTables(tables.left, tables.right, keyColumns),
-    [tables, keyColumns]
+    () => alignCsvTables(currentTables.left, currentTables.right, keyColumns),
+    [currentTables, keyColumns]
   )
   const visible = useMemo(() => align.rows.filter((row) => matchesFilter(row, filter)), [align, filter])
 
@@ -217,6 +234,32 @@ export function CsvView({
     setKeyColumns((current) =>
       current.includes(name) ? current.filter((key) => key !== name) : [...current, name]
     )
+  }
+
+  /** Opens a local CSV / TSV file on one side and re-aligns by the key columns. */
+  async function open(side: 'left' | 'right'): Promise<void> {
+    try {
+      const picked = await pickTextFile(
+        platform,
+        side === 'left' ? '打开左侧 CSV / TSV 文件' : '打开右侧 CSV / TSV 文件',
+        [DELIMITED_FILE_FILTER]
+      )
+      if (picked === null) return
+      const delimiter = classifyFile(picked.path)?.delimiter ?? ','
+      const sample: CsvSample = { path: picked.path, text: picked.text, delimiter }
+      const next: CsvTables = {
+        left: side === 'left' ? parseCsvTable(sample) : currentTables.left,
+        right: side === 'right' ? parseCsvTable(sample) : currentTables.right
+      }
+      if (side === 'left') setLeftSide(sample)
+      else setRightSide(sample)
+      setCurrentTables(next)
+      // A new pair may not share the previous keys; re-pick from the new columns.
+      setKeyColumns(initialKeys(defaultKeyColumns, commonCsvColumns(next.left, next.right)))
+      setNotice({ text: `已打开 ${picked.path}`, tone: 'ok' })
+    } catch (cause) {
+      setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
+    }
   }
 
   const duplicateHint = align.duplicateKeys
@@ -262,7 +305,15 @@ export function CsvView({
           onChange={setFilter}
         />
 
-        <span className="ml-auto flex shrink-0 items-center gap-3 text-2xs text-content-muted">
+        <span className="ml-auto flex shrink-0 flex-wrap items-center gap-3 text-2xs text-content-muted">
+          {notice ? (
+            <span
+              role="status"
+              className={cx('truncate', notice.tone === 'error' ? 'text-danger' : 'text-diff-added')}
+            >
+              {notice.text}
+            </span>
+          ) : null}
           {align.duplicateKeys.length > 0 ? (
             <span
               className="flex items-center gap-1 text-diff-modified"
@@ -276,11 +327,26 @@ export function CsvView({
           <span className="tabular font-mono text-content-secondary">
             {`${visible.length.toLocaleString('en-US')} / ${align.rows.length.toLocaleString('en-US')} 行`}
           </span>
+          <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+          <ToolbarButton
+            size="sm"
+            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            onClick={() => void open('left')}
+          >
+            打开左文件
+          </ToolbarButton>
+          <ToolbarButton
+            size="sm"
+            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            onClick={() => void open('right')}
+          >
+            打开右文件
+          </ToolbarButton>
         </span>
       </div>
 
       <Panel
-        title={`${basename(left.path)} ↔ ${basename(right.path)}`}
+        title={`${basename(leftSide.path)} ↔ ${basename(rightSide.path)}`}
         subtitle={`对齐 ${align.rows.length.toLocaleString('en-US')} 行 · 主键 ${keyColumns.join(' + ') || '未选择'}`}
       >
         {align.columns.length === 0 ? (
