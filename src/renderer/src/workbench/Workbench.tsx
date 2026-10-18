@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import {
   AlertTriangle,
@@ -27,6 +27,7 @@ import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
 import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
 import { CodeView } from '@renderer/views/CodeView'
+import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
@@ -92,10 +93,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [codeMerge, setCodeMerge] = useState<CodeMergeState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all')
   const cache = useRef(createComparisonCache())
+
+  const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
 
   const active = sessions.find((session) => session.id === activeId) ?? null
 
@@ -107,7 +111,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     return { ...countTreeFiles(filtered), conflict: 0 }
   }, [active, directoryFilter])
 
-  const legend = active?.scene === 'directory' ? directoryCounts : (active?.composition ?? null)
+  // The code session's conflict count is computed at runtime from the merge
+  // model, not read from the sample answer key.
+  const legend = useMemo<SampleComposition | null>(() => {
+    if (active?.scene === 'directory') return directoryCounts
+    const base = active?.composition ?? null
+    if (base && active?.scene === 'code' && codeMerge) {
+      return { ...base, conflict: codeMerge.unresolved }
+    }
+    return base
+  }, [active, directoryCounts, codeMerge])
 
   async function load(options?: {
     readonly scene?: SceneId
@@ -231,9 +244,14 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         ) : null
       case 'code':
         return session.adhoc ? (
-          <CodeView pair={session.adhoc.pair} />
+          <CodeView key={session.id} pair={session.adhoc.pair} />
         ) : (
-          <CodeView fixture={CODE_SCENE} defaultMode={session.columns === 3 ? 'merge' : 'diff'} />
+          <CodeView
+            key={session.id}
+            fixture={CODE_SCENE}
+            defaultMode={session.columns === 3 ? 'merge' : 'diff'}
+            onMergeStateChange={handleMergeState}
+          />
         )
       case 'csv': {
         if (session.adhoc) {
@@ -385,7 +403,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         {active ? (
           <span className="ml-auto flex shrink-0 items-center gap-3">
             {active.stats.map((stat) => (
-              <StatusEntry key={stat.label} label={stat.label} value={stat.value} tone={stat.tone} />
+              <StatusEntry
+                key={stat.label}
+                label={stat.label}
+                value={
+                  active.scene === 'code' && stat.label === '冲突块' && codeMerge
+                    ? codeMerge.unresolved
+                    : stat.value
+                }
+                tone={stat.tone}
+              />
             ))}
           </span>
         ) : null}
