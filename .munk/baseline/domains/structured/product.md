@@ -13,6 +13,7 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 - **节点路径变更视图（`StructuredView.tsx`）**：一键状态过滤 `全部 / 新增 / 删除 / 修改 / 类型变更 / 相同`（即时生效，仅收窄列表，计数恒为当前对比结果运行时全集）；变更列表逐行展示状态标签、JSON Pointer 路径与原值 → 新值（状态色走差异语义 token `--color-diff-*` / `DiffBadge`，`typeChanged` 用 conflict 色调区分于 `modified`）；同屏左右原文对照（`CodeBlock`）；内置场景 JSON / YAML 格式切换（`SegmentedControl`）。
 - **两类数据源同一套引擎**：内置样本场景 `STRUCTURED_SCENE`（json/yaml 两对，可切换格式）与目录树双击下钻传入的 ad-hoc `pair`（含 `format`，格式固定、不显示格式切换控件）。
 - **解析错误态**：非法 JSON / YAML 给出可读错误提示（`StateView` 危险态），不崩溃、不白屏，左右原文与其余会话仍可用。
+- **本地结构化文件入口（`StructuredView` 顶栏）**：经 `PlatformPort.selectFile` 分别打开左 / 右本地 `.json` / `.yaml` 文件，按扩展名判定格式并重算语义差异；打开非 JSON/YAML 或解析失败时展示可读错误态而非崩溃。
 
 ## 验收
 
@@ -25,12 +26,13 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 - **ac-format-switch-and-drilldown**：内置场景可在 JSON 与 YAML 之间切换并各自展示对应对比结果；从目录对比下钻的 `.json/.yaml` 会话以既定格式直接展示语义对比结果（不显示格式切换）。
 - **ac-raw-pair-visible**：对比列表与左右原文对照可同屏查看（左右原文仍在视图中可见）。
 - **ac-parse-error**：非法 JSON 或非法 YAML 输入展示可读错误提示，应用不崩溃，其他会话仍可用。
+- **ac-structured-open**：`StructuredView` 顶栏可分别打开左 / 右本地 JSON / YAML 文件并重算语义差异（变更/节点计数随之更新）；打开非 JSON/YAML 或解析失败时显示错误态而非崩溃，左/右原文与其它会话仍可用；取消时不变更现有对比。
 - **ac-core-tests**：`src/core/structured/` 有 vitest 用例覆盖键序归一化、格式噪音忽略、深层路径增删改、类型变更与计数；`pnpm test` 全绿。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿。
 
 ## 非目标
 
-- **不做结构化编辑 / 合并**：不做一键采纳、左右覆写、写回文件、导出对比报告。
+- **不做结构化编辑 / 合并 / 写回**：不做一键采纳、左右覆写、写回文件、导出对比报告；文件对话框能力由 `PlatformPort.selectFile`（`foundation` 域）提供，本域只做 `StructuredView` 顶栏本地打开接线。
 - **不做跨格式比对**：JSON 只对 JSON、YAML 只对 YAML；不做 JSON ↔ YAML 转换后对比。
 - **不做数组智能对齐**：数组按索引比对，不做 LCS / 按元素内容重新对齐数组项。
 - **不做 YAML 高级语义**：不实现锚点 / 别名 / 合并键（`<<`）/ 多文档流的额外展开规则，一律按 `yaml` 库默认解析行为；解析失败即走错误态。
@@ -50,8 +52,8 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 
 ## 最近交付证明
 
-- WI：`wi_ws_11cdd670ac9efc7c`（JSON / YAML 结构化语义归一化对比与节点路径变更视图，`kind: feature`）
-- 日期：2026-10-18
-- 结果：self_test passed（`pnpm test` 11 文件 / 70 用例全绿，其中 `src/core/structured` 23/23；`StructuredView.test.tsx` jsdom 渲染用例通过）。
-- 覆盖摘要：新建纯算法引擎 `src/core/structured/` —— `parse.ts`（`parseStructured`：JSONC 容错 / YAML 默认解析，空文档与解析错误抛 `StructuredParseError` 含 side 与行列定位）+ `diff.ts`（`diffStructured` 按 JSON Pointer 递归比对、排序键并集遍历与键序无关、容器增删单路径、`typeChanged` 与 `modified` 分列、`countStatuses` 运行时计数、`filterStructuredChanges` 过滤；`STRUCTURED_STATUSES` / `StructuredChange` / `StructuredFilter` 类型）。`StructuredView.tsx` 由只读原文占位改为真实语义对比视图：状态过滤 `SegmentedControl` + 运行时计数栏（`共 N 个节点`）+ 三栏 `SplitPane`（节点路径变更列表 / 左原文 / 右原文 `CodeBlock`），内置样本 JSON↔YAML 格式切换与目录下钻 ad-hoc `pair`（固定格式、无格式切换控件）共用同一引擎，解析失败渲染 `StateView` 危险错误态且原文仍可见。变更列表 `typeChanged` 用 conflict 色调，状态色全走 `--color-diff-*` token，未硬编码颜色。十一条验收均有对应折叠用例（qa/）。
+- WI：`wi_intake_e60068db55d0fef9`（真实文件 IO 闭环 + GitHub 开源发布基线，`kind: feature`）
+- 日期：2026-10-19
+- 结果：self_test passed。
+- 覆盖摘要：`StructuredView.tsx` 顶栏新增「打开左文件 / 打开右文件」，经 `PlatformPort.selectFile` 选本地 `.json`/`.yaml` 后按扩展名判定格式并重算语义差异；打开截断/非法 JSON 时 `jsonc-parser` 抛错由现有错误态呈现（「结构化解析失败」+ side + 行/列 + hint），左右原文与会话不受影响，无崩溃/白屏；每次打开给出「已打开 <路径>」提示，取消不变更对比。语义引擎 `src/core/structured/` 未改，`StructuredView.test.tsx` 保持绿（`pnpm test` 20 files / 155 tests）。一条验收均有对应折叠用例（qa/）。
 - 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过（沿用既有 tech overview 与 design 基线）。

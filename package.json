@@ -17,7 +17,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.21",
@@ -41,6 +45,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^37.10.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^6.0.0",
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",

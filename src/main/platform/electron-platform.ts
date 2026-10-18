@@ -7,6 +7,7 @@
 import { access, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
+import type { FileFilter } from 'electron'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type { DirectoryEntry } from '@shared/platform/types'
@@ -62,6 +63,66 @@ async function selectDirectory(): Promise<string | null> {
   return result.filePaths[0]
 }
 
+/** Validated dialog request, ready for the Electron dialog API. */
+interface DialogRequest {
+  readonly title?: string
+  readonly filters?: FileFilter[]
+  readonly defaultPath?: string
+}
+
+/** Dialog options arrive over IPC, so every field is validated before use. */
+function parseFilters(value: unknown): FileFilter[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const filters: FileFilter[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as { name?: unknown; extensions?: unknown }
+    if (typeof record.name !== 'string' || !Array.isArray(record.extensions)) continue
+    const extensions = record.extensions
+      .filter((extension): extension is string => typeof extension === 'string')
+      // Electron wants bare extensions; accept either `txt` or `.txt`.
+      .map((extension) => extension.replace(/^\./, ''))
+      .filter((extension) => extension.length > 0)
+    if (extensions.length > 0) filters.push({ name: record.name, extensions })
+  }
+  return filters.length === 0 ? undefined : filters
+}
+
+function parseText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function parseDialogRequest(value: unknown): DialogRequest {
+  const record = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>
+  return {
+    title: parseText(record.title),
+    filters: parseFilters(record.filters),
+    defaultPath: parseText(record.defaultPath)
+  }
+}
+
+async function selectFile(options: DialogRequest): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    title: options.title,
+    filters: options.filters,
+    properties: ['openFile']
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+}
+
+async function saveFile(options: DialogRequest, content: string): Promise<string | null> {
+  const result = await dialog.showSaveDialog({
+    title: options.title,
+    defaultPath: options.defaultPath,
+    filters: options.filters
+  })
+  if (result.canceled || !result.filePath) return null
+  const target = assertWritable(result.filePath)
+  await writeFile(target, content, 'utf8')
+  return target
+}
+
 async function listDirectory(path: string): Promise<DirectoryEntry[]> {
   const entries = await readdir(path, { withFileTypes: true })
   // One directory's width is small; stat its entries in parallel so a real
@@ -106,6 +167,19 @@ async function temporaryDirectory(): Promise<string> {
 /** Registers the native PlatformPort handlers backed by the local file system. */
 export function registerPlatformIpc(): void {
   ipcMain.handle(PLATFORM_CHANNELS.selectDirectory, () => selectDirectory())
+  ipcMain.handle(PLATFORM_CHANNELS.selectFile, (_event, options: unknown) =>
+    selectFile(parseDialogRequest(options))
+  )
+  ipcMain.handle(PLATFORM_CHANNELS.saveFile, (_event, options: unknown) => {
+    const record = (typeof options === 'object' && options !== null ? options : {}) as Record<
+      string,
+      unknown
+    >
+    return saveFile(
+      parseDialogRequest(options),
+      typeof record.content === 'string' ? record.content : ''
+    )
+  })
   ipcMain.handle(PLATFORM_CHANNELS.listDirectory, (_event, path: unknown) => {
     const target = assertPath(path)
     return isSamplePath(target) ? listSampleDirectory(target) : listDirectory(target)

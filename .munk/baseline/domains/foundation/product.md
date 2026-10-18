@@ -7,6 +7,7 @@
 - 从空仓初始化 OpenCompare 跨平台桌面工程（`package.json` + `src/main` / `src/preload` / `src/renderer` / `src/core` / `src/shared`）。
 - 安装本栈官方/主流 Skill 到 worktree `.agents/skills/`，并写薄 `AGENTS.md` 路由。
 - 打通双模运行架构：`PlatformPort` 抽象 + Electron IPC 实现 + Web/内存实现，renderer 仅依赖 `PlatformPort`。
+- **平台文件 IO 能力（`PlatformPort.selectFile` / `saveFile`）**：原生打开文件对话框返回所选绝对路径（取消 `null`）；保存对话框 + `node:fs/promises` 写盘返回目标路径（取消 `null`）；options 支持 `title` / 扩展名 `filters` / `defaultPath`。三处实现齐备且行为一致：Electron（`dialog.showOpenDialog`/`showSaveDialog`）、preload channel 白名单（`src/shared/platform/channels.ts`）、Web 内存实现（隐藏 file input 物化到内存 FS；保存写内存 FS 并尽力触发下载）。
 - 预装核心运行时依赖（diff / node-diff3 / papaparse / @tanstack/react-virtual / yaml / jsonc-parser / lucide-react）与开发测试依赖（vitest / @testing-library/react / eslint / typescript）。
 - 配齐单命令质量门禁：`install` / `lint` / `typecheck` / `build` / `test`（各自单条 argv）。
 
@@ -16,6 +17,8 @@
 - **ac-scaffold**：根目录存在 electron-vite 结构工程（`package.json` + `src/main`、`src/preload`、`src/renderer`、`src/core`、`src/shared`），`install` 门禁可成功完成依赖安装。
 - **ac-deps**：`diff` / `node-diff3` / `papaparse` / `@tanstack/react-virtual` / `yaml` / `jsonc-parser` / `lucide-react` / `vitest` 均已在 `package.json` 声明且可被 typecheck 解析。
 - **ac-platformport**：定义 `PlatformPort` 抽象并给出 Electron 与 Web 两套实现，renderer 不直接依赖 Electron API。
+- **ac-select-file**：`PlatformPort.selectFile` 在两套实现中可用 —— Electron 走原生打开文件对话框返回所选绝对路径，Web 兼容实现用隐藏 file input 把所选内容物化到内存 FS 并返回可选路径；取消时返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。
+- **ac-save-file**：`PlatformPort.saveFile` 在两套实现中可用 —— Electron 保存对话框 + `node:fs/promises` 写盘并返回目标路径，Web 兼容实现把内容写入内存 FS（并尽力触发下载）；取消返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。
 - **ac-gates**：`.munk/code-gates.json` 存在，含相互独立的 `install` / `lint` / `typecheck` / `build` / `test` 门禁，且每条命令为单条 argv。
 - **ac-desktop-build**：`build` 门禁成功产出 Electron 桌面端产物；主进程 + renderer 均可构建，能拉起基础壳窗口。
 - **ac-web-render**：renderer 可在 Web/内存模式下构建并拉起基础壳（不依赖 Electron 原生能力）。
@@ -26,7 +29,7 @@
 - 不做任何业务功能（目录树对比、文本/代码 Diff、3-way Merge、CSV 主键对齐、JSON/YAML 语义对比、增量同步、模板提取）。
 - 不做视觉基线 / 设计系统（token、基础组件、真实主界面属后续 `ui-baseline` / Design 项）。
 - 不做样本库内容（`src/shared/fixtures/` 内容属后续子项）。
-- 不做打包分发（安装包、签名、公证、自动更新、CI 发布）。
+- 不做打包分发 / CI 发布（安装包目标、代码签名、公证、自动更新、GitHub Release 属 `release` 域）；本域只在 `PlatformPort` 层提供文件对话框与读写能力，不含各视图的「打开/保存本地文件」业务入口。
 - 不做远端能力（FTP / SFTP）。
 - 不做快捷键、分栏拖拽、主题切换等交互细节。
 
@@ -40,8 +43,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_360b2db981f4e4ed`（repo-bootstrap / 工程脚手架与工具链初始化）
-- 日期：2026-10-18
-- 结果：code_gates passed（本轮跳过 UI 自测，按 needSelfTest=false 走 code_gates 门禁）。
-- 覆盖摘要：新建 electron-vite 工程骨架（`src/main` / `src/preload` / `src/renderer` / `src/core` / `src/shared`）；落地 `PlatformPort` 抽象（`src/shared/platform/types.ts` + `channels.ts`）与 Electron IPC（`src/main/platform/electron-platform.ts`）及 Web 内存（`src/renderer/src/platform/web-platform.ts`）两套实现；写入薄 `AGENTS.md` 与 6 个 `.agents/skills/`（electron-dev / vite / vercel-react-best-practices / typescript-advanced / tailwind-4-docs / vitest）；`.munk/code-gates.json` 拆成独立 install / lint / typecheck / build / build-web / test 单 argv 门禁；含最小 vitest 用例（`src/core/text/lines.test.ts`、`src/shared/deps.test.ts`、`src/renderer/src/App.test.tsx`）。
-- 注：本 WI change pack 未提供 `tests/cases/**`，QA 目录暂无折叠用例。
+- WI：`wi_intake_e60068db55d0fef9`（真实文件 IO 闭环 + GitHub 开源发布基线，`kind: feature`）
+- 日期：2026-10-19
+- 结果：self_test passed。
+- 覆盖摘要：`PlatformPort`（`src/shared/platform/types.ts`）扩展 `selectFile` / `saveFile`（options 含 `title` / `filters` / `defaultPath`，取消返回 `null`）；`channels.ts` 收敛新 IPC channel 白名单；Electron 实现走 `dialog.showOpenDialog({properties:['openFile']})` / `dialog.showSaveDialog` + `node:fs/promises` 写盘（`electron-platform.ts`），preload 白名单桥接，Web 实现用隐藏 file input 物化到内存 FS / 写内存 FS 并尽力触发下载（`web-platform.ts`）；两套实现 plus `/samples` 只读保护均有单测（`electron-platform.test.ts` / `web-platform.test.ts`），`pnpm test` 全绿。
+- 注：本域本轮折叠用例 `qa/select-file.md`、`qa/save-file.md`；release 打包/CI 基线折叠在 `domains/release`。

@@ -420,12 +420,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         ) : null
       case 'code':
         return session.adhoc ? (
-          <CodeView key={session.id} pair={session.adhoc.pair} />
+          <CodeView key={session.id} pair={session.adhoc.pair} platform={platform} />
         ) : (
           <CodeView
             key={session.id}
             fixture={CODE_SCENE}
             defaultMode={session.columns === 3 ? 'merge' : 'diff'}
+            platform={platform}
             onMergeStateChange={handleMergeState}
           />
         )
@@ -441,6 +442,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               right={{ path: pair.right.path, text: pair.right.text, delimiter: delimiter ?? ',' }}
               defaultKeyColumns={[]}
               tables={tables}
+              platform={platform}
               onAlignStateChange={handleCsvAlign}
             />
           )
@@ -453,15 +455,21 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             right={CSV_SCENE.right}
             defaultKeyColumns={CSV_SCENE.keyColumns}
             tables={session.tables}
+            platform={platform}
             onAlignStateChange={handleCsvAlign}
           />
         ) : null
       }
       case 'structured':
         return session.adhoc ? (
-          <StructuredView pair={session.adhoc.pair} format={session.adhoc.format} />
+          <StructuredView
+            key={session.id}
+            pair={session.adhoc.pair}
+            format={session.adhoc.format}
+            platform={platform}
+          />
         ) : (
-          <StructuredView fixture={STRUCTURED_SCENE} />
+          <StructuredView key={session.id} fixture={STRUCTURED_SCENE} platform={platform} />
         )
     }
   }

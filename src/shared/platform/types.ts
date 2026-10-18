@@ -17,10 +17,35 @@ export interface DirectoryEntry {
   readonly modifiedMs: number
 }
 
+/** One entry of an open / save dialog filter; extensions carry no leading dot. */
+export interface FileDialogFilter {
+  readonly name: string
+  readonly extensions: readonly string[]
+}
+
+export interface SelectFileOptions {
+  readonly title?: string
+  readonly filters?: readonly FileDialogFilter[]
+}
+
+export interface SaveFileOptions extends SelectFileOptions {
+  /** Pre-filled file name or path of the save dialog. */
+  readonly defaultPath?: string
+  /** UTF-8 text written to the chosen path before it is returned. */
+  readonly content: string
+}
+
 export interface PlatformPort {
   readonly kind: PlatformKind
   /** Ask the user for a directory; resolves to `null` when cancelled. */
   selectDirectory(): Promise<string | null>
+  /** Ask the user for a file; resolves to the chosen path, or `null` when cancelled. */
+  selectFile(options?: SelectFileOptions): Promise<string | null>
+  /**
+   * Ask the user where to write `content` and write it. Resolves to the written
+   * path, or `null` when cancelled; a read-only mount rejects the write.
+   */
+  saveFile(options: SaveFileOptions): Promise<string | null>
   listDirectory(path: string): Promise<DirectoryEntry[]>
   readTextFile(path: string): Promise<string>
   /**
