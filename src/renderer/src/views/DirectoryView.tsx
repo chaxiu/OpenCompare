@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
-import { FolderSearch, LoaderCircle, Sparkles } from 'lucide-react'
+import { FolderSearch, LoaderCircle, Shuffle, Sparkles, SplitSquareHorizontal } from 'lucide-react'
 import type { SampleComposition } from '@shared/fixtures'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import {
@@ -9,12 +9,16 @@ import {
   projectDirectoryTree
 } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
+import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { CompositionLegend } from '@renderer/components/StatusBar'
 import { TreeView } from '@renderer/components/TreeView'
+import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
+import { DirectorySyncDialog } from './DirectorySyncDialog'
+import { TemplateDialog } from './TemplateDialog'
 
 const FILTER_LABELS: Record<DirectoryFilter, string> = {
   all: '全部',
@@ -29,6 +33,16 @@ const FILTER_OPTIONS = DIRECTORY_FILTERS.map((value) => ({
   label: FILTER_LABELS[value]
 }))
 
+const DIRECTION_OPTIONS: readonly { value: SyncDirection; label: string }[] = [
+  { value: 'left-to-right', label: '左 → 右' },
+  { value: 'right-to-left', label: '右 → 左' }
+]
+
+const MODE_OPTIONS: readonly { value: SyncMode; label: string }[] = [
+  { value: 'incremental', label: '增量' },
+  { value: 'mirror', label: '镜像' }
+]
+
 export interface DirectoryViewProps {
   readonly comparison: DirectoryComparison
   /** Active status filter; owned by the shell so the status bar can follow it. */
@@ -40,14 +54,24 @@ export interface DirectoryViewProps {
   readonly pickerAvailable: boolean
   readonly busy: boolean
   readonly notice?: string | null
+  readonly noticeTone?: 'danger' | 'info'
   readonly onPick: (side: 'left' | 'right') => void
   readonly onLoadSample: () => void
   readonly onOpenFile: (node: DirectoryDiffNode) => void
+  readonly onPreviewSync: (direction: SyncDirection, mode: SyncMode) => void
+  readonly onPreviewTemplate: () => void
+  readonly syncPreview: SyncPreview | null
+  readonly templatePreview: TemplatePreview | null
+  readonly onCancelSync: () => void
+  readonly onConfirmSync: (deletePaths: readonly string[]) => void
+  readonly onCancelTemplate: () => void
+  readonly onConfirmTemplate: () => void
 }
 
 /**
  * The runtime directory comparison: two trees projected from the engine result,
- * a one-click status filter, and double-click drilldown for files.
+ * a one-click status filter, and double-click drilldown for files. The toolbar
+ * also hosts the one-way sync and the template placement extracts.
  */
 export function DirectoryView({
   comparison,
@@ -57,10 +81,21 @@ export function DirectoryView({
   pickerAvailable,
   busy,
   notice,
+  noticeTone = 'danger',
   onPick,
   onLoadSample,
-  onOpenFile
+  onOpenFile,
+  onPreviewSync,
+  onPreviewTemplate,
+  syncPreview,
+  templatePreview,
+  onCancelSync,
+  onConfirmSync,
+  onCancelTemplate,
+  onConfirmTemplate
 }: DirectoryViewProps): JSX.Element {
+  const [direction, setDirection] = useState<SyncDirection>('left-to-right')
+  const [mode, setMode] = useState<SyncMode>('incremental')
   const filtered = useMemo(
     () => filterDirectoryTree(comparison.root, filter),
     [comparison, filter]
@@ -118,13 +153,53 @@ export function DirectoryView({
         </span>
       </div>
 
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <SegmentedControl
+          label="同步方向"
+          options={DIRECTION_OPTIONS}
+          value={direction}
+          onChange={setDirection}
+        />
+        <SegmentedControl
+          label="同步模式"
+          options={MODE_OPTIONS}
+          value={mode}
+          onChange={setMode}
+        />
+        <ToolbarButton
+          size="sm"
+          icon={<SplitSquareHorizontal aria-hidden className="size-3.5" />}
+          onClick={() => onPreviewSync(direction, mode)}
+          disabled={busy}
+          title="生成变更清单后弹出 Dry-run 预览，确认才写入"
+        >
+          预览并同步
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<Shuffle aria-hidden className="size-3.5" />}
+          onClick={onPreviewTemplate}
+          disabled={busy}
+          title="以左（源）目录为结构模板，从内置散乱目录树 /samples/directory/incoming 归位文件"
+        >
+          模板归位
+        </ToolbarButton>
+      </div>
+
       {pickerAvailable ? null : (
         <p className="shrink-0 text-2xs text-content-muted">
           Web 预览模式没有原生目录选择，请使用「加载样本目录」体验真实对比；桌面端（pnpm dev）可直接选择本地目录。
         </p>
       )}
       {notice ? (
-        <p role="alert" className="shrink-0 text-2xs text-danger">
+        <p
+          role="alert"
+          className={
+            noticeTone === 'info'
+              ? 'shrink-0 text-2xs text-diff-added'
+              : 'shrink-0 text-2xs text-danger'
+          }
+        >
           {notice}
         </p>
       ) : null}
@@ -161,6 +236,23 @@ export function DirectoryView({
       <p className="shrink-0 text-2xs text-content-muted">
         双击文件可下钻到对应文件对比视图（代码 / 文本 · CSV / TSV · JSON / YAML）；左独有文件右侧为空、右独有文件左侧为空。
       </p>
+
+      {syncPreview ? (
+        <DirectorySyncDialog
+          preview={syncPreview}
+          busy={busy}
+          onCancel={onCancelSync}
+          onConfirm={onConfirmSync}
+        />
+      ) : null}
+      {templatePreview ? (
+        <TemplateDialog
+          preview={templatePreview}
+          busy={busy}
+          onCancel={onCancelTemplate}
+          onConfirm={onConfirmTemplate}
+        />
+      ) : null}
     </div>
   )
 }

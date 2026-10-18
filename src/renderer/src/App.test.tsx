@@ -169,4 +169,65 @@ describe('workbench shell', () => {
     expect(samplePicker.disabled).toBe(false)
     expect(screen.getByText(/Web 预览模式没有原生目录选择/)).toBeDefined()
   })
+
+  it('previews a sync dry-run with byte totals and cancels without writing', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('tab', { name: '镜像' }))
+    fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))
+
+    const dialog = await screen.findByRole('dialog', { name: /左 → 右 · 镜像同步预览/ })
+    expect(within(dialog).getByText('待新增拷贝')).toBeDefined()
+    expect(within(dialog).getByText('待覆盖修改')).toBeDefined()
+    expect(within(dialog).getByText('待删除（镜像）')).toBeDefined()
+    expect(within(dialog).getByText(/合计/)).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // The sample tree itself is untouched: the comparison still lists both roots.
+    expect(screen.getByText('/samples/directory/baseline')).toBeDefined()
+  })
+
+  it('applies the confirmed sync and refreshes the comparison tree', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))
+    const dialog = await screen.findByRole('dialog', { name: /左 → 右 · 增量同步预览/ })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认执行' }))
+
+    expect(await screen.findByText(/同步完成/)).toBeDefined()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // The refresh compares the materialised writable copy, not the read-only mount.
+    expect(screen.queryByText('/samples/directory/candidate')).toBeNull()
+  })
+
+  it('previews the template placement and extracts it into a writable root', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
+
+    expect(within(dialog).getByText('src/core/utils/strings.ts')).toBeDefined()
+    expect(
+      within(dialog).getByText('/samples/directory/incoming/misc/deep/deeper/strings.ts')
+    ).toBeDefined()
+    expect(within(dialog).getByText('缺失槽位')).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
+    const notice = await screen.findByText(/模板归位完成/)
+    expect(notice.textContent).toContain('已匹配 9')
+    // Complete restore: every written slot lands, nothing missing or conflicting.
+    expect(notice.textContent).toContain('缺失 0')
+    expect(notice.textContent).toContain('冲突 0')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
 })

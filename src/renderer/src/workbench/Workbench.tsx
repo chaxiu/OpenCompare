@@ -19,6 +19,7 @@ import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
 import { countTreeFiles, filterDirectoryTree } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
+import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { DropdownMenu } from '@renderer/components/DropdownMenu'
 import type { DropdownItem } from '@renderer/components/DropdownMenu'
@@ -36,6 +37,13 @@ import {
   createDirectorySession,
   createDrilldownSession
 } from './directoryCompare'
+import {
+  applySyncPreview,
+  applyTemplateExtract,
+  previewSync,
+  previewTemplate
+} from './directoryOps'
+import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
 import type { WorkbenchSession } from './session'
@@ -96,10 +104,19 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [codeMerge, setCodeMerge] = useState<CodeMergeState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all')
+  const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
+  const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
   const cache = useRef(createComparisonCache())
+  const opSequence = useRef(0)
 
   const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
+
+  function report(message: string, tone: 'danger' | 'info' = 'danger'): void {
+    setNotice(message)
+    setNoticeTone(tone)
+  }
 
   const active = sessions.find((session) => session.id === activeId) ?? null
 
@@ -181,7 +198,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const comparison = await compareDirectoryRoots(platform, leftRoot, rightRoot, cache.current)
       upsertSession(createDirectorySession(comparison))
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : String(cause))
+      report(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setDirectoryBusy(false)
     }
@@ -204,7 +221,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
     const target = classifyFile(node.name)
     if (target === null) {
-      setNotice(`暂不支持把 ${node.name} 下钻到文件对比（仅代码 / 文本 · CSV / TSV · JSON / YAML）。`)
+      report(`暂不支持把 ${node.name} 下钻到文件对比（仅代码 / 文本 · CSV / TSV · JSON / YAML）。`)
       return
     }
 
@@ -217,7 +234,95 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       ])
       upsertSession(createDrilldownSession(node, target, leftText, rightText))
     } catch (cause) {
+      report(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** Builds a dry-run sync plan and opens its preview dialog. */
+  async function handlePreviewSync(direction: SyncDirection, mode: SyncMode): Promise<void> {
+    const comparison = active?.directory
+    if (!comparison) return
+
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      opSequence.current += 1
+      const preview = await previewSync(platform, comparison, direction, mode, opSequence.current)
+      setSyncPreview(preview)
+    } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNoticeTone('danger')
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** Applies the confirmed plan, then refreshes the comparison tree. */
+  async function handleConfirmSync(deletePaths: readonly string[]): Promise<void> {
+    const preview = syncPreview
+    if (!preview) return
+
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const result = await applySyncPreview(platform, preview, cache.current, deletePaths)
+      upsertSession(createDirectorySession(result.comparison))
+      setSyncPreview(null)
+      setNotice(
+        `同步完成：新增拷贝 ${result.copied} · 覆盖 ${result.updated} · 删除 ${result.deleted}。`
+      )
+      setNoticeTone('info')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNoticeTone('danger')
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** Matches the shuffled incoming tree against the left (template) tree. */
+  async function handlePreviewTemplate(): Promise<void> {
+    const comparison = active?.directory
+    if (!comparison) return
+
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      opSequence.current += 1
+      const preview = await previewTemplate(
+        platform,
+        comparison.leftRoot,
+        DIRECTORY_SAMPLE_PATHS.incoming,
+        opSequence.current
+      )
+      setTemplatePreview(preview)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNoticeTone('danger')
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** Extracts the matched files and re-verifies the rebuilt structure. */
+  async function handleConfirmTemplate(): Promise<void> {
+    const preview = templatePreview
+    if (!preview) return
+
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const result = await applyTemplateExtract(platform, preview)
+      setTemplatePreview(null)
+      setNotice(
+        `模板归位完成：写入 ${result.extracted} 个文件；复核已写入槽位 已匹配 ${result.verifiedMatched} · 缺失 ${result.verifiedMissing} · 冲突 ${result.verifiedConflicts}。`
+      )
+      setNoticeTone('info')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
     }
@@ -235,11 +340,20 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             pickerAvailable={platform.kind === 'electron'}
             busy={directoryBusy}
             notice={notice}
+            noticeTone={noticeTone}
             onPick={(side) => void pickDirectory(side)}
             onLoadSample={() =>
               void runDirectoryCompare(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
             }
             onOpenFile={(node) => void openFile(node)}
+            onPreviewSync={(direction, mode) => void handlePreviewSync(direction, mode)}
+            onPreviewTemplate={() => void handlePreviewTemplate()}
+            syncPreview={syncPreview}
+            templatePreview={templatePreview}
+            onCancelSync={() => setSyncPreview(null)}
+            onConfirmSync={(deletePaths) => void handleConfirmSync(deletePaths)}
+            onCancelTemplate={() => setTemplatePreview(null)}
+            onConfirmTemplate={() => void handleConfirmTemplate()}
           />
         ) : null
       case 'code':

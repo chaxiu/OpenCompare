@@ -1,6 +1,6 @@
 # Domain: directory
 
-只读双目录对比域：`src/core/` 纯算法目录对比引擎（相对路径配对、四类状态、大小/mtime 短路 + SHA-256 内容确认、增量缓存），双栏目录对比视图（展开/折叠、逐行差异徽章、目录后代聚合计数、五档状态过滤），以及取数与下钻（本地真实目录选择 / 内置样本目录一键加载；双击差异文件下钻到对应文件级视图）。本域只做目录级对比与只读呈现，不做文件级差异算法本体与任何写操作。
+目录域：`src/core/` 纯算法目录对比引擎（相对路径配对、四类状态、大小/mtime 短路 + SHA-256 内容确认、增量缓存），双栏目录对比视图（展开/折叠、逐行差异徽章、目录后代聚合计数、五档状态过滤），取数与下钻（本地真实目录选择 / 内置样本目录一键加载；双击差异文件下钻到对应文件级视图）。在只读对比之上，本域还承载两项高阶目录操作：**文件夹单向增量复制 / 镜像同步（Dry-run 预览后写入）** 与 **跨层级散乱目录树按模板归位 / 提取器**。本域不做文件级差异算法本体（行级 / 3-way merge 归代码域）。
 
 ## 范围
 
@@ -9,6 +9,11 @@
 - **双栏目录对比视图**：左右双栏树、目录展开/折叠、逐行差异语义徽章（复用 `DiffBadge` / `--color-diff-*`）、目录行显示其后代差异聚合计数；一键过滤 `全部 / 仅差异 / 左独有 / 右独有 / 相同`，过滤后仅保留匹配条目及其祖先目录。
 - **取数与下钻**：本地真实目录选择（左/右各经 `PlatformPort.selectDirectory`，Electron 原生对话框、Web 模式降级提示）；内置样本目录一键加载（`pnpm dev` 与 `pnpm dev:web` 均可）；双击差异文件（`added`/`removed`/`modified`）按其类型把左右内容带入对应文件级视图并切换会话（代码/文本 → 代码双栏 Diff；CSV/TSV → CSV 视图；JSON/YAML → 结构化视图；左独有右侧空、右独有左侧空）。
 - **运行时统计**：目录对比会话的统计（状态栏 / 图例 / 徽章）全部来自运行时引擎计算结果，不再读取样本 `DirectoryNode.status` answer key。
+- **同步计划生成器（`src/core/directory/`，纯函数）**：基于现有 `DirectoryComparison` 输出某方向（**左→右 / 右→左**）的变更清单：`copy`（源侧有、目标侧不存在的新增拷贝）、`update`（两侧都存在且 `modified` 的覆盖修改）、`delete`（仅**镜像模式**下，目标侧独有的文件；默认勾选、可逐项取消）。`same` 文件不进清单。每项带相对路径、源/目标绝对路径与字节数；计划带 `count`/`bytes` 分组汇总与 `totalCount`/`totalBytes`。
+- **执行器**：按计划经 `PlatformPort` 写入目标侧，自动创建缺失的中间目录；镜像模式按传入的 `deletePaths` 只删除选中项；写入后使受影响路径的比对缓存失效；同一方向重复执行后计划为空（幂等）。
+- **Dry-run 预览确认弹窗**：执行前弹出弹窗，分组列出待新增拷贝、待覆盖修改（镜像模式另列待删除项），显示字节汇总与目标根路径；**取消不写任何文件**；确认后才执行；执行完成后自动重跑 `compareDirectories`，目录树、徽章与状态栏统计随之刷新。
+- **模板归位匹配器（`src/core/directory/`，纯函数）**：以模板树 A（当前目录会话左/源侧，或用户选定目录）的**相对路径槽位**为骨架，用「**文件名 + SHA-256 内容哈希**」从层级被打乱的树 B（内置 `/samples/directory/incoming` 或用户选定目录）中匹配文件，产出 `matched`（A 槽位 ← B 文件，文件名一致且内容哈希一致）、`missing`（A 槽位在 B 中无同名候选）、`conflict`（同名候选内容不同 `content-mismatch`，或同名候选多于一个 `ambiguous`）、以及 B 中未被消费的 `unused` 文件。匹配经哈希索引 + 文件名索引完成，线性复杂度，不做两两内容比对。
+- **模板预览与提取归位**：视图展示归位映射预览（已匹配相对路径映射、缺失槽位、冲突项、B 未使用文件；确认前不写任何文件）；确认后按模板 A 的相对路径结构写出所有 `matched` 文件（自动创建缺失父目录）到目标根，完成后用同一匹配器复核归位结果。
 
 ## 验收
 
@@ -21,34 +26,50 @@
 - **ac-sample-directory**：一键把内置样本目录加载为左右两侧并完成对比，无需外部文件；`pnpm dev` 与 `pnpm dev:web` 均可复现。
 - **ac-drilldown-code**：双击树中的差异代码/文本文件，下钻打开文件级对比视图并携带左右文件内容（左独有→右侧空，右独有→左侧空）。
 - **ac-drilldown-typed**：双击差异 CSV/TSV 文件下钻到 CSV 视图、双击差异 JSON/YAML 下钻到结构化视图，均携带左右内容并正确解析。
-- **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿，且新增 vitest 覆盖引擎四类状态、增量短路与过滤谓词。
+- **ac-sync-plan**：纯函数计划生成器按方向产出 `copy` / `update`（镜像模式另含 `delete`）变更清单，逐项带相对路径与字节数、并给出字节汇总；左→右 与 右→左 互为镜像（vitest 可单测）。
+- **ac-sync-plan-same-modified**：两侧相同的文件不进清单；`modified` 进 `update`；源侧独有的文件在目标侧进 `copy`（vitest 覆盖四类状态）。
+- **ac-sync-dryrun-dialog**：目录视图可发起左→右 / 右→左同步并弹出 Dry-run 预览弹窗，分组展示待新增拷贝 / 待覆盖修改（镜像模式含待删除）与字节汇总；取消后目标侧无任何写入。
+- **ac-sync-apply-refresh**：确认后经 `PlatformPort` 实际写入（缺失父目录自动创建），完成后自动重跑对比并刷新目录树与统计；再执行同一方向时计划为空（幂等）。
+- **ac-sync-mirror-delete**：镜像模式可把目标侧独有文件列为待删除项并可逐项取消；未勾选项不被删除。
+- **ac-sync-electron-local**：Electron（`pnpm dev`）下对两个真实本地目录完成 dry-run → 确认 → 磁盘写入 → 重新对比闭环。
+- **ac-sync-web-sample**：Web（`pnpm dev:web`）下用内置样本目录 / 内存可写区完成同一闭环；内置样本库保持只读、可重复一键加载（写操作不污染 `/samples`）。
+- **ac-template-match**：匹配器以文件名 + SHA-256 内容哈希把散乱树 B 的文件映射到模板 A 的相对路径槽位，正确产出 已匹配 / 缺失 / 冲突（同名不同内容或同名多候选），并列出 B 未使用文件（vitest 可单测）。
+- **ac-template-sample**：对模板 A（`/samples/directory/baseline`）与散乱树 B（`/samples/directory/incoming`）匹配，能把被打乱层级的多层文件归位到模板路径（如 `misc/deep/deeper/strings.ts` → `src/core/utils/strings.ts`、`misc/ui/SplitPane.tsx` → `src/ui/workbench/SplitPane.tsx`），缺失槽位正确报缺失。
+- **ac-template-preview**：视图展示归位映射预览（已匹配相对路径、缺失、冲突、B 未使用），确认前不写任何文件。
+- **ac-template-extract**：确认后按模板 A 的相对路径结构写出（自动创建缺失父目录），且用同一匹配器复核归位结果为全匹配、模板结构可从输出目录重建。
+- **ac-template-perf**：匹配基于哈希/文件名索引，1,000+ 文件的合成散乱树仍在线性时间内完成且不对同一文件重复读取内容 / 计算哈希（vitest 用计数桩断言）。
+- **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿，且新增 vitest 覆盖同步计划与模板匹配。
 
 ## 非目标
 
 - **不做文件级差异算法本体**：行级 / 行内字符级 inline diff、3-way merge 冲突求解与点选合并、CSV 主键列对齐、JSON/YAML 语义归一化 diff 一律不在本域。下钻只把内容带进对应视图并只读呈现，视图增强留给对应子项。
-- **不做任何写操作 / 同步**：不做写回、复制、镜像同步、Dry-run 变更清单、删除。
-- **不做跨层级散乱目录树 B 的模板归位 / 提取（P1-3）**；本域目录视图只承载同层相对路径配对的目录对比。
+- **不做双向 / 三向同步**：同步为单向（左→右 / 右→左）按方向覆盖，不做双向 / 三向同步、不做内容级合并冲突策略（3-way 归代码域）。
+- **不做二进制 / 非 UTF-8 字节级拷贝**：平台读写通道为文本；不做权限 / 属主 / 模式位 / ACL / 符号链接复制；不做回收站、版本保留、保留策略等高级镜像选项。
+- **不做持续 / 定时自动同步与 watcher**：不对文件系统做监听、不做增量重扫调度；同步为按需触发（用户点「预览并同步」）。
+- **不做模板归位的模糊 / 相似度匹配**：仅精确文件名 + SHA-256 内容哈希；不做重命名识别与内容 diff 匹配，改名文件按「缺失 + B 未使用」处理。
 - 不做 Hex 二进制对比、`.xlsx` 解析、远端 FTP / SFTP。
-- 不做文件监听 / 自动刷新 / 增量重扫调度：对比为按需触发，不做 watcher。
-- 不做符号链接跟随、权限 / 属主 / 模式位对比、忽略规则（.gitignore / glob 过滤）。
-- 不做三向或超过两个目录的对比；不做目录级写操作与合并。
-- 不做快捷键绑定、命令面板、主题切换与浅色皮肤；不做打包分发、签名、公证、自动更新、CI 发布。
-- 不改 `.munk/baseline/**`（由 Delivery 折入）。
+- 不做三向或超过两个目录的对比；不做快捷键绑定、命令面板、主题切换与浅色皮肤；不做打包分发、签名、公证、自动更新、CI 发布。
+- 不改样本 answer key（`src/shared/fixtures/` 的 `status` 字段）；不改 `.munk/baseline/**`（由 Delivery 折入）。
 
 ## 实现约束
 
 - 技术栈已由上游 tech-research 冻结，不得替换：Electron `^37.10.3` + electron-vite + React 19 + TS + Tailwind CSS v4 + Lucide React；不引入第二套 UI 库 / 样式方案。token 唯一来源 `src/renderer/src/assets/main.css`，差异语义色一律走 `--color-diff-*`，组件不写死颜色 / 尺寸。
-- 分层硬约束：目录对比引擎放 `src/core/`，零 Electron / DOM 依赖，可被 vitest 在 Node 环境直接单测；renderer 只经 `PlatformPort`（`@shared/platform/types`）取文件系统数据，绝不直接 import Electron API。可扩展 `PlatformPort`（保持现有契约语义不破坏），新增能力同时给 Electron IPC 与 Web 内存两套实现。
-- 目录扫描 / 读取走 `PlatformPort.selectDirectory` / `listDirectory` / `readTextFile`。**SHA-256 必须用可在 Node、浏览器与 Electron renderer 三端运行的实现**：renderer 侧不得引入 `node:*`，不依赖难以单测的异步 Web Crypto；核心比对保持同步纯函数。
-- 差异语义复用现有 `DiffStatus`（`same`/`added`/`removed`/`modified`）与 `DiffBadge` / `diffSemantics`，不新造状态枚举。
+- 分层硬约束：目录对比 / 同步 / 模板算法放 `src/core/directory/`（如 `compare.ts` / `sync.ts` / `template.ts`），零 Electron / DOM 依赖，纯函数或「纯函数 + 注入的 IO 回调」，可被 vitest 在 Node 环境直接单测；renderer 只经 `PlatformPort`（`@shared/platform/types`）取文件系统数据，绝不直接 import Electron API。可扩展 `PlatformPort`（保持现有契约语义不破坏，如 `ensureDirectory`、必要时 `copyFile`），新增能力同时给 Electron IPC 与 Web 内存两套实现，新 channel 登记到 `src/shared/platform/channels.ts` 白名单。
+- **SHA-256 必须用可在 Node、浏览器与 Electron renderer 三端运行的实现**：renderer 侧不得引入 `node:*`，不依赖难以单测的异步 Web Crypto；核心比对保持同步纯函数。
+- 目录扫描 / 读取走 `PlatformPort.selectDirectory` / `listDirectory` / `readTextFile`；写入走 `writeTextFile` / `ensureDirectory`（镜像删除经 `delete-file`）。
+- **写入后必须使受影响路径的比对缓存失效**（清 `ComparisonCache.hashes` 对应条目），并让 Web 虚拟文件系统的写入更新其 size / mtime 元数据；否则「size 与 mtime 相同即判相同」的短路会让刷新读到旧结论（Web 侧 `modifiedMs` 恒为 0，尤其危险）。
+- 目标 / 源若落在只读的 `/samples` 挂载上，先物化到可写区再执行（Web → `/memory/**`；Electron → 临时目录），保证样本库只读且可重复加载。
+- 差异语义复用现有 `DiffStatus`（`same`/`added`/`removed`/`modified`）与 `DiffBadge` / `diffSemantics`，不新造状态枚举；Dry-run 弹窗与模板预览用现有基础组件组合（`Panel` / `Button` / `SegmentedControl` / `DropdownMenu` / `TreeView` / `DiffBadge`），需要弹层语义时用 `role="dialog"` + 焦点管理；不新造第四套视图或重型组件库。
+- 匹配与计划生成必须避免 O(n²) 内容比对：哈希 / 文件名建索引后再匹配。
+- 大目录操作不阻塞 UI：执行 / 匹配期间有忙碌态与错误提示（复用现有 `busy` / `notice`），失败要给出可理解信息且不静默半途写坏目标侧。
 - 下钻复用现有 `CodeView` / `CsvView` / `StructuredView`，不新写第四个文件查看器；工作台会话模型支持「非样本来源」的会话。
 - 目录视图数据源必须换成运行时计算结果：`DirectoryNode.status`（样本 answer key）不再作为目录视图输入，仅 `src/shared/fixtures/` 的校验用例继续使用。
-- 内置样本目录经 `PlatformPort` 可读（Web 内存实现把 `src/shared/fixtures/` 挂在 `/samples`）；Electron 下需有等价的可读路径。Web 内存实现 `modifiedMs` 为 0，mtime 短路在样本目录上不生效，由内容哈希兜底。
+- 现有 `src/renderer/src/App.test.tsx` 与目录视图 / 下钻 / 同步 / 模板归位相关断言需随改造同步并保持绿。
 
 ## 最近交付证明
 
-- WI：`wi_ws_83482f5aa362fd2e`（目录对比引擎 + 双栏目录视图 + 取数与下钻，`kind: feature`）
+- WI：`wi_ws_6841b3431c2d50f9`（文件夹增量复制同步含 Dry-run 预览弹窗 + 跨层级模板归位提取器，`kind: feature`）
 - 日期：2026-10-18
-- 结果：self_test passed。（Host code-gates attempts 001/002 六条门禁均 exitCode 0；`pnpm test` = 6 files / 30 tests 全绿）
-- 覆盖摘要：新建纯算法引擎 `src/core/directory/`（`scanDirectory` / `compareScannedTrees` / `compareDirectories` / `planContentReads` / `ComparisonCache` / 同步 `sha256Hex`，大小·mtime 短路 + SHA-256 内容确认 + 按路径/大小/mtime 增量缓存；`compare.test.ts` 覆盖四类状态、增量短路、过滤谓词）；双栏目录视图重写 `views/DirectoryView`（左右双栏树、展开/折叠、逐行 `DiffBadge`、目录后代聚合计数、五档过滤 `SegmentedControl`、Web 模式目录选择降级提示），运行时编排 `workbench/directoryCompare.ts` 与 `workbench/fileKinds.ts`；取数接入 `PlatformPort.selectDirectory`（Electron 原生对话框 / Web 内存降级）与内置样本目录一键加载；下钻经 `Workbench.openFile` 把左右内容带入 `CodeView` / `CsvView` / `StructuredView` 并切换会话（左/右独有空侧补齐、非文本类型给出可读提示）；`App.test.tsx` 随改造同步更新保持绿。十条验收均有对应折叠用例（qa/）。
+- 结果：self_test passed。（`pnpm install/lint/typecheck/build/build:web/test` 全 exit 0；`pnpm test` = 12 files / 62 tests 全绿）
+- 覆盖摘要：新建纯算法 `src/core/directory/sync.ts`（`buildSyncPlan(comparison, direction, mode)` 产出 `copy`/`update`/`delete` 分组与 `count`/`bytes`/`totalCount`/`totalBytes`；镜像才会列目标独有项为 `delete`；`sync.test.ts` 覆盖方向镜像、四类分类、镜像删除、写入+父目录+缓存失效+幂等、逐项取消删除）；新建纯算法 `src/core/directory/template.ts`（`matchTemplate(templateTree, incomingTree, io)` 以文件名 + SHA-256 索引产出 `matched`/`missing`/`conflict`（`content-mismatch` / `ambiguous`）/`unused`，线性复杂度、每个文件仅读一次）；扩展 `PlatformPort`（`ensureDirectory` / `delete-file` / 保 mtime 写入；Electron IPC 与 Web 内存两套实现，channels 白名单登记），主进程 `electron-platform.test.ts` 真实目录 IPC 回归。UI 新建 `views/DirectorySyncDialog.tsx`（`role="dialog"` Dry-run 预览：待新增/待覆盖/待删除分组 + 字节汇总 + 目标根；取消不写；确认后执行并自动重跑对比刷新）与 `views/TemplateDialog.tsx`（模板归位映射预览 + 确认提取 + 复核），编排 `workbench/directoryOps.ts`，基础组件 `components/Dialog.tsx`；`DirectoryView` 工具栏新增方向 + 增量/镜像 + 「预览并同步」与「模板归位」入口，`App.test.tsx` 随改造同步保持绿。十九条验收均有对应折叠用例（qa/）。
 - 注：本轮 WI change pack 未提供 `tech.md` / `ux/**`，全局 tech / design 折叠跳过。
