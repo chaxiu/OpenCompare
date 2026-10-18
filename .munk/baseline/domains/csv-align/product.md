@@ -1,0 +1,73 @@
+# Domain: csv-align
+
+CSV/TSV 场景的**主键列对齐对比**域：`src/core/csv/` 纯算法对齐引擎（按用户选定主键列跨左右配对、行状态判定、单元格级变动明细、运行时计数），加 `CsvView` 单表合并对齐视图（统一列集、`@tanstack/react-virtual` 虚拟滚动、主键选择器、一键状态过滤、变动单元格「原值 → 新值」高亮）。本域只做只读对齐对比，不做 CSV 写回 / 导出 / 合并。
+
+## 范围
+
+- **`src/core/csv/` 纯算法引擎（新模块，零 Electron / DOM / React）**：输入左右两张已解析表（`header: string[]` + `rows: string[][]`，来自 renderer 现有 `parseCsvTable`）＋用户选定的主键列名（1..n 列，有序）。
+  - **主键对齐**：按选定列名在各自表头里的位置取值组成键元组，跨左右配对；两侧行序完全无关。
+  - **容忍列顺序偏移与独有列**：按**列名**而非列下标配对；单边独有列参与展示但不计入行「修改」判定——判定只在左右共有列的交集上做。
+  - **行状态**：`same` / `modified` / `added` / `removed`（CSV 无 `conflict` 语义）。
+  - **单元格级明细**：每条 `modified` 行输出具体变动列及其左值 → 右值。
+  - **运行时统计**：`same / added / removed / modified` 计数由引擎返回，不是样本 answer key。
+  - **重复主键**：同侧同键多行不崩溃、按出现顺序确定性配对，多余行归该侧新增/删除，结果带重复键提示信息。
+  - 输出对齐行顺序确定：先按左侧出现顺序输出「左有」的行，再按右侧出现顺序追加「仅右有」的行；主键未选中或交集为空时返回空结果而非抛错。
+- **`CsvView.tsx` 虚拟列表对齐视图（替换原双原始表铺开）**：
+  - **单表合并视图**：统一列集显示，列序 = 主键列（按勾选顺序，置左）→ 其余左表列（按左表原序）→ 右表独有列（按右表原序）；每行 = 一条对齐结果。
+  - **`@tanstack/react-virtual` 虚拟滚动**：固定行高，千行级样本滚动流畅，DOM 行数只与视口相关。
+  - **行状态视觉**：`added` / `removed` / `modified` / `same` 用统一差异语义色（`--color-diff-*`）区分行背景/状态标记。
+  - **变动单元格高亮**：`modified` 行每个变动单元格内联展示「原值 → 新值」，用 modified 语义色；未变动单元格只显示一个值。
+  - **新增/删除行**：新增行显示右值 + added 语义色；删除行显示左值 + removed 语义色；单边列在缺失侧留空。
+  - **主键选择器**：可交互勾选/取消单列或多列主键（候选 = 左右共有列；样本场景默认 `CSV_SCENE.keyColumns` 即 `order_id`；下钻会话无声明主键时默认第一个共有列）；切换后对齐结果、行状态、单元格高亮与统计即时重算。
+  - **一键状态过滤**：`全部 / 仅差异 / 新增 / 删除 / 修改 / 相同`，作用于对齐行，视图内行数随之变化。
+  - **运行时统计上抛**：CSV 会话状态栏 same/added/removed/modified 来自运行时对齐结果（沿用 `CodeView` 的 `onMergeStateChange` 回调模式），不再用样本 answer key。
+  - 同时覆盖**内置千行样本会话**与**目录树下钻打开的 CSV/TSV 会话**（`session.adhoc` 路径）。
+
+## 验收
+
+- **ac-core-align-counts**：`src/core/csv/` 引擎对内置样本按 `order_id` 对齐后的运行时统计与 `CSV_SCENE.composition` 完全一致（相同 1,123 / 新增 24 / 删除 31 / 修改 86），核心逻辑由 vitest 直接单测。
+- **ac-core-row-shuffle**：左右行序被打乱（样本本身即乱序）仍按主键正确配对；打乱输入顺序不改变统计结果。
+- **ac-core-column-offset**：左 7 列 / 右 8 列且顺序不同（右侧独有 `region`）时按列名配对；单边独有列不计入「修改」判定，修改行数仍为 86。
+- **ac-core-multi-key**：支持单列与多列主键（如 `order_id+sku`）；切换主键后重新对齐并重算统计，不崩溃、无重复计数。
+- **ac-core-cell-detail**：`modified` 行能列出具体变动列与左值 → 右值（`qty`、`status` 各一条示例可断言）。
+- **ac-core-dup-key**：主键在同侧重复时确定性配对、不抛错，多余行归入该侧新增/删除。
+- **ac-virtual-scroll**：千行级对齐表用 `@tanstack/react-virtual` 虚拟滚动，滚动流畅且实际渲染的 `tr` 数远小于总行数。
+- **ac-key-picker**：可在界面勾选/切换单列或多列主键，切换后对齐结果、行状态与统计即时刷新。
+- **ac-filter**：一键状态过滤（全部 / 仅差异 / 新增 / 删除 / 修改 / 相同）生效，视图行数随过滤变化。
+- **ac-runtime-stats**：状态栏 same/added/removed/modified 计数来自运行时对齐结果，且与答案键一致但来源不同（改主键后计数会随之变化）。
+- **ac-modified-cell**：修改行内变动单元格清晰展示「原值 → 新值」并使用 modified 差异语义色；新增行 / 删除行分别以 added / removed 语义色区分。
+- **ac-drilldown-csv**：目录下钻打开的 CSV/TSV 会话进入同一对齐视图；无声明主键时默认选中第一个共有列并可交互修改。
+- **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿（含随新视图更新的 `App.test.tsx`）。
+
+## 非目标
+
+- **不做 CSV 写回 / 导出 / 合并**：不给修改行提供左覆右、右覆左、应用到对方或「合并结果另存」，只读对比。
+- **不改 CSV/TSV 解析器**：沿用现有 `parseCsvTable` + papaparse 语义（含引号字段现状），不做引号内换行编辑、分隔符自动嗅探、编码/BOM 处理。
+- **不做左右双表同步滚动视图或视图模式切换**：本域只交单表合并对齐视图。
+- **不做表格增强功能**：列宽拖拽、列隐藏、列排序、单元格编辑、行内搜索、复制单元格、跳转下一个差异、冻结列以外的表头固定策略。
+- **不做数值/内容归一化比较**：字符串精确比较，`19.50` 与 `19.5` 视为不同；不做大小写/去空格/类型转换容差。
+- **不做模糊主键匹配、主键自动推荐、复合键表达式或键归一化**。
+- **不做重复主键的歧义裁决 UI**（只在结果与统计里体现）。
+- **不做 `.xlsx` / Excel、不做超大表分页 / 流式加载 / Web Worker 卸载**。
+- **不改 `src/main/` / `src/preload/` / `PlatformPort` 契约，不改 `src/core/directory`、`src/core/text` 与目录 / 代码 / 结构化视图的行为**。
+- **不新增第三方依赖**（`@tanstack/react-virtual`、`papaparse` 已在 `package.json`）。
+- **不做快捷键、命令面板、主题切换、浅色皮肤**；不改 `.munk/baseline/**`（由 Delivery 折入）。
+
+## 实现约束
+
+- 技术栈已冻结，不得替换：Electron `^37.10.3` + electron-vite + React 19 + TS + Tailwind CSS v4 + Lucide React。
+- 分层硬约束：`src/core/csv/` 纯函数、零 Electron / DOM / React 依赖，可在 Node 下被 vitest 直接单测（AGENTS.md + ESLint `no-restricted-imports`）。解析产出仍由 renderer 侧 `parseCsvTable` 提供，引擎只吃 `header` / `rows` 纯数据。
+- 样式只引用 token 唯一来源 `src/renderer/src/assets/main.css`，差异语义色一律走 `--color-diff-*` / `components/diffSemantics.ts`，不写死颜色 / 尺寸。
+- 虚拟列表用仓内已有的 `@tanstack/react-virtual`；固定行高以保滚动性能与简单性。
+- 统计计数经回调上抛给 `Workbench.tsx` 状态栏（沿用 `CodeView` 的 `onMergeStateChange` 既有模式），不在视图内重复造状态栏。
+- 验收对照物是样本 answer key `CSV_SCENE.composition`（由 `src/shared/fixtures` 暴露），不在新测试里另写一套硬编码期望值与之分叉。
+- 现有 `src/renderer/src/App.test.tsx` 中对 `report.csv` 下钻的断言随新视图同步更新，保持测试绿。
+- 写 UI 前读 `.agents/skills/tailwind-4-docs/SKILL.md` 与 `.agents/skills/vercel-react-best-practices/SKILL.md`；写测试读 `.agents/skills/vitest/SKILL.md`。
+
+## 最近交付证明
+
+- WI：`wi_ws_274d4a5de8f6c5e4`（千行 CSV/TSV 按指定主键列对齐对比与虚拟列表单元格变动高亮，`kind: feature`）
+- 日期：2026-10-18
+- 结果：self_test passed（13/13 case，0 fail / 0 na；Host code-gates 六门禁 latest.json ok=true）。
+- 覆盖摘要：新建纯算法引擎 `src/core/csv/`（`alignCsvTables` 按列名配对、行状态 `same`/`modified`/`added`/`removed`、`changedColumns` 左值→右值明细、`duplicateKeys` 提示、零 Electron/DOM/React 依赖）；`CsvView.tsx` 由双原始表铺开重写为单表合并对齐视图（统一列集、`useVirtualizer` 固定行高 28px 虚拟滚动、主键选择器候选=左右共有列、六档状态过滤、变动单元格 modified 语义色内联「原值 → 新值」，新增/删除行 added/removed 语义色、单边列缺失侧留空），统计经回调上抛 `Workbench.tsx` 状态栏（沿用 `CodeView` 模式，不再读样本 answer key）；下钻 CSV/TSV 会话（`session.adhoc`）进入同一视图、无声明主键默认第一个共有列。`pnpm test` 11 files / 62 tests 全绿（`src/core/csv/align.test.ts` 10、`CsvView.test.tsx` 5、`App.test.tsx` 9 含 `report.csv` 下钻断言与运行时状态栏计数断言）；样本 answer key 与 fixtures 未改。13 条验收均有对应折叠用例（qa/）。
+- 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过（沿用既有 tech overview 与 design 基线）。
