@@ -1,0 +1,206 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
+import type { SnapshotDocument } from '@shared/snapshot'
+import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
+import { createComparisonCache } from '@core/directory/compare'
+import { serializeSnapshot } from '@core/directory/snapshot'
+import { sha256Hex } from '@core/directory/hash'
+import { App } from './App'
+import { createWebPlatformPort } from './platform/web-platform'
+import {
+  compareSides,
+  exportSideSnapshot,
+  parseSnapshotText,
+  readFileText,
+  remoteSnapshotSides
+} from './workbench/snapshotOps'
+
+const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:mock')
+const revokeObjectURL = vi.fn<(url: string) => void>(() => undefined)
+
+beforeEach(() => {
+  URL.createObjectURL = createObjectURL
+  URL.revokeObjectURL = revokeObjectURL
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  createObjectURL.mockClear()
+  revokeObjectURL.mockClear()
+})
+
+/** Loads the sample library and waits for the directory session to be ready. */
+async function loadWorkbench(): Promise<void> {
+  render(<App />)
+  fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+  await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+}
+
+function selectedFileInto(label: string, file: File): void {
+  fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } })
+}
+
+describe('snapshot workbench integration', () => {
+  it('loads the remote snapshot sample with a snapshot-labelled right pane and four statuses', async () => {
+    await loadWorkbench()
+
+    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+
+    expect(await screen.findByText('/snapshots/right/remote-prod')).toBeDefined()
+    expect(screen.getAllByText('remote-prod').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('快照').length).toBeGreaterThan(0)
+
+    const comparison = await compareSides(
+      createWebPlatformPort(),
+      remoteSnapshotSides(),
+      createComparisonCache()
+    )
+    for (const status of ['same', 'added', 'removed', 'modified'] as const) {
+      expect(comparison.counts[status]).toBeGreaterThan(0)
+    }
+
+    const statusBar = screen.getByRole('contentinfo').textContent ?? ''
+    expect(statusBar).toContain(
+      `${comparison.counts.same}相同${comparison.counts.added}新增${comparison.counts.removed}删除${comparison.counts.modified}修改`
+    )
+  })
+
+  it('filters a snapshot comparison by status', async () => {
+    await loadWorkbench()
+    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    await screen.findByText('/snapshots/right/remote-prod')
+
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+    expect(screen.queryByText('parser.ts')).toBeNull()
+    expect(screen.getAllByText('engine.ts').length).toBe(2)
+
+    fireEvent.click(screen.getByRole('tab', { name: '右独有' }))
+    expect(screen.getAllByText('worker.ts').length).toBe(1)
+    expect(screen.queryByText('engine.ts')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: '相同' }))
+    expect(screen.getAllByText('parser.ts').length).toBe(2)
+    expect(screen.queryByText('engine.ts')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: '全部' }))
+    expect(screen.getAllByText('engine.ts').length).toBe(2)
+  })
+
+  it('drills snapshot files into code, CSV and structured views pointing at the mount', async () => {
+    await loadWorkbench()
+    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    await screen.findByText('/snapshots/right/remote-prod')
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+
+    fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
+    expect(
+      await screen.findAllByText(/\/snapshots\/right\/remote-prod\/src\/core\/engine\.ts/)
+    ).not.toHaveLength(0)
+    expect(screen.getByText(/来自目录对比下钻/)).toBeDefined()
+
+    fireEvent.click(
+      within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', { name: /目录对比/ })
+    )
+    fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
+    expect(
+      await screen.findAllByText(/\/snapshots\/right\/remote-prod\/src\/data\/report\.csv/)
+    ).not.toHaveLength(0)
+
+    fireEvent.click(
+      within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', { name: /目录对比/ })
+    )
+    fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
+    expect(
+      await screen.findAllByText(/\/snapshots\/right\/remote-prod\/config\/deploy\.yaml/)
+    ).not.toHaveLength(0)
+    expect(screen.getByText(/YAML 原文/)).toBeDefined()
+  })
+
+  it('exports the left directory side as a downloadable snapshot', async () => {
+    let capturedDownload: string | null = null
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement
+    ) {
+      capturedDownload = this.download
+    })
+
+    await loadWorkbench()
+    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+
+    expect(await screen.findByText(/已导出 baseline\.ocsnap\.json（15 个文件）/)).toBeDefined()
+    expect(capturedDownload).toBe('baseline.ocsnap.json')
+
+    const blob = createObjectURL.mock.calls[0][0]
+    const snapshot = parseSnapshotText(await readFileText(blob))
+    expect(snapshot.name).toBe('baseline')
+    expect(snapshot.entries).toHaveLength(15)
+    expect(snapshot.entries.find((entry) => entry.path === 'src/core/engine.ts')?.content).toBeDefined()
+    expect(snapshot.entries.find((entry) => entry.path === 'assets/logo.png')?.content).toBeUndefined()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock')
+  })
+
+  it('mounts an imported snapshot on the right and reaches an all-same comparison', async () => {
+    const exported = await exportSideSnapshot(createWebPlatformPort(), {
+      kind: 'directory',
+      path: DIRECTORY_SAMPLE_PATHS.left
+    })
+
+    await loadWorkbench()
+    selectedFileInto(
+      '选择右侧快照文件',
+      new File([exported.text], 'baseline.ocsnap.json', { type: 'application/json' })
+    )
+
+    expect(await screen.findByText('/snapshots/right/baseline')).toBeDefined()
+    expect(await screen.findByText(/已挂载快照 baseline/)).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain('15相同0新增0删除0修改')
+
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+    expect(screen.getAllByText(/当前过滤下/).length).toBe(2)
+  })
+
+  it('rejects a non-snapshot file and keeps the current comparison', async () => {
+    await loadWorkbench()
+    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    await screen.findByText('/snapshots/right/remote-prod')
+    const before = screen.getByRole('contentinfo').textContent ?? ''
+
+    selectedFileInto(
+      '选择左侧快照文件',
+      new File(['{"a":1}'], 'broken.json', { type: 'application/json' })
+    )
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('快照导入失败')
+    expect(screen.getByText('/samples/directory/baseline')).toBeDefined()
+    expect(screen.getByText('/snapshots/right/remote-prod')).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toBe(before)
+  })
+
+  it('hints when a snapshot did not inline the file content', async () => {
+    const document: SnapshotDocument = {
+      schema: SNAPSHOT_SCHEMA,
+      name: 'meta-only',
+      exportedAt: '2026-10-17T00:00:00.000Z',
+      entries: [{ path: 'src/notes.ts', size: 3, modifiedMs: 0, sha256: sha256Hex('abc') }]
+    }
+
+    await loadWorkbench()
+    selectedFileInto(
+      '选择右侧快照文件',
+      new File([serializeSnapshot(document)], 'meta-only.ocsnap.json', { type: 'application/json' })
+    )
+    await screen.findByText('/snapshots/right/meta-only')
+
+    fireEvent.doubleClick(screen.getAllByText('notes.ts')[0])
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('未内联')
+    })
+    // No empty drilldown session replaced the comparison.
+    expect(screen.getByText('session-directory')).toBeDefined()
+  })
+})

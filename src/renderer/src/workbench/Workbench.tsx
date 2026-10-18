@@ -33,11 +33,7 @@ import { CsvView } from '@renderer/views/CsvView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
-import {
-  compareDirectoryRoots,
-  createDirectorySession,
-  createDrilldownSession
-} from './directoryCompare'
+import { createDirectorySession, createDrilldownSession } from './directoryCompare'
 import {
   applySyncPreview,
   applyTemplateExtract,
@@ -47,6 +43,21 @@ import {
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
+import {
+  compareSides,
+  describeSnapshotContentError,
+  describeSnapshotImportError,
+  directorySides,
+  downloadSnapshotFile,
+  exportSideSnapshot,
+  parseSnapshotText,
+  readFileText,
+  readSideFile,
+  remoteSnapshotSides,
+  snapshotSide,
+  withSide
+} from './snapshotOps'
+import type { ComparisonSides, SidePosition } from './snapshotOps'
 import type { WorkbenchSession } from './session'
 
 type WorkbenchStatus = 'empty' | 'loading' | 'ready' | 'error'
@@ -108,6 +119,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all')
+  const [sides, setSides] = useState<ComparisonSides>(() =>
+    directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
+  )
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
   const cache = useRef(createComparisonCache())
@@ -154,6 +168,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     try {
       const loaded = await loadSampleSessions(platform, { ...options, cache: cache.current })
       setSessions(loaded)
+      setSides(directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right))
       setActiveId((current) =>
         current !== null && loaded.some((session) => session.id === current)
           ? current
@@ -196,12 +211,17 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setActiveId(session.id)
   }
 
-  /** Runs a real comparison through PlatformPort and refreshes the session. */
-  async function runDirectoryCompare(leftRoot: string, rightRoot: string): Promise<void> {
+  /**
+   * Runs a comparison over the given sides (real directory and/or mounted
+   * snapshot) and refreshes the directory session. Only a successful run
+   * commits the new sides, so a failed import leaves the previous view intact.
+   */
+  async function runSidesCompare(next: ComparisonSides): Promise<void> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      const comparison = await compareDirectoryRoots(platform, leftRoot, rightRoot, cache.current)
+      const comparison = await compareSides(platform, next, cache.current)
+      setSides(next)
       upsertSession(createDirectorySession(comparison))
     } catch (cause) {
       report(cause instanceof Error ? cause.message : String(cause))
@@ -210,15 +230,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }
 
-  async function pickDirectory(side: 'left' | 'right'): Promise<void> {
+  async function pickDirectory(side: SidePosition): Promise<void> {
     const chosen = await platform.selectDirectory()
     if (chosen === null) return
 
-    const comparison = active?.directory
-    const leftRoot = side === 'left' ? chosen : (comparison?.leftRoot ?? DIRECTORY_SAMPLE_PATHS.left)
-    const rightRoot =
-      side === 'right' ? chosen : (comparison?.rightRoot ?? DIRECTORY_SAMPLE_PATHS.right)
-    await runDirectoryCompare(leftRoot, rightRoot)
+    await runSidesCompare(withSide(sides, side, { kind: 'directory', path: chosen }))
   }
 
   /** Opens a directory-tree file in the matching file-level view. */
@@ -235,12 +251,45 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setNotice(null)
     try {
       const [leftText, rightText] = await Promise.all([
-        node.leftPath ? platform.readTextFile(node.leftPath) : Promise.resolve(''),
-        node.rightPath ? platform.readTextFile(node.rightPath) : Promise.resolve('')
+        node.leftPath ? readSideFile(platform, sides, node.leftPath) : Promise.resolve(''),
+        node.rightPath ? readSideFile(platform, sides, node.rightPath) : Promise.resolve('')
       ])
       upsertSession(createDrilldownSession(node, target, leftText, rightText))
     } catch (cause) {
+      report(describeSnapshotContentError(cause, node.relativePath))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** Exports one side as a canonical `.ocsnap.json` download. */
+  async function handleExportSnapshot(side: SidePosition): Promise<void> {
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const exported = await exportSideSnapshot(platform, sides[side])
+      downloadSnapshotFile(exported.text, exported.snapshot.name)
+      report(`已导出 ${exported.snapshot.name}.ocsnap.json（${exported.entryCount} 个文件）。`, 'info')
+    } catch (cause) {
       report(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** Mounts a picked `.ocsnap.json` on one side and recomputes the comparison. */
+  async function handleImportSnapshot(side: SidePosition, file: File): Promise<void> {
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const snapshot = parseSnapshotText(await readFileText(file))
+      const next = withSide(sides, side, snapshotSide(side, snapshot))
+      const comparison = await compareSides(platform, next, cache.current)
+      setSides(next)
+      upsertSession(createDirectorySession(comparison))
+      report(`已挂载快照 ${snapshot.name} 到${side === 'left' ? '左' : '右'}栏。`, 'info')
+    } catch (cause) {
+      report(describeSnapshotImportError(cause))
     } finally {
       setDirectoryBusy(false)
     }
@@ -349,9 +398,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             noticeTone={noticeTone}
             onPick={(side) => void pickDirectory(side)}
             onLoadSample={() =>
-              void runDirectoryCompare(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
+              void runSidesCompare(
+                directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
+              )
             }
             onOpenFile={(node) => void openFile(node)}
+            leftIsSnapshot={sides.left.kind === 'snapshot'}
+            rightIsSnapshot={sides.right.kind === 'snapshot'}
+            onExportSnapshot={(side) => void handleExportSnapshot(side)}
+            onImportSnapshot={(side, file) => void handleImportSnapshot(side, file)}
+            onLoadRemoteSnapshotSample={() => void runSidesCompare(remoteSnapshotSides())}
             onPreviewSync={(direction, mode) => void handlePreviewSync(direction, mode)}
             onPreviewTemplate={() => void handlePreviewTemplate()}
             syncPreview={syncPreview}
