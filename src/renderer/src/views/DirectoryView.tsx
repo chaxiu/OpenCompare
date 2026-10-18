@@ -1,6 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import { FolderSearch, LoaderCircle, Shuffle, Sparkles, SplitSquareHorizontal } from 'lucide-react'
+import {
+  Cloud,
+  Download,
+  FolderSearch,
+  LoaderCircle,
+  Shuffle,
+  Sparkles,
+  SplitSquareHorizontal,
+  Upload
+} from 'lucide-react'
 import type { SampleComposition } from '@shared/fixtures'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import {
@@ -17,6 +26,7 @@ import { SplitPane } from '@renderer/components/SplitPane'
 import { CompositionLegend } from '@renderer/components/StatusBar'
 import { TreeView } from '@renderer/components/TreeView'
 import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
+import type { SidePosition } from '@renderer/workbench/snapshotOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { TemplateDialog } from './TemplateDialog'
 
@@ -58,6 +68,12 @@ export interface DirectoryViewProps {
   readonly onPick: (side: 'left' | 'right') => void
   readonly onLoadSample: () => void
   readonly onOpenFile: (node: DirectoryDiffNode) => void
+  /** True when that side is a mounted snapshot rather than a real directory. */
+  readonly leftIsSnapshot: boolean
+  readonly rightIsSnapshot: boolean
+  readonly onExportSnapshot: (side: SidePosition) => void
+  readonly onImportSnapshot: (side: SidePosition, file: File) => void
+  readonly onLoadRemoteSnapshotSample: () => void
   readonly onPreviewSync: (direction: SyncDirection, mode: SyncMode) => void
   readonly onPreviewTemplate: () => void
   readonly syncPreview: SyncPreview | null
@@ -85,6 +101,11 @@ export function DirectoryView({
   onPick,
   onLoadSample,
   onOpenFile,
+  leftIsSnapshot,
+  rightIsSnapshot,
+  onExportSnapshot,
+  onImportSnapshot,
+  onLoadRemoteSnapshotSample,
   onPreviewSync,
   onPreviewTemplate,
   syncPreview,
@@ -96,6 +117,13 @@ export function DirectoryView({
 }: DirectoryViewProps): JSX.Element {
   const [direction, setDirection] = useState<SyncDirection>('left-to-right')
   const [mode, setMode] = useState<SyncMode>('incremental')
+  const leftInputRef = useRef<HTMLInputElement>(null)
+  const rightInputRef = useRef<HTMLInputElement>(null)
+
+  function selectedFile(side: SidePosition, files: FileList | null): void {
+    const file = files?.[0]
+    if (file) onImportSnapshot(side, file)
+  }
   const filtered = useMemo(
     () => filterDirectoryTree(comparison.root, filter),
     [comparison, filter]
@@ -186,6 +214,76 @@ export function DirectoryView({
         </ToolbarButton>
       </div>
 
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <ToolbarButton
+          size="sm"
+          icon={<Download aria-hidden className="size-3.5" />}
+          onClick={() => onExportSnapshot('left')}
+          disabled={busy}
+          title="把左侧目录扫描为快照并下载为 <name>.ocsnap.json（已挂载快照则原样重导出）"
+        >
+          导出左侧快照
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<Upload aria-hidden className="size-3.5" />}
+          onClick={() => leftInputRef.current?.click()}
+          disabled={busy}
+          title="选择一个 .ocsnap.json 并挂载到左栏"
+        >
+          导入左侧快照
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<Download aria-hidden className="size-3.5" />}
+          onClick={() => onExportSnapshot('right')}
+          disabled={busy}
+          title="把右侧目录扫描为快照并下载为 <name>.ocsnap.json（已挂载快照则原样重导出）"
+        >
+          导出右侧快照
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<Upload aria-hidden className="size-3.5" />}
+          onClick={() => rightInputRef.current?.click()}
+          disabled={busy}
+          title="选择一个 .ocsnap.json 并挂载到右栏"
+        >
+          导入右侧快照
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<Cloud aria-hidden className="size-3.5" />}
+          onClick={onLoadRemoteSnapshotSample}
+          disabled={busy}
+          title="一键加载内置本地样本目录（左）vs 内置远端快照 remote-prod（右）"
+        >
+          远端快照样本
+        </ToolbarButton>
+        <input
+          ref={leftInputRef}
+          type="file"
+          accept=".json,.ocsnap.json,application/json"
+          aria-label="选择左侧快照文件"
+          className="sr-only"
+          onChange={(event) => {
+            selectedFile('left', event.target.files)
+            event.target.value = ''
+          }}
+        />
+        <input
+          ref={rightInputRef}
+          type="file"
+          accept=".json,.ocsnap.json,application/json"
+          aria-label="选择右侧快照文件"
+          className="sr-only"
+          onChange={(event) => {
+            selectedFile('right', event.target.files)
+            event.target.value = ''
+          }}
+        />
+      </div>
+
       {pickerAvailable ? null : (
         <p className="shrink-0 text-2xs text-content-muted">
           Web 预览模式没有原生目录选择，请使用「加载样本目录」体验真实对比；桌面端（pnpm dev）可直接选择本地目录。
@@ -210,7 +308,7 @@ export function DirectoryView({
             key="left"
             title={comparison.leftName}
             subtitle={comparison.leftRoot}
-            meta={<span className="text-2xs text-content-muted">源目录</span>}
+            meta={<span className="text-2xs text-content-muted">{leftIsSnapshot ? '快照' : '源目录'}</span>}
           >
             {leftTree ? (
               <TreeView root={leftTree} onOpenFile={onOpenFile} />
@@ -222,7 +320,7 @@ export function DirectoryView({
             key="right"
             title={comparison.rightName}
             subtitle={comparison.rightRoot}
-            meta={<span className="text-2xs text-content-muted">目标目录</span>}
+            meta={<span className="text-2xs text-content-muted">{rightIsSnapshot ? '快照' : '目标目录'}</span>}
           >
             {rightTree ? (
               <TreeView root={rightTree} onOpenFile={onOpenFile} />

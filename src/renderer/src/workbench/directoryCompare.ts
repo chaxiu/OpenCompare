@@ -1,37 +1,15 @@
 /**
- * Renderer-side directory comparison orchestration: binds the pure engine in
- * `@core/directory` to `PlatformPort`, and turns results into workbench
- * sessions (the directory session itself, plus file drilldown sessions).
+ * Renderer-side directory comparison orchestration: turns comparison results
+ * into workbench sessions (the directory session itself, plus file drilldown
+ * sessions). Running a comparison lives in `snapshotOps` / `loadSampleSessions`.
  */
-import type { PlatformPort } from '@shared/platform/types'
-import { compareDirectories } from '@core/directory/compare'
-import type {
-  ComparisonCache,
-  DirectoryComparison,
-  DirectoryDiffNode
-} from '@core/directory/compare'
+import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import type { DrilldownTarget } from './fileKinds'
 import type { AdhocFilePair, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 
 /** Stable id of the single directory-comparison session. */
 export const DIRECTORY_SESSION_ID = 'session-directory'
-
-/** Recursively scans both roots and compares them, reading bodies only when needed. */
-export function compareDirectoryRoots(
-  platform: PlatformPort,
-  leftRoot: string,
-  rightRoot: string,
-  cache: ComparisonCache
-): Promise<DirectoryComparison> {
-  return compareDirectories(
-    leftRoot,
-    rightRoot,
-    (path) => platform.listDirectory(path),
-    (path) => platform.readTextFile(path),
-    cache
-  )
-}
 
 /** Builds the directory session whose stats come from the runtime comparison. */
 export function createDirectorySession(comparison: DirectoryComparison): WorkbenchSession {
@@ -83,7 +61,9 @@ export function createDrilldownSession(
     id: `file:${node.relativePath}`,
     scene: target.kind,
     title: node.name,
-    subtitle: `${node.relativePath} · ${target.label}`,
+    // The subtitle names the two resolved side paths, so a drilldown out of a
+    // mounted snapshot points back at its `/snapshots/...` mount.
+    subtitle: `${pair.left.path} ↔ ${pair.right.path} · ${target.label}`,
     columns: 2,
     stats: [
       { label: '行数（左）', value: countTextLines(leftText) },
