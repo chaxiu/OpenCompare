@@ -29,6 +29,7 @@ import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
+import type { FilePair } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
 
@@ -69,9 +70,9 @@ function offsetTop(range: MergeRange): number {
 /* Two-column line + inline character diff                             */
 /* ------------------------------------------------------------------ */
 
-function CodeDiffView({ fixture }: { readonly fixture: CodeSceneFixture }): JSX.Element {
-  const [leftText, setLeftText] = useState(fixture.diff.left.text)
-  const [rightText, setRightText] = useState(fixture.diff.right.text)
+function CodeDiffView({ pair }: { readonly pair: FilePair }): JSX.Element {
+  const [leftText, setLeftText] = useState(pair.left.text)
+  const [rightText, setRightText] = useState(pair.right.text)
   const [active, setActive] = useState(0)
 
   const leftScroll = useRef<HTMLDivElement>(null)
@@ -113,8 +114,8 @@ function CodeDiffView({ fixture }: { readonly fixture: CodeSceneFixture }): JSX.
   }
 
   function reset(): void {
-    setLeftText(fixture.diff.left.text)
-    setRightText(fixture.diff.right.text)
+    setLeftText(pair.left.text)
+    setRightText(pair.right.text)
     setActive(0)
   }
 
@@ -169,7 +170,7 @@ function CodeDiffView({ fixture }: { readonly fixture: CodeSceneFixture }): JSX.
 
       <SplitPane
         panes={[
-          <Panel key="left" title={fixture.diff.left.path} subtitle="左">
+          <Panel key="left" title={pair.left.path} subtitle="左">
             <DiffPane
               rows={diff.rows}
               side="left"
@@ -178,7 +179,7 @@ function CodeDiffView({ fixture }: { readonly fixture: CodeSceneFixture }): JSX.
               onScroll={() => syncScroll(leftScroll, rightScroll)}
             />
           </Panel>,
-          <Panel key="right" title={fixture.diff.right.path} subtitle="右">
+          <Panel key="right" title={pair.right.path} subtitle="右">
             <DiffPane
               rows={diff.rows}
               side="right"
@@ -426,33 +427,46 @@ function CodeMergeView({
 /* Mode switch                                                         */
 /* ------------------------------------------------------------------ */
 
-/** Scene B — code diff pair and the three-way merge set. */
+/**
+ * Scene B — code diff pair and the three-way merge set.
+ *
+ * A drilldown `pair` (from the directory view) renders the two-column diff
+ * only; the built-in code scene additionally exposes the three-way merge.
+ */
 export function CodeView({
   fixture,
   defaultMode = 'merge',
+  pair,
   onMergeStateChange
 }: {
-  readonly fixture: CodeSceneFixture
+  readonly fixture?: CodeSceneFixture
   /** Three-column merge is the default for a session declared with three panes. */
   readonly defaultMode?: CodeMode
+  /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
+  readonly pair?: FilePair
   readonly onMergeStateChange?: (state: CodeMergeState) => void
 }): JSX.Element {
   const [mode, setMode] = useState<CodeMode>(defaultMode)
+  const adhoc = pair !== undefined
+  const effectiveMode: CodeMode = adhoc ? 'diff' : mode
+  const diffPair = pair ?? fixture?.diff
 
   const model = useMemo(
     () =>
-      buildMergeModel(
-        fixture.merge.base.text,
-        fixture.merge.ours.text,
-        fixture.merge.theirs.text
-      ),
+      fixture
+        ? buildMergeModel(
+            fixture.merge.base.text,
+            fixture.merge.ours.text,
+            fixture.merge.theirs.text
+          )
+        : null,
     [fixture]
   )
   const [resolutions, setResolutions] = useState<MergeResolutions>({})
   const [activeConflict, setActiveConflict] = useState(0)
 
-  const unresolved = countUnresolved(model, resolutions)
-  const total = model.conflictIds.length
+  const unresolved = model ? countUnresolved(model, resolutions) : 0
+  const total = model ? model.conflictIds.length : 0
 
   useEffect(() => {
     onMergeStateChange?.({ unresolved, total })
@@ -461,17 +475,30 @@ export function CodeView({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
       <div className="flex shrink-0 items-center gap-2">
-        <SegmentedControl label="代码视图" options={MODE_OPTIONS} value={mode} onChange={setMode} />
-        <span className="hidden text-2xs text-content-muted md:inline">
-          {mode === 'diff'
-            ? '行级 + 行内字符级 Diff · 同步滚动与逐块覆写'
-            : '按行切分 diff3 · 逐块点选采纳并导出'}
-        </span>
+        {adhoc ? (
+          <span className="text-2xs text-content-muted">
+            来自目录对比下钻 · 双栏字符级 Diff
+          </span>
+        ) : (
+          <>
+            <SegmentedControl
+              label="代码视图"
+              options={MODE_OPTIONS}
+              value={mode}
+              onChange={setMode}
+            />
+            <span className="hidden text-2xs text-content-muted md:inline">
+              {mode === 'diff'
+                ? '行级 + 行内字符级 Diff · 同步滚动与逐块覆写'
+                : '按行切分 diff3 · 逐块点选采纳并导出'}
+            </span>
+          </>
+        )}
       </div>
 
-      {mode === 'diff' ? (
-        <CodeDiffView fixture={fixture} />
-      ) : (
+      {effectiveMode === 'diff' && diffPair ? (
+        <CodeDiffView pair={diffPair} />
+      ) : fixture && model ? (
         <CodeMergeView
           fixture={fixture}
           model={model}
@@ -480,7 +507,7 @@ export function CodeView({
           activeConflict={activeConflict}
           onSelectConflict={setActiveConflict}
         />
-      )}
+      ) : null}
     </div>
   )
 }

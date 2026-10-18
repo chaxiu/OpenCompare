@@ -80,6 +80,16 @@ function buildSampleFiles(): SampleFile[] {
 /** Every sample file of the library, addressed by its virtual path. */
 export const SAMPLE_FIXTURE_FILES: readonly SampleFile[] = buildSampleFiles()
 
+/**
+ * Virtual roots of the built-in directory sample. Both sides are readable
+ * through `PlatformPort`, so "load the sample directory" needs no real files.
+ */
+export const DIRECTORY_SAMPLE_PATHS = {
+  root: `${SAMPLE_ROOT}/directory`,
+  left: `${SAMPLE_ROOT}/directory/${DIRECTORY_SCENE.left.name}`,
+  right: `${SAMPLE_ROOT}/directory/${DIRECTORY_SCENE.right.name}`
+} as const
+
 function countTextLines(text: string): number {
   return text.trimEnd().split('\n').length
 }

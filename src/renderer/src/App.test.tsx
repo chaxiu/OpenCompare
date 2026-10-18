@@ -1,10 +1,24 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CSV_SCENE } from '@shared/fixtures'
+import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
+import { compareDirectories, createComparisonCache } from '@core/directory/compare'
 import { App } from './App'
+import { createWebPlatformPort } from './platform/web-platform'
 
 afterEach(cleanup)
+
+/** Runtime truth for the directory session: the engine over the sample roots. */
+async function compareSampleDirectory(): Promise<ReturnType<typeof compareDirectories>> {
+  const platform = createWebPlatformPort()
+  return compareDirectories(
+    DIRECTORY_SAMPLE_PATHS.left,
+    DIRECTORY_SAMPLE_PATHS.right,
+    (path) => platform.listDirectory(path),
+    (path) => platform.readTextFile(path),
+    createComparisonCache()
+  )
+}
 
 describe('workbench shell', () => {
   it('mounts the empty workbench on the in-memory PlatformPort', () => {
@@ -71,5 +85,88 @@ describe('workbench shell', () => {
       await screen.findByRole('heading', { name: '样本库读取失败' }, { timeout: 4000 })
     ).toBeDefined()
     expect(screen.getByRole('button', { name: '重试' })).toBeDefined()
+  })
+
+  it('filters the directory comparison and drills a file into its file view', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    // Runtime comparison: the paired file shows up in both projected panes.
+    expect(screen.getByRole('tablist', { name: '差异过滤' })).toBeDefined()
+    expect(screen.getAllByText('engine.ts').length).toBe(2)
+    // Status-bar counts are computed by the engine, not read from the answer key.
+    const comparison = await compareSampleDirectory()
+    const statusBar = screen.getByRole('contentinfo').textContent ?? ''
+    expect(statusBar).toContain(
+      `文件（源）${comparison.counts.same + comparison.counts.removed + comparison.counts.modified}`
+    )
+    expect(statusBar).toContain(
+      `差异${comparison.counts.added + comparison.counts.removed + comparison.counts.modified}`
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+    expect(screen.queryByText('parser.ts')).toBeNull()
+    expect(screen.getAllByText('engine.ts').length).toBe(2)
+    // Filtering also refreshes the status-bar legend.
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `0相同${comparison.counts.added}新增${comparison.counts.removed}删除${comparison.counts.modified}修改`
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '全部' }))
+    fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
+
+    expect(await screen.findByText('file:src/core/engine.ts', {}, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByText(/来自目录对比下钻/)).toBeDefined()
+  })
+
+  it('drills CSV and YAML files into their typed views', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
+    expect(await screen.findByText('file:src/data/report.csv', {}, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByText('3 行 · CSV')).toBeDefined()
+    expect(screen.getByText('4 行 · CSV')).toBeDefined()
+
+    const sessionTabs = screen.getByRole('tablist', { name: '会话' })
+    fireEvent.click(within(sessionTabs).getByRole('tab', { name: /目录对比/ }))
+
+    fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
+    expect(await screen.findByText('file:config/deploy.yaml', {}, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByText(/YAML 原文/)).toBeDefined()
+  })
+
+  it('explains why a non-text file cannot be drilled into', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(screen.getAllByText('logo.png')[0])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('暂不支持')
+    // the directory session stays put instead of silently doing nothing
+    expect(screen.getByText('session-directory')).toBeDefined()
+  })
+
+  it('degrades the native directory picker on the web runtime', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    const leftPicker = screen.getByRole('button', { name: '选择左目录' }) as HTMLButtonElement
+    const rightPicker = screen.getByRole('button', { name: '选择右目录' }) as HTMLButtonElement
+    const samplePicker = screen.getByRole('button', { name: '加载样本目录' }) as HTMLButtonElement
+
+    expect(leftPicker.disabled).toBe(true)
+    expect(rightPicker.disabled).toBe(true)
+    expect(samplePicker.disabled).toBe(false)
+    expect(screen.getByText(/Web 预览模式没有原生目录选择/)).toBeDefined()
   })
 })
