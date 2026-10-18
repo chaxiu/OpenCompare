@@ -30,6 +30,7 @@ import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/
 import { CodeView } from '@renderer/views/CodeView'
 import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
+import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
 import {
@@ -102,6 +103,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [codeMerge, setCodeMerge] = useState<CodeMergeState | null>(null)
+  const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
@@ -112,6 +114,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const opSequence = useRef(0)
 
   const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
+  const handleCsvAlign = useCallback((state: CsvAlignState) => setCsvAlign(state), [])
 
   function report(message: string, tone: 'danger' | 'info' = 'danger'): void {
     setNotice(message)
@@ -128,16 +131,19 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     return { ...countTreeFiles(filtered), conflict: 0 }
   }, [active, directoryFilter])
 
-  // The code session's conflict count is computed at runtime from the merge
-  // model, not read from the sample answer key.
+  // The code session's conflict count and the CSV alignment counts are computed
+  // at runtime, not read from the sample answer key.
   const legend = useMemo<SampleComposition | null>(() => {
     if (active?.scene === 'directory') return directoryCounts
+    if (active?.scene === 'csv' && csvAlign?.sessionId === active.id) {
+      return { ...csvAlign.counts, conflict: 0 }
+    }
     const base = active?.composition ?? null
     if (base && active?.scene === 'code' && codeMerge) {
       return { ...base, conflict: codeMerge.unresolved }
     }
     return base
-  }, [active, directoryCounts, codeMerge])
+  }, [active, directoryCounts, codeMerge, csvAlign])
 
   async function load(options?: {
     readonly scene?: SceneId
@@ -373,19 +379,25 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           if (!tables) return null
           return (
             <CsvView
+              key={session.id}
+              sessionId={session.id}
               left={{ path: pair.left.path, text: pair.left.text, delimiter: delimiter ?? ',' }}
               right={{ path: pair.right.path, text: pair.right.text, delimiter: delimiter ?? ',' }}
-              keyColumns={[]}
+              defaultKeyColumns={[]}
               tables={tables}
+              onAlignStateChange={handleCsvAlign}
             />
           )
         }
         return session.tables ? (
           <CsvView
+            key={session.id}
+            sessionId={session.id}
             left={CSV_SCENE.left}
             right={CSV_SCENE.right}
-            keyColumns={CSV_SCENE.keyColumns}
+            defaultKeyColumns={CSV_SCENE.keyColumns}
             tables={session.tables}
+            onAlignStateChange={handleCsvAlign}
           />
         ) : null
       }

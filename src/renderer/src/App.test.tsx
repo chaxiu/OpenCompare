@@ -57,22 +57,28 @@ describe('workbench shell', () => {
     expect(screen.getAllByRole('separator', { name: '调整分栏宽度' }).length).toBe(2)
   })
 
-  it('renders the CSV reconciliation tables with their parsed row counts', async () => {
+  it('shows the key-aligned CSV reconciliation with runtime counts', async () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: '样本' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /CSV 主键对比/ }))
 
-    const leftRows =
-      CSV_SCENE.composition.same + CSV_SCENE.composition.removed + CSV_SCENE.composition.modified
-    const rightRows =
-      CSV_SCENE.composition.same + CSV_SCENE.composition.added + CSV_SCENE.composition.modified
+    const total = CSV_SCENE.composition.same + CSV_SCENE.composition.added +
+      CSV_SCENE.composition.removed + CSV_SCENE.composition.modified
 
-    expect(leftRows).toBeGreaterThanOrEqual(1200)
+    // The declared key column is selected and the merged view is sized by the
+    // runtime alignment, not the sample answer key.
+    const keyPicker = await screen.findByRole('group', { name: '主键列选择' }, { timeout: 4000 })
     expect(
-      await screen.findByText(`${leftRows.toLocaleString('en-US')} 行 · CSV`, {}, { timeout: 4000 })
-    ).toBeDefined()
-    expect(screen.getByText(`${rightRows.toLocaleString('en-US')} 行 · TSV`)).toBeDefined()
+      within(keyPicker).getByRole('button', { name: 'order_id' }).getAttribute('aria-pressed')
+    ).toBe('true')
+    expect(screen.getByRole('tablist', { name: '状态过滤' })).toBeDefined()
+    expect(screen.getByText(`${total.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} 行`)).toBeDefined()
+
+    const { same, added, removed, modified } = CSV_SCENE.composition
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `${same}相同${added}新增${removed}删除${modified}修改`
+    )
   })
 
   it('surfaces a readable, retryable error state', async () => {
@@ -129,8 +135,9 @@ describe('workbench shell', () => {
 
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
     expect(await screen.findByText('file:src/data/report.csv', {}, { timeout: 4000 })).toBeDefined()
-    expect(screen.getByText('3 行 · CSV')).toBeDefined()
-    expect(screen.getByText('4 行 · CSV')).toBeDefined()
+    // No declared primary key on a drilldown: the first shared column wins.
+    expect(await screen.findByText('对齐 4 行 · 主键 order_id')).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain('2相同1新增0删除1修改')
 
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /目录对比/ }))
