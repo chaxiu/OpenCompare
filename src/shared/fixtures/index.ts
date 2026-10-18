@@ -22,6 +22,9 @@ import type {
 } from './types'
 
 export { CODE_SCENE, CSV_SCENE, DIRECTORY_SCENE, STRUCTURED_SCENE } from './scenes'
+export { REMOTE_SNAPSHOT } from './remote-snapshot'
+
+export type { RemoteSnapshotFixture } from './remote-snapshot'
 
 export type {
   CodeSceneFixture,
