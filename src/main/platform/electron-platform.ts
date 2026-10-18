@@ -4,9 +4,9 @@
  * `/samples`, mirroring the in-memory mount the web runtime uses, so loading the
  * sample directory works identically in `pnpm dev` and `pnpm dev:web`.
  */
-import { access, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain } from 'electron'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type { DirectoryEntry } from '@shared/platform/types'
@@ -90,6 +90,19 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+function assertWritable(path: string): string {
+  if (isSamplePath(path)) {
+    throw new Error(`内置样本库挂在只读的 ${SAMPLE_ROOT} 上，不能写入：${path}`)
+  }
+  return path
+}
+
+async function temporaryDirectory(): Promise<string> {
+  const root = join(app.getPath('temp'), 'opencompare')
+  await mkdir(root, { recursive: true })
+  return root
+}
+
 /** Registers the native PlatformPort handlers backed by the local file system. */
 export function registerPlatformIpc(): void {
   ipcMain.handle(PLATFORM_CHANNELS.selectDirectory, () => selectDirectory())
@@ -106,11 +119,26 @@ export function registerPlatformIpc(): void {
   })
   ipcMain.handle(
     PLATFORM_CHANNELS.writeTextFile,
-    (_event, path: unknown, content: unknown) =>
-      writeFile(assertPath(path), typeof content === 'string' ? content : String(content), 'utf8')
+    async (_event, path: unknown, content: unknown, modifiedMs: unknown) => {
+      const target = assertWritable(assertPath(path))
+      await writeFile(target, typeof content === 'string' ? content : String(content), 'utf8')
+      if (typeof modifiedMs === 'number' && Number.isFinite(modifiedMs)) {
+        const stamp = new Date(modifiedMs)
+        await utimes(target, stamp, stamp)
+      }
+    }
   )
   ipcMain.handle(PLATFORM_CHANNELS.exists, (_event, path: unknown) => {
     const target = assertPath(path)
     return isSamplePath(target) ? samplePathExists(target) : exists(target)
   })
+  ipcMain.handle(PLATFORM_CHANNELS.ensureDirectory, (_event, path: unknown) => {
+    const target = assertPath(path)
+    if (isSamplePath(target)) return undefined
+    return mkdir(target, { recursive: true })
+  })
+  ipcMain.handle(PLATFORM_CHANNELS.deleteFile, (_event, path: unknown) =>
+    rm(assertWritable(assertPath(path)))
+  )
+  ipcMain.handle(PLATFORM_CHANNELS.temporaryDirectory, () => temporaryDirectory())
 }

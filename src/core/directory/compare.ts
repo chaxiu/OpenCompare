@@ -131,6 +131,13 @@ export interface DirectoryDiffNode {
   readonly counts: Readonly<Record<FileDiffStatus, number>>
   readonly leftPath?: string
   readonly rightPath?: string
+  /** Byte size of the file on the left side; only set for file nodes. */
+  readonly leftSize?: number
+  /** Byte size of the file on the right side; only set for file nodes. */
+  readonly rightSize?: number
+  /** Modification time on the left side; lets a copy preserve source metadata. */
+  readonly leftModifiedMs?: number
+  readonly rightModifiedMs?: number
 }
 
 export interface DirectoryComparison {
@@ -248,7 +255,11 @@ function markSubtree(
       children: [],
       counts: countEntry(status),
       leftPath,
-      rightPath
+      rightPath,
+      leftSize: side === 'left' ? node.size : undefined,
+      rightSize: side === 'right' ? node.size : undefined,
+      leftModifiedMs: side === 'left' ? node.modifiedMs : undefined,
+      rightModifiedMs: side === 'right' ? node.modifiedMs : undefined
     }
   }
 
@@ -311,7 +322,11 @@ function buildNode(
       children: [],
       counts: countEntry(status),
       leftPath: left.path,
-      rightPath: right.path
+      rightPath: right.path,
+      leftSize: left.size,
+      rightSize: right.size,
+      leftModifiedMs: left.modifiedMs,
+      rightModifiedMs: right.modifiedMs
     }
   }
 

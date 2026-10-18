@@ -23,6 +23,17 @@ export interface PlatformPort {
   selectDirectory(): Promise<string | null>
   listDirectory(path: string): Promise<DirectoryEntry[]>
   readTextFile(path: string): Promise<string>
-  writeTextFile(path: string, content: string): Promise<void>
+  /**
+   * Writes UTF-8 text. When `modifiedMs` is given the file's modification time
+   * is set to it afterwards, which lets a copy keep the source's metadata so the
+   * comparison's size/mtime fast path stays truthful.
+   */
+  writeTextFile(path: string, content: string, modifiedMs?: number): Promise<void>
   exists(path: string): Promise<boolean>
+  /** Creates `path` and any missing ancestors; a no-op when it already exists. */
+  ensureDirectory(path: string): Promise<void>
+  /** Removes one file. Directories and read-only mounts are rejected. */
+  deleteFile(path: string): Promise<void>
+  /** Writable scratch root for materialising read-only trees (per runtime). */
+  temporaryDirectory(): Promise<string>
 }

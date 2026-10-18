@@ -7,5 +7,8 @@ export const PLATFORM_CHANNELS = {
   listDirectory: 'platform:list-directory',
   readTextFile: 'platform:read-text-file',
   writeTextFile: 'platform:write-text-file',
-  exists: 'platform:exists'
+  exists: 'platform:exists',
+  ensureDirectory: 'platform:ensure-directory',
+  deleteFile: 'platform:delete-file',
+  temporaryDirectory: 'platform:temporary-directory'
 } as const
