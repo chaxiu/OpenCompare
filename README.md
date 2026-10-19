@@ -52,7 +52,7 @@ pnpm dist:win         # Windows：nsis
 pnpm dist:linux       # Linux：AppImage / deb
 ```
 
-打包配置见根目录 `electron-builder.yml`（macOS / Windows / Linux 目标）。macOS 目标已配置 Developer ID 签名（证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，签名身份钉住 `Developer ID Application: Tao Zhu (3X4J53U6RY)`）与 App Store Connect API Key 公证（`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`；`APPLE_TEAM_ID` 为 `3X4J53U6RY`），凭据一律由人类录入 GitHub Secrets，仓内不落明文；`APPLE_API_KEY` 的 `.p8` base64 只在 CI 打包前解码到 `$RUNNER_TEMP` 权限 `600` 的临时文件，打包后清理。缺任一凭据时 macOS 打包步骤**显式失败**（fail-closed），绝不产出未签名裸包。本地只打包当前平台；多平台产物由 CI 生成。凭据清单与协助文案见 [`docs/release-signing.md`](docs/release-signing.md)。
+打包配置见根目录 `electron-builder.yml`（macOS / Windows / Linux 目标）。macOS 目标已配置 Developer ID 签名（证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，签名身份钉住 `Tao Zhu (3X4J53U6RY)`（配置里不写 `Developer ID Application:` 前缀））与 App Store Connect API Key 公证（`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`；`APPLE_TEAM_ID` 为 `3X4J53U6RY`），凭据一律由人类录入 GitHub Secrets，仓内不落明文；`APPLE_API_KEY` 的 `.p8` base64 只在 CI 打包前解码到 `$RUNNER_TEMP` 权限 `600` 的临时文件，打包后清理。缺任一凭据时 macOS 打包步骤**显式失败**（fail-closed），绝不产出未签名裸包。本地只打包当前平台；多平台产物由 CI 生成。凭据清单与协助文案见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 ## 发布流程
 

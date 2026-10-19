@@ -16,6 +16,8 @@ const RIGHT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.right}/src/core/engine.ts`
 const LEFT_REPORT = `${DIRECTORY_SAMPLE_PATHS.left}/src/data/report.csv`
 const RIGHT_REPORT = `${DIRECTORY_SAMPLE_PATHS.right}/src/data/report.csv`
 const SAMPLE_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
+/** Drilldown session ids carry the source directory session they came from. */
+const DRILLDOWN_PREFIX = `file:${SAMPLE_DIRECTORY_ID}::`
 
 /** Runtime truth for the directory session: the engine over the sample roots. */
 async function compareSampleDirectory(): Promise<ReturnType<typeof compareDirectories>> {
@@ -167,7 +169,7 @@ describe('workbench shell', () => {
     fireEvent.click(screen.getByRole('tab', { name: '全部' }))
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
 
-    expect(await screen.findByText('file:src/core/engine.ts', {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByText(`${DRILLDOWN_PREFIX}src/core/engine.ts`, {}, { timeout: 4000 })).toBeDefined()
     expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
   })
 
@@ -178,7 +180,7 @@ describe('workbench shell', () => {
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
-    expect(await screen.findByText('file:src/data/report.csv', {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByText(`${DRILLDOWN_PREFIX}src/data/report.csv`, {}, { timeout: 4000 })).toBeDefined()
     // No declared primary key on a drilldown: the first shared column wins.
     expect(await screen.findByText('对齐 4 行 · 主键 order_id')).toBeDefined()
     expect(screen.getByRole('contentinfo').textContent).toContain('2相同1新增0删除1修改')
@@ -187,7 +189,7 @@ describe('workbench shell', () => {
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /baseline ↔ candidate/ }))
 
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
-    expect(await screen.findByText('file:config/deploy.yaml', {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByText(`${DRILLDOWN_PREFIX}config/deploy.yaml`, {}, { timeout: 4000 })).toBeDefined()
     expect(screen.getByText(/YAML 原文/)).toBeDefined()
   })
 
@@ -481,5 +483,121 @@ describe('real file workbench', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('暂不支持对比 logo.png')
     expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+})
+
+/** The reversed pair is a second directory session over the same roots. */
+const REVERSED_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.right} ↔ ${DIRECTORY_SAMPLE_PATHS.left}`
+
+describe('directory drilldown roundtrip', () => {
+  async function loadDirectorySamples(): Promise<void> {
+    render(<App />)
+    loadDemoSamples()
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+  }
+
+  /** Both pane trees share the merged root's accessible name; index them. */
+  function paneTree(side: 0 | 1): HTMLElement {
+    return screen.getAllByRole('tree')[side]
+  }
+
+  it('returns to the source directory with filter, expansion, scroll and selection intact', async () => {
+    await loadDirectorySamples()
+
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+    // Collapse `config`: its descendants hide on both panes, while `engine.ts`
+    // stays visible, so a drilldown out of it can be opened and returned from.
+    fireEvent.click(screen.getAllByRole('button', { name: '折叠 config' })[0])
+    expect(within(paneTree(0)).queryAllByText('deploy.yaml')).toHaveLength(0)
+    expect(within(paneTree(1)).queryAllByText('deploy.yaml')).toHaveLength(0)
+    expect(within(paneTree(0)).queryAllByText('engine.ts')).toHaveLength(1)
+
+    // Select a file row and scroll the left pane.
+    const row = within(paneTree(0)).getAllByText('engine.ts')[0]
+    fireEvent.click(row)
+    expect(row.closest('[role="treeitem"]')?.getAttribute('aria-selected')).toBe('true')
+
+    const leftBody = paneTree(0).parentElement as HTMLElement
+    leftBody.scrollTop = 96
+    fireEvent.scroll(leftBody)
+
+    fireEvent.doubleClick(row)
+    expect(
+      await screen.findByText(`${DRILLDOWN_PREFIX}src/core/engine.ts`, {}, { timeout: 4000 })
+    ).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+
+    // Back on the source directory session: nothing was reset by the roundtrip.
+    expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
+    expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
+    expect(within(paneTree(0)).queryAllByText('deploy.yaml')).toHaveLength(0)
+    expect(within(paneTree(1)).queryAllByText('deploy.yaml')).toHaveLength(0)
+    expect(
+      within(paneTree(0)).getAllByText('engine.ts')[0].closest('[role="treeitem"]')
+        ?.getAttribute('aria-selected')
+    ).toBe('true')
+    expect((paneTree(0).parentElement as HTMLElement).scrollTop).toBe(96)
+  })
+
+  it('repeats drilldown and return without drifting', async () => {
+    await loadDirectorySamples()
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+
+    for (let round = 0; round < 3; round += 1) {
+      fireEvent.doubleClick(within(paneTree(1)).getAllByText('engine.ts')[0])
+      const back = await screen.findByRole(
+        'button',
+        { name: '返回上级目录视图' },
+        { timeout: 4000 }
+      )
+      fireEvent.click(back)
+
+      expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
+      expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
+      expect(within(paneTree(0)).queryAllByText('engine.ts')).toHaveLength(1)
+    }
+  })
+
+  it('keeps same-path drilldowns of two directory sessions apart', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          directories: [
+            DIRECTORY_SAMPLE_PATHS.right,
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /candidate ↔ baseline/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    // Drill the same relative path out of the active (baseline → candidate) session.
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
+    await screen.findByText(`${DRILLDOWN_PREFIX}src/core/engine.ts`, {}, { timeout: 4000 })
+
+    // Drill the same relative path out of the first (candidate → baseline) session.
+    const sessionTabs = screen.getByRole('tablist', { name: '会话' })
+    fireEvent.click(within(sessionTabs).getByRole('tab', { name: /candidate ↔ baseline/ }))
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
+    await screen.findByText(`file:${REVERSED_DIRECTORY_ID}::src/core/engine.ts`, {}, { timeout: 4000 })
+
+    // Both same-path drilldowns exist; neither overwrote the other.
+    expect(within(sessionTabs).getAllByRole('tab', { name: /engine\.ts/ })).toHaveLength(2)
+
+    // The active drilldown returns to its own source session.
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    expect(screen.getByRole('contentinfo').textContent).toContain(REVERSED_DIRECTORY_ID)
+
+    // The other drilldown still returns to the other source session.
+    fireEvent.click(within(sessionTabs).getAllByRole('tab', { name: /engine\.ts/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    expect(screen.getByRole('contentinfo').textContent).toContain(SAMPLE_DIRECTORY_ID)
   })
 })

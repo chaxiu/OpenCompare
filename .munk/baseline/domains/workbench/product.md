@@ -46,7 +46,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - 不做组件大全、不做 HTML 设计稿；不改 `.munk/baseline/**`（由 Delivery 折入）。
 - 不做打包分发、代码签名、公证、自动更新、CI 发布。
 - 真实入口不做「最近打开 / 历史记录 / 收藏夹 / 书签」；不做 OS 级集成（Finder「打开方式」、命令行路径参数、macOS `open-file` 事件、拖到 Dock）；不做单侧智能配对（同名文件 / 同父兄弟 / 路径记忆）——单路径拖入只做左栏填充 + 提示；不做多选批量选择（一律左右各一次）。
-- 会话标签止于「建立并进入」：不做标签生命周期与未保存提示（`session-tabs-lifecycle`，只保留会话级 `dirty` 状态）、不做目录下钻与返回状态保持（`directory-drilldown-roundtrip`）。
+- 会话标签止于「建立并进入」：不做标签生命周期与未保存提示（`session-tabs-lifecycle`，只保留会话级 `dirty` 状态）；目录下钻、返回上级目录视图与往返状态保持已由 directory 域交付（会话模型仅新增 `parentDirectoryId` 来源标识），本域不重复展开其行为验收；原位保存与导出已由 code-diff-merge / snapshot 域交付。
 - 不删改内置样本、不重构 `loadSampleSessions` 既有加载路径；不新增对比能力品类、不改目录对比 / Diff / CSV / 结构化算法内核。
 
 ## 实现约束

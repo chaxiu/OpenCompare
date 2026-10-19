@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import {
   Cloud,
@@ -54,10 +54,21 @@ const MODE_OPTIONS: readonly { value: SyncMode; label: string }[] = [
 ]
 
 export interface DirectoryViewProps {
+  /** Session this view renders; keys the controlled tree state of the shell. */
+  readonly sessionId: string
   readonly comparison: DirectoryComparison
   /** Active status filter; owned by the shell so the status bar can follow it. */
   readonly filter: DirectoryFilter
   readonly onFilterChange: (filter: DirectoryFilter) => void
+  /** Relative paths of collapsed directories; the rest render expanded. */
+  readonly collapsedPaths: ReadonlySet<string>
+  readonly onTogglePath: (path: string) => void
+  /** Relative path of the selected row across both panes; `null` for none. */
+  readonly selectedPath: string | null
+  readonly onSelectPath: (path: string) => void
+  /** Scroll offsets to restore, owned by the shell and keyed by session. */
+  readonly scrollTops: { readonly left: number; readonly right: number }
+  readonly onScrollTopChange: (side: SidePosition, scrollTop: number) => void
   /** Diff counts of the currently visible entries. */
   readonly visibleCounts: SampleComposition
   /** False on the web runtime, which has no native directory picker. */
@@ -88,9 +99,16 @@ export interface DirectoryViewProps {
  * also hosts the one-way sync and the template placement extracts.
  */
 export function DirectoryView({
+  sessionId,
   comparison,
   filter,
   onFilterChange,
+  collapsedPaths,
+  onTogglePath,
+  selectedPath,
+  onSelectPath,
+  scrollTops,
+  onScrollTopChange,
   visibleCounts,
   pickerAvailable,
   busy,
@@ -115,6 +133,15 @@ export function DirectoryView({
   const [mode, setMode] = useState<SyncMode>('incremental')
   const leftInputRef = useRef<HTMLInputElement>(null)
   const rightInputRef = useRef<HTMLInputElement>(null)
+  const leftBodyRef = useRef<HTMLDivElement>(null)
+  const rightBodyRef = useRef<HTMLDivElement>(null)
+
+  // The panel scroll containers are rebuilt whenever this view remounts (e.g.
+  // returning from a drilldown), so the shell's saved offsets are re-applied.
+  useLayoutEffect(() => {
+    if (leftBodyRef.current) leftBodyRef.current.scrollTop = scrollTops.left
+    if (rightBodyRef.current) rightBodyRef.current.scrollTop = scrollTops.right
+  }, [sessionId, scrollTops])
 
   function selectedFile(side: SidePosition, files: FileList | null): void {
     const file = files?.[0]
@@ -293,9 +320,18 @@ export function DirectoryView({
             title={comparison.leftName}
             subtitle={comparison.leftRoot}
             meta={<span className="text-2xs text-content-muted">{leftIsSnapshot ? '快照' : '源目录'}</span>}
+            bodyRef={leftBodyRef}
+            onBodyScroll={(scrollTop) => onScrollTopChange('left', scrollTop)}
           >
             {leftTree ? (
-              <TreeView root={leftTree} onOpenFile={onOpenFile} />
+              <TreeView
+                root={leftTree}
+                collapsedPaths={collapsedPaths}
+                onTogglePath={onTogglePath}
+                selectedPath={selectedPath}
+                onSelectPath={onSelectPath}
+                onOpenFile={onOpenFile}
+              />
             ) : (
               <p className="p-3 text-2xs text-content-muted">当前过滤下左目录没有条目。</p>
             )}
@@ -305,9 +341,18 @@ export function DirectoryView({
             title={comparison.rightName}
             subtitle={comparison.rightRoot}
             meta={<span className="text-2xs text-content-muted">{rightIsSnapshot ? '快照' : '目标目录'}</span>}
+            bodyRef={rightBodyRef}
+            onBodyScroll={(scrollTop) => onScrollTopChange('right', scrollTop)}
           >
             {rightTree ? (
-              <TreeView root={rightTree} onOpenFile={onOpenFile} />
+              <TreeView
+                root={rightTree}
+                collapsedPaths={collapsedPaths}
+                onTogglePath={onTogglePath}
+                selectedPath={selectedPath}
+                onSelectPath={onSelectPath}
+                onOpenFile={onOpenFile}
+              />
             ) : (
               <p className="p-3 text-2xs text-content-muted">当前过滤下右目录没有条目。</p>
             )}

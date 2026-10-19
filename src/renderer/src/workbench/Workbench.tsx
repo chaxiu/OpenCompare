@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, JSX } from 'react'
 import {
   AlertTriangle,
+  ArrowLeft,
   Braces,
   FileCode2,
   FolderOpen,
@@ -38,7 +39,8 @@ import { StructuredView } from '@renderer/views/StructuredView'
 import {
   createDirectorySession,
   createDrilldownSession,
-  openFilePairSession
+  openFilePairSession,
+  resolveDirectoryReturn
 } from './directoryCompare'
 import {
   applySyncPreview,
@@ -74,6 +76,31 @@ interface PendingLeft {
   readonly path: string
   readonly kind: 'file' | 'directory'
 }
+
+/**
+ * The directory view state the shell keeps per directory session: filter,
+ * collapsed folders and the selected row survive a drilldown roundtrip (the
+ * view remounts on return) and never cross over between directory sessions.
+ */
+interface DirectoryViewState {
+  readonly filter: DirectoryFilter
+  readonly collapsed: readonly string[]
+  readonly selectedPath: string | null
+}
+
+const EMPTY_DIRECTORY_STATE: DirectoryViewState = {
+  filter: 'all',
+  collapsed: [],
+  selectedPath: null
+}
+
+/** Scroll offsets of a directory session's two panels. */
+interface DirectoryScroll {
+  readonly left: number
+  readonly right: number
+}
+
+const EMPTY_SCROLL: DirectoryScroll = { left: 0, right: 0 }
 
 const VIEW_OPTIONS: readonly { value: SceneId; label: string; icon: JSX.Element }[] = [
   { value: 'directory', label: '目录对比', icon: <FolderTree aria-hidden className="size-3.5" /> },
@@ -154,7 +181,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [directoryBusy, setDirectoryBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
-  const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all')
+  const [directoryStates, setDirectoryStates] = useState<Record<string, DirectoryViewState>>({})
+  const [directoryScroll, setDirectoryScroll] = useState<Record<string, DirectoryScroll>>({})
   const [pendingLeft, setPendingLeft] = useState<PendingLeft | null>(null)
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
@@ -199,14 +227,19 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const active = sessions.find((session) => session.id === activeId) ?? null
   /** Inputs of the session on screen; every directory action is scoped to them. */
   const activeSides: ComparisonSides | null = active?.sides ?? null
+  /** Tree state of the directory session on screen, keyed by its id. */
+  const directoryState =
+    active?.scene === 'directory'
+      ? (directoryStates[active.id] ?? EMPTY_DIRECTORY_STATE)
+      : EMPTY_DIRECTORY_STATE
 
   /** Diff counts of the directory entries currently visible, filter included. */
   const directoryCounts = useMemo<SampleComposition | null>(() => {
     const comparison = active?.scene === 'directory' ? active.directory : undefined
     if (!comparison) return null
-    const filtered = filterDirectoryTree(comparison.root, directoryFilter)
+    const filtered = filterDirectoryTree(comparison.root, directoryState.filter)
     return { ...countTreeFiles(filtered), conflict: 0 }
-  }, [active, directoryFilter])
+  }, [active, directoryState.filter])
 
   // The code session's conflict count and the CSV alignment counts are computed
   // at runtime, not read from the sample answer key.
@@ -221,6 +254,50 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
     return base
   }, [active, directoryCounts, codeMerge, csvAlign])
+
+  /** Applies one patch on top of a directory session's kept view state. */
+  function patchDirectoryState(id: string, patch: Partial<DirectoryViewState>): void {
+    setDirectoryStates((current) => ({
+      ...current,
+      [id]: { ...(current[id] ?? EMPTY_DIRECTORY_STATE), ...patch }
+    }))
+  }
+
+  function toggleDirectoryPath(id: string, path: string): void {
+    setDirectoryStates((current) => {
+      const state = current[id] ?? EMPTY_DIRECTORY_STATE
+      const collapsed = state.collapsed.includes(path)
+        ? state.collapsed.filter((item) => item !== path)
+        : [...state.collapsed, path]
+      return { ...current, [id]: { ...state, collapsed } }
+    })
+  }
+
+  /** Remembers one panel's scroll offset so a remount re-applies it on return. */
+  function rememberDirectoryScroll(id: string, side: SidePosition, scrollTop: number): void {
+    setDirectoryScroll((current) => {
+      const scroll = current[id] ?? { left: 0, right: 0 }
+      if (scroll[side] === scrollTop) return current
+      return { ...current, [id]: { ...scroll, [side]: scrollTop } }
+    })
+  }
+
+  /** 「返回上级目录视图」: prefer the source session, fall back with a notice. */
+  function backToDirectory(sourceId: string): void {
+    const destination = resolveDirectoryReturn(sessions, sourceId)
+    if (!destination) {
+      report('来源目录会话已不可用，当前也没有其他目录对比会话可返回。')
+      return
+    }
+    if (destination.fallback) {
+      const fallback = sessions.find((session) => session.id === destination.id)
+      report(
+        `来源目录会话已不可用，已返回可用的目录对比：${fallback?.title ?? destination.id}。`,
+        'info'
+      )
+    }
+    setActiveId(destination.id)
+  }
 
   async function load(options?: {
     readonly scene?: SceneId
@@ -424,8 +501,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   async function openFile(node: DirectoryDiffNode): Promise<void> {
     if (node.kind !== 'file') return
 
+    const source = active
     const current = activeSides
-    if (current === null) return
+    if (!source || source.scene !== 'directory' || current === null) return
 
     const target = classifyFile(node.name)
     if (target === null) {
@@ -440,7 +518,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         node.leftPath ? readSideFile(platform, current, node.leftPath) : Promise.resolve(''),
         node.rightPath ? readSideFile(platform, current, node.rightPath) : Promise.resolve('')
       ])
-      upsertSession(createDrilldownSession(node, target, leftText, rightText))
+      upsertSession(createDrilldownSession(source.id, node, target, leftText, rightText))
     } catch (cause) {
       report(describeSnapshotContentError(cause, node.relativePath))
     } finally {
@@ -586,16 +664,54 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }
 
   function renderScene(session: WorkbenchSession): JSX.Element | null {
+    const body = renderSceneBody(session)
+    const sourceId = session.parentDirectoryId
+    if (!sourceId) return body
+
+    // A drilled-down file view carries an explicit way back to the directory
+    // session it came from; the tree's own state is kept by the shell.
+    const source = sessions.find((item) => item.id === sourceId)
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-subtle bg-surface-sunken px-2">
+          <ToolbarButton
+            size="sm"
+            icon={<ArrowLeft aria-hidden className="size-3.5" />}
+            onClick={() => backToDirectory(sourceId)}
+            title="返回发起本次下钻的目录对比会话"
+          >
+            返回上级目录视图
+          </ToolbarButton>
+          <span className="truncate text-2xs text-content-muted" title={source?.subtitle}>
+            来源目录对比：{source ? source.title : sourceId}
+          </span>
+        </div>
+        {body}
+      </div>
+    )
+  }
+
+  function renderSceneBody(session: WorkbenchSession): JSX.Element | null {
     switch (session.scene) {
       case 'directory': {
         const comparison = session.directory
         const sessionSides = session.sides
         if (!comparison || !sessionSides) return null
+        const treeState = directoryStates[session.id] ?? EMPTY_DIRECTORY_STATE
         return (
           <DirectoryView
+            sessionId={session.id}
             comparison={comparison}
-            filter={directoryFilter}
-            onFilterChange={setDirectoryFilter}
+            filter={treeState.filter}
+            onFilterChange={(next) => patchDirectoryState(session.id, { filter: next })}
+            collapsedPaths={new Set(treeState.collapsed)}
+            onTogglePath={(path) => toggleDirectoryPath(session.id, path)}
+            selectedPath={treeState.selectedPath}
+            onSelectPath={(path) => patchDirectoryState(session.id, { selectedPath: path })}
+            scrollTops={directoryScroll[session.id] ?? EMPTY_SCROLL}
+            onScrollTopChange={(side, scrollTop) =>
+              rememberDirectoryScroll(session.id, side, scrollTop)
+            }
             visibleCounts={directoryCounts ?? { ...comparison.counts, conflict: 0 }}
             pickerAvailable={platform.kind === 'electron'}
             busy={directoryBusy}

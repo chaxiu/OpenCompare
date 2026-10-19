@@ -50,6 +50,12 @@ export interface WorkbenchSession extends FixtureSession {
    */
   readonly dirty?: boolean
   /**
+   * The directory session this file session was drilled out of. Set only on a
+   * directory-tree drilldown, so the file view can offer「返回上级目录视图」and
+   * two directory sessions never claim each other's same-path drilldown.
+   */
+  readonly parentDirectoryId?: string
+  /**
    * The two inputs this directory session compares. They live on the session
    * rather than in one shell-wide slot, so several directory pairs can be opened
    * side by side without their pickers, drilldowns and snapshots crossing over.
