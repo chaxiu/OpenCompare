@@ -15,5 +15,9 @@ export const PLATFORM_CHANNELS = {
   statPath: 'platform:stat-path',
   ensureDirectory: 'platform:ensure-directory',
   deleteFile: 'platform:delete-file',
-  temporaryDirectory: 'platform:temporary-directory'
+  temporaryDirectory: 'platform:temporary-directory',
+  /** main → renderer: one compare request collected from the launch source. */
+  compareRequest: 'platform:compare-request',
+  /** renderer → main: the subscriber is listening, deliver queued requests. */
+  compareRequestsReady: 'platform:compare-requests-ready'
 } as const

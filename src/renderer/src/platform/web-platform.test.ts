@@ -134,3 +134,17 @@ describe('web file dialogs', () => {
     ).rejects.toThrow(/只读/)
   })
 })
+
+describe('web launch request parity', () => {
+  it('exposes the same inert stream the Electron bridge exposes', async () => {
+    const platform = createWebPlatformPort()
+    const listener = vi.fn()
+
+    const unsubscribe = platform.onCompareRequest?.(listener)
+    expect(typeof unsubscribe).toBe('function')
+    expect(() => unsubscribe?.()).not.toThrow()
+    expect(listener).not.toHaveBeenCalled()
+
+    await expect(platform.compareRequestsReady?.()).resolves.toBeUndefined()
+  })
+})

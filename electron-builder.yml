@@ -10,6 +10,12 @@
 # Electron-vite emits the three process bundles into `out/`, which is what gets packed.
 appId: com.opencompare.app
 productName: OpenCompare
+# `opencompare://compare?left=&right=` links: the macOS bundle gets the
+# CFBundleURLTypes declaration from here, and Linux reuses it for the desktop entry.
+protocols:
+  - name: OpenCompare Compare Link
+    schemes:
+      - opencompare
 directories:
   output: release
 files:
@@ -46,6 +52,9 @@ nsis:
 linux:
   icon: build/icon.png
   category: Development
+  desktop:
+    entry:
+      MimeType: x-scheme-handler/opencompare
   # `deb` requires an explicit maintainer (electron-builder falls back to
   # package.json author.email, which is not guaranteed to be present).
   maintainer: 'OpenCompare Contributors <chaxiu@users.noreply.github.com>'

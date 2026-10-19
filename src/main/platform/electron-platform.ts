@@ -159,8 +159,9 @@ function isMissingError(error: unknown): boolean {
 /**
  * `file` / `directory` / `missing` probe. Absence is a normal answer; any other
  * failure (permissions, I/O) rejects so the caller can report it as unreadable.
+ * Exported because the launch intake probes with the very same implementation.
  */
-async function statPath(path: string): Promise<PathProbeKind> {
+export async function statPath(path: string): Promise<PathProbeKind> {
   if (isSamplePath(path)) {
     if (SAMPLE_FILES.has(path)) return 'file'
     if (path === SAMPLE_ROOT) return 'directory'
@@ -191,8 +192,17 @@ async function temporaryDirectory(): Promise<string> {
   return root
 }
 
+/** Hooks the launch bootstrap needs from the IPC layer. */
+export interface PlatformIpcOptions {
+  /** Called when the renderer announces its launch-request subscription. */
+  readonly onCompareRequestsReady?: () => void
+}
+
 /** Registers the native PlatformPort handlers backed by the local file system. */
-export function registerPlatformIpc(): void {
+export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
+  ipcMain.handle(PLATFORM_CHANNELS.compareRequestsReady, () => {
+    options.onCompareRequestsReady?.()
+  })
   ipcMain.handle(PLATFORM_CHANNELS.homeDirectory, () => app.getPath('home'))
   ipcMain.handle(PLATFORM_CHANNELS.workingDirectory, () => process.cwd())
   ipcMain.handle(PLATFORM_CHANNELS.selectDirectory, () => selectDirectory())

@@ -6,6 +6,8 @@
  *  - Electron: main-process handlers + a `contextBridge` bridge exposed by preload.
  *  - Web: an in-memory virtual file system for browser / `--rendererOnly` runs.
  */
+import type { CompareRequestPayload } from '../compareRequest'
+
 export type PlatformKind = 'electron' | 'web'
 
 /** A directory entry as returned by {@link PlatformPort.listDirectory}. */
@@ -84,4 +86,16 @@ export interface PlatformPort {
   deleteFile(path: string): Promise<void>
   /** Writable scratch root for materialising read-only trees (per runtime). */
   temporaryDirectory(): Promise<string>
+  /**
+   * Subscribes to compare requests collected from the launch source (launch
+   * arguments or an `opencompare://` link). Optional: a runtime without a launch
+   * source omits it and the workbench treats it as "no injection". The returned
+   * function releases the subscription.
+   */
+  onCompareRequest?(listener: (payload: CompareRequestPayload) => void): () => void
+  /**
+   * Announces that the listener above is attached, so the host may deliver the
+   * requests it queued while the renderer was starting up.
+   */
+  compareRequestsReady?(): Promise<void>
 }

@@ -41,6 +41,15 @@ export type CompareResult =
   | { readonly ok: true; readonly request: CompareRequest }
   | { readonly ok: false; readonly error: CompareError }
 
+/**
+ * Payload the launch source (argv / `opencompare://`) hands to the renderer.
+ * A failed intake carries only the readable reason, so the renderer reports it
+ * without opening a session.
+ */
+export type CompareRequestPayload =
+  | { readonly ok: true; readonly request: CompareRequest }
+  | { readonly ok: false; readonly message: string }
+
 export type ParsedComparePaths =
   | { readonly ok: true; readonly paths: ComparePaths }
   | { readonly ok: false; readonly error: CompareError }

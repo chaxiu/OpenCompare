@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { CODE_SCENE, CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { SampleComposition, SceneId } from '@shared/fixtures'
-import type { CompareRequest } from '@shared/compareRequest'
+import type { CompareRequest, CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
@@ -203,6 +203,33 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [compareDialogOpen, setCompareDialogOpen] = useState(false)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
+  /** Latest launch-request handler; the subscription itself is installed once. */
+  const launchRequest = useRef<(payload: CompareRequestPayload) => void>(() => undefined)
+
+  useEffect(() => {
+    launchRequest.current = (payload) => {
+      if (payload.ok) {
+        // The injected request follows the same route as the manual entry.
+        void openCompareRequest(payload.request, (message) => report(message))
+        return
+      }
+      // A rejected launch source only reports; sessions and the active tab stay.
+      report(payload.message)
+    }
+  })
+
+  /**
+   * Subscribes once per mount to the requests collected by the launch source
+   * (launch arguments / `opencompare://`). The ready signal goes out only after
+   * the listener is attached, so the host delivers its queue exactly once.
+   */
+  useEffect(() => {
+    const subscribe = platform.onCompareRequest
+    if (!subscribe) return
+    const unsubscribe = subscribe((payload) => launchRequest.current(payload))
+    void platform.compareRequestsReady?.()
+    return unsubscribe
+  }, [platform])
 
   // Cmd/Ctrl+N opens the manual entry from anywhere; while it is already open
   // the shortcut is a no-op instead of stacking a second dialog.
