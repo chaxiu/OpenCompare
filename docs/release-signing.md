@@ -24,7 +24,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 ### 说明
 
 - 公证走 **App Store Connect API Key 模式**：`APPLE_API_KEY`（`.p8` base64）+ `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` 三件套替代 Apple ID + App 专用密码。Team Key 需具备 Developer 角色即可提交公证；`.p8` 私钥**仅可下载一次**，请妥善保存后录入 Secret（丢失需重新生成 Key）。
-- `APPLE_TEAM_ID` 为 `3X4J53U6RY`；`electron-builder.yml` 的 `mac.identity` 已显式钉住 **Developer ID Application: Tao Zhu (3X4J53U6RY)**，避免共享 runner 上自动选中错误证书。`appId` 保持 OpenCompare 自有值 `com.opencompare.app`。
+- `APPLE_TEAM_ID` 为 `3X4J53U6RY`；`electron-builder.yml` 的 `mac.identity` 钉住 **Tao Zhu (3X4J53U6RY)**。不要带 `Developer ID Application:` 前缀，electron-builder 会按这个证书类型自己选择，避免共享 runner 上选中别的证书。`appId` 保持 OpenCompare 自有值 `com.opencompare.app`。
 - `electron-builder.yml` 已声明 `hardenedRuntime: true` + `build/entitlements.mac.plist`（JIT / 未签名可执行内存 / 关闭库校验），`mac.notarize: true` 由 electron-builder / `@electron/notarize` 调用 `notarytool` 完成公证。
 - `release.yml` 在 mac 打包前逐一检查上述 6 个 Secret 是否齐备；任一缺失即以 `::error::` 列出缺失项并 `exit 1`（fail-closed），不产出/上传产物。`APPLE_API_KEY` 只在 `$RUNNER_TEMP` 解码为权限 `600` 的临时 `.p8`，打包后删除，日志不打印密钥内容。
 

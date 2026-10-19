@@ -144,7 +144,7 @@ describe('macOS signing and notarization', () => {
   })
 
   it('pins the Developer ID identity and keeps the OpenCompare appId', () => {
-    expect(builder.mac?.identity).toBe('Developer ID Application: Tao Zhu (3X4J53U6RY)')
+    expect(builder.mac?.identity).toBe('Tao Zhu (3X4J53U6RY)')
     expect(builder.appId).toBe('com.opencompare.app')
   })
 
