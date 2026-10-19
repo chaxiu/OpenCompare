@@ -8,7 +8,9 @@
 node_modules/
 out/
 dist/
-release/
+# electron-builder output (project root only; keep the release domain baseline
+# under .munk/baseline/domains/release/ committable)
+/release/
 coverage/
 *.tsbuildinfo
 .DS_Store

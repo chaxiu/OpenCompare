@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "OpenCompare — 现代跨平台桌面对比与三向合并工具",
+  "author": {
+    "name": "OpenCompare Contributors",
+    "email": "chaxiu@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/chaxiu/OpenCompare",
   "main": "./out/main/index.js",
   "packageManager": "pnpm@10.18.3",
   "engines": {

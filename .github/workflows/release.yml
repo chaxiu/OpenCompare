@@ -55,9 +55,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # electron-vite writes the main / preload / renderer bundles into `out/`.
       - run: pnpm build
-      # `--publish always` uploads to the GitHub Release of the pushed tag
-      # (a draft release is created when none exists yet).
+      # `--publish always` uploads to the GitHub Release of the pushed tag.
+      # electron-builder creates it as a public release (releaseType in
+      # electron-builder.yml); the finalise job below also promotes any
+      # pre-existing draft for this tag.
       - name: Build and publish to the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm exec electron-builder --${{ matrix.target }} --publish always
+
+  # electron-builder only applies `releaseType` when it creates the release, so a
+  # draft left behind by an earlier run would stay hidden. Promote the tag's
+  # release once every platform has uploaded its artifacts.
+  finalize:
+    name: Publish the GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Make the tag's release public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest

@@ -23,6 +23,14 @@ nsis:
   allowToChangeInstallationDirectory: true
 linux:
   category: Development
+  # `deb` requires an explicit maintainer (electron-builder falls back to
+  # package.json author.email, which is not guaranteed to be present).
+  maintainer: 'OpenCompare Contributors <chaxiu@users.noreply.github.com>'
   target:
     - AppImage
     - deb
+# `--publish always` defaults to a draft release; publish to a real release so
+# the tag's Release is visible outside the repository.
+publish:
+  provider: github
+  releaseType: release
