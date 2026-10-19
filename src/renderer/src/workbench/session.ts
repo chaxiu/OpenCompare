@@ -44,6 +44,12 @@ export interface WorkbenchSession extends FixtureSession {
   readonly adhoc?: AdhocFilePair
   readonly directory?: DirectoryComparison
   /**
+   * True while any side of the session carries unsaved edits (a file pair whose
+   * working text no longer matches what was loaded from disk). Reported by the
+   * active file view so a later close prompt can reuse the flag.
+   */
+  readonly dirty?: boolean
+  /**
    * The directory session this file session was drilled out of. Set only on a
    * directory-tree drilldown, so the file view can offer「返回上级目录视图」and
    * two directory sessions never claim each other's same-path drilldown.

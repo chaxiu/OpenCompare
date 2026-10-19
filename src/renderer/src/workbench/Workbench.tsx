@@ -56,12 +56,13 @@ import {
   describeSnapshotContentError,
   describeSnapshotImportError,
   directorySides,
-  downloadSnapshotFile,
   exportSideSnapshot,
   parseSnapshotText,
   readFileText,
   readSideFile,
   remoteSnapshotSides,
+  snapshotFileName,
+  SNAPSHOT_FILE_FILTER,
   snapshotSide,
   withSide
 } from './snapshotOps'
@@ -205,6 +206,18 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
   const handleCsvAlign = useCallback((state: CsvAlignState) => setCsvAlign(state), [])
+
+  /**
+   * Mirrors a file view's unsaved state onto its session model, so a later
+   * close prompt can read it off the session rather than the view.
+   */
+  const handleSessionDirty = useCallback((id: string, dirty: boolean) => {
+    setSessions((current) => {
+      const target = current.find((session) => session.id === id)
+      if (!target || (target.dirty ?? false) === dirty) return current
+      return current.map((session) => (session.id === id ? { ...session, dirty } : session))
+    })
+  }, [])
 
   function report(message: string, tone: 'danger' | 'info' = 'danger'): void {
     setNotice(message)
@@ -513,7 +526,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }
 
-  /** Exports one side as a canonical `.ocsnap.json` download. */
+  /** Exports one side as a `.ocsnap.json` file through the platform save dialog. */
   async function handleExportSnapshot(side: SidePosition): Promise<void> {
     const current = activeSides
     if (current === null) return
@@ -522,8 +535,14 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setNotice(null)
     try {
       const exported = await exportSideSnapshot(platform, current[side])
-      downloadSnapshotFile(exported.text, exported.snapshot.name)
-      report(`已导出 ${exported.snapshot.name}.ocsnap.json（${exported.entryCount} 个文件）。`, 'info')
+      const path = await platform.saveFile({
+        title: '导出目录快照',
+        defaultPath: snapshotFileName(exported.snapshot.name),
+        filters: [SNAPSHOT_FILE_FILTER],
+        content: exported.text
+      })
+      if (path === null) return
+      report(`已导出到 ${path}（${exported.entryCount} 个文件）。`, 'info')
     } catch (cause) {
       report(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -721,7 +740,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       }
       case 'code':
         return session.adhoc ? (
-          <CodeView key={session.id} pair={session.adhoc.pair} platform={platform} />
+          <CodeView
+            key={session.id}
+            pair={session.adhoc.pair}
+            platform={platform}
+            onDirtyChange={(dirty) => handleSessionDirty(session.id, dirty)}
+          />
         ) : (
           <CodeView
             key={session.id}

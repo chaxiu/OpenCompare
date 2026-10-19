@@ -51,6 +51,7 @@
 - **ac-template-preview**：视图展示归位映射预览（已匹配相对路径、缺失、冲突、B 未使用），确认前不写任何文件。
 - **ac-template-extract**：确认后按模板 A 的相对路径结构写出（自动创建缺失父目录），且用同一匹配器复核归位结果为全匹配、模板结构可从输出目录重建。
 - **ac-template-perf**：匹配基于哈希/文件名索引，1,000+ 文件的合成散乱树仍在线性时间内完成且不对同一文件重复读取内容 / 计算哈希（vitest 用计数桩断言）。
+- **ac-existing-confirmations**：目录同步 / 模板归位等既有危险动作的预览与确认语义保持不变（`role="dialog"` 预览、确认前不写、取消不写、按预览写入后刷新）。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿，且新增 vitest 覆盖同步计划与模板匹配。
 
 ## 非目标
@@ -87,6 +88,11 @@
 
 ## 最近交付证明
 
+- WI：`wi_ws_4829ebe71d4e966e`（真实修改原位保存回磁盘与结果导出为文件产物，`kind: feature`）
+- 日期：2026-10-19
+- 结果：self_test skipped（本项 UI 自测改由 code_gates 关点；本轮本域无代码改动，仅回归确认）。
+- 覆盖摘要：本轮新增的「原位保存 / 导出改走系统保存对话框」未触及目录同步与模板归位路径——`DirectorySyncDialog` / `TemplateDialog` 的 `role="dialog"` 预览、目标根与分组明细、确认前不写、取消不写、确认后重跑对比的语义原样保留；`DirectoryView` 仅两条快照导出按钮的 title 文案改为「经系统保存对话框」，同步 / 模板归位入口与文案未动。`ac-existing-confirmations` 由折叠用例 `qa/existing-confirmations-unchanged.md` 覆盖。
+- 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过。
 - WI：`wi_ws_4e87a158048a1dcb`（目录下钻返回上级与往返状态保持，`kind: feature`）
 - 日期：2026-10-19
 - 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm typecheck` / `pnpm lint` / `pnpm test` 全绿，含随动与新用例）。

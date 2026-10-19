@@ -243,7 +243,7 @@ export function DirectoryView({
           icon={<Download aria-hidden className="size-3.5" />}
           onClick={() => onExportSnapshot('left')}
           disabled={busy}
-          title="把左侧目录扫描为快照并下载为 <name>.ocsnap.json（已挂载快照则原样重导出）"
+          title="把左侧目录扫描为快照并经系统保存对话框导出为 <name>.ocsnap.json（已挂载快照则原样重导出）"
         >
           导出左侧快照
         </ToolbarButton>
@@ -261,7 +261,7 @@ export function DirectoryView({
           icon={<Download aria-hidden className="size-3.5" />}
           onClick={() => onExportSnapshot('right')}
           disabled={busy}
-          title="把右侧目录扫描为快照并下载为 <name>.ocsnap.json（已挂载快照则原样重导出）"
+          title="把右侧目录扫描为快照并经系统保存对话框导出为 <name>.ocsnap.json（已挂载快照则原样重导出）"
         >
           导出右侧快照
         </ToolbarButton>

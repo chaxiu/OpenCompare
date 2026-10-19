@@ -5,6 +5,7 @@
 ## 范围
 
 - **双栏代码 Diff（`CodeView` 的 `diff` 模式）**：`diff`(jsdiff) 行级差异块（same / added / removed / modified），颜色走既有差异语义 token（`--color-diff-*` + `DiffBadge`/`diffSemantics`）；配对 modified 行的二级行内字符级高亮（仅变化片段着色）；左/右真实行号槽 + 单侧多出/缺少行的填充占位对齐；按行号映射的双向同步滚动（垂直 + 水平）；差异块上一个/下一个循环导航（当前块高亮 + 两侧滚入可见 + 序号/总数）；单块「→ 覆写到右」/「← 覆写到左」即时重算差异与一次撤销/重置回样本原文。
+- **真实文件会话的脏标记与原位保存（`CodeView.CodeDiffView` 的 `diff` 模式）**：任一侧「当前工作文本 ≠ 从磁盘载入的原始文本」即为该侧「已修改（未保存）」，在面板标题区与工具栏同时可见（明确左/右哪一侧），并把会话级 `dirty` 上报到 `workbench/session.ts` 供后续关闭提示复用；覆写回原内容或点「重置」清除。对已修改的一侧提供「保存左文件 / 保存右文件」：经 `PlatformPort.saveFile` 打开系统保存对话框，`defaultPath` 预填该侧真实磁盘路径、`content` 为当前工作文本；写入成功后更新该侧来源路径与基线文本、清除脏标记并提示「已写回 <路径>」；取消保持脏标记且不报错；只读样本路径被平台拒绝时按既有提示语气报错、脏标记不变。
 - **三向合并（`CodeView` 的 `merge` 模式，base / ours / theirs）**：`node-diff3` 的 `diff3MergeRegions`（按 `\n` 切分行数组调用）识别稳定区与冲突区，区分「仅一侧变更（自动采纳）」与「双侧冲突块」；冲突剩余计数实时递减至清零完成态；上下冲突跳转定位并高亮；逐块 `Accept Ours` / `Accept Theirs` / `Accept Both` / `Accept Base` 采纳与改选（显示采纳来源）；独立合并结果预览区随选择即时更新（未解决块以冲突标记呈现）；冲突清零后导出合并文本 + 复制到剪贴板。
 - **算法落位与测试**：行级 + 行内 Diff 计算、diff3 区域计算、已解决选择 → 合并文本拼接均为 `src/core/` 纯函数，可由 vitest 在 Node 直接单测；行内字符级 diff 对超长行（>2000 字符）退化整行标记保护。
 - **本地文件入口（`CodeView` 顶栏）**：经 `PlatformPort.selectFile` 分别打开左 / 右本地文本文件即时刷新双栏 Diff；三向合并可分别打开 base / ours / theirs 本地文件并重建合并模型与冲突列表（清空旧采纳状态）；冲突全部解决后经 `PlatformPort.saveFile` 把合并结果保存到本地（`defaultPath` 预填，未解决时动作禁用）。
@@ -25,6 +26,14 @@
 - **ac-code-diff-open**：`CodeView` 双栏 Diff 顶栏可分别打开左 / 右本地文本文件，打开后对比区立即按新内容刷新（差异块计数随之更新）；取消时不改变现有对比且不报错。
 - **ac-code-merge-open**：`CodeView` 三向合并模式可分别打开 base / ours / theirs 本地文件并重建合并模型与冲突列表（冲突计数/列表随之更新、旧分块采纳状态清空、导航回到首块）；取消时不改变现有合并状态。
 - **ac-code-merge-save**：三向合并冲突全部解决后，可经 `saveFile` 把合并结果保存到本地文件（未解决时该动作不可用）；保存内容为按各块选择拼接的结果且不含冲突标记，保存后给出成功提示，取消不误报成功。
+- **ac-edit-dirty**：真实文件对比会话中覆写差异块后，被覆写的一侧显示为「已修改（未保存）」，另一侧不受影响。
+- **ac-reset-clears-dirty**：点「重置」后两侧回到磁盘载入内容，两侧脏标记清除。
+- **ac-save-in-place**：对已修改的一侧执行保存，经系统保存对话框（`defaultPath` 预填该侧真实路径）写回后脏标记清除并提示已写回路径；磁盘文件内容等于修改后内容。
+- **ac-save-cancel-keeps-dirty**：在保存对话框取消后，磁盘不变、脏标记保持、无错误刷屏。
+- **ac-save-readonly-sample**：对只读（内置样本库）路径保存被拒绝并按既有提示语气报错，脏标记不变。
+- **ac-export-merge-via-dialog**：「导出合并文本」经系统保存对话框落盘为文件（非无声下载），成功提示路径；对话框取消不改磁盘、不报错。
+- **ac-gates**：`pnpm typecheck` / `pnpm lint` / `pnpm test` 在改动后全绿（含随动的 Blob 断言更新与新增脏标记 / 保存用例）。
+- **ac-self-test-desktop**：在真实 Electron 窗口（`pnpm dev`）走通：打开两个真实文件 → 做出修改 → 经保存对话框原位写回 → 外部读取核对磁盘内容为修改后内容 → 导出合并/快照结果并核对落盘文件可复现。
 - **ac-tests**：`src/core/` 有 vitest 覆盖行级/行内字符级区间、差异块划分、diff3 区域划分与采纳拼接结果；`pnpm test` 绿。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿。
 
@@ -32,7 +41,8 @@
 
 - 不做目录树对比/下钻、CSV 主键对齐、JSON/YAML 语义 diff、增量同步与模板归位——各属后续子项；本域只动代码/文本场景。
 - 不替换目录 / CSV / JSON·YAML 三类会话的 answer-key 统计，只改代码会话的冲突计数。
-- 不引入 CodeMirror / Monaco 等重型编辑器或第二套 UI 库；沿用既有组件与自建行渲染。
+- 不引入 CodeMirror / Monaco 等重型编辑器或第二套 UI 库；沿用既有组件与自建行渲染。本域只建立脏标记状态与按侧原位保存，不做会话关闭时的未保存提示 / 标签生命周期（`session-tabs-lifecycle`），不做自由文本编辑。
+- 不做代码统一 diff 文本导出、CSV 对齐结果导出、`.ocsnap.json` 协议扩展或二进制/Hex；快照导出属 `snapshot` 域。
 - 不做语法高亮、浅色主题、快捷键/命令面板、分栏拖拽（`SplitPane` 已具备）。
 - 文件对话框能力由 `PlatformPort.selectFile` / `saveFile`（`foundation` 域）提供，本域只做视图入口接线；不做最近文件列表、多文件选择、目录批量 IO 等顺手扩展。
 - 不做十六进制/二进制对比、`.xlsx` 解析、FTP/SFTP。
@@ -48,8 +58,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_e60068db55d0fef9`（真实文件 IO 闭环 + GitHub 开源发布基线，`kind: feature`）
+- WI：`wi_ws_4829ebe71d4e966e`（真实修改原位保存回磁盘与结果导出为文件产物，`kind: feature`）
 - 日期：2026-10-19
-- 结果：self_test passed。
-- 覆盖摘要：`CodeView.tsx` 顶栏接入 `PlatformPort.selectFile` / `saveFile` —— 双栏 Diff 可分别打开左/右本地文本文件并即时重算差异块；三向合并可分别打开 base/ours/theirs 本地文件并重建合并模型（旧采纳状态清空、导航回首块）；冲突清零后「导出合并文本」经 `saveFile`（`defaultPath=merged.txt`）保存，未清零时禁用；每次打开/保存给出「已打开/已保存 <路径>」提示，取消不改变状态、不误报。`CodeView.test.tsx` 随入口同步扩展，`pnpm test` 20 files / 155 tests 全绿，样本兜底路径与四项核心算法未改。三条验收均有对应折叠用例（qa/）。
+- 结果：self_test skipped（本项 UI 自测改由 code_gates 关点；桌面 E2E case 仍保留为验收定义）。
+- 覆盖摘要：`CodeView.tsx` 的 `CodeDiffView` 以「工作文本 ≠ 磁盘载入原文」按侧计算脏标记：面板 `meta` 显示「已修改（未保存）」、工具栏显示「未保存：左/右」并按侧启用「保存左文件 / 保存右文件」；`save(side)` 经 `CodeView` 新增的 `onDirtyChange` 上报会话级 `dirty`（`workbench/session.ts` 新增 `WorkbenchSession.dirty`），`Workbench` 以 `handleSessionDirty` 镜像到会话模型供后续关闭提示复用。保存走 `PlatformPort.saveFile`（`title` = 保存左侧/右侧文件、`defaultPath` = 该侧真实路径、`filters=[TEXT_FILE_FILTER]`、`content` = 当前工作文本），成功后把该侧来源路径与基线文本一并更新、脏标记消失并提示「已写回 <路径>」；取消 `null` 时直接返回、保持脏标记不报错；写入被平台拒绝（只读样本库）时以既有 `notice` 语气显示错误、工作副本与脏标记不变；「重置」恢复 sources 并自然清脏。三向合并「导出合并文本」保持走 `saveFile`（默认 `merged.txt`），待决冲突未清零时禁用。`CodeView.test.tsx` 新增脏标记 / 重置 / 原位保存 / 取消 / 只读拒绝 / 合并导出断言，`pnpm typecheck` / `pnpm lint` / `pnpm test`（21 files / 203 tests）全绿。七条新验收与 `ac-gates` / `ac-self-test-desktop` 均有对应折叠用例（qa/）。
 - 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过（沿用既有 tech overview 与 design 基线）。

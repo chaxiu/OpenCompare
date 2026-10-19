@@ -16,7 +16,7 @@
 ### 目录视图挂载闭环（第二阶段，`src/renderer/src/workbench/` + `views/DirectoryView`）
 
 - **快照挂载编排（`snapshotOps.ts`，与 `directoryOps.ts` 同级）**：渲染层纯编排——`ComparisonSides`（左右各为 `directory` 或 `snapshot` 输入）、`SnapshotMount`（名称 + 挂载点 `/snapshots/<left|right>/<name>`）、`snapshotMountPath` / `snapshotSide` / `withSide` / `snapshotMounts` / `findSnapshotMount`、`seedSnapshotCache`（把挂载快照种子进 `ComparisonCache`）、`compareSides`（复用 `compareDirectorySides` 重算）。快照侧文件读取一律经挂载注册表（`readSnapshotContent`），**禁止**把 `/snapshots/...` 路径传给 `PlatformPort`。
-- **导出 / 导入的 DOM 管线**：`exportSideSnapshot`（扫描真实目录 → `buildSnapshot`，或已是快照时按规范形式重新序列化做 round-trip）；`downloadSnapshotFile`（`Blob` + anchor 下载 `<name>.ocsnap.json`）；`readFileText`（`FileReader`）；`parseSnapshotText`（`parseSnapshot` 包装）。导入 / 导出只用 renderer DOM API（`<input type="file">` + `FileReader`；`Blob` + anchor），**不新增 `PlatformPort` / IPC / 原生保存对话框**，Electron（`contextIsolation` + `sandbox`）与 Web 双端行为一致、组件测试可在 jsdom 内驱动。
+- **导出 / 导入的管线**：`exportSideSnapshot`（扫描真实目录 → `buildSnapshot`，或已是快照时按规范形式重新序列化做 round-trip）；导出经 `PlatformPort.saveFile` 打开系统保存对话框（`title=导出目录快照`、`defaultPath=<name>.ocsnap.json`、过滤器 `SNAPSHOT_FILE_FILTER` 含 `ocsnap.json` / `json`），取消返回 `null` 不写盘；`readFileText`（`FileReader`）；`parseSnapshotText`（`parseSnapshot` 包装）。导入只用 renderer DOM API（`<input type="file">` + `FileReader`），Electron（`contextIsolation` + `sandbox`）与 Web 双端行为一致、组件测试可在 jsdom 内驱动；Web 端 `saveFile` 仍为内存写 + best-effort 下载，导出逻辑不得只在 Electron 生效。
 - **来源状态标识与错误文案**：左 / 右栏面板标题 / 副标题 / 标签区分「目录」与「快照」，快照侧显示快照名（如 `remote-prod`）与挂载点 `/snapshots/right/remote-prod`；`describeSnapshotImportError` / `describeSnapshotContentError` 产出可读中文错误（schema/格式不被接受；该快照未内联该文件内容、无法离线下钻）。
 - **Workbench 持有挂载状态**：左右两侧是目录还是快照、快照文档、名称、挂载点由 `Workbench` 持有并传到 `DirectoryView`；导入成功后立即 `compareSides` 重算并复用既有 `ComparisonCache`；导入失败回滚到导入前状态，不出现空树或会话丢失。左右两栏入口可访问名可区分（「导出左侧快照」/「导入右侧快照」/「远端快照样本」）。
 - **下钻与过滤闭环**：快照侧差异文件双击按扩展名下钻到代码 / CSV / JSON / YAML 视图，内容来自快照内联文本，会话标题 / 副标题指向该快照路径；未内联内容的文件给出明确提示而不渲染空白；左独有 / 右独有仍按现有语义渲染空侧。现有五态过滤（全部 / 仅差异 / 左独有 / 右独有 / 相同）与状态栏计数、图例对快照参与的对比同样生效。
@@ -46,11 +46,13 @@
 - **ac-drilldown-not-inlined-hint**：双击快照中未内联内容的文件时给出明确提示（说明该快照未内联内容），不渲染空白对比。
 - **ac-snapshot-vs-snapshot**：左右两栏均挂载快照（可用内置样本与导入的快照组合）时对比仍正常产出，过滤器与双击下钻可用。
 - **ac-tests-and-gates**：新增/扩展的 jsdom 组件测试与纯函数单测通过，`pnpm test` / `pnpm lint` / `pnpm typecheck` 全绿，不降低既有测试。
+- **ac-export-snapshot-via-dialog**：目录快照导出经系统保存对话框落盘为 `<name>.ocsnap.json`，不再走 Blob 无声下载；成功提示落盘路径。
+- **ac-export-roundtrip**：导出的合并文本 / 快照文件可被外部读取或再次导入应用，内容与导出时一致（可复现）。
 
 ## 非目标
 
 - **不改 `@core` 快照协议、`compare` / `filter` / `sync` / `template` 引擎语义，不改 `@shared/fixtures` 既有样本内容与答案键**；`REMOTE_SNAPSHOT` 只消费，不重造。
-- **不改 `PlatformPort`、IPC channel、main / preload**：不新增 `selectFile`、不做原生保存对话框；导入/导出全走 renderer DOM API。
+- **不改 `PlatformPort` 契约、IPC channel、main / preload**：快照导出复用既有 `saveFile` 系统保存对话框（不再用 Blob + anchor 无声下载），导入仍走 renderer DOM API。
 - **不做拖拽导入、剪贴板粘贴导入、快照列表/多快照管理、快照合并、快照重命名**。
 - **不做真实 SSH/SFTP、远端网络探测或远端增量同步**；不做远端刷新/自动重连。
 - **不做二进制 / 图片等非文本内容内联**；不做 base64 大文件内联、分块、压缩（gzip）或流式快照。
@@ -71,12 +73,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_1c48f73551810bc2`（目录视图快照导出/导入挂载与远端快照下钻体验，`kind: feature`；承接前序 protocol 底座 `wi_ws_80baff2d4373dbb5`）
-- 日期：2026-10-18
-- 结果：self_test passed（10 条 case 全 pass：9 条 UI case + 门禁 case）。`pnpm test` = **20 files / 141 tests 全绿**（较前序 18 files / 125 tests 净增 2 files / 16 tests）；`pnpm lint` exit 0；`pnpm typecheck` exit 0。
-- 覆盖摘要：
-  - 新建 `src/renderer/src/workbench/snapshotOps.ts`：`ComparisonSides` / `SnapshotMount` / `MountedSnapshotFile` / `SnapshotExport` 模型；`snapshotMountPath` / `directorySides` / `remoteSnapshotSides` / `snapshotSide` / `withSide` / `parseSnapshotText` / `snapshotMounts` / `findSnapshotMount` / `seedSnapshotCache` / `compareSides` 编排；`readSideFile`（目录走 `readTextFile`、快照走 `readSnapshotContent`，按侧分流禁止把 `/snapshots/...` 传给 `PlatformPort`）；`exportSideSnapshot` / `downloadSnapshotFile` / `readFileText`（DOM 管线，无新增 IPC）；`describeSnapshotImportError` / `describeSnapshotContentError` 可读中文错误。
-  - 改 `src/renderer/src/workbench/directoryCompare.ts` / `views/DirectoryView.tsx` / `workbench/Workbench.tsx`：左/右栏快照导出、导入挂载、来源状态标识（目录 vs 快照 + 名称 + 挂载点）、「远端快照样本」一键加载、过滤/图例/计数联动、快照侧按扩展名下钻、未内联内容提示、导入失败回滚到导入前状态。
-  - 新增 `src/renderer/src/workbench/snapshotOps.test.ts`（183 行，纯函数/编排单测：挂载点、按侧读取分流、导出/round-trip、导入错误分支、内容错误分支）与 `src/renderer/src/App.snapshot.test.tsx`（206 行，jsdom 组件测试：导出下载、导入挂载、非法拒绝、远端样本四态、过滤、下钻、未内联提示、快照 vs 快照）。
-  - 九条新验收（ac-export-directory-snapshot / import-mount-and-roundtrip / import-invalid-rejected / remote-sample-four-statuses / snapshot-filter / snapshot-drilldown / drilldown-not-inlined-hint / snapshot-vs-snapshot / tests-and-gates）由 9 条折叠用例（`qa/`）与 `pnpm test` / `lint` / `typecheck` 覆盖。
-  - 注：本轮 WI change pack 仅提供 `prd.md` + `tests/cases/**`（无 `tech.md` / `ux/**`）：全局 tech / design 折叠无可执行项，故本轮跳过 tech/ux 折叠。
+- WI：`wi_ws_4829ebe71d4e966e`（真实修改原位保存回磁盘与结果导出为文件产物，`kind: feature`）
+- 日期：2026-10-19
+- 结果：self_test skipped（本项 UI 自测改由 code_gates 关点；桌面 E2E case 仍保留为验收定义）。
+- 覆盖摘要：删除 `snapshotOps.downloadSnapshotFile`（`URL.createObjectURL` + anchor 无声下载），新增 `SNAPSHOT_FILE_FILTER`（`name: 'OpenCompare 快照'`、`extensions: ['ocsnap.json', 'json']`）与 `snapshotFileName(name)`；`Workbench.handleExportSnapshot` 改为 `platform.saveFile({ title: '导出目录快照', defaultPath: snapshotFileName(...), filters: [SNAPSHOT_FILE_FILTER], content: exported.text })`，`null`（取消）直接返回不改状态，成功提示「已导出到 <路径>（N 个文件）。」；`DirectoryView` 导出按钮 title 同步为「经系统保存对话框」。`App.snapshot.test.tsx` 断言改核对 `saveFile` 的默认名 / 过滤器 / 内容与取消分支，不再依赖 `URL.createObjectURL` / anchor。`parseSnapshot` / `exportSideSnapshot` 的 round-trip 语义未改，导入路径仍走 `FileReader`。`pnpm typecheck` / `pnpm lint` / `pnpm test`（21 files / 203 tests）全绿。两条新验收均有折叠用例（qa/`snapshot-export-via-save-dialog.md`、`qa/export-roundtrip.md`）。
+- 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过。
