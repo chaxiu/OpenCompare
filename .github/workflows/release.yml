@@ -28,6 +28,34 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # Create the tag's GitHub Release exactly once, before the packaging
+      # matrix starts. Letting each platform's electron-builder publish
+      # concurrently raced into several same-named releases for one tag, which
+      # split the uploaded assets across them. The matrix now uploads into this
+      # single release instead. Any duplicate releases left behind by an earlier
+      # race are pruned so exactly one remains for the tag.
+      - name: Pre-create the tag's release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          readarray -t ids < <(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"${GITHUB_REF_NAME}\") | .id")
+
+          if [ "${#ids[@]}" -eq 0 ]; then
+            echo "No release for ${GITHUB_REF_NAME}; creating a draft."
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --draft \
+              --generate-notes
+          else
+            echo "Keeping release ${ids[0]} for ${GITHUB_REF_NAME}."
+            for id in "${ids[@]:1}"; do
+              echo "Pruning duplicate release ${id} for ${GITHUB_REF_NAME}."
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
+            done
+          fi
 
   release:
     name: Package ${{ matrix.target }}
@@ -55,18 +83,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # electron-vite writes the main / preload / renderer bundles into `out/`.
       - run: pnpm build
-      # `--publish always` uploads to the GitHub Release of the pushed tag.
-      # electron-builder creates it as a public release (releaseType in
-      # electron-builder.yml); the finalise job below also promotes any
-      # pre-existing draft for this tag.
-      - name: Build and publish to the GitHub Release
+      # Package locally only: publishing is deferred to the upload step below so
+      # the three platforms never create the GitHub Release concurrently.
+      - name: Build installers
+        run: pnpm exec electron-builder --${{ matrix.target }} --publish never
+      # Upload this platform's artifacts into the single pre-created release.
+      # `shell: bash` guarantees globbing works on the windows runner too.
+      - name: Upload installers to the tag's release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm exec electron-builder --${{ matrix.target }} --publish always
+          GH_REPO: ${{ github.repository }}
+        run: |
+          shopt -s nullglob
+          assets=(release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.blockmap release/latest*.yml)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release artifacts found under release/." >&2
+            exit 1
+          fi
+          gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
 
-  # electron-builder only applies `releaseType` when it creates the release, so a
-  # draft left behind by an earlier run would stay hidden. Promote the tag's
-  # release once every platform has uploaded its artifacts.
+  # The release stays a draft while the matrix uploads, then is promoted once
+  # every platform has contributed its artifacts.
   finalize:
     name: Publish the GitHub Release
     needs: release
@@ -75,4 +113,5 @@ jobs:
       - name: Make the tag's release public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
