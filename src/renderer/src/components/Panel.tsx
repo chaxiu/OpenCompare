@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react'
+import type { JSX, ReactNode, Ref, UIEvent } from 'react'
 import { cx } from './utils'
 
 export interface PanelProps {
@@ -12,6 +12,10 @@ export interface PanelProps {
   readonly children: ReactNode
   readonly className?: string
   readonly bodyClassName?: string
+  /** Exposes the scroll container so a view can restore its scroll offset. */
+  readonly bodyRef?: Ref<HTMLDivElement>
+  /** Reports the scroll container's offset as it moves. */
+  readonly onBodyScroll?: (scrollTop: number) => void
 }
 
 /** Bordered, scrollable panel container used across every workbench view. */
@@ -22,7 +26,9 @@ export function Panel({
   actions,
   children,
   className,
-  bodyClassName
+  bodyClassName,
+  bodyRef,
+  onBodyScroll
 }: PanelProps): JSX.Element {
   return (
     <section
@@ -46,7 +52,17 @@ export function Panel({
           {actions}
         </span>
       </header>
-      <div className={cx('min-h-0 flex-1 overflow-auto', bodyClassName)}>{children}</div>
+      <div
+        ref={bodyRef}
+        onScroll={
+          onBodyScroll
+            ? (event: UIEvent<HTMLDivElement>) => onBodyScroll(event.currentTarget.scrollTop)
+            : undefined
+        }
+        className={cx('min-h-0 flex-1 overflow-auto', bodyClassName)}
+      >
+        {children}
+      </div>
     </section>
   )
 }

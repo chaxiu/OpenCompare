@@ -92,18 +92,42 @@ export function createFilePairSession(
 
 /** Builds the file-level session a directory-tree double-click opens. */
 export function createDrilldownSession(
+  parentId: string,
   node: DirectoryDiffNode,
   target: DrilldownTarget,
   leftText: string,
   rightText: string
 ): WorkbenchSession {
-  return createFilePairSession(
-    `file:${node.relativePath}`,
-    node.name,
-    target,
-    { path: node.leftPath ?? `${node.relativePath}（左不存在）`, text: leftText },
-    { path: node.rightPath ?? `${node.relativePath}（右不存在）`, text: rightText }
+  return {
+    // The parent scope keeps two directory sessions' same-path drilldowns apart,
+    // so returning each one lands back on the tree it came from.
+    ...createFilePairSession(
+      `file:${parentId}::${node.relativePath}`,
+      node.name,
+      target,
+      { path: node.leftPath ?? `${node.relativePath}（左不存在）`, text: leftText },
+      { path: node.rightPath ?? `${node.relativePath}（右不存在）`, text: rightText }
+    ),
+    parentDirectoryId: parentId
+  }
+}
+
+/**
+ * Where「返回上级目录视图」lands. The source directory session when it is still
+ * open, otherwise any remaining directory session (reported as a fallback), or
+ * `null` when the workbench has no directory view left to return to.
+ */
+export function resolveDirectoryReturn(
+  sessions: readonly WorkbenchSession[],
+  sourceId: string
+): { readonly id: string; readonly fallback: boolean } | null {
+  const source = sessions.find(
+    (session) => session.id === sourceId && session.scene === 'directory'
   )
+  if (source) return { id: source.id, fallback: false }
+
+  const fallback = sessions.find((session) => session.scene === 'directory')
+  return fallback ? { id: fallback.id, fallback: true } : null
 }
 
 /**

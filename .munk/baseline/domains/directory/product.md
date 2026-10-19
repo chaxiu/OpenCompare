@@ -1,6 +1,6 @@
 # Domain: directory
 
-目录域：`src/core/` 纯算法目录对比引擎（相对路径配对、四类状态、大小/mtime 短路 + SHA-256 内容确认、增量缓存），双栏目录对比视图（展开/折叠、逐行差异徽章、目录后代聚合计数、五档状态过滤），取数与下钻（本地真实目录选择 / 内置样本目录一键加载；双击差异文件下钻到对应文件级视图）。在只读对比之上，本域还承载两项高阶目录操作：**文件夹单向增量复制 / 镜像同步（Dry-run 预览后写入）** 与 **跨层级散乱目录树按模板归位 / 提取器**。本域不做文件级差异算法本体（行级 / 3-way merge 归代码域）。
+目录域：`src/core/` 纯算法目录对比引擎（相对路径配对、四类状态、大小/mtime 短路 + SHA-256 内容确认、增量缓存），双栏目录对比视图（展开/折叠、逐行差异徽章、目录后代聚合计数、五档状态过滤），取数与下钻（本地真实目录选择 / 内置样本目录一键加载；双击差异文件下钻到对应文件级视图，并可一键返回来源目录视图且往返不丢目录树状态）。在只读对比之上，本域还承载两项高阶目录操作：**文件夹单向增量复制 / 镜像同步（Dry-run 预览后写入）** 与 **跨层级散乱目录树按模板归位 / 提取器**。本域不做文件级差异算法本体（行级 / 3-way merge 归代码域）。
 
 ## 范围
 
@@ -8,7 +8,10 @@
 - **高速 / 增量策略**：先比文件大小、再比修改时间；二者都不足以判定差异时才读取内容做 **SHA-256** 内容哈希确认（覆盖「大小相同但内容不同」）；已比对条目按（路径 / 大小 / 修改时间）缓存，重复比对不重复读内容与哈希。输出带状态的左右树 + 按状态文件计数。
 - **双栏目录对比视图**：左右双栏树、目录展开/折叠、逐行差异语义徽章（复用 `DiffBadge` / `--color-diff-*`）、目录行显示其后代差异聚合计数；一键过滤 `全部 / 仅差异 / 左独有 / 右独有 / 相同`，过滤后仅保留匹配条目及其祖先目录。
 - **取数与下钻**：本地真实目录选择（左/右各经 `PlatformPort.selectDirectory`，Electron 原生对话框、Web 模式降级提示）；内置样本目录一键加载（`pnpm dev` 与 `pnpm dev:web` 均可）；双击差异文件（`added`/`removed`/`modified`）按其类型把左右内容带入对应文件级视图并切换会话（代码/文本 → 代码双栏 Diff；CSV/TSV → CSV 视图；JSON/YAML → 结构化视图；左独有右侧空、右独有左侧空）。
-- **运行时统计**：目录对比会话的统计（状态栏 / 图例 / 徽章）全部来自运行时引擎计算结果，不再读取样本 `DirectoryNode.status` answer key。
+- **下钻来源绑定与返回上级目录视图**：目录树下钻生成的文件级会话记录**来源目录会话**（`parentDirectoryId`）与会话 id 前缀（`file:{parentId}::{relativePath}`），两个不同目录会话对同一相对路径的下钻互不覆盖；文件级视图顶部提供明确的「返回上级目录视图」导航（左箭头按钮 + 「来源目录对比：<目录会话标题>」说明），一步回到发起本次下钻的目录会话，可反复「下钻 → 返回」。不实现目录级下钻栈 / 面包屑 / 前进后退历史（树已展示完整层级，下钻止于文件级）。
+- **往返目录状态保持（按目录会话归口）**：过滤档位、目录树折叠/展开集合、左右面板滚动位置、树行选中项由工作台壳层按目录会话 id 保存并受控回填，不依赖组件挂载生命周期；目录视图因下钻卸载重建后，上述状态原样恢复，且不同目录会话之间互不串味。状态仅保持于当前运行期内存，不跨重启/跨窗口持久化。
+- **目录树行选中态**：行单击即单选选中（左右栏同一相对路径行同步高亮），选中样式引用 `--color-accent-soft` 语义 token；点展开/折叠按钮不改变选中。
+- **来源不可用兜底**：来源目录会话已不可用（被关闭或被替换）时，返回优先落到仍可用的其他目录会话并给出明确状态栏提示；无任何目录会话可返回时停留文件视图并提示，不崩溃、不死路。
 - **同步计划生成器（`src/core/directory/`，纯函数）**：基于现有 `DirectoryComparison` 输出某方向（**左→右 / 右→左**）的变更清单：`copy`（源侧有、目标侧不存在的新增拷贝）、`update`（两侧都存在且 `modified` 的覆盖修改）、`delete`（仅**镜像模式**下，目标侧独有的文件；默认勾选、可逐项取消）。`same` 文件不进清单。每项带相对路径、源/目标绝对路径与字节数；计划带 `count`/`bytes` 分组汇总与 `totalCount`/`totalBytes`。
 - **执行器**：按计划经 `PlatformPort` 写入目标侧，自动创建缺失的中间目录；镜像模式按传入的 `deletePaths` 只删除选中项；写入后使受影响路径的比对缓存失效；同一方向重复执行后计划为空（幂等）。
 - **Dry-run 预览确认弹窗**：执行前弹出弹窗，分组列出待新增拷贝、待覆盖修改（镜像模式另列待删除项），显示字节汇总与目标根路径；**取消不写任何文件**；确认后才执行；执行完成后自动重跑 `compareDirectories`，目录树、徽章与状态栏统计随之刷新。
@@ -26,6 +29,16 @@
 - **ac-sample-directory**：一键把内置样本目录加载为左右两侧并完成对比，无需外部文件；`pnpm dev` 与 `pnpm dev:web` 均可复现。
 - **ac-drilldown-code**：双击树中的差异代码/文本文件，下钻打开文件级对比视图并携带左右文件内容（左独有→右侧空，右独有→左侧空）。
 - **ac-drilldown-typed**：双击差异 CSV/TSV 文件下钻到 CSV 视图、双击差异 JSON/YAML 下钻到结构化视图，均携带左右内容并正确解析。
+- **ac-drilldown-opens-file-view**：真实目录对比中双击差异文件行仍下钻到对应文件级对比（代码/文本 · CSV/TSV · JSON/YAML），与既有下钻同一会话模型，每个下钻生成独立会话标签且目录对比标签仍在。
+- **ac-back-to-parent-directory**：下钻后的文件级视图有明确的「返回上级目录视图」导航，点击即回到发起本次下钻的目录对比会话。
+- **ac-roundtrip-repeatable**：同一目录会话连续「下钻 → 返回」多次，每次都落回同一目录视图且行为一致，无需刷新/重启。
+- **ac-filter-preserved**：往返后目录视图的差异过滤值与下钻前相同。
+- **ac-expand-preserved**：往返后目录树的展开/折叠状态与下钻前一致，未被重置为全展开。
+- **ac-scroll-preserved**：往返后两侧目录面板的滚动位置与下钻前一致。
+- **ac-selection-preserved**：目录树行可单击选中并有可见高亮；往返后选中项与高亮保持。
+- **ac-drilldown-isolation**：两个不同目录会话各自下钻同一相对路径时互不覆盖；各自「返回」都回到自己的来源目录会话。
+- **ac-parent-fallback**：来源目录会话不可用时返回给出明确提示并落到可用目录视图，不崩溃、不死路。
+- **ac-gates**：`pnpm typecheck` / `pnpm lint` / `pnpm test` 在改动后全绿（含随动与新测试）。
 - **ac-sync-plan**：纯函数计划生成器按方向产出 `copy` / `update`（镜像模式另含 `delete`）变更清单，逐项带相对路径与字节数、并给出字节汇总；左→右 与 右→左 互为镜像（vitest 可单测）。
 - **ac-sync-plan-same-modified**：两侧相同的文件不进清单；`modified` 进 `update`；源侧独有的文件在目标侧进 `copy`（vitest 覆盖四类状态）。
 - **ac-sync-dryrun-dialog**：目录视图可发起左→右 / 右→左同步并弹出 Dry-run 预览弹窗，分组展示待新增拷贝 / 待覆盖修改（镜像模式含待删除）与字节汇总；取消后目标侧无任何写入。
@@ -48,6 +61,9 @@
 - **不做持续 / 定时自动同步与 watcher**：不对文件系统做监听、不做增量重扫调度；同步为按需触发（用户点「预览并同步」）。
 - **不做模板归位的模糊 / 相似度匹配**：仅精确文件名 + SHA-256 内容哈希；不做重命名识别与内容 diff 匹配，改名文件按「缺失 + B 未使用」处理。
 - 不做 Hex 二进制对比、`.xlsx` 解析、远端 FTP / SFTP。
+- **不做目录级下钻与导航栈**：不把子目录作为独立视图打开再逐级返回（树已展示全部层级），不做面包屑路径条、浏览器式前进/后退历史、键盘导航、右键菜单、多选 / 区间选择。
+- **不做往返状态跨重启持久化**：过滤/折叠/滚动/选中只保持于当前运行期内存（按目录会话 id），不落盘、不做跨窗口同步，也不为此引入全局状态管理库或持久化层。
+- 不做会话关闭与未保存提示（`session-tabs-lifecycle` 子项）、不做原位保存与结果导出（`save-in-place-and-export` 子项）。
 - 不做三向或超过两个目录的对比；不做快捷键绑定、命令面板、主题切换与浅色皮肤；不做打包分发、签名、公证、自动更新、CI 发布。
 - 不改样本 answer key（`src/shared/fixtures/` 的 `status` 字段）；不改 `.munk/baseline/**`（由 Delivery 折入）。
 
@@ -65,11 +81,14 @@
 - 下钻复用现有 `CodeView` / `CsvView` / `StructuredView`，不新写第四个文件查看器；工作台会话模型支持「非样本来源」的会话。
 - 目录视图数据源必须换成运行时计算结果：`DirectoryNode.status`（样本 answer key）不再作为目录视图输入，仅 `src/shared/fixtures/` 的校验用例继续使用。
 - 现有 `src/renderer/src/App.test.tsx` 与目录视图 / 下钻 / 同步 / 模板归位相关断言需随改造同步并保持绿。
+- **目录树状态不得依赖组件本地挂载生命周期**：`TreeView` 的展开态、选中行改为受控 props（`collapsedPaths` / `selectedPath` + 回调），滚动位置经 `Panel` 的 `bodyRef` / `onBodyScroll` 上报；工作台壳层按 `sessionId` 保存 `{ filter, collapsed, selectedPath }` 与 `{ left, right }` 滚动偏移，返回时经 `useLayoutEffect` 回填。不为此引入全局状态管理库。
+- 下钻会话身份带来源：`createDrilldownSession(parentId, …)` 产出 `file:{parentId}::{relativePath}` 并写 `parentDirectoryId`；返回落点由 `resolveDirectoryReturn(sessions, sourceId)` 纯函数决定（来源会话 → 其他可用目录会话 fallback → `null`），兜底提示复用 `report(message, tone)`。
+- 选中高亮与返回入口只引用 `main.css` 语义 token 与既有 `focus-ring` / `transition-fast` utility；点展开/折叠按钮 `stopPropagation`，避免误改选中。
 
 ## 最近交付证明
 
-- WI：`wi_ws_6841b3431c2d50f9`（文件夹增量复制同步含 Dry-run 预览弹窗 + 跨层级模板归位提取器，`kind: feature`）
-- 日期：2026-10-18
-- 结果：self_test passed。（`pnpm install/lint/typecheck/build/build:web/test` 全 exit 0；`pnpm test` = 12 files / 62 tests 全绿）
-- 覆盖摘要：新建纯算法 `src/core/directory/sync.ts`（`buildSyncPlan(comparison, direction, mode)` 产出 `copy`/`update`/`delete` 分组与 `count`/`bytes`/`totalCount`/`totalBytes`；镜像才会列目标独有项为 `delete`；`sync.test.ts` 覆盖方向镜像、四类分类、镜像删除、写入+父目录+缓存失效+幂等、逐项取消删除）；新建纯算法 `src/core/directory/template.ts`（`matchTemplate(templateTree, incomingTree, io)` 以文件名 + SHA-256 索引产出 `matched`/`missing`/`conflict`（`content-mismatch` / `ambiguous`）/`unused`，线性复杂度、每个文件仅读一次）；扩展 `PlatformPort`（`ensureDirectory` / `delete-file` / 保 mtime 写入；Electron IPC 与 Web 内存两套实现，channels 白名单登记），主进程 `electron-platform.test.ts` 真实目录 IPC 回归。UI 新建 `views/DirectorySyncDialog.tsx`（`role="dialog"` Dry-run 预览：待新增/待覆盖/待删除分组 + 字节汇总 + 目标根；取消不写；确认后执行并自动重跑对比刷新）与 `views/TemplateDialog.tsx`（模板归位映射预览 + 确认提取 + 复核），编排 `workbench/directoryOps.ts`，基础组件 `components/Dialog.tsx`；`DirectoryView` 工具栏新增方向 + 增量/镜像 + 「预览并同步」与「模板归位」入口，`App.test.tsx` 随改造同步保持绿。十九条验收均有对应折叠用例（qa/）。
-- 注：本轮 WI change pack 未提供 `tech.md` / `ux/**`，全局 tech / design 折叠跳过。
+- WI：`wi_ws_4e87a158048a1dcb`（目录下钻返回上级与往返状态保持，`kind: feature`）
+- 日期：2026-10-19
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm typecheck` / `pnpm lint` / `pnpm test` 全绿，含随动与新用例）。
+- 覆盖摘要：`session.ts` `WorkbenchSession` 新增 `parentDirectoryId`；`directoryCompare.ts` `createDrilldownSession(parentId, …)` 以 `file:{parentId}::{relativePath}` 生成会话 id 并记录来源，新增纯函数 `resolveDirectoryReturn(sessions, sourceId)`（来源会话 → 其他目录会话 fallback → `null`）；`TreeView` 去掉每个 `TreeNode` 的 `useState(true)`，改为受控 `collapsedPaths` / `selectedPath` + `onTogglePath` / `onSelectPath`，行单击单选并 `aria-selected` + `bg-accent-soft` 高亮（展开按钮 `stopPropagation`）；`Panel` 新增 `bodyRef` / `onBodyScroll` 暴露滚动容器；`DirectoryView` 接收 `sessionId` 与受控树/滚动状态，`useLayoutEffect` 回填左右 `scrollTop`；`Workbench` 以 `directoryStates`（filter/collapsed/selectedPath）与 `directoryScroll`（left/right）按目录会话 id 保存，下钻文件视图顶部新增「返回上级目录视图」按钮 + 「来源目录对比：<标题>」条，`backToDirectory` 按 `resolveDirectoryReturn` 落点并对不可用来源给出 `report` 提示。十条验收均有对应折叠用例（qa/）。`App.test.tsx` 覆盖返回落点、往返过滤/展开/滚动/选中保持、同相对路径下钻隔离与来源不可用兜底，`directoryCompare.test.ts` 覆盖返回落点解析。
+- 注：本轮 WI change pack 未提供 `tech.md` / `ux/**`，全局 tech / design 折叠跳过。真实目录往返的 Electron 窗口人工复核口径由 `qa/back-to-parent-directory.md` 等用例描述承载；自动用例使用脚本化内存 PlatformPort。
