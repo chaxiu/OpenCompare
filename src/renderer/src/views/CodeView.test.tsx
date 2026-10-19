@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodeSceneFixture } from '@shared/fixtures'
+import type { PlatformPort, SaveFileOptions } from '@shared/platform/types'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
 import type { CodeMergeState } from './CodeView'
@@ -150,3 +151,72 @@ describe('local file entry points', () => {
     expect(await platform.readTextFile('/memory/merged.txt')).toContain('ours-1')
   })
 })
+
+describe('in-place save and dirty marker', () => {
+  const PAIR = {
+    left: { path: '/memory/left.ts', text: 'alpha\nbeta\n' },
+    right: { path: '/memory/right.ts', text: 'alpha\ngamma\n' }
+  }
+
+  it('marks the overwritten side dirty and clears it on reset', () => {
+    render(<CodeView pair={PAIR} platform={createWebPlatformPort()} />)
+
+    expect(screen.queryByText('已修改（未保存）')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+
+    expect(screen.getByText('未保存：右')).toBeDefined()
+    expect(screen.getAllByText('已修改（未保存）')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '保存右文件' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: '保存左文件' }).hasAttribute('disabled')).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    expect(screen.queryByText('未保存：右')).toBeNull()
+    expect(screen.queryByText('已修改（未保存）')).toBeNull()
+  })
+
+  it('writes a modified side back in place and clears its dirty flag', async () => {
+    const base = createWebPlatformPort()
+    const saved: SaveFileOptions[] = []
+    const port: PlatformPort = {
+      ...base,
+      saveFile: async (options) => {
+        saved.push(options)
+        return base.saveFile(options)
+      }
+    }
+    render(<CodeView pair={PAIR} platform={port} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存右文件' }))
+
+    expect(await screen.findByText(/已写回 \/memory\/right\.ts/)).toBeDefined()
+    expect(saved[0].defaultPath).toBe('/memory/right.ts')
+    expect(saved[0].content).toBe('alpha\nbeta\n')
+    await waitFor(() => expect(screen.queryByText('已修改（未保存）')).toBeNull())
+    // Disk now holds exactly the modified working text.
+    expect(await base.readTextFile('/memory/right.ts')).toBe('alpha\nbeta\n')
+  })
+
+  it('keeps the dirty flag when the save dialog is cancelled', async () => {
+    const saveFile = vi.fn(async () => null)
+    render(<CodeView pair={PAIR} platform={{ ...createWebPlatformPort(), saveFile }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存右文件' }))
+
+    await waitFor(() => expect(saveFile).toHaveBeenCalled())
+    expect(screen.getByText('未保存：右')).toBeDefined()
+    expect(screen.queryByText(/不能写入|只读/)).toBeNull()
+  })
+
+  it('reports a rejected write to a read-only sample path and keeps the dirty flag', async () => {
+    render(<CodeView fixture={FIXTURE} defaultMode="diff" platform={platform} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存右文件' }))
+
+    expect(await screen.findByText(/不能写入/)).toBeDefined()
+    expect(screen.getByText('未保存：右')).toBeDefined()
+  })
+})
+

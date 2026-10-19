@@ -13,12 +13,12 @@
  * resolved through {@link readSnapshotContent}, never handed to `PlatformPort`
  * (its virtual `/snapshots/...` paths do not exist there).
  *
- * DOM access is confined to the import/export plumbing (`FileReader`,
- * `Blob` + anchor download), so the module behaves identically in Electron and
- * the web runtime and a jsdom component test can drive it.
+ * DOM access is confined to the import plumbing (`FileReader`), while export
+ * text is handed to `PlatformPort.saveFile`, so the module behaves identically
+ * in Electron and the web runtime and a jsdom component test can drive it.
  */
 import { REMOTE_SNAPSHOT, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
-import type { PlatformPort } from '@shared/platform/types'
+import type { FileDialogFilter, PlatformPort } from '@shared/platform/types'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { scanDirectory } from '@core/directory/compare'
 import type { ComparisonCache, DirectoryComparison } from '@core/directory/compare'
@@ -222,8 +222,19 @@ export async function exportSideSnapshot(
 }
 
 /* ------------------------------------------------------------------ */
-/* DOM plumbing (import pickers + download)                            */
+/* DOM plumbing (import picker)                                        */
 /* ------------------------------------------------------------------ */
+
+/** Save-dialog filter of the `.ocsnap.json` protocol. */
+export const SNAPSHOT_FILE_FILTER: FileDialogFilter = {
+  name: 'OpenCompare 快照',
+  extensions: ['ocsnap.json', 'json']
+}
+
+/** Canonical file name of a snapshot export: `<name>.ocsnap.json`. */
+export function snapshotFileName(name: string): string {
+  return `${name}.ocsnap.json`
+}
 
 /** Reads a picked file (or any blob) as UTF-8 text. */
 export function readFileText(file: Blob): Promise<string> {
@@ -233,19 +244,6 @@ export function readFileText(file: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('读取所选文件失败。'))
     reader.readAsText(file)
   })
-}
-
-/** Triggers a download of the canonical `.ocsnap.json` text. */
-export function downloadSnapshotFile(text: string, name: string): void {
-  const blob = new Blob([text], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `${name}.ocsnap.json`
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
 }
 
 /* ------------------------------------------------------------------ */

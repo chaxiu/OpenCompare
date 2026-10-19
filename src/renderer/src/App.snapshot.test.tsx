@@ -4,16 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
+import type { PlatformPort, SaveFileOptions } from '@shared/platform/types'
 import { createComparisonCache } from '@core/directory/compare'
 import { serializeSnapshot } from '@core/directory/snapshot'
 import { sha256Hex } from '@core/directory/hash'
 import { App } from './App'
 import { createWebPlatformPort } from './platform/web-platform'
+import { Workbench } from './workbench/Workbench'
 import {
   compareSides,
   exportSideSnapshot,
   parseSnapshotText,
-  readFileText,
   remoteSnapshotSides
 } from './workbench/snapshotOps'
 
@@ -23,6 +24,7 @@ const revokeObjectURL = vi.fn<(url: string) => void>(() => undefined)
 beforeEach(() => {
   URL.createObjectURL = createObjectURL
   URL.revokeObjectURL = revokeObjectURL
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
 })
 
 afterEach(() => {
@@ -123,27 +125,51 @@ describe('snapshot workbench integration', () => {
     expect(screen.getByText(/YAML 原文/)).toBeDefined()
   })
 
-  it('exports the left directory side as a downloadable snapshot', async () => {
-    let capturedDownload: string | null = null
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
-      this: HTMLAnchorElement
-    ) {
-      capturedDownload = this.download
-    })
+  it('exports the left directory side as an .ocsnap.json file through the save dialog', async () => {
+    const base = createWebPlatformPort()
+    const saved: SaveFileOptions[] = []
+    const port: PlatformPort = {
+      ...base,
+      saveFile: async (options) => {
+        saved.push(options)
+        return base.saveFile(options)
+      }
+    }
 
-    await loadWorkbench()
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
     fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
 
-    expect(await screen.findByText(/已导出 baseline\.ocsnap\.json（15 个文件）/)).toBeDefined()
-    expect(capturedDownload).toBe('baseline.ocsnap.json')
+    expect(
+      await screen.findByText(/已导出到 \/memory\/baseline\.ocsnap\.json（15 个文件）/)
+    ).toBeDefined()
+    expect(saved[0].defaultPath).toBe('baseline.ocsnap.json')
+    expect(saved[0].filters?.[0]?.extensions).toContain('ocsnap.json')
 
-    const blob = createObjectURL.mock.calls[0][0]
-    const snapshot = parseSnapshotText(await readFileText(blob))
+    // The saved artifact round-trips: the dialog wrote the canonical snapshot text.
+    const snapshot = parseSnapshotText(await base.readTextFile('/memory/baseline.ocsnap.json'))
     expect(snapshot.name).toBe('baseline')
     expect(snapshot.entries).toHaveLength(15)
     expect(snapshot.entries.find((entry) => entry.path === 'src/core/engine.ts')?.content).toBeDefined()
     expect(snapshot.entries.find((entry) => entry.path === 'assets/logo.png')?.content).toBeUndefined()
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock')
+  })
+
+  it('keeps the comparison untouched when the snapshot save dialog is cancelled', async () => {
+    const base = createWebPlatformPort()
+    const port: PlatformPort = { ...base, saveFile: async () => null }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    const before = screen.getByRole('contentinfo').textContent
+
+    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(screen.getByRole('contentinfo').textContent).toBe(before)
+    await expect(base.exists('/memory/baseline.ocsnap.json')).resolves.toBe(false)
   })
 
   it('mounts an imported snapshot on the right and reaches an all-same comparison', async () => {

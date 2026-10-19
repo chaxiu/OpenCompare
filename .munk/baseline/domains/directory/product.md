@@ -38,6 +38,7 @@
 - **ac-template-preview**：视图展示归位映射预览（已匹配相对路径、缺失、冲突、B 未使用），确认前不写任何文件。
 - **ac-template-extract**：确认后按模板 A 的相对路径结构写出（自动创建缺失父目录），且用同一匹配器复核归位结果为全匹配、模板结构可从输出目录重建。
 - **ac-template-perf**：匹配基于哈希/文件名索引，1,000+ 文件的合成散乱树仍在线性时间内完成且不对同一文件重复读取内容 / 计算哈希（vitest 用计数桩断言）。
+- **ac-existing-confirmations**：目录同步 / 模板归位等既有危险动作的预览与确认语义保持不变（`role="dialog"` 预览、确认前不写、取消不写、按预览写入后刷新）。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿，且新增 vitest 覆盖同步计划与模板匹配。
 
 ## 非目标
@@ -68,8 +69,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_6841b3431c2d50f9`（文件夹增量复制同步含 Dry-run 预览弹窗 + 跨层级模板归位提取器，`kind: feature`）
-- 日期：2026-10-18
-- 结果：self_test passed。（`pnpm install/lint/typecheck/build/build:web/test` 全 exit 0；`pnpm test` = 12 files / 62 tests 全绿）
-- 覆盖摘要：新建纯算法 `src/core/directory/sync.ts`（`buildSyncPlan(comparison, direction, mode)` 产出 `copy`/`update`/`delete` 分组与 `count`/`bytes`/`totalCount`/`totalBytes`；镜像才会列目标独有项为 `delete`；`sync.test.ts` 覆盖方向镜像、四类分类、镜像删除、写入+父目录+缓存失效+幂等、逐项取消删除）；新建纯算法 `src/core/directory/template.ts`（`matchTemplate(templateTree, incomingTree, io)` 以文件名 + SHA-256 索引产出 `matched`/`missing`/`conflict`（`content-mismatch` / `ambiguous`）/`unused`，线性复杂度、每个文件仅读一次）；扩展 `PlatformPort`（`ensureDirectory` / `delete-file` / 保 mtime 写入；Electron IPC 与 Web 内存两套实现，channels 白名单登记），主进程 `electron-platform.test.ts` 真实目录 IPC 回归。UI 新建 `views/DirectorySyncDialog.tsx`（`role="dialog"` Dry-run 预览：待新增/待覆盖/待删除分组 + 字节汇总 + 目标根；取消不写；确认后执行并自动重跑对比刷新）与 `views/TemplateDialog.tsx`（模板归位映射预览 + 确认提取 + 复核），编排 `workbench/directoryOps.ts`，基础组件 `components/Dialog.tsx`；`DirectoryView` 工具栏新增方向 + 增量/镜像 + 「预览并同步」与「模板归位」入口，`App.test.tsx` 随改造同步保持绿。十九条验收均有对应折叠用例（qa/）。
-- 注：本轮 WI change pack 未提供 `tech.md` / `ux/**`，全局 tech / design 折叠跳过。
+- WI：`wi_ws_4829ebe71d4e966e`（真实修改原位保存回磁盘与结果导出为文件产物，`kind: feature`）
+- 日期：2026-10-19
+- 结果：self_test skipped（本项 UI 自测改由 code_gates 关点；本轮本域无代码改动，仅回归确认）。
+- 覆盖摘要：本轮新增的「原位保存 / 导出改走系统保存对话框」未触及目录同步与模板归位路径——`DirectorySyncDialog` / `TemplateDialog` 的 `role="dialog"` 预览、目标根与分组明细、确认前不写、取消不写、确认后重跑对比的语义原样保留；`DirectoryView` 仅两条快照导出按钮的 title 文案改为「经系统保存对话框」，同步 / 模板归位入口与文案未动。`ac-existing-confirmations` 由折叠用例 `qa/existing-confirmations-unchanged.md` 覆盖。
+- 注：本 WI change pack 未提供 `tech.md` / `ux/**`，本轮 tech/ux 折叠跳过。

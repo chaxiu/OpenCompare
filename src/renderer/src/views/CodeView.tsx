@@ -8,7 +8,8 @@ import {
   ClipboardCopy,
   Download,
   FolderOpen,
-  RotateCcw
+  RotateCcw,
+  Save
 } from 'lucide-react'
 import { diffLineTexts, overwriteBlock } from '@core/text/diff'
 import type { OverwriteDirection } from '@core/text/diff'
@@ -76,15 +77,18 @@ function offsetTop(range: MergeRange): number {
 
 function CodeDiffView({
   pair,
-  platform
+  platform,
+  onDirtyChange
 }: {
   readonly pair: FilePair
   readonly platform: PlatformPort
+  /** Reports whether any side now differs from its loaded disk content. */
+  readonly onDirtyChange?: (dirty: boolean) => void
 }): JSX.Element {
   const [leftPath, setLeftPath] = useState(pair.left.path)
   const [rightPath, setRightPath] = useState(pair.right.path)
   // The loaded bodies (reset target) are kept apart from the working copies the
-  // per-block overwrite mutates.
+  // per-block overwrite mutates. A side is dirty once the two diverge again.
   const [leftSource, setLeftSource] = useState(pair.left.text)
   const [rightSource, setRightSource] = useState(pair.right.text)
   const [leftText, setLeftText] = useState(pair.left.text)
@@ -94,6 +98,18 @@ function CodeDiffView({
 
   const leftScroll = useRef<HTMLDivElement>(null)
   const rightScroll = useRef<HTMLDivElement>(null)
+
+  const leftDirty = leftText !== leftSource
+  const rightDirty = rightText !== rightSource
+  const dirty = leftDirty || rightDirty
+
+  const dirtyCallback = useRef(onDirtyChange)
+  useEffect(() => {
+    dirtyCallback.current = onDirtyChange
+  })
+  useEffect(() => {
+    dirtyCallback.current?.(dirty)
+  }, [dirty])
 
   const diff = useMemo(() => diffLineTexts(leftText, rightText), [leftText, rightText])
 
@@ -134,6 +150,36 @@ function CodeDiffView({
     setLeftText(leftSource)
     setRightText(rightSource)
     setActive(0)
+  }
+
+  /**
+   * Writes one side back through the platform: the save dialog is pre-filled
+   * with that side's real path, so confirming rewrites the very file the side
+   * was loaded from. A cancelled dialog keeps the buffers and the dirty flag;
+   * a rejected write (e.g. a read-only sample path) is reported as-is.
+   */
+  async function save(side: 'left' | 'right'): Promise<void> {
+    const path = side === 'left' ? leftPath : rightPath
+    const content = side === 'left' ? leftText : rightText
+    try {
+      const written = await platform.saveFile({
+        title: side === 'left' ? '保存左侧文件' : '保存右侧文件',
+        defaultPath: path,
+        filters: [TEXT_FILE_FILTER],
+        content
+      })
+      if (written === null) return
+      if (side === 'left') {
+        setLeftPath(written)
+        setLeftSource(content)
+      } else {
+        setRightPath(written)
+        setRightSource(content)
+      }
+      setNotice({ text: `已写回 ${written}`, tone: 'ok' })
+    } catch (cause) {
+      setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
+    }
   }
 
   /** Opens a local file on one side and re-runs the comparison over it. */
@@ -211,6 +257,30 @@ function CodeDiffView({
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <ToolbarButton
           size="sm"
+          icon={<Save aria-hidden className="size-3.5" />}
+          onClick={() => void save('left')}
+          disabled={!leftDirty}
+          title="经系统保存对话框把左侧修改原位写回其磁盘路径"
+        >
+          保存左文件
+        </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<Save aria-hidden className="size-3.5" />}
+          onClick={() => void save('right')}
+          disabled={!rightDirty}
+          title="经系统保存对话框把右侧修改原位写回其磁盘路径"
+        >
+          保存右文件
+        </ToolbarButton>
+        {dirty ? (
+          <span role="status" className="text-2xs text-diff-modified">
+            未保存：{[leftDirty ? '左' : null, rightDirty ? '右' : null].filter(Boolean).join('、')}
+          </span>
+        ) : null}
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        <ToolbarButton
+          size="sm"
           icon={<FolderOpen aria-hidden className="size-3.5" />}
           onClick={() => void open('left')}
         >
@@ -238,7 +308,16 @@ function CodeDiffView({
 
       <SplitPane
         panes={[
-          <Panel key="left" title={leftPath} subtitle="左">
+          <Panel
+            key="left"
+            title={leftPath}
+            subtitle="左"
+            meta={
+              leftDirty ? (
+                <span className="text-2xs text-diff-modified">已修改（未保存）</span>
+              ) : null
+            }
+          >
             <DiffPane
               rows={diff.rows}
               side="left"
@@ -247,7 +326,16 @@ function CodeDiffView({
               onScroll={() => syncScroll(leftScroll, rightScroll)}
             />
           </Panel>,
-          <Panel key="right" title={rightPath} subtitle="右">
+          <Panel
+            key="right"
+            title={rightPath}
+            subtitle="右"
+            meta={
+              rightDirty ? (
+                <span className="text-2xs text-diff-modified">已修改（未保存）</span>
+              ) : null
+            }
+          >
             <DiffPane
               rows={diff.rows}
               side="right"
@@ -567,7 +655,8 @@ export function CodeView({
   defaultMode = 'merge',
   pair,
   platform,
-  onMergeStateChange
+  onMergeStateChange,
+  onDirtyChange
 }: {
   readonly fixture?: CodeSceneFixture
   /** Three-column merge is the default for a session declared with three panes. */
@@ -576,6 +665,8 @@ export function CodeView({
   readonly pair?: FilePair
   readonly platform: PlatformPort
   readonly onMergeStateChange?: (state: CodeMergeState) => void
+  /** Reports the diff pair's unsaved state up to the session model. */
+  readonly onDirtyChange?: (dirty: boolean) => void
 }): JSX.Element {
   const [mode, setMode] = useState<CodeMode>(defaultMode)
   const adhoc = pair !== undefined
@@ -640,7 +731,7 @@ export function CodeView({
       </div>
 
       {effectiveMode === 'diff' && diffPair ? (
-        <CodeDiffView pair={diffPair} platform={platform} />
+        <CodeDiffView pair={diffPair} platform={platform} onDirtyChange={onDirtyChange} />
       ) : mergeSides && model ? (
         <CodeMergeView
           sides={mergeSides}
