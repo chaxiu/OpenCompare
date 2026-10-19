@@ -15,11 +15,43 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as 
 }
 
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
+  appId?: string
+  mac?: {
+    identity?: string
+    hardenedRuntime?: boolean
+    entitlements?: string
+    entitlementsInherit?: string
+    notarize?: boolean
+    target?: string[]
+  }
   linux?: { maintainer?: string; target?: string[] }
   publish?: { provider?: string; releaseType?: string }
 }
 
+const builderConfig = readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')
+
+const entitlementsPath = builder.mac?.entitlements ?? ''
+const macEntitlements = entitlementsPath
+  ? readFileSync(join(repoRoot, entitlementsPath), 'utf8')
+  : ''
+
 const releaseWorkflow = readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8')
+
+const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md'), 'utf8')
+
+const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
+
+const changelog = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')
+
+// App Store Connect API key mode: certificate + team id + .p8 key trio.
+const signingSecrets = [
+  'CSC_LINK',
+  'CSC_KEY_PASSWORD',
+  'APPLE_TEAM_ID',
+  'APPLE_API_KEY',
+  'APPLE_API_KEY_ID',
+  'APPLE_API_ISSUER'
+]
 
 describe('release package metadata', () => {
   it('declares an author with a non-empty email (required by Linux .deb)', () => {
@@ -87,5 +119,154 @@ describe('github release publishing', () => {
     expect(releaseWorkflow).toMatch(
       /gh release edit\s+"\$\{GITHUB_REF_NAME\}"\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--draft=false\s+--latest/
     )
+  })
+})
+
+describe('macOS signing and notarization', () => {
+  it('enables the hardened runtime with the shipped entitlements files', () => {
+    expect(builder.mac?.hardenedRuntime).toBe(true)
+    expect(builder.mac?.entitlements).toBe('build/entitlements.mac.plist')
+    expect(builder.mac?.entitlementsInherit).toBe('build/entitlements.mac.plist')
+  })
+
+  it('declares the entitlements Electron needs to launch after signing', () => {
+    for (const key of [
+      'com.apple.security.cs.allow-jit',
+      'com.apple.security.cs.allow-unsigned-executable-memory',
+      'com.apple.security.cs.disable-library-validation'
+    ]) {
+      expect(macEntitlements).toContain(key)
+    }
+  })
+
+  it('enables notarization of the Developer ID bundle', () => {
+    expect(builder.mac?.notarize).toBe(true)
+  })
+
+  it('pins the Developer ID identity and keeps the OpenCompare appId', () => {
+    expect(builder.mac?.identity).toBe('Developer ID Application: Tao Zhu (3X4J53U6RY)')
+    expect(builder.appId).toBe('com.opencompare.app')
+  })
+
+  it('keeps the macOS dmg and zip targets', () => {
+    expect(builder.mac?.target).toContain('dmg')
+    expect(builder.mac?.target).toContain('zip')
+  })
+
+  it('keeps certificate material out of the repository config', () => {
+    expect(builderConfig).not.toMatch(/BEGIN (RSA |EC )?PRIVATE KEY/)
+    expect(releaseWorkflow).not.toMatch(/BEGIN (RSA |EC )?PRIVATE KEY/)
+  })
+})
+
+describe('release signing secrets wiring', () => {
+  it('wires every signing/notarization secret into the mac matrix build', () => {
+    for (const secret of signingSecrets) {
+      expect(releaseWorkflow).toMatch(
+        new RegExp(`${secret}:\\s*\\$\\{\\{ secrets\\.${secret} \\}\\}`)
+      )
+    }
+    // The packaging step receives the decoded .p8 path, not the base64 secret.
+    expect(releaseWorkflow).toMatch(
+      /APPLE_API_KEY:\s*\$\{\{\s*steps\.api-key\.outputs\.key-path\s*\}\}/
+    )
+  })
+
+  it('wires only the six mac signing secrets plus the workflow token', () => {
+    const secretRefs = [...releaseWorkflow.matchAll(/secrets\.([A-Z0-9_]+)/g)].map(
+      (match) => match[1]
+    )
+    expect(new Set(secretRefs)).toEqual(new Set([...signingSecrets, 'GITHUB_TOKEN']))
+  })
+
+  it('fails closed when the mac credentials are missing', () => {
+    expect(releaseWorkflow).toMatch(/Require macOS signing and notarization credentials/)
+    expect(releaseWorkflow).toMatch(/matrix\.target == 'mac'/)
+    expect(releaseWorkflow).toMatch(/Missing macOS signing\/notarization secrets/)
+    expect(releaseWorkflow).toMatch(
+      /for name in CSC_LINK CSC_KEY_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do/
+    )
+    expect(releaseWorkflow).toMatch(/exit 1/)
+  })
+
+  it('decodes the API key to a 0600 file outside the checkout without logging it', () => {
+    expect(releaseWorkflow).toMatch(/base64 --decode/)
+    expect(releaseWorkflow).toMatch(/\$\{RUNNER_TEMP\}\/opencompare-appstoreconnect\.p8/)
+    expect(releaseWorkflow).toMatch(/chmod 600/)
+    expect(releaseWorkflow).toMatch(/key-path=\$\{key_path\}/)
+    expect(releaseWorkflow).toMatch(/Remove the temporary App Store Connect API key/)
+    expect(releaseWorkflow).not.toMatch(/echo[^\n]*\$\{APPLE_API_KEY\}/)
+  })
+
+  it('no longer reads the legacy Apple ID credentials', () => {
+    expect(releaseWorkflow).not.toMatch(/\bAPPLE_ID\b/)
+    expect(releaseWorkflow).not.toMatch(/APPLE_APP_SPECIFIC_PASSWORD/)
+  })
+})
+
+describe('release version gate', () => {
+  it('asserts package.json version matches the tag before packaging', () => {
+    expect(releaseWorkflow).toMatch(/Assert the tag matches package\.json version/)
+    expect(releaseWorkflow).toMatch(/\$\{GITHUB_REF_NAME#v\}/)
+  })
+
+  it('asserts the packaged latest*.yml version matches the tag', () => {
+    expect(releaseWorkflow).toMatch(/Assert packaged version matches the tag/)
+    expect(releaseWorkflow).toMatch(/latest\*\.yml/)
+  })
+
+  it('enforces exactly one public release per tag', () => {
+    expect(releaseWorkflow).toMatch(/Verify the tag has exactly one public release/)
+  })
+})
+
+describe('release signing credentials checklist', () => {
+  it('documents each credential for human entry as a GitHub secret', () => {
+    for (const secret of signingSecrets) {
+      expect(signingDoc).toContain(secret)
+    }
+    expect(signingDoc).toMatch(/GitHub Secrets?/)
+  })
+
+  it('documents the App Store Connect API key mode', () => {
+    expect(signingDoc).toMatch(/App Store Connect API Key/)
+    expect(signingDoc).toMatch(/Developer\*{0,2} 角色/)
+    expect(signingDoc).toMatch(/仅可下载一次/)
+    expect(signingDoc).toMatch(/Key ID/)
+    expect(signingDoc).toMatch(/Issuer ID/)
+    expect(signingDoc).toContain('3X4J53U6RY')
+  })
+
+  it('defers the actual credential entry to the Apple Developer Program decision', () => {
+    expect(signingDoc).toMatch(/Apple Developer Program/)
+  })
+
+  it('documents the v0.1.2 formal-release posture instead of the former freeze', () => {
+    expect(signingDoc).toMatch(/v0\.1\.2/)
+    expect(signingDoc).toMatch(/正式版/)
+    expect(signingDoc).not.toMatch(/发布冻结/)
+  })
+
+  it('lists the six secrets and fail-closed behavior in the README', () => {
+    for (const secret of signingSecrets) {
+      expect(readme).toContain(secret)
+    }
+    expect(readme).toMatch(/fail-closed/)
+  })
+
+  it('presents the README as the v0.1.2 formal release', () => {
+    expect(readme).toMatch(/v0\.1\.2/)
+    expect(readme).not.toMatch(/发布状态：冻结/)
+  })
+})
+
+describe('release notes changelog', () => {
+  it('documents the v0.1.2 entry with signing, reproducible packaging and the version gate', () => {
+    expect(changelog).toMatch(/## v0\.1\.2/)
+    expect(changelog).toMatch(/Developer ID/)
+    expect(changelog).toMatch(/App Store Connect API Key/)
+    expect(changelog).toMatch(/fail-closed/)
+    expect(changelog).toMatch(/唯一/)
+    expect(changelog).toMatch(/latest\*\.yml/)
   })
 })

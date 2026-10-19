@@ -23,6 +23,18 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Fail before anything is built when the tag and the package version drift:
+      # the tag's semantic version (minus the `v` prefix) must equal
+      # package.json#version, otherwise the release would ship mismatched assets.
+      - name: Assert the tag matches package.json version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=${GITHUB_REF_NAME} package.json=${version}"
+          if [ "${version}" != "${tag}" ]; then
+            echo "::error::package.json version (${version}) does not match tag ${GITHUB_REF_NAME}; bump the version or move the tag."
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
@@ -83,10 +95,87 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # electron-vite writes the main / preload / renderer bundles into `out/`.
       - run: pnpm build
+      # Fail closed on macOS: never let electron-builder silently skip code
+      # signing and ship an unsigned bundle. The Developer ID certificate and the
+      # App Store Connect API key credentials are human-entered GitHub Secrets;
+      # until all six exist this step aborts the run (see docs/release-signing.md).
+      - name: Require macOS signing and notarization credentials
+        if: matrix.target == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=()
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            if [ -z "${!name}" ]; then missing+=("${name}"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing macOS signing/notarization secrets: ${missing[*]}. Refusing to build an unsigned macOS bundle (fail-closed); see docs/release-signing.md."
+            exit 1
+          fi
+      # electron-builder / @electron/notarize hand the App Store Connect key to
+      # `notarytool --key`, which expects a .p8 file path. Decode the base64
+      # secret into a 0600 file outside the checkout; the key material is never
+      # echoed to the log.
+      - name: Materialize the App Store Connect API key
+        if: matrix.target == 'mac'
+        id: api-key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          key_path="${RUNNER_TEMP}/opencompare-appstoreconnect.p8"
+          printf '%s' "${APPLE_API_KEY}" | base64 --decode > "${key_path}"
+          chmod 600 "${key_path}"
+          if [ ! -s "${key_path}" ]; then
+            echo "::error::APPLE_API_KEY did not decode to a non-empty .p8 file; refusing to build an unnotarized bundle."
+            exit 1
+          fi
+          echo "key-path=${key_path}" >> "${GITHUB_OUTPUT}"
       # Package locally only: publishing is deferred to the upload step below so
-      # the three platforms never create the GitHub Release concurrently.
+      # the three platforms never create the GitHub Release concurrently. The mac
+      # step signs (CSC_LINK / CSC_KEY_PASSWORD) and notarizes (APPLE_API_KEY /
+      # APPLE_API_KEY_ID / APPLE_API_ISSUER) the bundle.
       - name: Build installers
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ steps.api-key.outputs.key-path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: pnpm exec electron-builder --${{ matrix.target }} --publish never
+      - name: Remove the temporary App Store Connect API key
+        if: matrix.target == 'mac' && always()
+        env:
+          APPLE_API_KEY: ${{ steps.api-key.outputs.key-path }}
+        run: |
+          if [ -n "${APPLE_API_KEY}" ]; then rm -f "${APPLE_API_KEY}"; fi
+      # The packaged update metadata (latest*.yml) must carry the tag version so
+      # the artifact names, the update feed and the release stay consistent.
+      - name: Assert packaged version matches the tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          shopt -s nullglob
+          files=(release/latest*.yml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No latest*.yml update metadata found under release/." >&2
+            exit 1
+          fi
+          status=0
+          for file in "${files[@]}"; do
+            version="$(FILE="${file}" node -e "const fs=require('fs');const {parse}=require('yaml');process.stdout.write(String(parse(fs.readFileSync(process.env.FILE,'utf8')).version))")"
+            echo "${file} version=${version}"
+            if [ "${version}" != "${tag}" ]; then
+              echo "::error::${file} version (${version}) does not match tag ${GITHUB_REF_NAME}." >&2
+              status=1
+            fi
+          done
+          exit ${status}
       # Upload this platform's artifacts into the single pre-created release.
       # `shell: bash` guarantees globbing works on the windows runner too.
       - name: Upload installers to the tag's release
@@ -115,3 +204,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+      # Enforce exactly one public release per tag: a leftover duplicate (or a
+      # stray draft) fails the run instead of silently advertising two releases.
+      - name: Verify the tag has exactly one public release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag_filter=".[] | select(.tag_name == \"${GITHUB_REF_NAME}\")"
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq "[${tag_filter}] | length")"
+          drafts="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq "[${tag_filter} | select(.draft)] | length")"
+          echo "releases for ${GITHUB_REF_NAME}: ${count} (drafts: ${drafts})"
+          if [ "${count}" -ne 1 ] || [ "${drafts}" -ne 0 ]; then
+            echo "::error::Expected exactly one public release for ${GITHUB_REF_NAME}, found ${count} (drafts: ${drafts})." >&2
+            exit 1
+          fi

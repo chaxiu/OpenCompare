@@ -1,7 +1,12 @@
 # electron-builder packaging targets.
 #
-# Cross-platform artifacts are built on CI only (see .github/workflows/release.yml);
-# code signing / notarisation stay out of scope, so the published bundles are unsigned.
+# Cross-platform artifacts are built on CI only (see .github/workflows/release.yml).
+# On the macos runner the bundles are Developer ID signed and Apple notarized; the
+# certificate and App Store Connect API key credentials are injected as
+# environment variables (CSC_LINK / CSC_KEY_PASSWORD / APPLE_TEAM_ID /
+# APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER) from GitHub Secrets and
+# are never committed. Missing credentials fail the build instead of shipping an
+# unsigned bundle (see docs/release-signing.md).
 # Electron-vite emits the three process bundles into `out/`, which is what gets packed.
 appId: com.opencompare.app
 productName: OpenCompare
@@ -12,6 +17,15 @@ files:
   - package.json
 mac:
   category: public.app-category.developer-tools
+  # Developer ID Application signing (certificate via CSC_LINK / CSC_KEY_PASSWORD)
+  # plus Apple notarization via an App Store Connect API key (APPLE_API_KEY points
+  # at the decoded .p8 file, identified by APPLE_API_KEY_ID / APPLE_API_ISSUER).
+  # The identity is pinned so the runner never picks a different certificate.
+  identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
   target:
     - dmg
     - zip

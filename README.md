@@ -2,6 +2,8 @@
 
 对标的 **Beyond Compare 5 Pro** 的现代跨平台桌面对比与三向合并工具。基于 Electron + React 19 + TypeScript，一套代码同时构建桌面应用与浏览器预览。
 
+> ✅ **当前发布状态：正式版 v0.1.2。** macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
+
 对开发者与运维团队最常用的四类对比，OpenCompare 内置了可直接试跑的完整样本，并支持打开/保存本地真实文件：
 
 ## 核心能力
@@ -50,15 +52,15 @@ pnpm dist:win         # Windows：nsis
 pnpm dist:linux       # Linux：AppImage / deb
 ```
 
-打包配置见根目录 `electron-builder.yml`（macOS / Windows / Linux 目标）。**不做代码签名与公证**，本地只打包当前平台；多平台产物由 CI 生成。
+打包配置见根目录 `electron-builder.yml`（macOS / Windows / Linux 目标）。macOS 目标已配置 Developer ID 签名（证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，签名身份钉住 `Developer ID Application: Tao Zhu (3X4J53U6RY)`）与 App Store Connect API Key 公证（`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`；`APPLE_TEAM_ID` 为 `3X4J53U6RY`），凭据一律由人类录入 GitHub Secrets，仓内不落明文；`APPLE_API_KEY` 的 `.p8` base64 只在 CI 打包前解码到 `$RUNNER_TEMP` 权限 `600` 的临时文件，打包后清理。缺任一凭据时 macOS 打包步骤**显式失败**（fail-closed），绝不产出未签名裸包。本地只打包当前平台；多平台产物由 CI 生成。凭据清单与协助文案见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 ## 发布流程
 
 推送 `v*` 标签即触发 GitHub Actions（`.github/workflows/release.yml`）：
 
-1. 先在 Ubuntu runner 上跑门禁（`install → lint → typecheck → test → build`），失败即中止发布；
-2. 门禁通过后，在 macOS / Windows / Linux 三个 runner 上分别构建平台产物；
-3. 产物自动发布到对应的 GitHub Release。
+1. 先在 Ubuntu runner 上跑门禁（`install → lint → typecheck → test → build`），并断言 `package.json#version` 与 tag 语义版本（去掉 `v` 前缀）一致，失败即中止发布；
+2. 门禁通过后，在 macOS / Windows / Linux 三个 runner 上分别构建平台产物；macOS 步骤要求上述 6 项签名 / 公证 Secrets 齐备，任一缺失即失败（fail-closed）；
+3. 各平台断言打包产物旁 `latest*.yml` 内的 `version` 等于 tag，再汇聚上传到该 tag 的唯一 Release，确认每个 tag 恰好一个公开（非 Draft）Release。
 
 ## 项目结构
 
