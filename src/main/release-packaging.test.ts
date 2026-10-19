@@ -1,14 +1,18 @@
-import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
+import { BRAND_NAME, buildAboutPanelOptions, resolveBrandIconPath } from '../shared/brand'
+import { createMenuTemplate } from './menu'
 
 // Release packaging is driven by repository-root config; assert it here so a
 // missing field fails `pnpm test` instead of a tag-triggered CI run.
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 
 const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+  version?: string
   author?: { name?: string; email?: string }
   license?: string
   homepage?: string
@@ -16,7 +20,9 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as 
 
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
   appId?: string
+  extraResources?: Array<{ from?: string; to?: string }>
   mac?: {
+    icon?: string
     identity?: string
     hardenedRuntime?: boolean
     entitlements?: string
@@ -24,7 +30,8 @@ const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8
     notarize?: boolean
     target?: string[]
   }
-  linux?: { maintainer?: string; target?: string[] }
+  win?: { icon?: string; target?: string[] }
+  linux?: { icon?: string; maintainer?: string; target?: string[] }
   publish?: { provider?: string; releaseType?: string }
 }
 
@@ -268,5 +275,224 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/fail-closed/)
     expect(changelog).toMatch(/唯一/)
     expect(changelog).toMatch(/latest\*\.yml/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Brand icon assets (self-made, replaceable) and their packaging / runtime wiring
+// ---------------------------------------------------------------------------
+
+const iconSourcePath = join(repoRoot, 'build/icons/icon.svg')
+const iconPngPath = join(repoRoot, 'build/icon.png')
+const iconIcnsPath = join(repoRoot, 'build/icon.icns')
+const iconIcoPath = join(repoRoot, 'build/icon.ico')
+
+const brandDoc = readFileSync(join(repoRoot, 'docs/brand-assets.md'), 'utf8')
+const brandModuleSource = readFileSync(join(repoRoot, 'src/shared/brand.ts'), 'utf8')
+const mainSource = readFileSync(join(repoRoot, 'src/main/index.ts'), 'utf8')
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+const ICON_SIZES = [16, 32, 64, 128, 256, 512, 1024]
+
+const fileSize = (path: string): number => statSync(path).size
+const pngDimensions = (path: string): { width: number; height: number } => {
+  const bytes = readFileSync(path)
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+}
+const sha256 = (path: string): string =>
+  createHash('sha256').update(readFileSync(path)).digest('hex')
+
+describe('brand icon assets', () => {
+  it('ships a non-empty editable SVG source', () => {
+    expect(existsSync(iconSourcePath)).toBe(true)
+    expect(fileSize(iconSourcePath)).toBeGreaterThan(0)
+    expect(readFileSync(iconSourcePath, 'utf8')).toContain('<svg')
+  })
+
+  it('ships a 1024x1024 PNG main icon with a valid PNG signature', () => {
+    expect(fileSize(iconPngPath)).toBeGreaterThan(0)
+    expect(readFileSync(iconPngPath).subarray(0, 4).equals(PNG_SIGNATURE)).toBe(true)
+    expect(pngDimensions(iconPngPath)).toEqual({ width: 1024, height: 1024 })
+  })
+
+  it('ships every multi-size PNG as a valid PNG of the declared size', () => {
+    for (const size of ICON_SIZES) {
+      const path = join(repoRoot, 'build/icons', `icon-${size}.png`)
+      expect(existsSync(path), `missing ${path}`).toBe(true)
+      expect(fileSize(path)).toBeGreaterThan(0)
+      expect(readFileSync(path).subarray(0, 4).equals(PNG_SIGNATURE)).toBe(true)
+      expect(pngDimensions(path)).toEqual({ width: size, height: size })
+    }
+  })
+
+  it('ships a macOS icns container', () => {
+    expect(fileSize(iconIcnsPath)).toBeGreaterThan(8)
+    expect(readFileSync(iconIcnsPath).subarray(0, 4).toString('ascii')).toBe('icns')
+  })
+
+  it('ships a Windows ico resource with the icon header', () => {
+    expect(fileSize(iconIcoPath)).toBeGreaterThan(22)
+    expect(readFileSync(iconIcoPath).subarray(0, 6).toString('hex')).toBe('000001000100')
+  })
+})
+
+describe('packaging points at the shipped brand icons', () => {
+  it('configures mac, win and linux icons against existing repository files', () => {
+    expect(builder.mac?.icon).toBe('build/icon.icns')
+    expect(builder.win?.icon).toBe('build/icon.ico')
+    expect(builder.linux?.icon).toBe('build/icon.png')
+    for (const icon of [builder.mac?.icon, builder.win?.icon, builder.linux?.icon]) {
+      expect(icon?.trim()).toBeTruthy()
+      expect(existsSync(join(repoRoot, icon ?? ''))).toBe(true)
+    }
+  })
+
+  it('never falls back to the Electron default icon names', () => {
+    for (const icon of [builder.mac?.icon, builder.win?.icon, builder.linux?.icon]) {
+      expect(icon).toMatch(/^build\//)
+      expect(icon).not.toMatch(/electron\.(icns|ico|png)/)
+    }
+
+    // When the Electron distribution is installed, its stock icns must differ
+    // byte-for-byte from the shipped brand icon.
+    const electronIcns = [
+      join(repoRoot, 'node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns'),
+      join(repoRoot, 'node_modules/electron/dist/resources/electron.icns')
+    ].find((path) => existsSync(path))
+    if (electronIcns) {
+      expect(sha256(iconIcnsPath)).not.toBe(sha256(electronIcns))
+    }
+  })
+
+  it('copies the main PNG into the packaged resources as icon.png', () => {
+    const entry = (builder.extraResources ?? []).find(
+      (resource) => resource.from === 'build/icon.png'
+    )
+    expect(entry).toBeTruthy()
+    expect(entry?.to).toBe('icon.png')
+  })
+
+  it('resolves the packaged and development icon to the same shipped PNG', () => {
+    const resourcesPath = '/Applications/OpenCompare.app/Contents/Resources'
+    expect(
+      resolveBrandIconPath({
+        isPackaged: true,
+        resourcesPath,
+        appPath: join(resourcesPath, 'app.asar')
+      })
+    ).toBe(join(resourcesPath, 'icon.png'))
+
+    const development = resolveBrandIconPath({
+      isPackaged: false,
+      resourcesPath: '/ignored',
+      appPath: repoRoot
+    })
+    expect(development).toBe(iconPngPath)
+    expect(existsSync(development)).toBe(true)
+  })
+})
+
+describe('window and dock share the packaged brand icon', () => {
+  it('passes the resolved PNG to BrowserWindow and the macOS dock', () => {
+    expect(mainSource).toMatch(/resolveBrandIconPath\(/)
+    expect(mainSource).toMatch(/icon:\s*iconPath/)
+    expect(mainSource).toMatch(/app\.dock\?\.setIcon\(iconPath\)/)
+  })
+
+  it('resolves platform-independently to one existing file', () => {
+    const first = resolveBrandIconPath({
+      isPackaged: false,
+      resourcesPath: '/whatever',
+      appPath: repoRoot
+    })
+    const second = resolveBrandIconPath({
+      isPackaged: false,
+      resourcesPath: '/another',
+      appPath: repoRoot
+    })
+    expect(first).toBe(second)
+    expect(existsSync(first)).toBe(true)
+  })
+})
+
+describe('about panel brand and version', () => {
+  it('fixes the brand name and reuses the runtime icon path', () => {
+    const options = buildAboutPanelOptions({
+      version: pkg.version ?? '',
+      iconPath: iconPngPath
+    })
+    expect(options.applicationName).toBe('OpenCompare')
+    expect(options.applicationName).toBe(BRAND_NAME)
+    expect(options.iconPath).toBe(iconPngPath)
+    expect(options.iconPath).toBe(
+      resolveBrandIconPath({ isPackaged: false, resourcesPath: '/x', appPath: repoRoot })
+    )
+  })
+
+  it('takes the version from package.json without hard-coding it', () => {
+    expect(pkg.version?.trim()).toBeTruthy()
+    const options = buildAboutPanelOptions({
+      version: pkg.version ?? '',
+      iconPath: iconPngPath
+    })
+    expect(options.applicationVersion).toBe(pkg.version)
+    // A different injected version flows straight through.
+    expect(
+      buildAboutPanelOptions({ version: '9.9.9', iconPath: '/tmp/icon.png' })
+        .applicationVersion
+    ).toBe('9.9.9')
+  })
+
+  it('wires app.getVersion() into app.setAboutPanelOptions', () => {
+    expect(mainSource).toMatch(/app\.setAboutPanelOptions\(/)
+    expect(mainSource).toMatch(/app\.getVersion\(\)/)
+    expect(mainSource).not.toMatch(/\b\d+\.\d+\.\d+\b/)
+    expect(mainSource).not.toMatch(/Electron/)
+    expect(brandModuleSource).not.toMatch(/\b\d+\.\d+\.\d+\b/)
+  })
+})
+
+interface MenuNode {
+  role?: string
+  label?: string
+  submenu?: MenuNode[]
+}
+
+describe('native About menu entry', () => {
+  const macTemplate = createMenuTemplate({ isMac: true }) as unknown as MenuNode[]
+  const otherTemplate = createMenuTemplate({ isMac: false }) as unknown as MenuNode[]
+
+  it('puts the about role in the macOS app menu', () => {
+    const appMenu = macTemplate[0]
+    expect(appMenu?.submenu?.some((item) => item.role === 'about')).toBe(true)
+  })
+
+  it('puts the about role in the Windows/Linux Help submenu', () => {
+    const helpMenu = otherTemplate.find((item) => item.role === 'help')
+    expect(helpMenu?.submenu?.some((item) => item.role === 'about')).toBe(true)
+  })
+
+  it('keeps edit and view menus, plus the window menu on macOS', () => {
+    for (const template of [macTemplate, otherTemplate]) {
+      expect(template.some((item) => item.role === 'editMenu')).toBe(true)
+      expect(template.some((item) => item.role === 'viewMenu')).toBe(true)
+    }
+    expect(macTemplate.some((item) => item.role === 'windowMenu')).toBe(true)
+  })
+})
+
+describe('brand asset documentation', () => {
+  it('marks the artwork as self-made and replaceable with all core paths', () => {
+    expect(brandDoc).toContain('自制')
+    expect(brandDoc).toContain('可替换')
+    for (const path of [
+      'build/icons/icon.svg',
+      'build/icon.png',
+      'build/icon.icns',
+      'build/icon.ico'
+    ]) {
+      expect(brandDoc).toContain(path)
+    }
+    expect(brandDoc).toContain('node build/icons/generate-icons.mjs')
   })
 })

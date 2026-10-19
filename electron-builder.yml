@@ -15,7 +15,13 @@ directories:
 files:
   - out/**
   - package.json
+# Self-made, replaceable brand PNG shipped inside the bundle so the window and
+# macOS dock icon resolve to the same artwork as the packaged app icon.
+extraResources:
+  - from: build/icon.png
+    to: icon.png
 mac:
+  icon: build/icon.icns
   category: public.app-category.developer-tools
   # Developer ID Application signing (certificate via CSC_LINK / CSC_KEY_PASSWORD)
   # plus Apple notarization via an App Store Connect API key (APPLE_API_KEY points
@@ -31,12 +37,14 @@ mac:
     - dmg
     - zip
 win:
+  icon: build/icon.ico
   target:
     - nsis
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 linux:
+  icon: build/icon.png
   category: Development
   # `deb` requires an explicit maintainer (electron-builder falls back to
   # package.json author.email, which is not guaranteed to be present).

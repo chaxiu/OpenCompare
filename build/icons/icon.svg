@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- OpenCompare brand mark: two diverging panes merging into one result bar. -->
+  <defs>
+    <linearGradient id="brand-bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1024" y2="1024">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#a371f7"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#brand-bg)"/>
+  <rect x="160" y="200" width="304" height="420" rx="72" fill="#ffffff"/>
+  <rect x="560" y="200" width="304" height="420" rx="72" fill="#ffffff"/>
+  <rect x="216" y="272" width="192" height="52" rx="26" fill="#0b0d12"/>
+  <rect x="216" y="376" width="144" height="52" rx="26" fill="#0b0d12"/>
+  <rect x="216" y="480" width="192" height="52" rx="26" fill="#0b0d12"/>
+  <rect x="616" y="272" width="144" height="52" rx="26" fill="#0b0d12"/>
+  <rect x="616" y="376" width="192" height="52" rx="26" fill="#0b0d12"/>
+  <rect x="616" y="480" width="144" height="52" rx="26" fill="#0b0d12"/>
+  <rect x="160" y="676" width="704" height="148" rx="74" fill="#ffffff"/>
+  <rect x="216" y="708" width="592" height="84" rx="42" fill="#0b0d12"/>
+</svg>
