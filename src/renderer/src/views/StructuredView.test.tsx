@@ -98,7 +98,7 @@ describe('drilldown pair', () => {
   it('renders the fixed format without a format switch', () => {
     render(<StructuredView pair={pair} format="yaml" platform={platform} />)
 
-    expect(screen.getByText(/来自目录对比下钻 · YAML 原文/)).toBeDefined()
+    expect(screen.getByText(/本地文件 · YAML 原文/)).toBeDefined()
     expect(screen.queryByRole('tablist', { name: '结构化格式' })).toBeNull()
     expect(screen.getByRole('tablist', { name: '状态过滤' })).toBeDefined()
 

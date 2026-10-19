@@ -620,7 +620,7 @@ export function CodeView({
       <div className="flex shrink-0 items-center gap-2">
         {adhoc ? (
           <span className="text-2xs text-content-muted">
-            来自目录对比下钻 · 双栏字符级 Diff
+            本地文件 · 双栏字符级 Diff
           </span>
         ) : (
           <>

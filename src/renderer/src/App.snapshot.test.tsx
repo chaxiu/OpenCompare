@@ -35,7 +35,7 @@ afterEach(() => {
 /** Loads the sample library and waits for the directory session to be ready. */
 async function loadWorkbench(): Promise<void> {
   render(<App />)
-  fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+  fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
   await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 }
 
@@ -47,7 +47,7 @@ describe('snapshot workbench integration', () => {
   it('loads the remote snapshot sample with a snapshot-labelled right pane and four statuses', async () => {
     await loadWorkbench()
 
-    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
 
     expect(await screen.findByText('/snapshots/right/remote-prod')).toBeDefined()
     expect(screen.getAllByText('remote-prod').length).toBeGreaterThan(0)
@@ -70,7 +70,7 @@ describe('snapshot workbench integration', () => {
 
   it('filters a snapshot comparison by status', async () => {
     await loadWorkbench()
-    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
     await screen.findByText('/snapshots/right/remote-prod')
 
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
@@ -91,7 +91,7 @@ describe('snapshot workbench integration', () => {
 
   it('drills snapshot files into code, CSV and structured views pointing at the mount', async () => {
     await loadWorkbench()
-    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
     await screen.findByText('/snapshots/right/remote-prod')
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
 
@@ -99,10 +99,12 @@ describe('snapshot workbench integration', () => {
     expect(
       await screen.findAllByText(/\/snapshots\/right\/remote-prod\/src\/core\/engine\.ts/)
     ).not.toHaveLength(0)
-    expect(screen.getByText(/来自目录对比下钻/)).toBeDefined()
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
 
     fireEvent.click(
-      within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', { name: /目录对比/ })
+      within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', {
+        name: /baseline ↔ remote-prod/
+      })
     )
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
     expect(
@@ -110,7 +112,9 @@ describe('snapshot workbench integration', () => {
     ).not.toHaveLength(0)
 
     fireEvent.click(
-      within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', { name: /目录对比/ })
+      within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', {
+        name: /baseline ↔ remote-prod/
+      })
     )
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
     expect(
@@ -164,7 +168,7 @@ describe('snapshot workbench integration', () => {
 
   it('rejects a non-snapshot file and keeps the current comparison', async () => {
     await loadWorkbench()
-    fireEvent.click(screen.getByRole('button', { name: '远端快照样本' }))
+    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
     await screen.findByText('/snapshots/right/remote-prod')
     const before = screen.getByRole('contentinfo').textContent ?? ''
 
@@ -201,6 +205,6 @@ describe('snapshot workbench integration', () => {
       expect(screen.getByRole('alert').textContent).toContain('未内联')
     })
     // No empty drilldown session replaced the comparison.
-    expect(screen.getByText('session-directory')).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain('/snapshots/right/meta-only')
   })
 })

@@ -180,6 +180,22 @@ export function createWebPlatformPort(): PlatformPort {
     })
   }
 
+  /**
+   * A browser drag & drop exposes the dropped body but no real path, so the body
+   * is materialised into the memory file system exactly like {@link selectFile}
+   * does; an unreadable handle resolves to `''` and the workbench reports it.
+   */
+  async function resolveDroppedPath(file: File): Promise<string> {
+    try {
+      const text = await readBlobText(file)
+      const path = `${ROOT}/${file.name}`
+      writeNode(path, text, Date.now())
+      return path
+    } catch {
+      return ''
+    }
+  }
+
   async function saveFile(options: SaveFileOptions): Promise<string | null> {
     const extension = (options.filters?.[0]?.extensions[0] ?? 'txt').replace(/^\./, '')
     const suggested =
@@ -196,6 +212,7 @@ export function createWebPlatformPort(): PlatformPort {
     kind: 'web',
     selectDirectory: async () => ROOT,
     selectFile,
+    resolveDroppedPath,
     saveFile,
     listDirectory: async (path) => {
       const node = requireNode(path)

@@ -12,6 +12,7 @@ import type { ComparisonCache } from '@core/directory/compare'
 import { createDirectorySession } from './directoryCompare'
 import type { WorkbenchSession } from './session'
 import { parseCsvTable } from './session'
+import { directorySides } from './snapshotOps'
 
 export interface LoadSampleOptions {
   /** Restrict the load to a single scene; omitted loads all four. */
@@ -68,7 +69,10 @@ export async function loadSampleSessions(
               (path) => platform.readTextFile(path),
               cache
             )
-            return createDirectorySession(comparison)
+            return createDirectorySession(
+              comparison,
+              directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
+            )
           }
           case 'csv':
             return {

@@ -63,8 +63,6 @@ export interface DirectoryViewProps {
   /** False on the web runtime, which has no native directory picker. */
   readonly pickerAvailable: boolean
   readonly busy: boolean
-  readonly notice?: string | null
-  readonly noticeTone?: 'danger' | 'info'
   readonly onPick: (side: 'left' | 'right') => void
   readonly onLoadSample: () => void
   readonly onOpenFile: (node: DirectoryDiffNode) => void
@@ -96,8 +94,6 @@ export function DirectoryView({
   visibleCounts,
   pickerAvailable,
   busy,
-  notice,
-  noticeTone = 'danger',
   onPick,
   onLoadSample,
   onOpenFile,
@@ -171,9 +167,9 @@ export function DirectoryView({
             icon={<Sparkles aria-hidden className="size-3.5" />}
             onClick={onLoadSample}
             disabled={busy}
-            title="把内置样本目录加载为左右两侧"
+            title="演示用途：把内置样本目录加载为左右两侧"
           >
-            加载样本目录
+            加载演示目录
           </ToolbarButton>
           {busy ? (
             <LoaderCircle aria-hidden className="size-3.5 animate-spin text-content-muted" />
@@ -256,9 +252,9 @@ export function DirectoryView({
           icon={<Cloud aria-hidden className="size-3.5" />}
           onClick={onLoadRemoteSnapshotSample}
           disabled={busy}
-          title="一键加载内置本地样本目录（左）vs 内置远端快照 remote-prod（右）"
+          title="演示用途：内置本地样本目录（左）vs 内置远端快照 remote-prod（右）"
         >
-          远端快照样本
+          演示：远端快照
         </ToolbarButton>
         <input
           ref={leftInputRef}
@@ -286,21 +282,9 @@ export function DirectoryView({
 
       {pickerAvailable ? null : (
         <p className="shrink-0 text-2xs text-content-muted">
-          Web 预览模式没有原生目录选择，请使用「加载样本目录」体验真实对比；桌面端（pnpm dev）可直接选择本地目录。
+          Web 预览模式没有原生目录选择，可用「加载演示目录」查看目录对比；桌面端（pnpm dev）可直接选择本地目录。
         </p>
       )}
-      {notice ? (
-        <p
-          role="alert"
-          className={
-            noticeTone === 'info'
-              ? 'shrink-0 text-2xs text-diff-added'
-              : 'shrink-0 text-2xs text-danger'
-          }
-        >
-          {notice}
-        </p>
-      ) : null}
 
       <SplitPane
         panes={[

@@ -42,6 +42,14 @@ export interface PlatformPort {
   /** Ask the user for a file; resolves to the chosen path, or `null` when cancelled. */
   selectFile(options?: SelectFileOptions): Promise<string | null>
   /**
+   * Resolves the absolute path behind a file dropped into the window. Electron 37
+   * removed `File.path`, so the dropped handle is resolved through the platform
+   * seam (`webUtils.getPathForFile` in preload) rather than guessed in the
+   * renderer. Resolves to `''` when the handle carries no real path (a handle
+   * constructed in JS, a drop in the browser runtime, …).
+   */
+  resolveDroppedPath(file: File): Promise<string>
+  /**
    * Ask the user where to write `content` and write it. Resolves to the written
    * path, or `null` when cancelled; a read-only mount rejects the write.
    */

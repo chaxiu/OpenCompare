@@ -230,7 +230,7 @@ export function StructuredView({
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         {adhoc ? (
           <span className="text-2xs text-content-muted">
-            来自目录对比下钻 · {effective.toUpperCase()} 原文 · 语义归一化对比
+            本地文件 · {effective.toUpperCase()} 原文 · 语义归一化对比
           </span>
         ) : (
           <>
