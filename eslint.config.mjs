@@ -18,6 +18,13 @@ export default tseslint.config(
     }
   },
   {
+    // Brand icon generator: plain Node script run with `node build/icons/generate-icons.mjs`.
+    files: ['build/**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node }
+    }
+  },
+  {
     files: ['src/renderer/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
