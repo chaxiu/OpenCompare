@@ -41,6 +41,8 @@ const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md'), 'utf8
 
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 
+const changelog = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')
+
 // App Store Connect API key mode: certificate + team id + .p8 key trio.
 const signingSecrets = [
   'CSC_LINK',
@@ -239,8 +241,10 @@ describe('release signing credentials checklist', () => {
     expect(signingDoc).toMatch(/Apple Developer Program/)
   })
 
-  it('keeps the release frozen until signing and notarization pass', () => {
-    expect(signingDoc).toMatch(/发布冻结/)
+  it('documents the v0.1.2 formal-release posture instead of the former freeze', () => {
+    expect(signingDoc).toMatch(/v0\.1\.2/)
+    expect(signingDoc).toMatch(/正式版/)
+    expect(signingDoc).not.toMatch(/发布冻结/)
   })
 
   it('lists the six secrets and fail-closed behavior in the README', () => {
@@ -248,5 +252,21 @@ describe('release signing credentials checklist', () => {
       expect(readme).toContain(secret)
     }
     expect(readme).toMatch(/fail-closed/)
+  })
+
+  it('presents the README as the v0.1.2 formal release', () => {
+    expect(readme).toMatch(/v0\.1\.2/)
+    expect(readme).not.toMatch(/发布状态：冻结/)
+  })
+})
+
+describe('release notes changelog', () => {
+  it('documents the v0.1.2 entry with signing, reproducible packaging and the version gate', () => {
+    expect(changelog).toMatch(/## v0\.1\.2/)
+    expect(changelog).toMatch(/Developer ID/)
+    expect(changelog).toMatch(/App Store Connect API Key/)
+    expect(changelog).toMatch(/fail-closed/)
+    expect(changelog).toMatch(/唯一/)
+    expect(changelog).toMatch(/latest\*\.yml/)
   })
 })

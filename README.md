@@ -2,7 +2,7 @@
 
 对标的 **Beyond Compare 5 Pro** 的现代跨平台桌面对比与三向合并工具。基于 Electron + React 19 + TypeScript，一套代码同时构建桌面应用与浏览器预览。
 
-> ⚠️ **当前发布状态：冻结 / 预发布（Pre-release）。** 已发布的 macOS 安装包（`.dmg` / `.zip`）**未签名、未公证（unsigned & not notarized）**，不作为可下载的正式版提供，任何对外文案不得宣称正式版可用；签名 + 公证跑通前不打入新 Tag、不 publish。Developer ID 签名 + App Store Connect API Key 公证链路已在 `electron-builder.yml` / CI 中接线，公司 Apple Developer 账户已就位，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；签名 + 公证跑通并产出唯一正式版 Release 后再解除冻结。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
+> ✅ **当前发布状态：正式版 v0.1.2。** macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 对开发者与运维团队最常用的四类对比，OpenCompare 内置了可直接试跑的完整样本，并支持打开/保存本地真实文件：
 

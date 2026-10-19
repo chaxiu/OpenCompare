@@ -15,6 +15,9 @@
 - **发布元数据（Linux `.deb` 前置）**：`package.json` 的 `author`（对象且含非空 `email`）、`license`、`homepage`；`electron-builder.yml` `linux.maintainer` 显式含 email。
 - **发布目标**：`electron-builder.yml` 声明 `publish: { provider: github, releaseType: release }`；实际发布改由 release.yml 单点预建 + `gh release upload` 完成（矩阵 `--publish never`），最终 Release 为公开（非 Draft）。
 - **发布工作流**：`.github/workflows/release.yml` 监听 `v*` tag，门禁 job（install `--frozen-lockfile` / lint / typecheck / test / build）先行。门禁末尾**单点预建该 tag 的唯一 Release**（`gh release create ... --draft --generate-notes`，注入 `GH_TOKEN`/`GH_REPO` 并显式带 `--repo`；若已存在则清理同名重复只留一个），随后 mac/win/linux 三平台矩阵 `electron-builder --<target> --publish never` 仅本地打包到 `release/`，再用 `gh release upload "${GITHUB_REF_NAME}" <三端全部产物> --clobber --repo` 汇聚上传到该唯一 Release；`finalize` job `gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest` 正式公开。Release 唯一性以 tag 为准，杜绝并发建单竞态。
+- **发版版本单点**：`package.json#version` 为发版的唯一版本来源（当前 `0.1.2`），tag 语义版本与打包产物 `latest*.yml#version` 均须与其对齐，二者由 `release.yml` 对齐闸断言。
+- **Release Notes 草案**：根目录 `CHANGELOG.md`（Keep a Changelog / SemVer 口径）记录版本条目；`v0.1.2` 条目覆盖 Developer ID 签名 + App Store Connect API Key 公证（6 项 Secrets fail-closed）、可复现打包与唯一公开 Release、版本/tag 对齐闸。
+- **正式版文档口径**：`README.md` 与 `docs/release-signing.md` 以「正式版经签名 + 公证流程产出」描述发版姿态（v0.1.2 已解冻），不再保留「未签名/未公证、发布冻结、不得打 Tag」的过时警示；公证实际结果以 tag 触发的那次 CI 为准，不预先宣称未经验证的公证结果。
 - **仓库门面**：根目录 `README.md`（定位、核心能力、本地开发与构建打包）与 `LICENSE`（MIT 全文）。
 - **发布配置断言单测**：Node 环境下读取仓库根配置做断言（`src/main/release-packaging.test.ts`，`node:fs` + `node:path`，不 import Electron），让缺失字段在 `pnpm test` 失败而非 tag 触发的 CI 才暴露。
 
@@ -55,6 +58,12 @@
 - **ac-config-unit-tests**：release 配置断言单测扩展覆盖签名/公证/版本对齐/唯一 Release 断言，`pnpm test` 通过。
 - **ac-gates-green**：`code-gates.json` 全部门禁（install / lint / typecheck / build / build:web / test）通过。
 - **ac-no-regression**：内置样本主链路无回归，`code-gates.json`（install / lint / typecheck / build / build:web / test）全绿；打包目标与触发条件（`v*` tag）不变。
+- **ac-version-bump**：`package.json#version` 为 `0.1.2`（tag↔version 对齐闸附带要求，`release.yml` 本身不改）。
+- **ac-changelog-v012**：新增 `CHANGELOG.md`，含 `v0.1.2` 条目，覆盖 Developer ID 签名 + Apple 公证（App Store Connect API Key 模式、6 项 Secrets fail-closed）、可复现打包与唯一公开 Release、版本/tag 对齐闸。
+- **ac-docs-api-key**：`README.md` 与 `docs/release-signing.md` 已更新为 App Store Connect API Key 模式口径与 v0.1.2 正式版说明。
+- **ac-freeze-warning-converged**：此前「未签名/未公证、发版冻结」的过时警示已收敛；措辞以「正式版经签名 + 公证流程产出」为准，不预先宣称尚未由 CI 验证的公证结果。
+- **ac-test-synced**：`src/main/release-packaging.test.ts` 断言随文档变更同步（冻结期断言改为正式版口径，并覆盖 `CHANGELOG.md` 条目），`pnpm test` 通过；签名/公证接线断言（6 项 Secrets、fail-closed、API Key 模式、唯一公开 Release、版本对齐闸）不得弱化。
+- **ac-no-scope-creep**：未改打包目标 / `appId` / 触发条件 / 发布模型，未新增依赖，未动 `@core`，无功能改动。
 
 ## 非目标
 
@@ -64,7 +73,8 @@
 - 不引入新发布渠道（npm / Homebrew / Snap 等），不改依赖版本与 `electron-vite` 构建脚本。
 - 不重写 `README` / `AGENTS.md`、不新增文档体系或设计语言；不在本地做多平台交叉编译。
 - 不顺手重构 CI（不加缓存策略、不拆并行 job、不改 Node 版本）；不重构既有「单点预建唯一 Release + 汇聚 `gh release upload` + finalize」模型，仅在其上接线签名公证与版本闸。
-- 不改 electron-builder 打包目标 / `appId`；不改触发条件（仍为 `v*` tag push）与 `permissions`；不做版本号自增、不改 `package.json` version；不引入新的 Action / 第三方发布工具。
+- 不改 electron-builder 打包目标 / `appId`；不改触发条件（仍为 `v*` tag push）与 `permissions`；不引入新的 Action / 第三方发布工具。发版版本 bump 仅限 `package.json#version` 改为与目标 tag 一致（v0.1.2），不做自增逻辑或自动化版本管理。
+- 发版必需改动不越界：不改 `release.yml`、不改打包目标 / `appId` / `mac.identity` / 触发条件 / 发布模型、不新增依赖、不改 `electron-builder.yml` / entitlements、不动 `src/core/`、不做功能/UI 改动；`CHANGELOG.md` 只覆盖 `v0.1.2` 条目，不追溯补写历史版本；不录入手工凭据、不在仓库/脚本/日志写明文密钥、不执行打 Tag / publish Release / 公证。
 - 不追求 bit-identical 二进制可复现；只保证输入锁定与产物名/版本确定。
 
 ## 实现约束
@@ -80,12 +90,13 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_d90fd2b7b90b257d`（release 签名/公证改用 App Store Connect API Key）
+- WI：`wi_intake_d134bf8347298666`（v0.1.2 正式版发版必需改动：版本 bump + Release Notes + 文档口径收敛）
 - 日期：2026-10-19
 - 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；本项无窗口可点交互，跳过 UI 自测）。
 - 覆盖摘要：
-  - `.github/workflows/release.yml`：mac fail-closed 前置步改为检查 6 个 Secret（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`），任一缺失即 `::error::` 列出名称并 `exit 1`；新增「Materialize the App Store Connect API key」步骤把 `APPLE_API_KEY`（`.p8` base64）解码到 `${RUNNER_TEMP}/opencompare-appstoreconnect.p8` 并 `chmod 600`，`Build installers` 的 `APPLE_API_KEY` 指向该路径（`steps.api-key.outputs.key-path`），`APPLE_API_KEY_ID` / `APPLE_API_ISSUER` 原样传入；打包后新增 `always()` 清理步骤。删除 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` 全部引用，无 Apple ID 回退路径。
-  - `electron-builder.yml`：mac 段新增 `identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'` 钉住签名身份；`appId` 仍为 `com.opencompare.app`，未出现 `sh.munk.app`；打包目标 / notarize / hardenedRuntime / entitlements 未改。
-  - `docs/release-signing.md` 改为 6 项凭据清单 + API Key 模式说明（Developer 角色、`.p8` 仅可下载一次、Key ID / Issuer ID）+ 协助录入文案（注明 Team ID `3X4J53U6RY`）；`README.md` 发布章节同步 6 Secrets 与 fail-closed 口径。发布冻结姿态未解除。
-  - `src/main/release-packaging.test.ts` 新增/更新断言：6 Secrets 接线（`APPLE_API_KEY` 指向解码后路径）、仅接线 6 Secrets + `GITHUB_TOKEN`、fail-closed 逐一检查、API Key 文件物化（`base64 --decode` / `${RUNNER_TEMP}` / `chmod 600` / 清理 / 不回显密钥）、legacy Apple ID 凭据已移除、签名身份钉住与 `appId` 自有、6 项文档清单与 README 口径；Node 环境读取仓库根配置，不引入 Electron/DOM。
-- 注：本域上一轮为 `wi_ws_02c54a7f073ddfce`（macOS 签名公证 + 可复现 CI 发布）。本轮按公司负责人最新凭据裁决，将公证凭据由 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` 三件套切换为 App Store Connect API Key 模式，`APPLE_TEAM_ID` / 签名身份显式钉住；`release` 域非目标「不做代码签名/公证」在上一轮已推翻，本轮进一步收敛凭据口径。实际凭据录入仍待人类经 GitHub Secrets 完成，在此之前发布保持冻结（Pre-release）。
+  - `package.json`：`version` 由 `0.1.0` 改为 `0.1.2`，与 `release.yml` 的 tag↔version 对齐闸一致（`release.yml` 未改）。
+  - 新增 `CHANGELOG.md`：Keep a Changelog / SemVer 口径，`## v0.1.2` 条目覆盖签名与公证（Developer ID + App Store Connect API Key 模式、6 项 Secrets fail-closed、`.p8` 于 `$RUNNER_TEMP` 物化 chmod 600）、可复现打包与唯一公开 Release（预建唯一 Release + `--publish never` + `gh release upload --clobber` + finalize）、版本/tag 对齐闸（tag↔`package.json#version` 与 `latest*.yml#version`）。
+  - `README.md`：顶部发布状态由「冻结 / 预发布、未签名未公证」改为「正式版 v0.1.2，经 Developer ID 签名 + Apple 公证流程产出、tag 触发唯一公开 Release」，保留 6 项 Secrets 与 fail-closed 描述，并注明公证结果以 tag 触发的那次 CI 为准。
+  - `docs/release-signing.md`：第三节「冻结期的发布姿态」改写为「正式版发布姿态（v0.1.2）」（解冻口径 + fail-closed + 查看 Release 命令），凭据清单与 API Key 模式说明保留。
+  - `src/main/release-packaging.test.ts`：冻结期断言（要求文档含「发布冻结」）改为正式版口径（文档含 `v0.1.2` / 「正式版」且不含「发布冻结」；README 含 `v0.1.2` 且不含「发布状态：冻结」），新增 `CHANGELOG.md` 断言组（`## v0.1.2` / Developer ID / App Store Connect API Key / fail-closed / 唯一 / `latest*.yml`）；既有 6 Secrets、fail-closed、API Key 物化、唯一 Release、版本对齐断言均保留未弱化。
+- 注：本域上一轮为 `wi_intake_d90fd2b7b90b257d`（签名/公证改用 App Store Connect API Key，发布仍冻结）。本轮按公司负责人批准的 v0.1.2 发版解冻：仅做发版必需改动（版本 bump / Release Notes / 文档口径），未改 `release.yml`、打包目标、`appId`、发布模型与依赖。发版冻结口径正式收敛为「正式版经签名 + 公证流程产出」；实际公证结果仍以 `v0.1.2` tag 触发的那次 CI 为准（本项不打 Tag、不 publish）。

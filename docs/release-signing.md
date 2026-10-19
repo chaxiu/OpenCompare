@@ -2,9 +2,9 @@
 
 OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application 签名** 与 **Apple 公证（Notarization）**，否则 Gatekeeper 会拦截、无法作为合规正式版分发。相关配置已接线，但**凭据必须由人类录入**，AI 不获取、不录入、不在本地执行公证。缺凭据时 CI 显式失败（fail-closed），**绝不产出、上传或公开未签名裸包**。
 
-> **当前状态：发布冻结。** 已发布 Release（`v0.1.0` / `v0.1.1`）均为 **Pre-release**，macOS 包未签名、未公证，不作为可下载正式版提供；在签名 + 公证跑通前**不得打入新 Tag、不得 publish 新 Release**。
+> **当前状态：v0.1.2 正式版路径（已解冻）。** 公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；签名 + 公证的实际结果以 tag 触发的那次 CI 为准。
 >
-> **解冻路径：** 公司 Apple Developer 账户已就位，人类可协助登录与录入。Developer ID 证书与 App Store Connect API Key **只进 Host 密钥库 / GitHub CI Secrets**，禁止写入仓库、构建脚本或日志；`release.yml` 按标准协助机制待人类录入后即可产出签名 + 公证通过的包，验证通过后再解除冻结、发布**唯一**正式版 Release。
+> **凭据录入：** Developer ID 证书与 App Store Connect API Key 由人类按标准协助机制录入 **GitHub CI Secrets**（只进 Secrets，禁止写入仓库、构建脚本或日志）；6 项 Secret 齐备后推送 `v*` 标签即可由 CI 产出签名 + 公证的包。
 
 ## 一、凭据清单
 
@@ -39,15 +39,13 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 > 5. 录入完成后请回复「已录入」，无需回传任何密钥内容；
 > 6. **请勿**把证书/密码/`.p8` 粘贴进对话、Issue、README 或任何仓库文件。
 >
-> 录入完成后，推送 `v*` 标签（`package.json#version` 需与 tag 一致）即由 CI 产出签名 + 公证通过的 macOS 包；在此之前发布保持冻结，不打新 Tag、不 publish、不宣称正式版可用。
+> 录入完成后，推送 `v*` 标签（`package.json#version` 需与 tag 一致）即由 CI 产出签名 + 公证的 macOS 包，并发布为该版本唯一的公开 Release。
 
-## 三、冻结期的发布姿态（已落实）
+## 三、正式版发布姿态（v0.1.2）
 
-- 存量 Release `v0.1.1`、`v0.1.0` 已置为 **Pre-release** 并在说明中标注 macOS 包未签名、未公证，仓库对外不再有公开的正式版（Latest）。
-- README 顶部与「构建与打包 / 发布流程」章节已标注当前未签名、未公证且发布冻结。
-- 如需再次核对/重执行：
+- 发布已解冻：正式版经 **Developer ID 签名 + Apple 公证** 流程产出，由 `v*` tag 触发的 CI 发布为每个版本唯一的公开 Release（详见 `README.md` 的「发布流程」）。
+- 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。
+- 如需查看 Release：
   ```bash
   gh release list --repo chaxiu/OpenCompare
-  gh release edit <tag> --repo chaxiu/OpenCompare --prerelease --latest=false
   ```
-- 凭据录入并完成正式发版后，再移除此冻结标注并解除 Pre-release。
