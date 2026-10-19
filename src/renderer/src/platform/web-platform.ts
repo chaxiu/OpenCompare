@@ -210,6 +210,10 @@ export function createWebPlatformPort(): PlatformPort {
 
   return {
     kind: 'web',
+    // The browser runtime has no process cwd or home directory; both are rooted
+    // at the writable memory sandbox so `~` and relative inputs stay predictable.
+    homeDirectory: async () => ROOT,
+    workingDirectory: async () => ROOT,
     selectDirectory: async () => ROOT,
     selectFile,
     resolveDroppedPath,

@@ -182,30 +182,18 @@ function CodeDiffView({
   }
 
   /**
-   * Writes one side back through the platform: the save dialog is pre-filled
-   * with that side's real path, so confirming rewrites the very file the side
-   * was loaded from. A cancelled dialog keeps the buffers and the dirty flag;
-   * a rejected write (e.g. a read-only sample path) is reported as-is.
+   * Writes one side straight back to the path it was loaded from — no save
+   * dialog, so the file on disk is exactly where the panel says it is. A failed
+   * write (e.g. a read-only sample mount) keeps the buffers and the dirty flag.
    */
   async function save(side: 'left' | 'right'): Promise<void> {
     const path = side === 'left' ? leftPath : rightPath
     const content = side === 'left' ? leftText : rightText
     try {
-      const written = await platform.saveFile({
-        title: side === 'left' ? '保存左侧文件' : '保存右侧文件',
-        defaultPath: path,
-        filters: [TEXT_FILE_FILTER],
-        content
-      })
-      if (written === null) return
-      if (side === 'left') {
-        setLeftPath(written)
-        setLeftSource(content)
-      } else {
-        setRightPath(written)
-        setRightSource(content)
-      }
-      setNotice({ text: `已写回 ${written}`, tone: 'ok' })
+      await platform.writeTextFile(path, content)
+      if (side === 'left') setLeftSource(content)
+      else setRightSource(content)
+      setNotice({ text: `已写回 ${path}`, tone: 'ok' })
     } catch (cause) {
       setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
     }
@@ -289,7 +277,7 @@ function CodeDiffView({
           icon={<Save aria-hidden className="size-3.5" />}
           onClick={() => void save('left')}
           disabled={!leftDirty}
-          title="经系统保存对话框把左侧修改原位写回其磁盘路径"
+          title="直接把左侧修改原位写回其磁盘路径（不弹保存对话框）"
         >
           保存左文件
         </ToolbarButton>
@@ -298,7 +286,7 @@ function CodeDiffView({
           icon={<Save aria-hidden className="size-3.5" />}
           onClick={() => void save('right')}
           disabled={!rightDirty}
-          title="经系统保存对话框把右侧修改原位写回其磁盘路径"
+          title="直接把右侧修改原位写回其磁盘路径（不弹保存对话框）"
         >
           保存右文件
         </ToolbarButton>

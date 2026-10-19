@@ -193,6 +193,8 @@ async function temporaryDirectory(): Promise<string> {
 
 /** Registers the native PlatformPort handlers backed by the local file system. */
 export function registerPlatformIpc(): void {
+  ipcMain.handle(PLATFORM_CHANNELS.homeDirectory, () => app.getPath('home'))
+  ipcMain.handle(PLATFORM_CHANNELS.workingDirectory, () => process.cwd())
   ipcMain.handle(PLATFORM_CHANNELS.selectDirectory, () => selectDirectory())
   ipcMain.handle(PLATFORM_CHANNELS.selectFile, (_event, options: unknown) =>
     selectFile(parseDialogRequest(options))

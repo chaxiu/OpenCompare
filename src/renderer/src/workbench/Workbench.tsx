@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { CODE_SCENE, CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { SampleComposition, SceneId } from '@shared/fixtures'
+import type { CompareRequest } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
@@ -52,6 +53,8 @@ import {
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
+import { NewCompareDialog } from './NewCompareDialog'
+import type { CompareOpenOutcome } from './NewCompareDialog'
 import {
   compareSides,
   describeSnapshotContentError,
@@ -197,8 +200,22 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
   /** The dirty session whose close is waiting for the unsaved-edits prompt. */
   const [closeTarget, setCloseTarget] = useState<WorkbenchSession | null>(null)
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
+
+  // Cmd/Ctrl+N opens the manual entry from anywhere; while it is already open
+  // the shortcut is a no-op instead of stacking a second dialog.
+  useEffect(() => {
+    function handleNewCompareShortcut(event: KeyboardEvent): void {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      if (event.key.toLowerCase() !== 'n') return
+      event.preventDefault()
+      setCompareDialogOpen(true)
+    }
+    document.addEventListener('keydown', handleNewCompareShortcut)
+    return () => document.removeEventListener('keydown', handleNewCompareShortcut)
+  }, [])
 
   // A dropped path must never replace the window with the dropped file: Electron
   // navigates on drop unless the default is prevented, on the window itself.
@@ -225,6 +242,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     })
   }, [])
   const handleCsvAlign = useCallback((state: CsvAlignState) => setCsvAlign(state), [])
+  const closeCompareDialog = useCallback(() => setCompareDialogOpen(false), [])
 
   /**
    * Mirrors a file view's unsaved state onto its session model, so a later
@@ -439,62 +457,112 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
    * Runs a comparison over the given sides (real directory and/or mounted
    * snapshot) and refreshes the directory session. Only a successful run
    * commits the new sides, so a failed import leaves the previous view intact.
+   * A caller-provided `onError` keeps the message local (the new-compare
+   * dialog); otherwise it lands in the workbench notice.
    */
-  async function runSidesCompare(next: ComparisonSides): Promise<void> {
+  async function runSidesCompare(
+    next: ComparisonSides,
+    onError?: (message: string) => void
+  ): Promise<boolean> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
       const comparison = await compareSides(platform, next, cache.current)
       upsertSession(createDirectorySession(comparison, next))
       setStatus('ready')
+      return true
     } catch (cause) {
-      report(cause instanceof Error ? cause.message : String(cause))
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (onError) onError(message)
+      else report(message)
+      return false
     } finally {
       setDirectoryBusy(false)
     }
   }
 
   /**
-   * Builds the file-level session for two real absolute paths. The drop handler
-   * and the file pickers both land here, so a pair is one session model.
+   * Builds the file-level session for two real absolute paths. The drop handler,
+   * the file pickers and the path dialog all land here, so a pair is one session
+   * model. Failures are reported without touching the sessions on screen.
    */
-  async function openFilePair(leftPath: string, rightPath: string): Promise<void> {
+  async function openFilePair(
+    leftPath: string,
+    rightPath: string,
+    onError?: (message: string) => void
+  ): Promise<boolean> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
       upsertSession(await openFilePairSession(platform, leftPath, rightPath))
       setStatus('ready')
+      return true
     } catch (cause) {
-      report(cause instanceof Error ? cause.message : String(cause))
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (onError) onError(message)
+      else report(message)
+      return false
     } finally {
       setDirectoryBusy(false)
     }
   }
 
+  /**
+   * Routes a validated request onto the existing session builders: the only
+   * decision here is file pair vs. directory pair.
+   */
+  async function openCompareRequest(
+    request: CompareRequest,
+    onError: (message: string) => void
+  ): Promise<boolean> {
+    if (request.kind === 'directory') {
+      return runSidesCompare(directorySides(request.left, request.right), onError)
+    }
+    return openFilePair(request.left, request.right, onError)
+  }
+
   /** 「打开文件」: left file then right file, no sample involved. */
-  async function pickFilePair(): Promise<void> {
+  async function pickFilePair(onError?: (message: string) => void): Promise<boolean> {
     const reusable = pendingLeft?.kind === 'file' ? pendingLeft.path : null
     const leftPath = reusable ?? (await platform.selectFile({ title: '选择左侧文件' }))
-    if (leftPath === null) return
+    if (leftPath === null) return false
 
     const rightPath = await platform.selectFile({ title: '选择右侧文件' })
-    if (rightPath === null) return
+    if (rightPath === null) return false
 
     setPendingLeft(null)
-    await openFilePair(leftPath, rightPath)
+    return openFilePair(leftPath, rightPath, onError)
   }
 
   /** 「打开文件夹」: left directory then right directory, no sample involved. */
-  async function pickDirectoryPair(): Promise<void> {
+  async function pickDirectoryPair(onError?: (message: string) => void): Promise<boolean> {
     const reusable = pendingLeft?.kind === 'directory' ? pendingLeft.path : null
     const leftPath = reusable ?? (await platform.selectDirectory())
-    if (leftPath === null) return
+    if (leftPath === null) return false
 
     const rightPath = await platform.selectDirectory()
-    if (rightPath === null) return
+    if (rightPath === null) return false
 
     setPendingLeft(null)
-    await runSidesCompare(directorySides(leftPath, rightPath))
+    return runSidesCompare(directorySides(leftPath, rightPath), onError)
+  }
+
+  /** Dialog「打开文件」: pickers feed the same pair builder, errors stay inline. */
+  async function pickFilesFromDialog(): Promise<CompareOpenOutcome> {
+    const feedback = { message: null as string | null }
+    const opened = await pickFilePair((message) => {
+      feedback.message = message
+    })
+    return opened ? { ok: true } : { ok: false, error: feedback.message }
+  }
+
+  /** Dialog「打开文件夹」: same picker flow as the toolbar action. */
+  async function pickDirectoriesFromDialog(): Promise<CompareOpenOutcome> {
+    const feedback = { message: null as string | null }
+    const opened = await pickDirectoryPair((message) => {
+      feedback.message = message
+    })
+    return opened ? { ok: true } : { ok: false, error: feedback.message }
   }
 
   /**
@@ -904,6 +972,15 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         />
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {/* The manual entry is permanent: with or without sessions on screen. */}
+          <ToolbarButton
+            icon={<GitCompare aria-hidden className="size-3.5" />}
+            onClick={() => setCompareDialogOpen(true)}
+            disabled={directoryBusy}
+            title="输入或粘贴左右两个真实路径，免系统弹窗建立对比（Cmd/Ctrl+N）"
+          >
+            新建对比
+          </ToolbarButton>
           {/* With a session on screen the empty-state CTAs are gone, so the
               toolbar keeps both real-open actions one click away. */}
           {status === 'empty' ? null : (
@@ -978,11 +1055,18 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <StateView
             icon={<GitCompare aria-hidden className="size-5" />}
             title="打开真实文件或文件夹开始对比"
-            description="经系统选择器依次选择左右两侧的两个文件或两个文件夹，或直接把两个真实路径拖入窗口。对比直接读取本机文件系统，无需加载任何样本。"
+            description="在「新建对比」中直接输入或粘贴左右两个真实路径，全程不弹系统对话框；也可以经系统选择器依次选择两侧，或直接把两个真实路径拖入窗口。对比直接读取本机文件系统，无需加载任何样本。"
             action={
               <>
                 <ToolbarButton
                   variant="primary"
+                  icon={<GitCompare aria-hidden className="size-3.5" />}
+                  onClick={() => setCompareDialogOpen(true)}
+                  disabled={directoryBusy}
+                >
+                  新建对比
+                </ToolbarButton>
+                <ToolbarButton
                   icon={<FileCode2 aria-hidden className="size-3.5" />}
                   onClick={() => void pickFilePair()}
                   disabled={directoryBusy}
@@ -1031,6 +1115,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
         {status === 'ready' && active ? renderScene(active) : null}
       </main>
+
+      {compareDialogOpen ? (
+        <NewCompareDialog
+          platform={platform}
+          onClose={closeCompareDialog}
+          openRequest={openCompareRequest}
+          onPickFiles={pickFilesFromDialog}
+          onPickDirectories={pickDirectoriesFromDialog}
+        />
+      ) : null}
 
       {closeTarget ? (
         <Dialog

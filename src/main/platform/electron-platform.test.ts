@@ -38,6 +38,8 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
 
 const platform: PlatformPort = {
   kind: 'electron',
+  homeDirectory: () => invoke(PLATFORM_CHANNELS.homeDirectory) as Promise<string>,
+  workingDirectory: () => invoke(PLATFORM_CHANNELS.workingDirectory) as Promise<string>,
   selectDirectory: async () => null,
   selectFile: (options) => invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
   // Drag & drop paths are resolved in preload (`webUtils`), not over IPC.
@@ -130,6 +132,11 @@ describe('electron real-directory sync', () => {
 })
 
 describe('path probe', () => {
+  it('exposes the home and working directories explicitly', async () => {
+    await expect(platform.homeDirectory()).resolves.toBe(tmpdir())
+    await expect(platform.workingDirectory()).resolves.toBe(process.cwd())
+  })
+
   it('reports the same file/directory/missing semantics as the web port', async () => {
     expect(await platform.statPath('/samples')).toBe('directory')
     expect(await platform.statPath('/samples/csv/orders.left.csv')).toBe('file')

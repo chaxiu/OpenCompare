@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
@@ -862,5 +862,449 @@ describe('session tabs lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
     expect(screen.getByRole('alert').textContent).toContain('没有其他目录对比会话可返回')
     expect(screen.queryByRole('heading', { name: EMPTY_TITLE })).toBeNull()
+  })
+})
+
+describe('new compare dialog', () => {
+  const LEFT_SPACED = '/memory/左 a.txt'
+  const RIGHT_SPACED = '/memory/右 b.txt'
+
+  function dialog(): HTMLElement {
+    return screen.getByRole('dialog', { name: '新建对比' })
+  }
+
+  function openDialog(): HTMLElement {
+    fireEvent.click(screen.getAllByRole('button', { name: '新建对比' })[0])
+    return dialog()
+  }
+
+  function fillPaths(left: string, right: string): void {
+    const panel = dialog()
+    fireEvent.change(within(panel).getByLabelText('左侧路径'), { target: { value: left } })
+    fireEvent.change(within(panel).getByLabelText('右侧路径'), { target: { value: right } })
+  }
+
+  function submitDialog(): void {
+    fireEvent.click(within(dialog()).getByRole('button', { name: '建立对比' }))
+  }
+
+  function sessionTabs(): HTMLElement {
+    return screen.getByRole('tablist', { name: '会话' })
+  }
+
+  /** Writes one in-memory file per path so the manual entry can probe it. */
+  async function writeFiles(
+    platform: PlatformPort,
+    files: readonly (readonly [string, string])[]
+  ): Promise<void> {
+    for (const [path, text] of files) await platform.writeTextFile(path, text)
+  }
+
+  it('keeps「新建对比」in the toolbar in the empty state and with sessions', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+
+    expect(screen.getAllByRole('button', { name: '新建对比' }).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+
+    const buttons = screen.getAllByRole('button', { name: '新建对比' })
+    expect(buttons).toHaveLength(1)
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('offers two path inputs and both picker actions inside the dialog', async () => {
+    const base = createWebPlatformPort()
+    const files = [LEFT_ENGINE, RIGHT_ENGINE]
+    const selectFile = vi.fn(async () => files.shift() ?? null)
+    render(<Workbench platform={{ ...base, selectFile }} />)
+
+    const panel = openDialog()
+    expect(within(panel).getByLabelText('左侧路径')).toBeDefined()
+    expect(within(panel).getByLabelText('右侧路径')).toBeDefined()
+
+    fireEvent.click(within(panel).getByRole('button', { name: '打开文件' }))
+
+    expect(await screen.findByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
+    expect(selectFile).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull()
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`
+    )
+  })
+
+  it('opens a directory pair from the dialog picker', async () => {
+    const base = createWebPlatformPort()
+    const directories = [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    const selectDirectory = vi.fn(async () => directories.shift() ?? null)
+    render(<Workbench platform={{ ...base, selectDirectory }} />)
+
+    fireEvent.click(within(openDialog()).getByRole('button', { name: '打开文件夹' }))
+
+    expect(
+      await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(selectDirectory).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('tablist', { name: '差异过滤' })).toBeDefined()
+  })
+
+  it('opens with Cmd/Ctrl+N, ignores repeats and closes on Escape without touching sessions', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    const before = screen.getByRole('contentinfo').textContent
+
+    fireEvent.keyDown(document, { key: 'n', metaKey: true })
+    expect(screen.getAllByRole('dialog', { name: '新建对比' })).toHaveLength(1)
+    fireEvent.keyDown(document, { key: 'n', metaKey: true })
+    expect(screen.getAllByRole('dialog', { name: '新建对比' })).toHaveLength(1)
+
+    // Focus lands on the left input and editing shortcuts stay untouched.
+    const leftInput = within(dialog()).getByLabelText('左侧路径')
+    expect(document.activeElement).toBe(leftInput)
+    fireEvent.keyDown(leftInput, { key: 'a', metaKey: true })
+    expect(dialog()).toBeDefined()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull()
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)
+    expect(screen.getByRole('contentinfo').textContent).toBe(before)
+  })
+
+  it('submits once on Enter and disables the button while the session is built', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      [LEFT_SPACED, 'left\n'],
+      [RIGHT_SPACED, 'right\n']
+    ])
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const reads: string[] = []
+    const port: PlatformPort = {
+      ...base,
+      readTextFile: async (path) => {
+        reads.push(path)
+        await gate
+        return base.readTextFile(path)
+      }
+    }
+    render(<Workbench platform={port} />)
+
+    const panel = openDialog()
+    fillPaths(LEFT_SPACED, RIGHT_SPACED)
+    const submit = within(panel).getByRole('button', { name: '建立对比' }) as HTMLButtonElement
+
+    fireEvent.keyDown(within(panel).getByLabelText('左侧路径'), { key: 'Enter' })
+    await waitFor(() => expect(submit.disabled).toBe(true))
+
+    // Repeats while the build is in flight must not start a second request.
+    fireEvent.keyDown(within(panel).getByLabelText('左侧路径'), { key: 'Enter' })
+    fireEvent.keyDown(within(panel).getByLabelText('右侧路径'), { key: 'Enter' })
+    release()
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull())
+    expect(reads).toEqual([LEFT_SPACED, RIGHT_SPACED])
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)
+  })
+
+  it('builds a code session from typed real file paths', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      [LEFT_SPACED, '左\n'],
+      [RIGHT_SPACED, '右\n']
+    ])
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths(LEFT_SPACED, RIGHT_SPACED)
+    submitDialog()
+
+    const tab = await screen.findByRole('tab', { name: /左 a\.txt/ }, { timeout: 4000 })
+    expect(tab.getAttribute('aria-selected')).toBe('true')
+    expect(tab.textContent).toContain(`${LEFT_SPACED} ↔ ${RIGHT_SPACED}`)
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
+  })
+
+  it('builds a directory session from typed real directory paths', async () => {
+    render(<Workbench platform={createWebPlatformPort()} />)
+
+    openDialog()
+    fillPaths(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
+    submitDialog()
+
+    expect(
+      await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(screen.getByRole('tablist', { name: '差异过滤' })).toBeDefined()
+    expect(screen.getAllByText('engine.ts').length).toBeGreaterThan(0)
+  })
+
+  it('strips paired quotes and surrounding whitespace before probing', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      [LEFT_SPACED, 'left\n'],
+      [RIGHT_SPACED, 'right\n']
+    ])
+    const stats: string[] = []
+    const reads: string[] = []
+    const port: PlatformPort = {
+      ...base,
+      statPath: async (path) => {
+        stats.push(path)
+        return base.statPath(path)
+      },
+      readTextFile: async (path) => {
+        reads.push(path)
+        return base.readTextFile(path)
+      }
+    }
+    render(<Workbench platform={port} />)
+
+    openDialog()
+    fillPaths(`"  ${LEFT_SPACED}  "`, `“  ${RIGHT_SPACED}  ”`)
+    submitDialog()
+
+    const tab = await screen.findByRole('tab', { name: /左 a\.txt/ }, { timeout: 4000 })
+    expect(tab.textContent).toContain(`${LEFT_SPACED} ↔ ${RIGHT_SPACED}`)
+    expect(tab.textContent).not.toContain('"')
+    expect(tab.textContent).not.toContain('“')
+    expect(stats).toEqual([LEFT_SPACED, RIGHT_SPACED])
+    expect(reads).toEqual([LEFT_SPACED, RIGHT_SPACED])
+  })
+
+  it('expands ~ and resolves relative paths against the platform base', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/Users/demo/项目/a.txt', 'home\n'],
+      ['/memory/a.txt', 'relative\n']
+    ])
+    const stats: string[] = []
+    const port: PlatformPort = {
+      ...base,
+      homeDirectory: async () => '/Users/demo',
+      workingDirectory: async () => '/memory',
+      statPath: async (path) => {
+        stats.push(path)
+        return base.statPath(path)
+      }
+    }
+    render(<Workbench platform={port} />)
+
+    openDialog()
+    fillPaths('~/项目/a.txt', 'a.txt')
+    submitDialog()
+
+    const tab = await screen.findByRole('tab', { name: /a\.txt/ }, { timeout: 4000 })
+    expect(tab.textContent).toContain('/Users/demo/项目/a.txt ↔ /memory/a.txt')
+    expect(stats).toEqual(['/Users/demo/项目/a.txt', '/memory/a.txt'])
+  })
+
+  it('never opens a native picker or save dialog for a typed pair', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      [LEFT_SPACED, 'left\n'],
+      [RIGHT_SPACED, 'right\n']
+    ])
+    const selectFile = vi.fn(async () => null)
+    const selectDirectory = vi.fn(async () => null)
+    const saveFile = vi.fn(async () => null)
+    render(
+      <Workbench platform={{ ...base, selectFile, selectDirectory, saveFile }} />
+    )
+
+    openDialog()
+    fillPaths(LEFT_SPACED, RIGHT_SPACED)
+    submitDialog()
+
+    await screen.findByRole('tab', { name: /左 a\.txt/ }, { timeout: 4000 })
+    expect(selectFile).not.toHaveBeenCalled()
+    expect(selectDirectory).not.toHaveBeenCalled()
+    expect(saveFile).not.toHaveBeenCalled()
+  })
+
+  it('adds one tab and keeps the existing session in place', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/x.txt', 'x\n'],
+      ['/memory/y.txt', 'y\n']
+    ])
+    const files = [LEFT_ENGINE, RIGHT_ENGINE]
+    render(<Workbench platform={{ ...base, selectFile: async () => files.shift() ?? null }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    const firstTab = within(sessionTabs()).getAllByRole('tab')[0]
+    const firstText = firstTab.textContent
+
+    openDialog()
+    fillPaths('/memory/x.txt', '/memory/y.txt')
+    submitDialog()
+
+    const added = await screen.findByRole('tab', { name: /x\.txt/ }, { timeout: 4000 })
+    const tabs = within(sessionTabs()).getAllByRole('tab')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[0].textContent).toBe(firstText)
+    expect(added.getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('contentinfo').textContent).toContain('/memory/x.txt ↔ /memory/y.txt')
+  })
+
+  it('re-submitting the same pair keeps a single tab', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      [LEFT_SPACED, 'left\n'],
+      [RIGHT_SPACED, 'right\n']
+    ])
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths(LEFT_SPACED, RIGHT_SPACED)
+    submitDialog()
+    await screen.findByRole('tab', { name: /左 a\.txt/ }, { timeout: 4000 })
+    const firstStatus = screen.getByRole('contentinfo').textContent
+
+    openDialog()
+    fillPaths(LEFT_SPACED, RIGHT_SPACED)
+    submitDialog()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull())
+
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)
+    expect(screen.getByRole('contentinfo').textContent).toBe(firstStatus)
+  })
+
+  it('names the missing right path and opens no tab', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [['/memory/left.txt', 'left\n']])
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths('/memory/left.txt', '/memory/right-missing.txt')
+    submitDialog()
+
+    const alert = await within(dialog()).findByRole('alert')
+    expect(alert.textContent).toContain('右侧')
+    expect(alert.textContent).toContain('/memory/right-missing.txt')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+    expect(dialog()).toBeDefined()
+  })
+
+  it('rejects an empty side without probing either path', async () => {
+    const base = createWebPlatformPort()
+    const statPath = vi.fn(base.statPath)
+    render(<Workbench platform={{ ...base, statPath }} />)
+
+    openDialog()
+    fillPaths('/memory/left.txt', '')
+    submitDialog()
+
+    const alert = await within(dialog()).findByRole('alert')
+    expect(alert.textContent).toContain('右侧')
+    expect(alert.textContent).toContain('路径为空')
+    expect(statPath).not.toHaveBeenCalled()
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
+  it('rejects a file / directory pair and keeps the dialog open', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [['/memory/a.txt', 'a\n']])
+    await base.ensureDirectory('/memory/folder')
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths('/memory/a.txt', '/memory/folder')
+    submitDialog()
+
+    const alert = await within(dialog()).findByRole('alert')
+    expect(alert.textContent).toContain('类型不一致')
+    expect(alert.textContent).toContain('/memory/a.txt')
+    expect(alert.textContent).toContain('/memory/folder')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
+  it('lists the supported families for an unsupported extension', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/a.bin', 'a'],
+      ['/memory/b.bin', 'b']
+    ])
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths('/memory/a.bin', '/memory/b.bin')
+    submitDialog()
+
+    const alert = await within(dialog()).findByRole('alert')
+    expect(alert.textContent).toContain('不支持')
+    expect(alert.textContent).toContain('代码/文本')
+    expect(alert.textContent).toContain('CSV/TSV')
+    expect(alert.textContent).toContain('JSON/YAML')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
+  it('rejects a mixed file family without creating a blank tab', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/a.json', '{}\n'],
+      ['/memory/b.yaml', 'a: 1\n']
+    ])
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths('/memory/a.json', '/memory/b.yaml')
+    submitDialog()
+
+    const alert = await within(dialog()).findByRole('alert')
+    expect(alert.textContent).toContain('两侧文件类型不一致')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
+  it('keeps the active session and status bar unchanged when a submit fails', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    const before = screen.getByRole('contentinfo').textContent
+
+    openDialog()
+    fillPaths(LEFT_ENGINE, '/memory/does-not-exist.txt')
+    submitDialog()
+
+    await within(dialog()).findByRole('alert')
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)
+    // The dialog's own footer is a second landmark while it stays open.
+    expect(screen.getAllByRole('contentinfo').at(-1)?.textContent).toBe(before)
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
+  })
+
+  it('keeps unsaved working copies across manual sessions', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/l1.txt', 'a\nb\n'],
+      ['/memory/r1.txt', 'a\nc\n'],
+      ['/memory/l2.txt', 'x\n'],
+      ['/memory/r2.txt', 'y\n']
+    ])
+    render(<Workbench platform={base} />)
+
+    openDialog()
+    fillPaths('/memory/l1.txt', '/memory/r1.txt')
+    submitDialog()
+    await screen.findByRole('tab', { name: /l1\.txt/ }, { timeout: 4000 })
+
+    openDialog()
+    fillPaths('/memory/l2.txt', '/memory/r2.txt')
+    submitDialog()
+    await screen.findByRole('tab', { name: /l2\.txt/ }, { timeout: 4000 })
+
+    fireEvent.click(within(sessionTabs()).getByRole('tab', { name: /l1\.txt/ }))
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    expect(screen.getByText('未保存：右')).toBeDefined()
+
+    fireEvent.click(within(sessionTabs()).getByRole('tab', { name: /l2\.txt/ }))
+    expect(screen.queryByText('未保存：右')).toBeNull()
+
+    fireEvent.click(within(sessionTabs()).getByRole('tab', { name: /l1\.txt/ }))
+    expect(screen.getByText('未保存：右')).toBeDefined()
+    expect(screen.getByText('已修改（未保存）')).toBeDefined()
   })
 })

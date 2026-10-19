@@ -12,6 +12,7 @@
 - **稳定错误码**：重复边（同一入口给出两次 left 或 right）、缺边、空串、未知 scheme/host 均产出稳定错误码与中文提示。
 - **校验与类型探测**：解析结果 + `PlatformPort` 探测（`statPath` 真实路径校验 / file·directory 类型探测）合并为最终 `CompareRequest`；定义不存在、单边不存在、file↔directory 类型不一致、扩展名不受支持、权限拒绝的错误码与可读中文提示。
 - **`PlatformPort` 扩展**：新增一次路径探测调用（返回 `file` / `directory` / `missing` 语义），Electron 实现走 `fs.stat`，Web 实现基于内存虚拟文件系统给出同构结果；preload 只加白名单 channel。
+- **路径上下文的平台来源**：`~` 展开与相对路径解析所需的 `homeDir` / `baseDir` 由 `PlatformPort` 显式提供只读查询 `homeDirectory()` / `workingDirectory()`，Electron 实现分别用 `app.getPath('home')` 与 `process.cwd()`，Web 实现都返回内存沙箱根 `/memory`；preload 只新增白名单 channel（`platform:home-directory` / `platform:working-directory`），不暴露 Node，两套实现单测同构。
 - **扩展名白名单单一来源**：支持的文件扩展名集合在 shared 定义一次，renderer 既有 `fileKinds.ts` 判定复用它，避免两套白名单漂移（不改变既有分类结果）。
 - **自动化单测**：覆盖空格 / 中文 / Unicode / 引号 / `~` / 相对路径 / 缺边 / 重复参数 / 类型不匹配 / 不支持文件类型 / 权限错误；错误码与提示可直接被 UI 与主进程消费。
 
@@ -40,11 +41,12 @@
 - **ac-error-precedence**：多重错误同时存在时按固定顺序返回首个：`EMPTY_PATH` → `DUPLICATE_SIDE`/`MISSING_SIDE` → `UNKNOWN_SCHEME`/`UNKNOWN_ACTION` → `NOT_FOUND` → `TYPE_MISMATCH` → `UNSUPPORTED_FILE_TYPE`；左侧问题先于右侧。
 - **ac-error-shape-stable**：所有失败结果统一为 `{ ok: false, error: { code, message } }`，`code` 属于固定联合类型（上列字符串字面量），`message` 非空且为中文可读文本；解析函数对任何畸形输入都返回结果而非抛出异常。
 - **ac-platform-web-parity**：Web `PlatformPort` 实现对新探测能力返回与 Electron 实现相同的 `file`/`directory`/`missing` 语义：内存中存在的文件 → `file`、目录 → `directory`、不存在路径 → `missing`；同一组路径用例在两个实现的单测中结果一致。
+- **ac-platform-home-workdir**：`PlatformPort.homeDirectory()` 与 `workingDirectory()` 在两套实现中都返回绝对路径字符串：Electron 分别等于 `app.getPath('home')` 与 `process.cwd()`（单测断言），Web 均返回内存沙箱根 `/memory`；两套实现均有单测，preload 只桥接白名单 channel，renderer 不读环境变量猜测基准目录。
 - **ac-pure-layer**：新增的解析/校验模块位于 `src/shared/`，不 import electron、react、node:fs 或任何 DOM API（以单测扫描 import 或 ESLint 限制断言），可被 vitest 在 node 环境直接运行。
 
 ## 非目标
 
-- 不做任何 UI：不加「新建对比」入口、输入框、错误提示样式或快捷键；不改 `Workbench.tsx` / `App.tsx` 的可见行为。
+- 本域不做 UI：顶栏「新建对比」入口、路径输入对话框、错误提示样式与 `Cmd/Ctrl+N` 快捷键属 `workbench` 域，本域只提供被它消费的纯契约与平台查询；不改对比算法、会话模型与任何视图。
 - 不做主进程单实例锁、argv 收集、`opencompare` 协议注册、`open-url` / `second-instance` 接管、请求队列与窗口聚焦（属后续启动参数/URL 注入项）。
 - 不做「保存左/右文件」原位写回，不改任何会话构建逻辑与 `WorkbenchSession` / `ComparisonSides` 语义。
 - 不新增运行时依赖，不做路径沙箱/安全策略（如允许根目录白名单）。
@@ -64,8 +66,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_e6ad25e5c9f149b9`（`CompareRequest` 契约：手工 / argv / URL 三入口解析规范化 + 探测校验，`kind: feature`）
+- WI：`wi_ws_2bb64d43d7ceba21`（为手工路径入口补 `PlatformPort` 显式路径上下文，`kind: feature`）
 - 日期：2026-10-20
 - 结果：self_test skipped（本项无 UI 自测，改由 code_gates 关点）。
-- 覆盖摘要：新增纯模块 `src/shared/compareRequest.ts`（`ComparePaths` / `CompareRequest` / `CompareResult` / `ParsedComparePaths` / `PathContext` / `PathProbe`，导出 `parseCompareUrl`、`parseCompareArgv`、`parseManualPaths`、`resolveCompareRequest`）：URL 百分号与 `+` 解码 + scheme/host 校验（`UNKNOWN_SCHEME` / `UNKNOWN_ACTION`）、argv 支持 `--left/--right` 空格与 `=` 两种形态、裸双位置参数、忽略 Chromium/Electron 噪声开关、手工输入去空白 / 剥成对引号（含中文引号）/ `~` 展开（`~user` 不展开）/ 相对路径按显式 `baseDir` 词法折叠 / 仅去根以外尾部斜杠，全程不在 shared 读 `process.env` / `os` / `window`；`resolveCompareRequest` 经 `PathProbe` 每侧探测一次产出 `kind: 'file' | 'directory'`，错误按 `EMPTY_PATH` → `DUPLICATE_SIDE`/`MISSING_SIDE` → `UNKNOWN_SCHEME`/`UNKNOWN_ACTION` → `NOT_FOUND` → `TYPE_MISMATCH` → `UNSUPPORTED_FILE_TYPE` 固定顺序、左侧优先，EACCES/EPERM 归为 `ACCESS_DENIED`，失败统一 `{ ok: false, error: { code, message } }` 中文提示。新增 `src/shared/fileExtensions.ts` 作为扩展名白名单单一来源（文本/代码、CSV/TSV、JSON/YAML，大小写不敏感），`src/renderer/src/workbench/fileKinds.ts` 改为复用（分类结果不变）。`PlatformPort` 新增 `statPath`（`'file' | 'directory' | 'missing'`）：Electron 实现走 `fs.stat` 并保留 `/samples` 只读虚拟路径语义，preload 白名单加 `PLATFORM_CHANNELS.statPath`，Web 内存实现按内存节点同构返回；两侧平台单测补齐 `statPath` 成功/缺失用例。`src/shared/compareRequest.test.ts` 覆盖空格 / 中文 / emoji / 引号 / `~` / 相对路径 / 缺边 / 重复参数 / 裸双参数 / 类型不匹配 / 不支持扩展名 / 权限拒绝 / 错误优先级 / 纯层 import 约束；`install` / `lint` / `typecheck` / `build` / `build:web` / `test` 六条门禁全绿。
-- 注：本 WI change pack 未提供 `tests/cases/**`，本域 `qa/` 暂无折叠用例；tech/ux 折叠跳过（未提供 `tech.md` / `ux/**`）。后续「新建对比」UI 与主进程单实例/协议接管项应折入本域，并复用本域契约而不再另造解析逻辑。
+- 覆盖摘要：`PlatformPort` 新增只读查询 `homeDirectory()` / `workingDirectory()`（`src/shared/platform/types.ts`），`channels.ts` 收敛 `platform:home-directory` / `platform:working-directory` 两个白名单 channel；Electron 实现分别 `app.getPath('home')` / `process.cwd()`，preload 白名单桥接，Web 内存实现两者都返回沙箱根 `/memory`（注释说明浏览器无 cwd / home）。`electron-platform.test.ts` 断言 home 为临时目录、workdir 为 `process.cwd()`；`web-platform.test.ts` 断言两者均为 `/memory`；`App.test.tsx` 的「~ 与相对路径」用例通过覆写这两个方法固定为 `/Users/demo` / `/memory`，验证 `~/项目/a.txt` 与 `a.txt` 落到契约规定的绝对路径。本域纯契约（`parseManualPaths` / `resolveCompareRequest`）未改；服务端消费方是 `workbench` 域的 `NewCompareDialog`。
+- 注：本 WI change pack 未提供 `tests/cases/**` / `tech.md` / `ux/**`，无新增折叠用例；既有 `qa/` 用例仍有效。

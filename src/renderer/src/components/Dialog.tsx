@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { JSX, ReactNode } from 'react'
+import type { JSX, ReactNode, RefObject } from 'react'
 import { X } from 'lucide-react'
 import { IconButton } from './Button'
 
@@ -9,6 +9,8 @@ export interface DialogProps {
   readonly description?: ReactNode
   readonly onClose: () => void
   readonly footer?: ReactNode
+  /** Element focused on mount instead of the dialog panel. */
+  readonly initialFocusRef?: RefObject<HTMLElement | null>
   readonly children: ReactNode
 }
 
@@ -22,19 +24,21 @@ export function Dialog({
   description,
   onClose,
   footer,
+  initialFocusRef,
   children
 }: DialogProps): JSX.Element {
   const panel = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    panel.current?.focus()
+    const target = initialFocusRef?.current ?? panel.current
+    target?.focus()
 
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [onClose, initialFocusRef])
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-surface-base/70 p-4">
