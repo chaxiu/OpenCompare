@@ -34,7 +34,7 @@ import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
 import { TEXT_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
-import type { FilePair } from '@renderer/workbench/session'
+import type { CodeFileBuffer, FilePair } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
 
@@ -77,22 +77,36 @@ function offsetTop(range: MergeRange): number {
 
 function CodeDiffView({
   pair,
+  buffer,
   platform,
-  onDirtyChange
+  onDirtyChange,
+  onBufferChange
 }: {
   readonly pair: FilePair
+  /** Working copies kept on the session, used when the view remounts. */
+  readonly buffer?: CodeFileBuffer
   readonly platform: PlatformPort
   /** Reports whether any side now differs from its loaded disk content. */
   readonly onDirtyChange?: (dirty: boolean) => void
+  /** Reports the editable state up so a tab switch cannot drop unsaved work. */
+  readonly onBufferChange?: (buffer: CodeFileBuffer) => void
 }): JSX.Element {
-  const [leftPath, setLeftPath] = useState(pair.left.path)
-  const [rightPath, setRightPath] = useState(pair.right.path)
+  const initial = {
+    leftPath: buffer?.leftPath ?? pair.left.path,
+    rightPath: buffer?.rightPath ?? pair.right.path,
+    leftSource: buffer?.leftSource ?? pair.left.text,
+    rightSource: buffer?.rightSource ?? pair.right.text,
+    leftText: buffer?.leftText ?? pair.left.text,
+    rightText: buffer?.rightText ?? pair.right.text
+  }
+  const [leftPath, setLeftPath] = useState(initial.leftPath)
+  const [rightPath, setRightPath] = useState(initial.rightPath)
   // The loaded bodies (reset target) are kept apart from the working copies the
   // per-block overwrite mutates. A side is dirty once the two diverge again.
-  const [leftSource, setLeftSource] = useState(pair.left.text)
-  const [rightSource, setRightSource] = useState(pair.right.text)
-  const [leftText, setLeftText] = useState(pair.left.text)
-  const [rightText, setRightText] = useState(pair.right.text)
+  const [leftSource, setLeftSource] = useState(initial.leftSource)
+  const [rightSource, setRightSource] = useState(initial.rightSource)
+  const [leftText, setLeftText] = useState(initial.leftText)
+  const [rightText, setRightText] = useState(initial.rightText)
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const [active, setActive] = useState(0)
 
@@ -110,6 +124,21 @@ function CodeDiffView({
   useEffect(() => {
     dirtyCallback.current?.(dirty)
   }, [dirty])
+
+  const bufferCallback = useRef(onBufferChange)
+  useEffect(() => {
+    bufferCallback.current = onBufferChange
+  })
+  useEffect(() => {
+    bufferCallback.current?.({
+      leftPath,
+      rightPath,
+      leftSource,
+      rightSource,
+      leftText,
+      rightText
+    })
+  }, [leftPath, rightPath, leftSource, rightSource, leftText, rightText])
 
   const diff = useMemo(() => diffLineTexts(leftText, rightText), [leftText, rightText])
 
@@ -654,19 +683,25 @@ export function CodeView({
   fixture,
   defaultMode = 'merge',
   pair,
+  buffer,
   platform,
   onMergeStateChange,
-  onDirtyChange
+  onDirtyChange,
+  onBufferChange
 }: {
   readonly fixture?: CodeSceneFixture
   /** Three-column merge is the default for a session declared with three panes. */
   readonly defaultMode?: CodeMode
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
+  /** Working copies kept on the session, used when the view remounts. */
+  readonly buffer?: CodeFileBuffer
   readonly platform: PlatformPort
   readonly onMergeStateChange?: (state: CodeMergeState) => void
   /** Reports the diff pair's unsaved state up to the session model. */
   readonly onDirtyChange?: (dirty: boolean) => void
+  /** Reports the diff pair's editable state up to the session model. */
+  readonly onBufferChange?: (buffer: CodeFileBuffer) => void
 }): JSX.Element {
   const [mode, setMode] = useState<CodeMode>(defaultMode)
   const adhoc = pair !== undefined
@@ -731,7 +766,13 @@ export function CodeView({
       </div>
 
       {effectiveMode === 'diff' && diffPair ? (
-        <CodeDiffView pair={diffPair} platform={platform} onDirtyChange={onDirtyChange} />
+        <CodeDiffView
+          pair={diffPair}
+          buffer={buffer}
+          platform={platform}
+          onDirtyChange={onDirtyChange}
+          onBufferChange={onBufferChange}
+        />
       ) : mergeSides && model ? (
         <CodeMergeView
           sides={mergeSides}
