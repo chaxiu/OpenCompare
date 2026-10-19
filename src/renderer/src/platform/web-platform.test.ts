@@ -62,6 +62,20 @@ describe('web PlatformPort', () => {
   })
 })
 
+describe('web path probe', () => {
+  it('reports the same file/directory/missing semantics as the Electron port', async () => {
+    const platform = createWebPlatformPort()
+
+    expect(await platform.statPath('/samples')).toBe('directory')
+    expect(await platform.statPath('/samples/csv/orders.left.csv')).toBe('file')
+    expect(await platform.statPath('/samples/does-not-exist.txt')).toBe('missing')
+
+    await platform.writeTextFile('/memory/probe.txt', 'hello')
+    expect(await platform.statPath('/memory/probe.txt')).toBe('file')
+    expect(await platform.statPath('/memory/absent.txt')).toBe('missing')
+  })
+})
+
 describe('web file dialogs', () => {
   it('materialises a picked file into the memory file system', async () => {
     const platform = createWebPlatformPort()

@@ -20,6 +20,10 @@ const platform: PlatformPort = {
   writeTextFile: (path, content, modifiedMs) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
+  statPath: (path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.statPath, path) as Promise<
+      'file' | 'directory' | 'missing'
+    >,
   ensureDirectory: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,

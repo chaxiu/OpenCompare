@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
 import { buildSyncPlan } from '@core/directory/sync'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
+import type { DirectoryEntry, PathProbeKind, PlatformPort } from '@shared/platform/types'
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import { registerPlatformIpc } from './electron-platform'
 
@@ -48,6 +48,7 @@ const platform: PlatformPort = {
   writeTextFile: (path, content, modifiedMs) =>
     invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
+  statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
   ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
   temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>
@@ -125,6 +126,24 @@ describe('electron real-directory sync', () => {
 
     const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
     expect(second.totalCount).toBe(0)
+  })
+})
+
+describe('path probe', () => {
+  it('reports the same file/directory/missing semantics as the web port', async () => {
+    expect(await platform.statPath('/samples')).toBe('directory')
+    expect(await platform.statPath('/samples/csv/orders.left.csv')).toBe('file')
+    expect(await platform.statPath('/samples/does-not-exist.txt')).toBe('missing')
+
+    const root = await scratchRoot()
+    const directory = join(root, 'folder')
+    const file = join(root, 'note.txt')
+    await mkdir(directory, { recursive: true })
+    await writeFile(file, 'hello')
+
+    expect(await platform.statPath(directory)).toBe('directory')
+    expect(await platform.statPath(file)).toBe('file')
+    expect(await platform.statPath(join(root, 'absent'))).toBe('missing')
   })
 })
 
