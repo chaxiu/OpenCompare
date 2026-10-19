@@ -236,6 +236,11 @@ export function createWebPlatformPort(): PlatformPort {
       writeNode(path, content, modifiedMs)
     },
     exists: async (path) => nodes.has(path),
+    statPath: async (path) => {
+      const node = nodes.get(path)
+      if (!node) return 'missing'
+      return node.isDirectory ? 'directory' : 'file'
+    },
     ensureDirectory: async (path) => {
       if (isSamplePath(path)) return
       ensureDirectoryNode(path)

@@ -35,6 +35,9 @@ export interface SaveFileOptions extends SelectFileOptions {
   readonly content: string
 }
 
+/** What lives at a path, as reported by {@link PlatformPort.statPath}. */
+export type PathProbeKind = 'file' | 'directory' | 'missing'
+
 export interface PlatformPort {
   readonly kind: PlatformKind
   /** Ask the user for a directory; resolves to `null` when cancelled. */
@@ -63,6 +66,11 @@ export interface PlatformPort {
    */
   writeTextFile(path: string, content: string, modifiedMs?: number): Promise<void>
   exists(path: string): Promise<boolean>
+  /**
+   * Reports whether `path` is a file, a directory, or absent. Permission and
+   * other I/O failures reject instead of guessing.
+   */
+  statPath(path: string): Promise<PathProbeKind>
   /** Creates `path` and any missing ancestors; a no-op when it already exists. */
   ensureDirectory(path: string): Promise<void>
   /** Removes one file. Directories and read-only mounts are rejected. */
