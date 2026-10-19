@@ -10,7 +10,7 @@ import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import type { DirectoryEntry } from '@shared/platform/types'
+import type { DirectoryEntry, PathProbeKind } from '@shared/platform/types'
 
 const SAMPLE_ROOT = '/samples'
 
@@ -151,6 +151,33 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+function isMissingError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/**
+ * `file` / `directory` / `missing` probe. Absence is a normal answer; any other
+ * failure (permissions, I/O) rejects so the caller can report it as unreadable.
+ */
+async function statPath(path: string): Promise<PathProbeKind> {
+  if (isSamplePath(path)) {
+    if (SAMPLE_FILES.has(path)) return 'file'
+    if (path === SAMPLE_ROOT) return 'directory'
+    const prefix = `${path}/`
+    return SAMPLE_FIXTURE_FILES.some((file) => file.path.startsWith(prefix))
+      ? 'directory'
+      : 'missing'
+  }
+  try {
+    const info = await stat(path)
+    return info.isDirectory() ? 'directory' : 'file'
+  } catch (error) {
+    if (isMissingError(error)) return 'missing'
+    throw error
+  }
+}
+
 function assertWritable(path: string): string {
   if (isSamplePath(path)) {
     throw new Error(`内置样本库挂在只读的 ${SAMPLE_ROOT} 上，不能写入：${path}`)
@@ -206,6 +233,9 @@ export function registerPlatformIpc(): void {
     const target = assertPath(path)
     return isSamplePath(target) ? samplePathExists(target) : exists(target)
   })
+  ipcMain.handle(PLATFORM_CHANNELS.statPath, (_event, path: unknown) =>
+    statPath(assertPath(path))
+  )
   ipcMain.handle(PLATFORM_CHANNELS.ensureDirectory, (_event, path: unknown) => {
     const target = assertPath(path)
     if (isSamplePath(target)) return undefined
