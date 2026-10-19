@@ -66,6 +66,13 @@ function extensionOf(name: string): string {
   return name.slice(dot + 1).toLowerCase()
 }
 
+/** Trailing separator tolerant base name of a POSIX or Windows path. */
+export function baseName(path: string): string {
+  const normalized = path.replace(/[\\/]+$/, '')
+  const separator = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+  return separator === -1 ? normalized : normalized.slice(separator + 1)
+}
+
 export function classifyFile(name: string): DrilldownTarget | null {
   const extension = extensionOf(name)
 

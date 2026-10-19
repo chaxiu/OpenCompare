@@ -40,6 +40,8 @@ const platform: PlatformPort = {
   kind: 'electron',
   selectDirectory: async () => null,
   selectFile: (options) => invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
+  // Drag & drop paths are resolved in preload (`webUtils`), not over IPC.
+  resolveDroppedPath: async () => '',
   saveFile: (options) => invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
   listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,

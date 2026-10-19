@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
 import { App } from './App'
 import { createWebPlatformPort } from './platform/web-platform'
+import { Workbench } from './workbench/Workbench'
 
 afterEach(cleanup)
+
+const EMPTY_TITLE = '打开真实文件或文件夹开始对比'
+const LEFT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.left}/src/core/engine.ts`
+const RIGHT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.right}/src/core/engine.ts`
+const LEFT_REPORT = `${DIRECTORY_SAMPLE_PATHS.left}/src/data/report.csv`
+const RIGHT_REPORT = `${DIRECTORY_SAMPLE_PATHS.right}/src/data/report.csv`
+const SAMPLE_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
 
 /** Runtime truth for the directory session: the engine over the sample roots. */
 async function compareSampleDirectory(): Promise<ReturnType<typeof compareDirectories>> {
@@ -20,25 +29,60 @@ async function compareSampleDirectory(): Promise<ReturnType<typeof compareDirect
   )
 }
 
+/** The built-in library is an auxiliary, explicitly labelled demo entry. */
+function loadDemoSamples(): void {
+  fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+}
+
+interface PortScript {
+  /** Answers of the successive `selectFile` calls; `undefined` cancels. */
+  readonly files?: readonly string[]
+  /** Answers of the successive `selectDirectory` calls. */
+  readonly directories?: readonly string[]
+  /** Paths resolved for the successive dropped handles. */
+  readonly dropped?: readonly string[]
+}
+
+/** Memory PlatformPort with scripted picker answers and dropped paths. */
+function scriptedPort(script: PortScript): PlatformPort {
+  const base = createWebPlatformPort()
+  const files = [...(script.files ?? [])]
+  const directories = [...(script.directories ?? [])]
+  const dropped = [...(script.dropped ?? [])]
+  return {
+    ...base,
+    selectFile: async () => files.shift() ?? null,
+    selectDirectory: async () => directories.shift() ?? null,
+    resolveDroppedPath: async () => dropped.shift() ?? ''
+  }
+}
+
+/** Dispatches a file drop whose handles resolve to `paths`. */
+function dropPaths(element: HTMLElement, paths: readonly string[]): boolean {
+  const files = paths.map((path) => new File([''], path.slice(path.lastIndexOf('/') + 1)))
+  return fireEvent.drop(element, { dataTransfer: { files, types: ['Files'] } })
+}
+
 describe('workbench shell', () => {
   it('mounts the empty workbench on the in-memory PlatformPort', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
     expect(screen.getByText('web')).toBeDefined()
-    expect(screen.getByRole('heading', { name: '尚未载入样本' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
     expect(screen.getByRole('tablist', { name: '视图切换' })).toBeDefined()
-    expect(screen.getAllByRole('button', { name: 'Load Sample Fixtures' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '打开文件' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '打开文件夹' })).toBeDefined()
   })
 
   it('shows the loading state, then every sample session', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     expect(screen.getByRole('heading', { name: '正在载入样本…' })).toBeDefined()
 
     expect(await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })).toBeDefined()
-    expect(screen.getByText('session-directory')).toBeDefined()
+    expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
     expect(screen.getAllByRole('tab', { name: /CSV 主键对比/ }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('tab', { name: /JSON \/ YAML/ }).length).toBeGreaterThan(0)
   })
@@ -46,7 +90,7 @@ describe('workbench shell', () => {
   it('switches the work area and the status bar with the active session', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     const codeTab = await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(codeTab)
@@ -60,7 +104,7 @@ describe('workbench shell', () => {
   it('shows the key-aligned CSV reconciliation with runtime counts', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: '样本' }))
+    fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /CSV 主键对比/ }))
 
     const total = CSV_SCENE.composition.same + CSV_SCENE.composition.added +
@@ -84,7 +128,7 @@ describe('workbench shell', () => {
   it('surfaces a readable, retryable error state', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: '样本' }))
+    fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /演示：样本读取失败/ }))
 
     expect(
@@ -96,7 +140,7 @@ describe('workbench shell', () => {
   it('filters the directory comparison and drills a file into its file view', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     // Runtime comparison: the paired file shows up in both projected panes.
@@ -124,13 +168,13 @@ describe('workbench shell', () => {
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
 
     expect(await screen.findByText('file:src/core/engine.ts', {}, { timeout: 4000 })).toBeDefined()
-    expect(screen.getByText(/来自目录对比下钻/)).toBeDefined()
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
   })
 
   it('drills CSV and YAML files into their typed views', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
@@ -140,7 +184,7 @@ describe('workbench shell', () => {
     expect(screen.getByRole('contentinfo').textContent).toContain('2相同1新增0删除1修改')
 
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
-    fireEvent.click(within(sessionTabs).getByRole('tab', { name: /目录对比/ }))
+    fireEvent.click(within(sessionTabs).getByRole('tab', { name: /baseline ↔ candidate/ }))
 
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
     expect(await screen.findByText('file:config/deploy.yaml', {}, { timeout: 4000 })).toBeDefined()
@@ -150,7 +194,7 @@ describe('workbench shell', () => {
   it('explains why a non-text file cannot be drilled into', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.doubleClick(screen.getAllByText('logo.png')[0])
@@ -158,18 +202,18 @@ describe('workbench shell', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('暂不支持')
     // the directory session stays put instead of silently doing nothing
-    expect(screen.getByText('session-directory')).toBeDefined()
+    expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
   })
 
   it('degrades the native directory picker on the web runtime', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     const leftPicker = screen.getByRole('button', { name: '选择左目录' }) as HTMLButtonElement
     const rightPicker = screen.getByRole('button', { name: '选择右目录' }) as HTMLButtonElement
-    const samplePicker = screen.getByRole('button', { name: '加载样本目录' }) as HTMLButtonElement
+    const samplePicker = screen.getByRole('button', { name: '加载演示目录' }) as HTMLButtonElement
 
     expect(leftPicker.disabled).toBe(true)
     expect(rightPicker.disabled).toBe(true)
@@ -180,7 +224,7 @@ describe('workbench shell', () => {
   it('previews a sync dry-run with byte totals and cancels without writing', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('tab', { name: '镜像' }))
@@ -201,7 +245,7 @@ describe('workbench shell', () => {
   it('applies the confirmed sync and refreshes the comparison tree', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))
@@ -217,7 +261,7 @@ describe('workbench shell', () => {
   it('previews the template placement and extracts it into a writable root', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Load Sample Fixtures' })[0])
+    loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
@@ -236,5 +280,206 @@ describe('workbench shell', () => {
     expect(notice.textContent).toContain('缺失 0')
     expect(notice.textContent).toContain('冲突 0')
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('real file workbench', () => {
+  it('opens two real files from the pickers without loading a sample', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+
+    expect(await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`
+    )
+    // A real pair lands on the shared file-session model, no sample scene involved.
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
+    expect(screen.queryByRole('tab', { name: /3-Way Merge/ })).toBeNull()
+  })
+
+  it('opens two real folders and labels the session with both roots', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          directories: [
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.incoming,
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    expect(
+      await screen.findByRole('tab', { name: /baseline ↔ incoming/ }, { timeout: 4000 })
+    ).toBeDefined()
+    // The tab subtitle carries the two real roots of this pair.
+    expect(
+      screen.getByText(
+        `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.incoming}`
+      )
+    ).toBeDefined()
+    expect(screen.getAllByText('engine.ts').length).toBeGreaterThan(0)
+
+    // A second pair adds its own tab instead of overwriting the first one.
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    expect(
+      await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)
+  })
+
+  it('leaves the workbench untouched when a picker is cancelled', async () => {
+    render(<Workbench platform={scriptedPort({})} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+    )
+    expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('opens nothing when the second picker is cancelled', async () => {
+    // The left side resolves, the right one is dismissed.
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE] })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+    )
+    expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('adds an independent tab for every opened pair', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          files: [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT, RIGHT_REPORT]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })
+
+    expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)
+    expect(screen.getAllByRole('tab', { name: /engine\.ts/ })).toHaveLength(1)
+  })
+
+  it('opens a pair when two same-kind paths are dropped', async () => {
+    render(
+      <Workbench platform={scriptedPort({ dropped: [LEFT_REPORT, RIGHT_REPORT] })} />
+    )
+
+    // The drop never reaches the browser default (which would navigate away).
+    expect(dropPaths(screen.getByRole('main'), [LEFT_REPORT, RIGHT_REPORT])).toBe(false)
+
+    expect(await screen.findByText('对齐 4 行 · 主键 order_id')).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `${LEFT_REPORT} ↔ ${RIGHT_REPORT}`
+    )
+  })
+
+  it('opens a directory session when two directories are dropped', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+        })}
+      />
+    )
+
+    dropPaths(screen.getByRole('main'), [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right])
+
+    expect(
+      await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain('差异')
+  })
+
+  it('keeps a single dropped path as the left baseline and asks for its counterpart', async () => {
+    render(
+      <Workbench platform={scriptedPort({ dropped: [LEFT_ENGINE], files: [RIGHT_ENGINE] })} />
+    )
+
+    dropPaths(screen.getByRole('main'), [LEFT_ENGINE])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(LEFT_ENGINE)
+    expect(alert.textContent).toContain('左侧基准')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+
+    // The next pick only asks for the right side and keeps the dropped baseline.
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    expect(await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`
+    )
+  })
+
+  it('rejects a drop of more than two paths without opening a session', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({ dropped: [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT] })}
+      />
+    )
+
+    dropPaths(screen.getByRole('main'), [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('两个文件或两个文件夹')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
+  it('rejects a mixed file / folder drop and keeps the current session', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          files: [LEFT_ENGINE, RIGHT_ENGINE],
+          dropped: [DIRECTORY_SAMPLE_PATHS.left, LEFT_REPORT]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    const before = screen.getByRole('contentinfo').textContent
+
+    dropPaths(screen.getByRole('main'), [DIRECTORY_SAMPLE_PATHS.left, LEFT_REPORT])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('一个是文件、一个是文件夹')
+    expect(screen.getByRole('contentinfo').textContent).toBe(before)
+    expect(screen.getAllByRole('tab', { name: /engine\.ts/ })).toHaveLength(1)
+  })
+
+  it('reports an unsupported extension without opening a session', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          files: [
+            `${DIRECTORY_SAMPLE_PATHS.left}/assets/logo.png`,
+            `${DIRECTORY_SAMPLE_PATHS.right}/assets/logo.png`
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('暂不支持对比 logo.png')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
   })
 })

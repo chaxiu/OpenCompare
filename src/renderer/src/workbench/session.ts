@@ -8,6 +8,7 @@
 import Papa from 'papaparse'
 import type { CsvSample, FixtureSession, SampleComposition, TextSample } from '@shared/fixtures'
 import type { DirectoryComparison } from '@core/directory/compare'
+import type { ComparisonSides } from './snapshotOps'
 
 export interface CsvTable {
   readonly header: readonly string[]
@@ -42,6 +43,12 @@ export interface WorkbenchSession extends FixtureSession {
   readonly tables?: CsvTables
   readonly adhoc?: AdhocFilePair
   readonly directory?: DirectoryComparison
+  /**
+   * The two inputs this directory session compares. They live on the session
+   * rather than in one shell-wide slot, so several directory pairs can be opened
+   * side by side without their pickers, drilldowns and snapshots crossing over.
+   */
+  readonly sides?: ComparisonSides
 }
 
 /** Parses one CSV/TSV side into a header plus data rows. */

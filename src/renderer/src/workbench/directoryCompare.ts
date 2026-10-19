@@ -1,25 +1,40 @@
 /**
- * Renderer-side directory comparison orchestration: turns comparison results
- * into workbench sessions (the directory session itself, plus file drilldown
- * sessions). Running a comparison lives in `snapshotOps` / `loadSampleSessions`.
+ * Renderer-side comparison orchestration: turns comparison results and opened
+ * real paths into workbench sessions (the directory session itself, plus the
+ * file pair sessions a picker, a drag & drop or a drilldown produces). Running a
+ * comparison lives in `snapshotOps` / `loadSampleSessions`.
  */
+import type { TextSample } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import type { DrilldownTarget } from './fileKinds'
+import { baseName, classifyFile } from './fileKinds'
 import type { AdhocFilePair, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
+import type { ComparisonSides } from './snapshotOps'
 
-/** Stable id of the single directory-comparison session. */
-export const DIRECTORY_SESSION_ID = 'session-directory'
+/**
+ * Stable id of one directory comparison, derived from the two roots so that
+ * opening a different pair adds a tab while reopening the same pair reuses it.
+ */
+export function directorySessionId(leftRoot: string, rightRoot: string): string {
+  return `directory:${leftRoot} ↔ ${rightRoot}`
+}
 
-/** Builds the directory session whose stats come from the runtime comparison. */
-export function createDirectorySession(comparison: DirectoryComparison): WorkbenchSession {
+/** Builds the directory session whose stats and inputs come from the runtime comparison. */
+export function createDirectorySession(
+  comparison: DirectoryComparison,
+  sides: ComparisonSides
+): WorkbenchSession {
   const { same, added, removed, modified } = comparison.counts
 
   return {
-    id: DIRECTORY_SESSION_ID,
+    id: directorySessionId(comparison.leftRoot, comparison.rightRoot),
     scene: 'directory',
-    title: '目录对比',
-    subtitle: `${comparison.leftName} ↔ ${comparison.rightName}`,
+    title: `${comparison.leftName} ↔ ${comparison.rightName}`,
+    // The subtitle carries the two real roots, so a session opened from the file
+    // system never reads as a sample path.
+    subtitle: `${comparison.leftRoot} ↔ ${comparison.rightRoot}`,
     columns: 2,
     composition: { ...comparison.counts, conflict: 0 },
     stats: [
@@ -27,7 +42,51 @@ export function createDirectorySession(comparison: DirectoryComparison): Workben
       { label: '文件（目标）', value: same + added + modified },
       { label: '差异', value: added + removed + modified }
     ],
-    directory: comparison
+    directory: comparison,
+    sides
+  }
+}
+
+/**
+ * Assembles a two-column file session from two resolved sides. Both the
+ * directory-tree drilldown and a real file pair opened from disk land here, so
+ * there is exactly one file-session model.
+ */
+export function createFilePairSession(
+  id: string,
+  title: string,
+  target: DrilldownTarget,
+  left: TextSample,
+  right: TextSample
+): WorkbenchSession {
+  const delimiter = target.delimiter ?? ','
+  const adhoc: AdhocFilePair = {
+    scene: target.kind,
+    pair: { left, right },
+    delimiter: target.delimiter,
+    format: target.format,
+    tables:
+      target.kind === 'csv'
+        ? {
+            left: parseCsvTable({ ...left, delimiter }),
+            right: parseCsvTable({ ...right, delimiter })
+          }
+        : undefined
+  }
+
+  return {
+    id,
+    scene: target.kind,
+    title,
+    // The subtitle names the two resolved side paths, so a drilldown out of a
+    // mounted snapshot points back at its `/snapshots/...` mount.
+    subtitle: `${left.path} ↔ ${right.path} · ${target.label}`,
+    columns: 2,
+    stats: [
+      { label: '行数（左）', value: countTextLines(left.text) },
+      { label: '行数（右）', value: countTextLines(right.text) }
+    ],
+    adhoc
   }
 }
 
@@ -38,37 +97,61 @@ export function createDrilldownSession(
   leftText: string,
   rightText: string
 ): WorkbenchSession {
-  const pair = {
-    left: { path: node.leftPath ?? `${node.relativePath}（左不存在）`, text: leftText },
-    right: { path: node.rightPath ?? `${node.relativePath}（右不存在）`, text: rightText }
+  return createFilePairSession(
+    `file:${node.relativePath}`,
+    node.name,
+    target,
+    { path: node.leftPath ?? `${node.relativePath}（左不存在）`, text: leftText },
+    { path: node.rightPath ?? `${node.relativePath}（右不存在）`, text: rightText }
+  )
+}
+
+/**
+ * Classifies one side of an opened pair, rejecting an unsupported extension with
+ * the workbench's usual readable notice.
+ */
+function requireComparableFile(path: string): { readonly target: DrilldownTarget } {
+  const name = baseName(path)
+  const target = classifyFile(name)
+  if (target === null) {
+    throw new Error(`暂不支持对比 ${name}（仅支持代码 / 文本 · CSV / TSV · JSON / YAML）。`)
   }
-  const delimiter = target.delimiter ?? ','
-  const adhoc: AdhocFilePair = {
-    scene: target.kind,
-    pair,
-    delimiter: target.delimiter,
-    format: target.format,
-    tables:
-      target.kind === 'csv'
-        ? {
-            left: parseCsvTable({ ...pair.left, delimiter }),
-            right: parseCsvTable({ ...pair.right, delimiter })
-          }
-        : undefined
+  return { target }
+}
+
+/**
+ * Opens two real absolute paths as one file-level session: the same model a
+ * drilldown produces (code text / delimited table / structured document).
+ * Rejects with a readable message when a side is unsupported or the two sides
+ * are not the same kind, so the caller neither builds nor replaces a session.
+ */
+export async function openFilePairSession(
+  platform: PlatformPort,
+  leftPath: string,
+  rightPath: string
+): Promise<WorkbenchSession> {
+  const left = requireComparableFile(leftPath)
+  const right = requireComparableFile(rightPath)
+  // One session renders one file family, so a mixed pair (e.g. JSON ↔ YAML) is
+  // rejected instead of silently picking a side's format.
+  if (left.target.label !== right.target.label) {
+    throw new Error(
+      `两侧文件类型不一致（${baseName(leftPath)} 是 ${left.target.label}，${baseName(rightPath)} 是 ${right.target.label}），请选择同类文件。`
+    )
   }
 
-  return {
-    id: `file:${node.relativePath}`,
-    scene: target.kind,
-    title: node.name,
-    // The subtitle names the two resolved side paths, so a drilldown out of a
-    // mounted snapshot points back at its `/snapshots/...` mount.
-    subtitle: `${pair.left.path} ↔ ${pair.right.path} · ${target.label}`,
-    columns: 2,
-    stats: [
-      { label: '行数（左）', value: countTextLines(leftText) },
-      { label: '行数（右）', value: countTextLines(rightText) }
-    ],
-    adhoc
-  }
+  const [leftText, rightText] = await Promise.all([
+    platform.readTextFile(leftPath),
+    platform.readTextFile(rightPath)
+  ])
+  const leftName = baseName(leftPath)
+  const rightName = baseName(rightPath)
+
+  return createFilePairSession(
+    `file:${leftPath} ↔ ${rightPath}`,
+    leftName === rightName ? leftName : `${leftName} ↔ ${rightName}`,
+    left.target,
+    { path: leftPath, text: leftText },
+    { path: rightPath, text: rightText }
+  )
 }

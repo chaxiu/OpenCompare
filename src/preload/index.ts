@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 
@@ -8,6 +8,9 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.selectDirectory) as Promise<string | null>,
   selectFile: (options) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
+  // `File.path` no longer exists in Electron 32+, so a dropped handle is turned
+  // into its real path here, where `webUtils` is available.
+  resolveDroppedPath: async (file) => webUtils.getPathForFile(file),
   saveFile: (options) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
   listDirectory: (path) =>

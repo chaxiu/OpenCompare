@@ -89,6 +89,15 @@ describe('web file dialogs', () => {
     await expect(selected).resolves.toBeNull()
   })
 
+  it('materialises a dropped file into the memory file system', async () => {
+    const platform = createWebPlatformPort()
+
+    const path = await platform.resolveDroppedPath(new File(['dropped'], 'note.txt'))
+
+    expect(path).toBe('/memory/note.txt')
+    expect(await platform.readTextFile('/memory/note.txt')).toBe('dropped')
+  })
+
   it('writes a saved body into the memory file system and rejects the read-only mount', async () => {
     const platform = createWebPlatformPort()
 

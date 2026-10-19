@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DragEvent as ReactDragEvent, JSX } from 'react'
 import {
   AlertTriangle,
   Braces,
   FileCode2,
+  FolderOpen,
   FolderTree,
   GitCompare,
   Layers,
@@ -27,13 +28,18 @@ import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
 import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
+import { cx } from '@renderer/components/utils'
 import { CodeView } from '@renderer/views/CodeView'
 import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
-import { createDirectorySession, createDrilldownSession } from './directoryCompare'
+import {
+  createDirectorySession,
+  createDrilldownSession,
+  openFilePairSession
+} from './directoryCompare'
 import {
   applySyncPreview,
   applyTemplateExtract,
@@ -62,6 +68,12 @@ import type { WorkbenchSession } from './session'
 
 type WorkbenchStatus = 'empty' | 'loading' | 'ready' | 'error'
 
+/** A single dropped path waiting for its counterpart. */
+interface PendingLeft {
+  readonly path: string
+  readonly kind: 'file' | 'directory'
+}
+
 const VIEW_OPTIONS: readonly { value: SceneId; label: string; icon: JSX.Element }[] = [
   { value: 'directory', label: '目录对比', icon: <FolderTree aria-hidden className="size-3.5" /> },
   {
@@ -81,24 +93,24 @@ const MENU_SCENES: Record<string, SceneId> = {
 }
 
 /**
- * The persistent dropdown next to the primary load button: per-scene loads plus
- * the baseline-only error-state exercise.
+ * The auxiliary sample library, explicitly marked as a demo: the workbench's
+ * primary entry is opening real files / folders or dropping real paths.
  */
 const SAMPLE_MENU: readonly DropdownItem[] = [
   {
     id: 'load-all',
-    label: '加载全部样本',
-    description: '一次打开四个场景会话',
+    label: '加载全部演示样本',
+    description: '一次打开四个演示场景会话',
     icon: <Sparkles aria-hidden className="size-3.5" />
   },
   {
     id: 'load-directory',
     label: '目录对比',
-    description: '运行时双目录差异 + 状态过滤'
+    description: '演示：双目录差异 + 状态过滤'
   },
-  { id: 'load-code', label: '代码 Diff & 3-Way Merge', description: '双栏 Diff + 多冲突块' },
-  { id: 'load-csv', label: 'CSV 主键对比', description: '1,240 行乱序主键对账' },
-  { id: 'load-structured', label: 'JSON / YAML 语义对比', description: '键序打乱 + 深层变更' },
+  { id: 'load-code', label: '代码 Diff & 3-Way Merge', description: '演示：双栏 Diff + 多冲突块' },
+  { id: 'load-csv', label: 'CSV 主键对比', description: '演示：1,240 行乱序主键对账' },
+  { id: 'load-structured', label: 'JSON / YAML 语义对比', description: '演示：键序打乱 + 深层变更' },
   {
     id: 'simulate-failure',
     label: '演示：样本读取失败',
@@ -106,6 +118,29 @@ const SAMPLE_MENU: readonly DropdownItem[] = [
     danger: true
   }
 ]
+
+/** File handles of a drag, tolerating the synthetic transfer a test dispatches. */
+function droppedFiles(transfer: DataTransfer | null): readonly File[] {
+  return transfer === null ? [] : Array.from(transfer.files)
+}
+
+function isFileDrag(transfer: DataTransfer | null): boolean {
+  return transfer !== null && Array.from(transfer.types).includes('Files')
+}
+
+/**
+ * Tells a dropped directory from a dropped file. Listing is the one probe both
+ * platform implementations answer truthfully, so nothing is guessed from the
+ * path shape.
+ */
+async function isDirectoryPath(platform: PlatformPort, path: string): Promise<boolean> {
+  try {
+    await platform.listDirectory(path)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
 export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
@@ -119,13 +154,26 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all')
-  const [sides, setSides] = useState<ComparisonSides>(() =>
-    directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
-  )
+  const [pendingLeft, setPendingLeft] = useState<PendingLeft | null>(null)
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
+
+  // A dropped path must never replace the window with the dropped file: Electron
+  // navigates on drop unless the default is prevented, on the window itself.
+  // Only file drags are blocked, so dragging text into an input still works.
+  useEffect(() => {
+    function preventFileNavigation(event: DragEvent): void {
+      if (isFileDrag(event.dataTransfer)) event.preventDefault()
+    }
+    window.addEventListener('dragover', preventFileNavigation)
+    window.addEventListener('drop', preventFileNavigation)
+    return () => {
+      window.removeEventListener('dragover', preventFileNavigation)
+      window.removeEventListener('drop', preventFileNavigation)
+    }
+  }, [])
 
   const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
   const handleCsvAlign = useCallback((state: CsvAlignState) => setCsvAlign(state), [])
@@ -136,6 +184,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }
 
   const active = sessions.find((session) => session.id === activeId) ?? null
+  /** Inputs of the session on screen; every directory action is scoped to them. */
+  const activeSides: ComparisonSides | null = active?.sides ?? null
 
   /** Diff counts of the directory entries currently visible, filter included. */
   const directoryCounts = useMemo<SampleComposition | null>(() => {
@@ -168,7 +218,6 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     try {
       const loaded = await loadSampleSessions(platform, { ...options, cache: cache.current })
       setSessions(loaded)
-      setSides(directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right))
       setActiveId((current) =>
         current !== null && loaded.some((session) => session.id === current)
           ? current
@@ -212,6 +261,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }
 
   /**
+   * Refreshes one session in place with a newer model of itself. A sync rewrites
+   * the compared roots, so the refreshed model gets a new id of its own; the tab
+   * keeps the identity it was opened with instead of leaving a stale one behind.
+   */
+  function replaceSession(id: string, session: WorkbenchSession): void {
+    setSessions((current) => current.map((item) => (item.id === id ? { ...session, id } : item)))
+    setActiveId(id)
+  }
+
+  /**
    * Runs a comparison over the given sides (real directory and/or mounted
    * snapshot) and refreshes the directory session. Only a successful run
    * commits the new sides, so a failed import leaves the previous view intact.
@@ -221,8 +280,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setNotice(null)
     try {
       const comparison = await compareSides(platform, next, cache.current)
-      setSides(next)
-      upsertSession(createDirectorySession(comparison))
+      upsertSession(createDirectorySession(comparison, next))
+      setStatus('ready')
     } catch (cause) {
       report(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -230,16 +289,130 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }
 
+  /**
+   * Builds the file-level session for two real absolute paths. The drop handler
+   * and the file pickers both land here, so a pair is one session model.
+   */
+  async function openFilePair(leftPath: string, rightPath: string): Promise<void> {
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      upsertSession(await openFilePairSession(platform, leftPath, rightPath))
+      setStatus('ready')
+    } catch (cause) {
+      report(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
+  /** 「打开文件」: left file then right file, no sample involved. */
+  async function pickFilePair(): Promise<void> {
+    const reusable = pendingLeft?.kind === 'file' ? pendingLeft.path : null
+    const leftPath = reusable ?? (await platform.selectFile({ title: '选择左侧文件' }))
+    if (leftPath === null) return
+
+    const rightPath = await platform.selectFile({ title: '选择右侧文件' })
+    if (rightPath === null) return
+
+    setPendingLeft(null)
+    await openFilePair(leftPath, rightPath)
+  }
+
+  /** 「打开文件夹」: left directory then right directory, no sample involved. */
+  async function pickDirectoryPair(): Promise<void> {
+    const reusable = pendingLeft?.kind === 'directory' ? pendingLeft.path : null
+    const leftPath = reusable ?? (await platform.selectDirectory())
+    if (leftPath === null) return
+
+    const rightPath = await platform.selectDirectory()
+    if (rightPath === null) return
+
+    setPendingLeft(null)
+    await runSidesCompare(directorySides(leftPath, rightPath))
+  }
+
+  /**
+   * Resolves dropped file handles to real paths and routes them: two same-kind
+   * paths open a session, one path becomes the left baseline, anything else is
+   * reported without touching the sessions on screen.
+   */
+  async function handleDroppedFiles(files: readonly File[]): Promise<void> {
+    const resolved = await Promise.all(
+      files.map(async (file) => {
+        try {
+          return await platform.resolveDroppedPath(file)
+        } catch {
+          // An unusable handle (not backed by a file on disk) carries no path.
+          return ''
+        }
+      })
+    )
+    const paths = resolved.filter((path) => path.length > 0)
+
+    if (paths.length === 0) {
+      report('未能从拖入项解析出真实路径，请改用「打开文件 / 打开文件夹」。')
+      return
+    }
+
+    if (paths.length === 1) {
+      const directory = await isDirectoryPath(platform, paths[0])
+      setPendingLeft({ path: paths[0], kind: directory ? 'directory' : 'file' })
+      report(
+        `已把 ${paths[0]} 作为左侧基准，请继续选择右侧对应的${directory ? '文件夹' : '文件'}。`,
+        'info'
+      )
+      return
+    }
+
+    if (paths.length !== 2) {
+      report(`当前只支持一次拖入两个同类路径（两个文件或两个文件夹），本次拖入了 ${paths.length} 个。`)
+      return
+    }
+
+    const [leftDirectory, rightDirectory] = await Promise.all([
+      isDirectoryPath(platform, paths[0]),
+      isDirectoryPath(platform, paths[1])
+    ])
+    if (leftDirectory !== rightDirectory) {
+      report('拖入的两项一个是文件、一个是文件夹，无法建立对比；请拖入两个同类路径。')
+      return
+    }
+
+    setPendingLeft(null)
+    if (leftDirectory) await runSidesCompare(directorySides(paths[0], paths[1]))
+    else await openFilePair(paths[0], paths[1])
+  }
+
+  function handleDragOver(event: ReactDragEvent<HTMLDivElement>): void {
+    if (!isFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  function handleDrop(event: ReactDragEvent<HTMLDivElement>): void {
+    event.preventDefault()
+    const files = droppedFiles(event.dataTransfer)
+    if (files.length === 0) return
+    void handleDroppedFiles(files)
+  }
+
   async function pickDirectory(side: SidePosition): Promise<void> {
+    const current = activeSides
+    if (current === null) return
+
     const chosen = await platform.selectDirectory()
     if (chosen === null) return
 
-    await runSidesCompare(withSide(sides, side, { kind: 'directory', path: chosen }))
+    await runSidesCompare(withSide(current, side, { kind: 'directory', path: chosen }))
   }
 
   /** Opens a directory-tree file in the matching file-level view. */
   async function openFile(node: DirectoryDiffNode): Promise<void> {
     if (node.kind !== 'file') return
+
+    const current = activeSides
+    if (current === null) return
 
     const target = classifyFile(node.name)
     if (target === null) {
@@ -251,8 +424,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setNotice(null)
     try {
       const [leftText, rightText] = await Promise.all([
-        node.leftPath ? readSideFile(platform, sides, node.leftPath) : Promise.resolve(''),
-        node.rightPath ? readSideFile(platform, sides, node.rightPath) : Promise.resolve('')
+        node.leftPath ? readSideFile(platform, current, node.leftPath) : Promise.resolve(''),
+        node.rightPath ? readSideFile(platform, current, node.rightPath) : Promise.resolve('')
       ])
       upsertSession(createDrilldownSession(node, target, leftText, rightText))
     } catch (cause) {
@@ -264,10 +437,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   /** Exports one side as a canonical `.ocsnap.json` download. */
   async function handleExportSnapshot(side: SidePosition): Promise<void> {
+    const current = activeSides
+    if (current === null) return
+
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      const exported = await exportSideSnapshot(platform, sides[side])
+      const exported = await exportSideSnapshot(platform, current[side])
       downloadSnapshotFile(exported.text, exported.snapshot.name)
       report(`已导出 ${exported.snapshot.name}.ocsnap.json（${exported.entryCount} 个文件）。`, 'info')
     } catch (cause) {
@@ -279,14 +455,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   /** Mounts a picked `.ocsnap.json` on one side and recomputes the comparison. */
   async function handleImportSnapshot(side: SidePosition, file: File): Promise<void> {
+    const current = activeSides
+    if (current === null) return
+
     setDirectoryBusy(true)
     setNotice(null)
     try {
       const snapshot = parseSnapshotText(await readFileText(file))
-      const next = withSide(sides, side, snapshotSide(side, snapshot))
+      const next = withSide(current, side, snapshotSide(side, snapshot))
       const comparison = await compareSides(platform, next, cache.current)
-      setSides(next)
-      upsertSession(createDirectorySession(comparison))
+      upsertSession(createDirectorySession(comparison, next))
       report(`已挂载快照 ${snapshot.name} 到${side === 'left' ? '左' : '右'}栏。`, 'info')
     } catch (cause) {
       report(describeSnapshotImportError(cause))
@@ -317,13 +495,18 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   /** Applies the confirmed plan, then refreshes the comparison tree. */
   async function handleConfirmSync(deletePaths: readonly string[]): Promise<void> {
     const preview = syncPreview
-    if (!preview) return
+    const target = active
+    if (!preview || !target) return
 
     setDirectoryBusy(true)
     setNotice(null)
     try {
       const result = await applySyncPreview(platform, preview, cache.current, deletePaths)
-      upsertSession(createDirectorySession(result.comparison))
+      const { leftRoot, rightRoot } = result.comparison
+      replaceSession(
+        target.id,
+        createDirectorySession(result.comparison, directorySides(leftRoot, rightRoot))
+      )
       setSyncPreview(null)
       setNotice(
         `同步完成：新增拷贝 ${result.copied} · 覆盖 ${result.updated} · 删除 ${result.deleted}。`
@@ -385,17 +568,18 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   function renderScene(session: WorkbenchSession): JSX.Element | null {
     switch (session.scene) {
-      case 'directory':
-        return session.directory ? (
+      case 'directory': {
+        const comparison = session.directory
+        const sessionSides = session.sides
+        if (!comparison || !sessionSides) return null
+        return (
           <DirectoryView
-            comparison={session.directory}
+            comparison={comparison}
             filter={directoryFilter}
             onFilterChange={setDirectoryFilter}
-            visibleCounts={directoryCounts ?? { ...session.directory.counts, conflict: 0 }}
+            visibleCounts={directoryCounts ?? { ...comparison.counts, conflict: 0 }}
             pickerAvailable={platform.kind === 'electron'}
             busy={directoryBusy}
-            notice={notice}
-            noticeTone={noticeTone}
             onPick={(side) => void pickDirectory(side)}
             onLoadSample={() =>
               void runSidesCompare(
@@ -403,8 +587,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               )
             }
             onOpenFile={(node) => void openFile(node)}
-            leftIsSnapshot={sides.left.kind === 'snapshot'}
-            rightIsSnapshot={sides.right.kind === 'snapshot'}
+            leftIsSnapshot={sessionSides.left.kind === 'snapshot'}
+            rightIsSnapshot={sessionSides.right.kind === 'snapshot'}
             onExportSnapshot={(side) => void handleExportSnapshot(side)}
             onImportSnapshot={(side, file) => void handleImportSnapshot(side, file)}
             onLoadRemoteSnapshotSample={() => void runSidesCompare(remoteSnapshotSides())}
@@ -417,7 +601,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             onCancelTemplate={() => setTemplatePreview(null)}
             onConfirmTemplate={() => void handleConfirmTemplate()}
           />
-        ) : null
+        )
+      }
       case 'code':
         return session.adhoc ? (
           <CodeView key={session.id} pair={session.adhoc.pair} platform={platform} />
@@ -475,7 +660,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-base text-content-primary">
+    <div
+      className="flex h-full min-h-0 flex-col bg-surface-base text-content-primary"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line-subtle bg-surface-sunken px-3">
         <div className="flex shrink-0 items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-sm bg-accent-soft text-accent">
@@ -498,17 +687,39 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         />
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {/* With a session on screen the empty-state CTAs are gone, so the
+              toolbar keeps both real-open actions one click away. */}
+          {status === 'empty' ? null : (
+            <>
+              <ToolbarButton
+                icon={<FileCode2 aria-hidden className="size-3.5" />}
+                onClick={() => void pickFilePair()}
+                disabled={directoryBusy}
+                title="依次选择左右两个真实文件开始对比"
+              >
+                打开文件
+              </ToolbarButton>
+              <ToolbarButton
+                icon={<FolderOpen aria-hidden className="size-3.5" />}
+                onClick={() => void pickDirectoryPair()}
+                disabled={directoryBusy}
+                title="依次选择左右两个真实文件夹开始对比"
+              >
+                打开文件夹
+              </ToolbarButton>
+            </>
+          )}
           <ToolbarButton
-            variant="primary"
             icon={<Sparkles aria-hidden className="size-3.5" />}
             onClick={() => void load()}
             disabled={status === 'loading'}
+            title="内置演示样本（辅助入口，可跳过）：不影响打开真实文件 / 文件夹与拖入路径"
           >
-            Load Sample Fixtures
+            加载演示样本
           </ToolbarButton>
           <DropdownMenu
-            label="样本"
-            menuLabel="样本库"
+            label="演示样本"
+            menuLabel="演示样本库"
             icon={<Layers aria-hidden className="size-3.5" />}
             items={SAMPLE_MENU}
             onSelect={handleMenuSelect}
@@ -531,22 +742,44 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         </div>
       ) : null}
 
+      {notice ? (
+        <p
+          role="alert"
+          className={cx(
+            'shrink-0 border-b border-line-subtle bg-surface-base px-3 py-1 text-2xs',
+            noticeTone === 'info' ? 'text-diff-added' : 'text-danger'
+          )}
+        >
+          {notice}
+        </p>
+      ) : null}
+
       <main className="flex min-h-0 flex-1 flex-col">
         {status === 'empty' ? (
           <StateView
-            icon={<FolderTree aria-hidden className="size-5" />}
-            title="尚未载入样本"
-            description="OpenCompare 内置四大标准对比场景：嵌套目录树、代码 Diff 与 3-Way Merge、1,200+ 行乱序主键 CSV、乱序深层 JSON / YAML。一键载入后即可在会话间切换。"
+            icon={<GitCompare aria-hidden className="size-5" />}
+            title="打开真实文件或文件夹开始对比"
+            description="经系统选择器依次选择左右两侧的两个文件或两个文件夹，或直接把两个真实路径拖入窗口。对比直接读取本机文件系统，无需加载任何样本。"
             action={
-              <ToolbarButton
-                variant="primary"
-                icon={<Sparkles aria-hidden className="size-3.5" />}
-                onClick={() => void load()}
-              >
-                Load Sample Fixtures
-              </ToolbarButton>
+              <>
+                <ToolbarButton
+                  variant="primary"
+                  icon={<FileCode2 aria-hidden className="size-3.5" />}
+                  onClick={() => void pickFilePair()}
+                  disabled={directoryBusy}
+                >
+                  打开文件
+                </ToolbarButton>
+                <ToolbarButton
+                  icon={<FolderOpen aria-hidden className="size-3.5" />}
+                  onClick={() => void pickDirectoryPair()}
+                  disabled={directoryBusy}
+                >
+                  打开文件夹
+                </ToolbarButton>
+              </>
             }
-            hint="目录 · 代码 · CSV 主键 · JSON / YAML"
+            hint="拖入 2 个同类路径（两个文件或两个文件夹）可直接开始；内置演示样本仅供体验，可在顶栏随时加载或完全跳过。"
           />
         ) : null}
 
