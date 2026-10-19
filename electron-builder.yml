@@ -20,8 +20,9 @@ mac:
   # Developer ID Application signing (certificate via CSC_LINK / CSC_KEY_PASSWORD)
   # plus Apple notarization via an App Store Connect API key (APPLE_API_KEY points
   # at the decoded .p8 file, identified by APPLE_API_KEY_ID / APPLE_API_ISSUER).
-  # The identity is pinned so the runner never picks a different certificate.
-  identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'
+  # Name only. electron-builder 26.17 rejects a "Developer ID Application:"
+  # prefix and selects that certificate type itself.
+  identity: 'Tao Zhu (3X4J53U6RY)'
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist

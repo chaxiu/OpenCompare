@@ -8,7 +8,7 @@ OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keep
 
 ### 签名与公证
 
-- macOS 产物启用 **Developer ID Application 签名**（`hardenedRuntime: true` + `build/entitlements.mac.plist`）与 **Apple 公证**，签名身份钉住 `Developer ID Application: Tao Zhu (3X4J53U6RY)`，`appId` 保持 `com.opencompare.app`。
+- macOS 产物启用 **Developer ID Application 签名**（`hardenedRuntime: true` + `build/entitlements.mac.plist`）与 **Apple 公证**，签名身份钉住 `Tao Zhu (3X4J53U6RY)`（`mac.identity` 不带 `Developer ID Application:` 前缀），`appId` 保持 `com.opencompare.app`。
 - 公证走 **App Store Connect API Key 模式**：`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_TEAM_ID`、`APPLE_API_KEY`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER` 共 **6 项 GitHub Secrets**，任一缺失即 fail-closed，绝不产出、上传或公开未签名裸包。
 - `APPLE_API_KEY` 的 `.p8` base64 只在打包前于 `$RUNNER_TEMP` 解码为权限 `600` 的仓库外临时文件（`notarytool --key` 需要文件路径），打包后清理，日志不打印密钥内容。
 
