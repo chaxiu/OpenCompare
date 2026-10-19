@@ -96,38 +96,64 @@ jobs:
       # electron-vite writes the main / preload / renderer bundles into `out/`.
       - run: pnpm build
       # Fail closed on macOS: never let electron-builder silently skip code
-      # signing and ship an unsigned bundle. The Developer ID certificate and App
-      # Store Connect credentials are human-entered GitHub Secrets; until they
-      # exist this step aborts the run (see docs/release-signing.md).
+      # signing and ship an unsigned bundle. The Developer ID certificate and the
+      # App Store Connect API key credentials are human-entered GitHub Secrets;
+      # until all six exist this step aborts the run (see docs/release-signing.md).
       - name: Require macOS signing and notarization credentials
         if: matrix.target == 'mac'
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           missing=()
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
             if [ -z "${!name}" ]; then missing+=("${name}"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Missing macOS signing/notarization secrets: ${missing[*]}. Refusing to build an unsigned macOS bundle (fail-closed); see docs/release-signing.md."
             exit 1
           fi
+      # electron-builder / @electron/notarize hand the App Store Connect key to
+      # `notarytool --key`, which expects a .p8 file path. Decode the base64
+      # secret into a 0600 file outside the checkout; the key material is never
+      # echoed to the log.
+      - name: Materialize the App Store Connect API key
+        if: matrix.target == 'mac'
+        id: api-key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          key_path="${RUNNER_TEMP}/opencompare-appstoreconnect.p8"
+          printf '%s' "${APPLE_API_KEY}" | base64 --decode > "${key_path}"
+          chmod 600 "${key_path}"
+          if [ ! -s "${key_path}" ]; then
+            echo "::error::APPLE_API_KEY did not decode to a non-empty .p8 file; refusing to build an unnotarized bundle."
+            exit 1
+          fi
+          echo "key-path=${key_path}" >> "${GITHUB_OUTPUT}"
       # Package locally only: publishing is deferred to the upload step below so
       # the three platforms never create the GitHub Release concurrently. The mac
-      # step signs (CSC_LINK / CSC_KEY_PASSWORD) and notarizes (APPLE_ID /
-      # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID) the bundle.
+      # step signs (CSC_LINK / CSC_KEY_PASSWORD) and notarizes (APPLE_API_KEY /
+      # APPLE_API_KEY_ID / APPLE_API_ISSUER) the bundle.
       - name: Build installers
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ steps.api-key.outputs.key-path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: pnpm exec electron-builder --${{ matrix.target }} --publish never
+      - name: Remove the temporary App Store Connect API key
+        if: matrix.target == 'mac' && always()
+        env:
+          APPLE_API_KEY: ${{ steps.api-key.outputs.key-path }}
+        run: |
+          if [ -n "${APPLE_API_KEY}" ]; then rm -f "${APPLE_API_KEY}"; fi
       # The packaged update metadata (latest*.yml) must carry the tag version so
       # the artifact names, the update feed and the release stay consistent.
       - name: Assert packaged version matches the tag

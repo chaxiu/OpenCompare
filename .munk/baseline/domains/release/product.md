@@ -5,12 +5,13 @@
 ## 范围
 
 - **打包配置**：`electron-builder.yml` 声明 macOS（dmg / zip）、Windows（nsis）、Linux（AppImage / deb）三平台目标；`package.json` 提供 `dist` / `dist:mac` / `dist:win` / `dist:linux` scripts，`electron-builder` 为 devDependency。
-- **macOS 签名与公证**：`electron-builder.yml` 的 `mac` 段启用 `hardenedRuntime: true`、声明 `entitlements` / `entitlementsInherit: build/entitlements.mac.plist`（Electron 最小必要项：`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation`）与 `notarize: true`；Developer ID Application 证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，App Store Connect 凭据经 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`（或等价 API Key）注入，仓内不落证书明文。
-- **签名凭据 fail-closed**：`release.yml` mac 矩阵步骤在打包前检查 5 个签名/公证 Secret 齐备，任一缺失即显式失败并升级（`munk_report_owner`），绝不产出、上传或公开未签名裸包；无「跳过签名继续发版」的静默降级分支。
+- **macOS 签名与公证**：`electron-builder.yml` 的 `mac` 段启用 `hardenedRuntime: true`、声明 `entitlements` / `entitlementsInherit: build/entitlements.mac.plist`（Electron 最小必要项：`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation`）与 `notarize: true`，并显式钉住签名身份 `identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'`；Developer ID Application 证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，公证走 **App Store Connect API Key 模式**（`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`），`APPLE_TEAM_ID` 为 `3X4J53U6RY`，`appId` 保持 `com.opencompare.app`；仓内不落证书/密钥明文。
+- **签名凭据 fail-closed**：`release.yml` mac 矩阵步骤在打包前逐一检查 6 个签名/公证 Secret（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）齐备，任一缺失即 `::error::` 列出缺失项并非零退出，绝不产出、上传或公开未签名裸包；无「跳过签名继续发版」的静默降级分支。
+- **API Key 物化**：`APPLE_API_KEY` 以 `.p8` base64 存放，`release.yml` 在打包前于 `$RUNNER_TEMP` 解码为权限 `600` 的仓库外临时文件，`Build installers` 步骤的 `APPLE_API_KEY` 指向该路径（electron-builder v26 / `@electron/notarize` 2.5 的 `notarytool --key` 需路径），打包后清理，日志不打印密钥内容。
 - **版本对齐闸**：`release.yml` 门禁 job 断言 `package.json#version` 等于 tag 语义版本（去 `v` 前缀）；各平台在打包后断言产物旁 `latest*.yml` 内 `version` 等于 tag；不一致即失败且不产出 Release。
 - **每标签唯一公开 Release**：`finalize` job 后新增断言，检查每个 tag 恰好一个公开（非 Draft）Release，存在重复/残留草稿即失败；资产名版本与 tag 一致。
 - **可复现打包**：锁定输入（`pnpm install --frozen-lockfile`、固定 pnpm/node 与 Action 版本），打包与上传单点由 CI 驱动（`--publish never` + 汇聚上传），产物版本由 tag 单点推导；无本地手工打包路径。
-- **凭据清单与协助文案**：`docs/release-signing.md` 列出待人类录入的 GitHub Secrets 清单与逐项用途/获取方式/录入位置，并注明实际录入时机待 Apple Developer Program 裁决。凭据一律经 GitHub Secrets / 环境变量注入，严禁写入仓库或日志。
+- **凭据清单与协助文案**：`docs/release-signing.md` 列出待人类录入的 6 项 GitHub Secrets 清单（名称/用途/获取方式/形态）、App Store Connect API Key 模式说明（Developer 角色、`.p8` 仅可下载一次、Key ID / Issuer ID）与协助录入文案；凭据一律经 GitHub Secrets / 环境变量注入，严禁写入仓库或日志。
 - **发布元数据（Linux `.deb` 前置）**：`package.json` 的 `author`（对象且含非空 `email`）、`license`、`homepage`；`electron-builder.yml` `linux.maintainer` 显式含 email。
 - **发布目标**：`electron-builder.yml` 声明 `publish: { provider: github, releaseType: release }`；实际发布改由 release.yml 单点预建 + `gh release upload` 完成（矩阵 `--publish never`），最终 Release 为公开（非 Draft）。
 - **发布工作流**：`.github/workflows/release.yml` 监听 `v*` tag，门禁 job（install `--frozen-lockfile` / lint / typecheck / test / build）先行。门禁末尾**单点预建该 tag 的唯一 Release**（`gh release create ... --draft --generate-notes`，注入 `GH_TOKEN`/`GH_REPO` 并显式带 `--repo`；若已存在则清理同名重复只留一个），随后 mac/win/linux 三平台矩阵 `electron-builder --<target> --publish never` 仅本地打包到 `release/`，再用 `gh release upload "${GITHUB_REF_NAME}" <三端全部产物> --clobber --repo` 汇聚上传到该唯一 Release；`finalize` job `gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest` 正式公开。Release 唯一性以 tag 为准，杜绝并发建单竞态。
@@ -29,21 +30,30 @@
 - **ac-upload-clobber**：`release` 矩阵在打包后有 `gh release upload "${GITHUB_REF_NAME}" ... --clobber --repo "${GITHUB_REPOSITORY}"` 步骤，汇聚上传三端安装包与元数据（dmg/zip/exe/AppImage/deb/blockmap/latest*.yml），且能在 windows runner 的默认 shell 下正常运行。
 - **ac-finalize-repo**：`finalize` Job 的 `gh release edit` 命令带 `--repo "${GITHUB_REPOSITORY}"`，并注入 `GH_REPO`，`--draft=false --latest` 保持；不存在 `fatal: not a git repository` 的前置依赖。
 - **ac-unit-assertions**：`src/main/release-packaging.test.ts` 断言覆盖预建唯一 Release、`--publish never` + `gh release upload --clobber`、`finalize` 带 `--repo`；旧断言若与新流程冲突已随之更新。
-- **ac-config-tests**：release 配置断言单测覆盖元数据 / 打包目标 / 发布配置三组，且由 `pnpm test` 执行并通过。
+- **ac-config-tests**：release 配置断言单测覆盖元数据 / 打包目标 / 发布配置三组、6 Secrets 接线、fail-closed、legacy 凭据不再接线、签名身份、`appId` 与 6 项文档清单，由 `pnpm test` 执行并通过且不引入 Electron/DOM 依赖。
 - **ac-builder**：`electron-builder` 已配置并可解析出 macOS / Windows / Linux 目标（配置存在于 `package.json` 或 `electron-builder.yml`）。
 - **ac-readme**：根目录 `README.md` 覆盖定位、核心能力清单与本地开发 / 构建打包说明。
 - **ac-license**：根目录 `LICENSE` 为 MIT 许可全文。
 - **ac-builder-mac-signing**：electron-builder mac 配置启用 `hardenedRuntime` 并声明 entitlements 文件与 Developer ID 签名（证书经 `CSC_LINK`/`CSC_KEY_PASSWORD` 注入，仓库无证书明文）。
 - **ac-builder-notarize**：electron-builder/CI 配置启用 Apple 公证（notarize），证书与 App Store Connect 凭据经环境变量/Secrets 注入。
-- **ac-notarize-secrets-wired**：`release.yml` mac 打包步骤接线 `CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`（或等价 App Store Connect API Key）Secrets。
+- **ac-api-key-secrets-wired**：`release.yml` 的 mac fail-closed 步与 `Build installers` 步骤均接线且仅接线 6 个 Secrets（`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_TEAM_ID`、`APPLE_API_KEY`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER`），公证凭据以 API Key 三件套传入 electron-builder/@electron/notarize。
+- **ac-fail-closed-six**：mac 前置步逐一检查 6 个 Secret，任一为空即输出 `::error::` 并以非零码退出；不存在缺凭据继续打包或静默跳过签名/公证的分支。
+- **ac-api-key-file-materialized**：`APPLE_API_KEY` 的 base64 `.p8` 在打包前解码到仓库外临时文件（权限 600），`Build installers` 的 `APPLE_API_KEY` 环境变量指向该文件路径（`notarytool --key` 需要路径），打包后可清理；日志不打印密钥内容。
+- **ac-legacy-credentials-removed**：`release.yml` 不再读取/引用 `APPLE_ID` 与 `APPLE_APP_SPECIFIC_PASSWORD`，也不保留 Apple ID 公证回退路径。
+- **ac-identity-pinned**：`electron-builder.yml` mac 配置显式声明签名身份 `Developer ID Application: Tao Zhu (3X4J53U6RY)`；文档注明 Team ID `3X4J53U6RY`。
+- **ac-appid-own**：`electron-builder.yml` 的 `appId` 仍为 `com.opencompare.app`，仓库中不出现 `sh.munk.app`。
 - **ac-ci-notarize-success**：CI 日志出现 notarization 成功，且不再出现 `skipped macOS application code signing`。
 - **ac-fail-closed-no-unsigned**：签名/公证凭据缺失时 mac 打包步骤显式失败并升级，不产出、不上传、不公开未签名裸包（无静默降级分支）。
 - **ac-version-tag-aligned**：发版前置断言 `package.json#version` 与 tag（去 `v`）一致，且 `latest*.yml` 内 version 等于 tag；不一致时 CI 失败且不产出 Release。
 - **ac-single-public-release**：每个 tag 恰好一个公开（非 Draft）Release，无重复/残留草稿。
 - **ac-asset-version-match**：Release 资产名中的版本与 tag 一致（如 `OpenCompare-<ver>-arm64.dmg`）。
 - **ac-reproducible-build**：打包在 CI 由锁定输入驱动（frozen lockfile + 固定 pnpm/node 与 Action 版本），同一 tag 重跑打包产出同名同版本产物，无本地手工打包路径。
-- **ac-credentials-checklist**：仓内存在待人类录入的凭据清单与协助文案，逐项说明 `CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` 的用途与录入位置，并注明实际录入时机待 Apple Developer Program 裁决。
+- **ac-credentials-checklist**：仓内存在待人类录入的凭据清单与协助文案，逐项说明 `CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` 的用途与录入位置，并注明实际录入时机待 Apple Developer Program 裁决。
+- **ac-docs-checklist**：`docs/release-signing.md` 含 6 项凭据清单（名称/用途/获取方式/形态）、API Key 模式说明（Developer 角色、`.p8` 仅可下载一次、Key ID / Issuer ID）与协助录入文案；发布冻结姿态不因本项解除。
+- **ac-readme-updated**：`README.md` 构建/发布章节按 API Key 模式列明 6 个 Secrets 与 fail-closed 行为，且与文档口径一致。
+- **ac-no-secret-leak**：仓库文件、工作流脚本、日志与 digest 中不含凭据值；代码只从 GitHub Secrets 读取，错误信息只列缺失 Secret 名。
 - **ac-config-unit-tests**：release 配置断言单测扩展覆盖签名/公证/版本对齐/唯一 Release 断言，`pnpm test` 通过。
+- **ac-gates-green**：`code-gates.json` 全部门禁（install / lint / typecheck / build / build:web / test）通过。
 - **ac-no-regression**：内置样本主链路无回归，`code-gates.json`（install / lint / typecheck / build / build:web / test）全绿；打包目标与触发条件（`v*` tag）不变。
 
 ## 非目标
@@ -59,19 +69,23 @@
 
 ## 实现约束
 
-- 沿用现有 `electron-builder.yml` 配置模式，仅新增必需字段，不重排既有配置。
 - 配置断言单测须落在 `vitest.config.mts` 的 `include` 路径（`src/**/*.test.ts`）内、Node 环境运行，可直接读仓库根配置；不得引入 Electron / DOM 依赖，`src/core/` 保持纯净。
 - 包管理固定 `pnpm@10.18.3`；`.deb` 仅由 CI 的 Linux runner 构建，本地不参与多平台编译。
 - 提交前跑 `pnpm lint && pnpm typecheck && pnpm test` 自检；门禁命令须为单条 argv。
 - 预建唯一 Release 放在 `gates` Job 末尾、`release` 矩阵之前；预建 / upload / finalize 统一使用 `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` 与 `GH_REPO: ${{ github.repository }}`，命令显式带 `--repo "${GITHUB_REPOSITORY}"`（不依赖隐式 git 仓库上下文，规避 `not a git repository`）。
 - 汇聚上传须兼容 windows-latest 默认 shell（pwsh）：使用 `shopt -s nullglob` 时须设 `shell: bash`，或用 gh 自带 glob 展开；`--clobber` 允许重复上传覆盖以保证可重跑。
-- 签名/公证凭据一律经 GitHub Secrets / 环境变量注入，严禁写入仓库或日志；entitlements 文件放 `build/`（electron-builder 默认查找路径）。**fail-closed 优先于继续发版**：缺凭据即失败并升级（`munk_report_owner`），绝不交付未签名裸包。
+- 签名/公证凭据一律经 GitHub Secrets / 环境变量注入，严禁写入仓库、脚本、README、日志或 digest；`::error::` 只允许列出缺失的 Secret 名称。`APPLE_API_KEY` 以 `.p8` 的 base64 存放，工作流须在 `$RUNNER_TEMP` 解码为权限 `600` 的仓库外文件并把 `APPLE_API_KEY` 设为该路径，`APPLE_API_KEY_ID` / `APPLE_API_ISSUER` 原样传入。`APPLE_TEAM_ID` 为 `3X4J53U6RY`；签名身份在 `electron-builder.yml` 的 `mac.identity` 显式声明，避免 runner 上自动挑选错误证书。entitlements 文件放 `build/`（electron-builder 默认查找路径）。**fail-closed 优先于继续发版**：缺凭据即失败并升级（`munk_report_owner`），绝不交付未签名裸包。
+- 沿用现有 `electron-builder.yml` 配置模式，只新增必需字段（如 `mac.identity`），不重排既有配置；`mac.notarize: true`、`hardenedRuntime`、entitlements 与打包目标保持不变。配置断言单测沿用 Node 环境读取仓库根配置的方式（`node:fs` + `node:path`，不 import Electron），落在现有 `src/main/release-packaging.test.ts`。文档与 README 保持既有发布冻结口径，只替换凭据模式相关内容，不新增文档体系。
 - 签名/公证 Secrets 只接到 mac 矩阵步骤；版本对齐只做断言与失败，不改 version、不打 tag；`release.yml` 保持 `v*` tag 触发、`gates` 先行与单点预建 + 汇聚上传 + finalize 流程。
 
 ## 最近交付证明
 
-- WI：`wi_ws_02c54a7f073ddfce`（macOS 签名公证与可复现 CI 打包发布）
+- WI：`wi_intake_d90fd2b7b90b257d`（release 签名/公证改用 App Store Connect API Key）
 - 日期：2026-10-19
-- 结果：code_gates passed（6 门禁全绿；本项无窗口可点交互，跳过 UI 自测）。
-- 覆盖摘要：`electron-builder.yml` mac 段新增 `hardenedRuntime: true`、`entitlements` / `entitlementsInherit: build/entitlements.mac.plist`、`notarize: true`（打包目标 dmg/zip 与 appId 未改）；新增 `build/entitlements.mac.plist`（JIT / 未签名可执行内存 / 关闭库校验）。`release.yml`：`gates` 新增「Assert the tag matches package.json version」断言 `package.json#version` == tag（去 `v`）；mac 矩阵新增 fail-closed 步骤「Require macOS signing and notarization credentials」检查 5 个 Secret，任一缺失即 `exit 1`，`Build installers` 步骤注入上述 5 个 Secrets；打包后新增「Assert packaged version matches the tag」校验 `release/latest*.yml` 内 `version` == tag；`finalize` 后新增「Verify the tag has exactly one public release」用 `gh api` 断言该 tag 恰好 1 个 Release 且 0 draft。新增 `docs/release-signing.md` 凭据清单 + 协助文案，`README.md` 更新签名/公证与发布流程说明。`src/main/release-packaging.test.ts` 新增四组断言：macOS 签名/公证（hardenedRuntime/entitlements/entitlements 内容/notarize/target/无证书明文）、Secrets 接线与 fail-closed、版本闸（tag vs package.json、latest*.yml、唯一公开 Release）、凭据清单（5 个 Secret + GitHub Secrets + Apple Developer Program）。
-- 注：本域上一轮为 `wi_intake_37aa5843386424aa`（单点预建唯一 Release + finalize 补 repo）。本轮**推翻**该域旧「不做代码签名 / 公证」非目标——macOS 已接线 Developer ID 签名 + Apple 公证，并新增版本对齐闸与唯一公开 Release 断言；`release` 域非目标已随之更新。实际凭据录入待公司 Apple Developer Program 裁决后由人类经 GitHub Secrets 完成，在此之前发布保持冻结（Pre-release）。
+- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；本项无窗口可点交互，跳过 UI 自测）。
+- 覆盖摘要：
+  - `.github/workflows/release.yml`：mac fail-closed 前置步改为检查 6 个 Secret（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`），任一缺失即 `::error::` 列出名称并 `exit 1`；新增「Materialize the App Store Connect API key」步骤把 `APPLE_API_KEY`（`.p8` base64）解码到 `${RUNNER_TEMP}/opencompare-appstoreconnect.p8` 并 `chmod 600`，`Build installers` 的 `APPLE_API_KEY` 指向该路径（`steps.api-key.outputs.key-path`），`APPLE_API_KEY_ID` / `APPLE_API_ISSUER` 原样传入；打包后新增 `always()` 清理步骤。删除 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` 全部引用，无 Apple ID 回退路径。
+  - `electron-builder.yml`：mac 段新增 `identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'` 钉住签名身份；`appId` 仍为 `com.opencompare.app`，未出现 `sh.munk.app`；打包目标 / notarize / hardenedRuntime / entitlements 未改。
+  - `docs/release-signing.md` 改为 6 项凭据清单 + API Key 模式说明（Developer 角色、`.p8` 仅可下载一次、Key ID / Issuer ID）+ 协助录入文案（注明 Team ID `3X4J53U6RY`）；`README.md` 发布章节同步 6 Secrets 与 fail-closed 口径。发布冻结姿态未解除。
+  - `src/main/release-packaging.test.ts` 新增/更新断言：6 Secrets 接线（`APPLE_API_KEY` 指向解码后路径）、仅接线 6 Secrets + `GITHUB_TOKEN`、fail-closed 逐一检查、API Key 文件物化（`base64 --decode` / `${RUNNER_TEMP}` / `chmod 600` / 清理 / 不回显密钥）、legacy Apple ID 凭据已移除、签名身份钉住与 `appId` 自有、6 项文档清单与 README 口径；Node 环境读取仓库根配置，不引入 Electron/DOM。
+- 注：本域上一轮为 `wi_ws_02c54a7f073ddfce`（macOS 签名公证 + 可复现 CI 发布）。本轮按公司负责人最新凭据裁决，将公证凭据由 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` 三件套切换为 App Store Connect API Key 模式，`APPLE_TEAM_ID` / 签名身份显式钉住；`release` 域非目标「不做代码签名/公证」在上一轮已推翻，本轮进一步收敛凭据口径。实际凭据录入仍待人类经 GitHub Secrets 完成，在此之前发布保持冻结（Pre-release）。
