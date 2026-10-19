@@ -5,6 +5,8 @@
 ## 范围
 
 - **打包配置**：`electron-builder.yml` 声明 macOS（dmg / zip）、Windows（nsis）、Linux（AppImage / deb）三平台目标；`package.json` 提供 `dist` / `dist:mac` / `dist:win` / `dist:linux` scripts，`electron-builder` 为 devDependency。
+- **自制品牌图标资产**：`build/icons/icon.svg` 为唯一可编辑源（双栏对比 / 分叉合并意象，纯几何图形）；`node build/icons/generate-icons.mjs` 仅用 Node 标准库可重复生成并入库 `build/icons/icon-{16,32,64,128,256,512,1024}.png`、`build/icon.png`（1024×1024，兼作 Linux 与运行时图标）、`build/icon.icns`、`build/icon.ico`；替换品牌只需换源并重跑，产物路径固定。手册见 `docs/brand-assets.md`。
+- **打包图标接线**：`electron-builder.yml` 显式配置 `mac.icon: build/icon.icns` / `win.icon: build/icon.ico` / `linux.icon: build/icon.png`，并以 `extraResources`（`build/icon.png` → `icon.png`）把同一份 PNG 放进打包根 `resources/`；不改 `appId`、`productName`、targets、notarize 与 publish 模型。
 - **macOS 签名与公证**：`electron-builder.yml` 的 `mac` 段启用 `hardenedRuntime: true`、声明 `entitlements` / `entitlementsInherit: build/entitlements.mac.plist`（Electron 最小必要项：`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation`）与 `notarize: true`，并显式钉住签名身份 `identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'`；Developer ID Application 证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，公证走 **App Store Connect API Key 模式**（`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`），`APPLE_TEAM_ID` 为 `3X4J53U6RY`，`appId` 保持 `com.opencompare.app`；仓内不落证书/密钥明文。
 - **签名凭据 fail-closed**：`release.yml` mac 矩阵步骤在打包前逐一检查 6 个签名/公证 Secret（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）齐备，任一缺失即 `::error::` 列出缺失项并非零退出，绝不产出、上传或公开未签名裸包；无「跳过签名继续发版」的静默降级分支。
 - **API Key 物化**：`APPLE_API_KEY` 以 `.p8` base64 存放，`release.yml` 在打包前于 `$RUNNER_TEMP` 解码为权限 `600` 的仓库外临时文件，`Build installers` 步骤的 `APPLE_API_KEY` 指向该路径（electron-builder v26 / `@electron/notarize` 2.5 的 `notarytool --key` 需路径），打包后清理，日志不打印密钥内容。
@@ -64,6 +66,12 @@
 - **ac-freeze-warning-converged**：此前「未签名/未公证、发版冻结」的过时警示已收敛；措辞以「正式版经签名 + 公证流程产出」为准，不预先宣称尚未由 CI 验证的公证结果。
 - **ac-test-synced**：`src/main/release-packaging.test.ts` 断言随文档变更同步（冻结期断言改为正式版口径，并覆盖 `CHANGELOG.md` 条目），`pnpm test` 通过；签名/公证接线断言（6 项 Secrets、fail-closed、API Key 模式、唯一公开 Release、版本对齐闸）不得弱化。
 - **ac-no-scope-creep**：未改打包目标 / `appId` / 触发条件 / 发布模型，未新增依赖，未动 `@core`，无功能改动。
+- **ac-icon-assets-valid**：`build/icons/icon.svg`、`build/icon.png`、`build/icon.icns`、`build/icon.ico` 及 16–1024 多尺寸 PNG 均存在且非空；PNG 以 `89 50 4E 47` 开头且主图标为 1024×1024，icns 前 4 字节为 `icns`，ico 头 6 字节为 `00 00 01 00 01 00`。
+- **ac-builder-icons-wired**：解析 `electron-builder.yml` 后，`mac.icon`、`win.icon`、`linux.icon` 均非空且分别指向上述实际存在的入库文件；宿主平台之外的两项同样配置齐全。
+- **ac-runtime-icon-resource**：`electron-builder.yml` 的 `extraResources` 含把 `build/icon.png` 复制为打包根 `icon.png` 的条目；纯路径解析函数在 packaged 时返回 `<resourcesPath>/icon.png`，非 packaged 时返回仓库内 `build/icon.png`，两者都指向同一份入库 PNG（运行时窗口 / dock / 关于面板接线见域 `desktop-shell`）。
+- **ac-no-electron-default**：三平台图标配置均显式指向 `build/` 下入库资产（不依赖 electron-builder 默认 `electron.icns` / `electron.ico`）；当测试机可定位 Electron 分发目录中的默认 `electron.icns` 时，断言其 SHA-256 与本仓 `build/icon.icns` 不同。
+- **ac-brand-docs-replaceable**：`docs/brand-assets.md` 存在，含「自制」「可替换」表述、四个核心资产路径（svg / png / icns / ico）与再生成命令；测试断言这些字符串与路径均可检索。
+- **ac-release-gates-green**：本项不新增依赖，`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm build:web` 全部通过。
 
 ## 非目标
 
@@ -76,6 +84,7 @@
 - 不改 electron-builder 打包目标 / `appId`；不改触发条件（仍为 `v*` tag push）与 `permissions`；不引入新的 Action / 第三方发布工具。发版版本 bump 仅限 `package.json#version` 改为与目标 tag 一致（v0.1.2），不做自增逻辑或自动化版本管理。
 - 发版必需改动不越界：不改 `release.yml`、不改打包目标 / `appId` / `mac.identity` / 触发条件 / 发布模型、不新增依赖、不改 `electron-builder.yml` / entitlements、不动 `src/core/`、不做功能/UI 改动；`CHANGELOG.md` 只覆盖 `v0.1.2` 条目，不追溯补写历史版本；不录入手工凭据、不在仓库/脚本/日志写明文密钥、不执行打 Tag / publish Release / 公证。
 - 不追求 bit-identical 二进制可复现；只保证输入锁定与产物名/版本确定。
+- 品牌图标项不改 `appId`（保持 `com.opencompare.app`）、`productName`、发布模型与 `release.yml` 的打包 / 发布 / 公证流程；不升版本号、不改 CHANGELOG / Release Notes、不动 `v0.1.2` tag 与资产；不做应用内「关于」页面或设置页、不做主题 / 视觉改版；不新增运行时或开发依赖、不引入在线图标生成服务、不使用 Electron 默认图标或任何第三方版权图标；不在本项执行签名、公证、打 tag、push、publish 或创建 Release。
 
 ## 实现约束
 
@@ -85,18 +94,19 @@
 - 预建唯一 Release 放在 `gates` Job 末尾、`release` 矩阵之前；预建 / upload / finalize 统一使用 `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` 与 `GH_REPO: ${{ github.repository }}`，命令显式带 `--repo "${GITHUB_REPOSITORY}"`（不依赖隐式 git 仓库上下文，规避 `not a git repository`）。
 - 汇聚上传须兼容 windows-latest 默认 shell（pwsh）：使用 `shopt -s nullglob` 时须设 `shell: bash`，或用 gh 自带 glob 展开；`--clobber` 允许重复上传覆盖以保证可重跑。
 - 签名/公证凭据一律经 GitHub Secrets / 环境变量注入，严禁写入仓库、脚本、README、日志或 digest；`::error::` 只允许列出缺失的 Secret 名称。`APPLE_API_KEY` 以 `.p8` 的 base64 存放，工作流须在 `$RUNNER_TEMP` 解码为权限 `600` 的仓库外文件并把 `APPLE_API_KEY` 设为该路径，`APPLE_API_KEY_ID` / `APPLE_API_ISSUER` 原样传入。`APPLE_TEAM_ID` 为 `3X4J53U6RY`；签名身份在 `electron-builder.yml` 的 `mac.identity` 显式声明，避免 runner 上自动挑选错误证书。entitlements 文件放 `build/`（electron-builder 默认查找路径）。**fail-closed 优先于继续发版**：缺凭据即失败并升级（`munk_report_owner`），绝不交付未签名裸包。
+- 品牌资产唯一入库位置为 `build/`（及 `build/icons/`），二进制产物必须提交；生成脚本只使用 Node 标准库与本机现有系统工具（如 macOS `iconutil`），不新增依赖；品牌名统一 `OpenCompare`，图标与关于信息必须同源，禁止多处各写一份。
 - 沿用现有 `electron-builder.yml` 配置模式，只新增必需字段（如 `mac.identity`），不重排既有配置；`mac.notarize: true`、`hardenedRuntime`、entitlements 与打包目标保持不变。配置断言单测沿用 Node 环境读取仓库根配置的方式（`node:fs` + `node:path`，不 import Electron），落在现有 `src/main/release-packaging.test.ts`。文档与 README 保持既有发布冻结口径，只替换凭据模式相关内容，不新增文档体系。
 - 签名/公证 Secrets 只接到 mac 矩阵步骤；版本对齐只做断言与失败，不改 version、不打 tag；`release.yml` 保持 `v*` tag 触发、`gates` 先行与单点预建 + 汇聚上传 + finalize 流程。
 
 ## 最近交付证明
 
-- WI：`wi_intake_d134bf8347298666`（v0.1.2 正式版发版必需改动：版本 bump + Release Notes + 文档口径收敛）
-- 日期：2026-10-19
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；本项无窗口可点交互，跳过 UI 自测）。
+- WI：`wi_ws_ecadd56de3f4c523`（自制品牌图标 + 打包图标接线 + 品牌资产手册）
+- 日期：2026-10-20
+- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；跳过 UI 自测 `needSelfTest=false`）。
 - 覆盖摘要：
-  - `package.json`：`version` 由 `0.1.0` 改为 `0.1.2`，与 `release.yml` 的 tag↔version 对齐闸一致（`release.yml` 未改）。
-  - 新增 `CHANGELOG.md`：Keep a Changelog / SemVer 口径，`## v0.1.2` 条目覆盖签名与公证（Developer ID + App Store Connect API Key 模式、6 项 Secrets fail-closed、`.p8` 于 `$RUNNER_TEMP` 物化 chmod 600）、可复现打包与唯一公开 Release（预建唯一 Release + `--publish never` + `gh release upload --clobber` + finalize）、版本/tag 对齐闸（tag↔`package.json#version` 与 `latest*.yml#version`）。
-  - `README.md`：顶部发布状态由「冻结 / 预发布、未签名未公证」改为「正式版 v0.1.2，经 Developer ID 签名 + Apple 公证流程产出、tag 触发唯一公开 Release」，保留 6 项 Secrets 与 fail-closed 描述，并注明公证结果以 tag 触发的那次 CI 为准。
-  - `docs/release-signing.md`：第三节「冻结期的发布姿态」改写为「正式版发布姿态（v0.1.2）」（解冻口径 + fail-closed + 查看 Release 命令），凭据清单与 API Key 模式说明保留。
-  - `src/main/release-packaging.test.ts`：冻结期断言（要求文档含「发布冻结」）改为正式版口径（文档含 `v0.1.2` / 「正式版」且不含「发布冻结」；README 含 `v0.1.2` 且不含「发布状态：冻结」），新增 `CHANGELOG.md` 断言组（`## v0.1.2` / Developer ID / App Store Connect API Key / fail-closed / 唯一 / `latest*.yml`）；既有 6 Secrets、fail-closed、API Key 物化、唯一 Release、版本对齐断言均保留未弱化。
-- 注：本域上一轮为 `wi_intake_d90fd2b7b90b257d`（签名/公证改用 App Store Connect API Key，发布仍冻结）。本轮按公司负责人批准的 v0.1.2 发版解冻：仅做发版必需改动（版本 bump / Release Notes / 文档口径），未改 `release.yml`、打包目标、`appId`、发布模型与依赖。发版冻结口径正式收敛为「正式版经签名 + 公证流程产出」；实际公证结果仍以 `v0.1.2` tag 触发的那次 CI 为准（本项不打 Tag、不 publish）。
+  - 新增 `build/icons/icon.svg`（1024×1024 视口，圆角矩形 + 线性渐变，双栏对比 / 分叉合并意象）与 `build/icons/generate-icons.mjs`（仅 Node 标准库，零新依赖，可重复生成、产物路径固定）。
+  - 入库 `build/icons/icon-{16,32,64,128,256,512,1024}.png`、`build/icon.png`（1024×1024）、`build/icon.icns`、`build/icon.ico`；替换品牌只需换 SVG 源并重跑脚本。
+  - `electron-builder.yml`：新增 `mac.icon: build/icon.icns` / `win.icon: build/icon.ico` / `linux.icon: build/icon.png` 与 `extraResources`（`build/icon.png` → `icon.png`）；`appId` / `productName` / targets / notarize / publish 未动。
+  - 新增 `docs/brand-assets.md`：自制 / 可替换表述、四个核心资产路径、`node build/icons/generate-icons.mjs` 再生成命令与替换步骤。
+  - `src/main/release-packaging.test.ts`：只增不改，新增品牌图标资产组（SVG 存在 / PNG 签名与 1024 尺寸 / 7 档多尺寸 / icns magic / ico 头 / 与 Electron 默认 icns SHA-256 不同）、打包图标接线组（三平台指向入库文件、`extraResources` 条目、packaged vs dev 路径同源）与窗口 / 关于面板断言；既有 6 Secrets、fail-closed、API Key 物化、唯一 Release、版本对齐断言均保留。
+- 注：运行时窗口 / dock / 关于面板 / 原生菜单接线（`src/shared/brand.ts`、`src/main/menu.ts`、`src/main/index.ts`）的 AC 定义落在新域 `desktop-shell`，本域只承载「资产存在 + 打包配置一致 + 文档可替换」。图标源为本仓自制几何图形，未使用 Electron 默认图标或第三方版权素材；本项不升版本、不打 Tag、不 publish。
