@@ -59,10 +59,33 @@ describe('github release publishing', () => {
     expect(releaseWorkflow).toMatch(/target: mac/)
     expect(releaseWorkflow).toMatch(/target: win/)
     expect(releaseWorkflow).toMatch(/target: linux/)
-    expect(releaseWorkflow).toMatch(/--publish always/)
   })
 
-  it('promotes the tag release to public after the matrix uploads', () => {
-    expect(releaseWorkflow).toMatch(/gh release edit\s+"\$\{GITHUB_REF_NAME\}"\s+--draft=false/)
+  it('pre-creates a single draft release before the matrix packages', () => {
+    // One release per tag: create it once in `gates`, targeting the repo
+    // explicitly so no checkout / git context is required.
+    expect(releaseWorkflow).toMatch(/GH_REPO: \$\{\{ github\.repository \}\}/)
+    expect(releaseWorkflow).toMatch(
+      /gh release create\s+"\$\{GITHUB_REF_NAME\}"[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"[\s\S]*?--draft[\s\S]*?--generate-notes/
+    )
+    // Duplicates left behind by an earlier race are pruned, keeping one.
+    expect(releaseWorkflow).toMatch(/gh api --method DELETE/)
+  })
+
+  it('packages locally without letting the matrix create releases', () => {
+    expect(releaseWorkflow).toMatch(/electron-builder --\$\{\{ matrix\.target \}\} --publish never/)
+    expect(releaseWorkflow).not.toMatch(/--publish always/)
+  })
+
+  it('uploads each platform artifacts into the single release with --clobber', () => {
+    expect(releaseWorkflow).toMatch(
+      /gh release upload\s+"\$\{GITHUB_REF_NAME\}"[\s\S]*?--clobber[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"/
+    )
+  })
+
+  it('promotes the tag release to public with an explicit --repo', () => {
+    expect(releaseWorkflow).toMatch(
+      /gh release edit\s+"\$\{GITHUB_REF_NAME\}"\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--draft=false\s+--latest/
+    )
   })
 })
