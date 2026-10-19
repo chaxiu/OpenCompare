@@ -601,3 +601,266 @@ describe('directory drilldown roundtrip', () => {
     expect(screen.getByRole('contentinfo').textContent).toContain(SAMPLE_DIRECTORY_ID)
   })
 })
+
+describe('session tabs lifecycle', () => {
+  const LEFT_YAML = `${DIRECTORY_SAMPLE_PATHS.left}/config/deploy.yaml`
+  const RIGHT_YAML = `${DIRECTORY_SAMPLE_PATHS.right}/config/deploy.yaml`
+  const ENGINE_SESSION_ID = `file:${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`
+  const REPORT_SESSION_ID = `file:${LEFT_REPORT} ↔ ${RIGHT_REPORT}`
+  const YAML_SESSION_ID = `file:${LEFT_YAML} ↔ ${RIGHT_YAML}`
+
+  /** Opens one real pair per click of「打开文件」; the port answers in order. */
+  async function openPairs(count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+      // The picker button is disabled while a pair is being read.
+      await waitFor(() =>
+        expect((screen.getByRole('button', { name: '打开文件' }) as HTMLButtonElement).disabled).toBe(
+          false
+        )
+      )
+    }
+  }
+
+  async function openCodeAndCsv(): Promise<void> {
+    await openPairs(2)
+    await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })
+  }
+
+  function sessionTabs(): HTMLElement {
+    return screen.getByRole('tablist', { name: '会话' })
+  }
+
+  function tab(name: RegExp): HTMLElement {
+    return within(sessionTabs()).getByRole('tab', { name })
+  }
+
+  function makeDirty(): void {
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+  }
+
+  it('keeps unsaved edits and the dirty marker across a tab roundtrip', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT, RIGHT_REPORT] })} />)
+    await openCodeAndCsv()
+
+    // Make the code session dirty, then leave it for the CSV session.
+    fireEvent.click(tab(/engine\.ts/))
+    makeDirty()
+    expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')
+    expect(screen.getByText('已修改（未保存）')).toBeDefined()
+
+    fireEvent.click(tab(/report\.csv/))
+    expect(screen.queryByText('已修改（未保存）')).toBeNull()
+    expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)
+
+    // Back on A: the working copy survived the unmount, not just the flag.
+    fireEvent.click(tab(/engine\.ts/))
+    expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)
+    expect(screen.getByText('已修改（未保存）')).toBeDefined()
+    expect(screen.getByText('未保存：右')).toBeDefined()
+    expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')
+
+    // The dirty session now asks before closing.
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+    expect(screen.getByRole('dialog', { name: '关闭含未保存修改的会话？' })).toBeDefined()
+  })
+
+  it('closes a clean background session immediately without switching away', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT, RIGHT_REPORT] })} />)
+    await openCodeAndCsv()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)
+    expect(screen.queryByRole('tab', { name: /engine\.ts/ })).toBeNull()
+    // The active session and its content did not change.
+    expect(tab(/report\.csv/).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)
+  })
+
+  it('activates the neighbour of the closed active session and empties on the last one', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          files: [
+            LEFT_ENGINE,
+            RIGHT_ENGINE,
+            LEFT_REPORT,
+            RIGHT_REPORT,
+            LEFT_YAML,
+            RIGHT_YAML,
+            // Answers for the pair opened after the workbench was emptied.
+            LEFT_REPORT,
+            RIGHT_REPORT
+          ]
+        })}
+      />
+    )
+    await openPairs(3)
+    await screen.findByRole('tab', { name: /deploy\.yaml/ }, { timeout: 4000 })
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(3)
+
+    // Close the middle one: the next tab (successor) takes over.
+    fireEvent.click(tab(/report\.csv/))
+    fireEvent.click(screen.getByRole('button', { name: '关闭 report.csv' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(tab(/deploy\.yaml/).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('contentinfo').textContent).toContain(YAML_SESSION_ID)
+
+    // Closing the last tab falls back to the previous one.
+    fireEvent.click(screen.getByRole('button', { name: '关闭 deploy.yaml' }))
+    expect(tab(/engine\.ts/).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)
+
+    // Closing the last session returns to the empty workbench, still usable.
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+    expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
+    expect(screen.getByRole('button', { name: '打开文件' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    expect(
+      await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)
+  })
+
+  it('prompts before closing dirty work and keeps it on「继续编辑」', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    makeDirty()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+
+    const dialog = screen.getByRole('dialog', { name: '关闭含未保存修改的会话？' })
+    expect(dialog.textContent).toContain('engine.ts')
+    expect(dialog.textContent).toContain('未保存修改')
+    // Nothing is removed while the prompt is open.
+    expect(tab(/engine\.ts/)).toBeDefined()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')
+    expect(screen.getByText('已修改（未保存）')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: '放弃修改并关闭' })
+    )
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+    expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
+  })
+
+  it('discards a dirty background session without switching away', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT, RIGHT_REPORT] })} />)
+    await openCodeAndCsv()
+
+    fireEvent.click(tab(/engine\.ts/))
+    makeDirty()
+    fireEvent.click(tab(/report\.csv/))
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: '放弃修改并关闭' })
+    )
+
+    expect(screen.queryByRole('tab', { name: /engine\.ts/ })).toBeNull()
+    expect(tab(/report\.csv/).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)
+  })
+
+  it('drops the dirty marker after a reset and closes without a prompt', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+
+    makeDirty()
+    expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')
+
+    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    expect(tab(/engine\.ts/).textContent).not.toContain('有未保存修改')
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
+  it('merges samples into open sessions instead of replacing them', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+
+    loadDemoSamples()
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+
+    const tabs = within(sessionTabs()).getAllByRole('tab')
+    // The real session stays first, and the active one is not switched away.
+    expect(tabs[0].textContent).toContain('engine.ts')
+    expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)
+    expect(tabs.filter((item) => item.textContent?.includes('baseline ↔ candidate'))).toHaveLength(1)
+
+    // Loading the same library again upserts by id: no duplicate sample tabs.
+    loadDemoSamples()
+    await screen.findByRole('heading', { name: '正在载入样本…' })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '正在载入样本…' })).toBeNull())
+    expect(
+      within(sessionTabs())
+        .getAllByRole('tab')
+        .filter((item) => item.textContent?.includes('baseline ↔ candidate'))
+    ).toHaveLength(1)
+
+    // A failed auxiliary load keeps the sessions on screen and reports it.
+    fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /演示：样本读取失败/ }))
+
+    const alert = await screen.findByRole('alert', {}, { timeout: 4000 })
+    expect(alert.textContent).toContain('无法读取内置样本库')
+    expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)
+    expect(within(sessionTabs()).getAllByRole('tab').length).toBeGreaterThan(1)
+  })
+
+  it('keeps a drilldown alive after its source directory session closes', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          directories: [
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.incoming,
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ incoming/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    // Drill out of the active session, then close that source session.
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
+    await screen.findByRole('button', { name: '返回上级目录视图' }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '关闭 baseline ↔ candidate' }))
+
+    // The file session still renders and returning falls back to the other tree.
+    expect(screen.getByRole('button', { name: '返回上级目录视图' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    expect(screen.getByRole('contentinfo').textContent).toContain('directory:')
+    expect(await screen.findByRole('alert')).toBeDefined()
+    expect(screen.getByRole('alert').textContent).toContain('已返回可用的目录对比')
+
+    // With no directory session left at all, the same action still explains itself.
+    fireEvent.click(within(sessionTabs()).getByRole('tab', { name: /engine\.ts/ }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭 baseline ↔ incoming' }))
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    expect(screen.getByRole('alert').textContent).toContain('没有其他目录对比会话可返回')
+    expect(screen.queryByRole('heading', { name: EMPTY_TITLE })).toBeNull()
+  })
+})

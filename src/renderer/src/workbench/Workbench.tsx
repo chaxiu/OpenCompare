@@ -23,6 +23,7 @@ import { countTreeFiles, filterDirectoryTree } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
+import { Dialog } from '@renderer/components/Dialog'
 import { DropdownMenu } from '@renderer/components/DropdownMenu'
 import type { DropdownItem } from '@renderer/components/DropdownMenu'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
@@ -67,7 +68,7 @@ import {
   withSide
 } from './snapshotOps'
 import type { ComparisonSides, SidePosition } from './snapshotOps'
-import type { WorkbenchSession } from './session'
+import type { CodeFileBuffer, WorkbenchSession } from './session'
 
 type WorkbenchStatus = 'empty' | 'loading' | 'ready' | 'error'
 
@@ -147,6 +148,14 @@ const SAMPLE_MENU: readonly DropdownItem[] = [
   }
 ]
 
+/** Drops one session's shell cache entry without mutating the record. */
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record
+  const next = { ...record }
+  delete next[key]
+  return next
+}
+
 /** File handles of a drag, tolerating the synthetic transfer a test dispatches. */
 function droppedFiles(transfer: DataTransfer | null): readonly File[] {
   return transfer === null ? [] : Array.from(transfer.files)
@@ -176,7 +185,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [codeMerge, setCodeMerge] = useState<CodeMergeState | null>(null)
+  const [codeMerge, setCodeMerge] = useState<Record<string, CodeMergeState>>({})
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -186,6 +195,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [pendingLeft, setPendingLeft] = useState<PendingLeft | null>(null)
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
+  /** The dirty session whose close is waiting for the unsaved-edits prompt. */
+  const [closeTarget, setCloseTarget] = useState<WorkbenchSession | null>(null)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
 
@@ -204,7 +215,15 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }, [])
 
-  const handleMergeState = useCallback((state: CodeMergeState) => setCodeMerge(state), [])
+  const handleMergeState = useCallback((id: string, state: CodeMergeState) => {
+    setCodeMerge((current) => {
+      const known = current[id]
+      if (known && known.unresolved === state.unresolved && known.total === state.total) {
+        return current
+      }
+      return { ...current, [id]: state }
+    })
+  }, [])
   const handleCsvAlign = useCallback((state: CsvAlignState) => setCsvAlign(state), [])
 
   /**
@@ -218,6 +237,46 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       return current.map((session) => (session.id === id ? { ...session, dirty } : session))
     })
   }, [])
+
+  /**
+   * Keeps the file view's working copies on the session, so switching tabs
+   * (which unmounts the view) never drops unsaved work.
+   */
+  const handleSessionBuffer = useCallback((id: string, buffer: CodeFileBuffer) => {
+    setSessions((current) =>
+      current.map((session) => (session.id === id ? { ...session, codeBuffer: buffer } : session))
+    )
+  }, [])
+
+  /** Closes one session, landing on its neighbour and cleaning shell caches. */
+  function closeSession(id: string): void {
+    const index = sessions.findIndex((session) => session.id === id)
+    if (index < 0) return
+
+    const remaining = sessions.filter((session) => session.id !== id)
+    if (activeId === id) {
+      // Prefer the next tab; the previous one is the fallback at the right edge.
+      setActiveId((remaining[index] ?? remaining[index - 1])?.id ?? null)
+    }
+    setSessions(remaining)
+    setDirectoryStates((current) => withoutKey(current, id))
+    setDirectoryScroll((current) => withoutKey(current, id))
+    setCodeMerge((current) => withoutKey(current, id))
+    setCsvAlign((current) => (current?.sessionId === id ? null : current))
+    setCloseTarget(null)
+    if (remaining.length === 0) setStatus('empty')
+  }
+
+  /** A clean session closes at once; a dirty one asks first. */
+  function requestCloseSession(id: string): void {
+    const target = sessions.find((session) => session.id === id)
+    if (!target) return
+    if (target.dirty) {
+      setCloseTarget(target)
+      return
+    }
+    closeSession(id)
+  }
 
   function report(message: string, tone: 'danger' | 'info' = 'danger'): void {
     setNotice(message)
@@ -242,18 +301,20 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }, [active, directoryState.filter])
 
   // The code session's conflict count and the CSV alignment counts are computed
-  // at runtime, not read from the sample answer key.
+  // at runtime, not read from the sample answer key. Merge state is keyed by
+  // session, so a tab switch never shows another session's count.
+  const activeMerge = active ? (codeMerge[active.id] ?? null) : null
   const legend = useMemo<SampleComposition | null>(() => {
     if (active?.scene === 'directory') return directoryCounts
     if (active?.scene === 'csv' && csvAlign?.sessionId === active.id) {
       return { ...csvAlign.counts, conflict: 0 }
     }
     const base = active?.composition ?? null
-    if (base && active?.scene === 'code' && codeMerge) {
-      return { ...base, conflict: codeMerge.unresolved }
+    if (base && active?.scene === 'code' && activeMerge) {
+      return { ...base, conflict: activeMerge.unresolved }
     }
     return base
-  }, [active, directoryCounts, codeMerge, csvAlign])
+  }, [active, directoryCounts, activeMerge, csvAlign])
 
   /** Applies one patch on top of a directory session's kept view state. */
   function patchDirectoryState(id: string, patch: Partial<DirectoryViewState>): void {
@@ -307,14 +368,28 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setError(null)
     try {
       const loaded = await loadSampleSessions(platform, { ...options, cache: cache.current })
-      setSessions(loaded)
+      // Samples are auxiliary: with sessions already open they are merged in by
+      // id, so the real sessions, their order and the active one survive.
+      setSessions((current) => {
+        if (current.length === 0) return loaded
+        const merged = current.map(
+          (session) => loaded.find((sample) => sample.id === session.id) ?? session
+        )
+        return [...merged, ...loaded.filter((sample) => !current.some((s) => s.id === sample.id))]
+      })
       setActiveId((current) =>
-        current !== null && loaded.some((session) => session.id === current)
+        current !== null && sessions.some((session) => session.id === current)
           ? current
           : (loaded[0]?.id ?? null)
       )
       setStatus('ready')
     } catch (cause) {
+      if (sessions.length > 0) {
+        // Keep what the user already has open and report the auxiliary failure.
+        report(cause instanceof Error ? cause.message : String(cause))
+        setStatus('ready')
+        return
+      }
       setSessions([])
       setActiveId(null)
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -743,8 +818,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <CodeView
             key={session.id}
             pair={session.adhoc.pair}
+            buffer={session.codeBuffer}
             platform={platform}
             onDirtyChange={(dirty) => handleSessionDirty(session.id, dirty)}
+            onBufferChange={(buffer) => handleSessionBuffer(session.id, buffer)}
           />
         ) : (
           <CodeView
@@ -752,7 +829,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             fixture={CODE_SCENE}
             defaultMode={session.columns === 3 ? 'merge' : 'diff'}
             platform={platform}
-            onMergeStateChange={handleMergeState}
+            onMergeStateChange={(state) => handleMergeState(session.id, state)}
           />
         )
       case 'csv': {
@@ -874,10 +951,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               id: session.id,
               title: session.title,
               subtitle: session.subtitle,
-              icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon
+              icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon,
+              dirty: session.dirty ?? false
             }))}
             activeId={activeId}
             onSelect={setActiveId}
+            onClose={requestCloseSession}
           />
         </div>
       ) : null}
@@ -953,6 +1032,26 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         {status === 'ready' && active ? renderScene(active) : null}
       </main>
 
+      {closeTarget ? (
+        <Dialog
+          title="关闭含未保存修改的会话？"
+          description={`会话「${closeTarget.title}」还有未保存修改，关闭后这些修改会丢失。`}
+          onClose={() => setCloseTarget(null)}
+          footer={
+            <>
+              <ToolbarButton onClick={() => setCloseTarget(null)}>继续编辑</ToolbarButton>
+              <ToolbarButton variant="danger" onClick={() => closeSession(closeTarget.id)}>
+                放弃修改并关闭
+              </ToolbarButton>
+            </>
+          }
+        >
+          <p className="text-2xs text-content-secondary">
+            需要保留修改时，请先「继续编辑」，在该会话内用「保存左文件 / 保存右文件」写回磁盘后再关闭。
+          </p>
+        </Dialog>
+      ) : null}
+
       <StatusBar>
         <StatusEntry label="会话" value={active ? active.id : '—'} />
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
@@ -970,8 +1069,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
                 key={stat.label}
                 label={stat.label}
                 value={
-                  active.scene === 'code' && stat.label === '冲突块' && codeMerge
-                    ? codeMerge.unresolved
+                  active.scene === 'code' && stat.label === '冲突块' && activeMerge
+                    ? activeMerge.unresolved
                     : stat.value
                 }
                 tone={stat.tone}

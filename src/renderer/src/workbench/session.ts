@@ -26,6 +26,22 @@ export interface FilePair {
   readonly right: TextSample
 }
 
+/**
+ * Editable state of one code file pair, owned by the session rather than the
+ * view: a tab switch may unmount the view, but the unsaved working copies (and
+ * the loaded bodies they are compared against) must survive it.
+ */
+export interface CodeFileBuffer {
+  readonly leftPath: string
+  readonly rightPath: string
+  /** Bodies as loaded from disk / last saved; the reset target. */
+  readonly leftSource: string
+  readonly rightSource: string
+  /** Working copies the per-block overwrite mutates. */
+  readonly leftText: string
+  readonly rightText: string
+}
+
 /** Drilldown payload: file contents opened outside the sample library. */
 export interface AdhocFilePair {
   readonly scene: 'code' | 'csv' | 'structured'
@@ -49,6 +65,11 @@ export interface WorkbenchSession extends FixtureSession {
    * active file view so a later close prompt can reuse the flag.
    */
   readonly dirty?: boolean
+  /**
+   * The code view's working copies kept on the session, so switching tabs does
+   * not destroy unsaved work and the view always remounts from its real buffer.
+   */
+  readonly codeBuffer?: CodeFileBuffer
   /**
    * The directory session this file session was drilled out of. Set only on a
    * directory-tree drilldown, so the file view can offer「返回上级目录视图」and
