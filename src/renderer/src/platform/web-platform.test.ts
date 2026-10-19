@@ -63,6 +63,13 @@ describe('web PlatformPort', () => {
 })
 
 describe('web path probe', () => {
+  it('exposes fixed home and working directories inside the sandbox', async () => {
+    const platform = createWebPlatformPort()
+
+    await expect(platform.homeDirectory()).resolves.toBe('/memory')
+    await expect(platform.workingDirectory()).resolves.toBe('/memory')
+  })
+
   it('reports the same file/directory/missing semantics as the Electron port', async () => {
     const platform = createWebPlatformPort()
 

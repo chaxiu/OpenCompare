@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodeSceneFixture } from '@shared/fixtures'
-import type { PlatformPort, SaveFileOptions } from '@shared/platform/types'
+import type { PlatformPort } from '@shared/platform/types'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
 import type { CodeMergeState } from './CodeView'
@@ -174,14 +174,16 @@ describe('in-place save and dirty marker', () => {
     expect(screen.queryByText('已修改（未保存）')).toBeNull()
   })
 
-  it('writes a modified side back in place and clears its dirty flag', async () => {
+  it('writes a modified side back in place without opening a save dialog', async () => {
     const base = createWebPlatformPort()
-    const saved: SaveFileOptions[] = []
+    const writes: { path: string; content: string }[] = []
+    const saveFile = vi.fn(async () => '/should/not/be/used.txt')
     const port: PlatformPort = {
       ...base,
-      saveFile: async (options) => {
-        saved.push(options)
-        return base.saveFile(options)
+      saveFile,
+      writeTextFile: async (path, content, modifiedMs) => {
+        writes.push({ path, content })
+        await base.writeTextFile(path, content, modifiedMs)
       }
     }
     render(<CodeView pair={PAIR} platform={port} />)
@@ -190,33 +192,55 @@ describe('in-place save and dirty marker', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存右文件' }))
 
     expect(await screen.findByText(/已写回 \/memory\/right\.ts/)).toBeDefined()
-    expect(saved[0].defaultPath).toBe('/memory/right.ts')
-    expect(saved[0].content).toBe('alpha\nbeta\n')
+    expect(writes).toEqual([{ path: '/memory/right.ts', content: 'alpha\nbeta\n' }])
+    expect(saveFile).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByText('已修改（未保存）')).toBeNull())
-    // Disk now holds exactly the modified working text.
+    // Disk now holds exactly the modified working text at the loaded path.
     expect(await base.readTextFile('/memory/right.ts')).toBe('alpha\nbeta\n')
+    expect(screen.getAllByText('/memory/right.ts').length).toBeGreaterThan(0)
   })
 
-  it('keeps the dirty flag when the save dialog is cancelled', async () => {
-    const saveFile = vi.fn(async () => null)
-    render(<CodeView pair={PAIR} platform={{ ...createWebPlatformPort(), saveFile }} />)
+  it('writes the left side back to its loaded path', async () => {
+    const base = createWebPlatformPort()
+    const writes: { path: string; content: string }[] = []
+    const saveFile = vi.fn(async () => '/should/not/be/used.txt')
+    const port: PlatformPort = {
+      ...base,
+      saveFile,
+      writeTextFile: async (path, content, modifiedMs) => {
+        writes.push({ path, content })
+        await base.writeTextFile(path, content, modifiedMs)
+      }
+    }
+    render(<CodeView pair={PAIR} platform={port} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
-    fireEvent.click(screen.getByRole('button', { name: '保存右文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '覆写到左' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存左文件' }))
 
-    await waitFor(() => expect(saveFile).toHaveBeenCalled())
-    expect(screen.getByText('未保存：右')).toBeDefined()
-    expect(screen.queryByText(/不能写入|只读/)).toBeNull()
+    expect(await screen.findByText(/已写回 \/memory\/left\.ts/)).toBeDefined()
+    expect(writes).toEqual([{ path: '/memory/left.ts', content: 'alpha\ngamma\n' }])
+    expect(saveFile).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByText('已修改（未保存）')).toBeNull())
+    expect(await base.readTextFile('/memory/left.ts')).toBe('alpha\ngamma\n')
+    expect(screen.getAllByText('/memory/left.ts').length).toBeGreaterThan(0)
   })
 
   it('reports a rejected write to a read-only sample path and keeps the dirty flag', async () => {
-    render(<CodeView fixture={FIXTURE} defaultMode="diff" platform={platform} />)
+    const saveFile = vi.fn(async () => '/should/not/be/used.txt')
+    render(
+      <CodeView
+        fixture={FIXTURE}
+        defaultMode="diff"
+        platform={{ ...createWebPlatformPort(), saveFile }}
+      />
+    )
 
     fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
     fireEvent.click(screen.getByRole('button', { name: '保存右文件' }))
 
     expect(await screen.findByText(/不能写入/)).toBeDefined()
     expect(screen.getByText('未保存：右')).toBeDefined()
+    expect(saveFile).not.toHaveBeenCalled()
   })
 })
 

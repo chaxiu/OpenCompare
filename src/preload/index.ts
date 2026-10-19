@@ -4,6 +4,10 @@ import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 
 const platform: PlatformPort = {
   kind: 'electron',
+  homeDirectory: () =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.homeDirectory) as Promise<string>,
+  workingDirectory: () =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.workingDirectory) as Promise<string>,
   selectDirectory: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.selectDirectory) as Promise<string | null>,
   selectFile: (options) =>

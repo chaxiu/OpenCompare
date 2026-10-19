@@ -40,6 +40,13 @@ export type PathProbeKind = 'file' | 'directory' | 'missing'
 
 export interface PlatformPort {
   readonly kind: PlatformKind
+  /**
+   * Absolute home directory used to expand a leading `~` in manually entered
+   * paths. Supplied explicitly instead of being read from the environment.
+   */
+  homeDirectory(): Promise<string>
+  /** Base directory relative paths are resolved against (the process cwd). */
+  workingDirectory(): Promise<string>
   /** Ask the user for a directory; resolves to `null` when cancelled. */
   selectDirectory(): Promise<string | null>
   /** Ask the user for a file; resolves to the chosen path, or `null` when cancelled. */

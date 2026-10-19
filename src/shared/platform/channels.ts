@@ -3,6 +3,8 @@
  * preload bridge. Keep both sides on this single source of truth.
  */
 export const PLATFORM_CHANNELS = {
+  homeDirectory: 'platform:home-directory',
+  workingDirectory: 'platform:working-directory',
   selectDirectory: 'platform:select-directory',
   selectFile: 'platform:select-file',
   saveFile: 'platform:save-file',
