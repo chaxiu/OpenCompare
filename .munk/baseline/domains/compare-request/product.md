@@ -47,7 +47,7 @@
 ## 非目标
 
 - 本域不做 UI：顶栏「新建对比」入口、路径输入对话框、错误提示样式与 `Cmd/Ctrl+N` 快捷键属 `workbench` 域，本域只提供被它消费的纯契约与平台查询；不改对比算法、会话模型与任何视图。
-- 不做主进程单实例锁、argv 收集、`opencompare` 协议注册、`open-url` / `second-instance` 接管、请求队列与窗口聚焦（属后续启动参数/URL 注入项）。
+- 不做主进程单实例锁、argv 收集、`opencompare` 协议注册、`open-url` / `second-instance` 接管、请求队列与窗口聚焦（已由 `launch` 域交付；本域只提供被它调用的 `parseCompareArgv` / `parseCompareUrl` / `resolveCompareRequest`，不承载 Electron 绑定与投递时序）。
 - 不做「保存左/右文件」原位写回，不改任何会话构建逻辑与 `WorkbenchSession` / `ComparisonSides` 语义。
 - 不新增运行时依赖，不做路径沙箱/安全策略（如允许根目录白名单）。
 - 不校验 file↔file 的文件家族是否一致（JSON vs YAML 等混合对仍由既有 `openFilePairSession` 拒绝），不改既有对比算法与目录扫描。

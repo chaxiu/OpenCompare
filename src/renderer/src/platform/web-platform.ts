@@ -255,6 +255,10 @@ export function createWebPlatformPort(): PlatformPort {
       if (node.isDirectory) throw new Error(`Cannot delete a directory: ${path}`)
       nodes.delete(path)
     },
-    temporaryDirectory: async () => ROOT
+    temporaryDirectory: async () => ROOT,
+    // The browser runtime has no launch source (`argv` / URL scheme), so the
+    // stream is an inert stub with the very same signature as the desktop one.
+    onCompareRequest: () => () => undefined,
+    compareRequestsReady: async () => undefined
   }
 }

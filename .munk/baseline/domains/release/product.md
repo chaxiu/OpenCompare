@@ -7,6 +7,7 @@
 - **打包配置**：`electron-builder.yml` 声明 macOS（dmg / zip）、Windows（nsis）、Linux（AppImage / deb）三平台目标；`package.json` 提供 `dist` / `dist:mac` / `dist:win` / `dist:linux` scripts，`electron-builder` 为 devDependency。
 - **自制品牌图标资产**：`build/icons/icon.svg` 为唯一可编辑源（双栏对比 / 分叉合并意象，纯几何图形）；`node build/icons/generate-icons.mjs` 仅用 Node 标准库可重复生成并入库 `build/icons/icon-{16,32,64,128,256,512,1024}.png`、`build/icon.png`（1024×1024，兼作 Linux 与运行时图标）、`build/icon.icns`、`build/icon.ico`；替换品牌只需换源并重跑，产物路径固定。手册见 `docs/brand-assets.md`。
 - **打包图标接线**：`electron-builder.yml` 显式配置 `mac.icon: build/icon.icns` / `win.icon: build/icon.ico` / `linux.icon: build/icon.png`，并以 `extraResources`（`build/icon.png` → `icon.png`）把同一份 PNG 放进打包根 `resources/`；不改 `appId`、`productName`、targets、notarize 与 publish 模型。
+- **协议（URL scheme）声明**：`electron-builder.yml` 顶层 `protocols` 声明 `opencompare` scheme（`name` 非空），mac 打包即据此生成 `Info.plist` 的 `CFBundleURLTypes`；`linux.desktop.entry.MimeType` 声明 `x-scheme-handler/opencompare`。运行时注册（`app.setAsDefaultProtocolClient`）、argv / `open-url` 接管与请求投递归 `launch` 域；本域只负责打包配置与配置断言。
 - **macOS 签名与公证**：`electron-builder.yml` 的 `mac` 段启用 `hardenedRuntime: true`、声明 `entitlements` / `entitlementsInherit: build/entitlements.mac.plist`（Electron 最小必要项：`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation`）与 `notarize: true`，并显式钉住签名身份 `identity: 'Developer ID Application: Tao Zhu (3X4J53U6RY)'`；Developer ID Application 证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入，公证走 **App Store Connect API Key 模式**（`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`），`APPLE_TEAM_ID` 为 `3X4J53U6RY`，`appId` 保持 `com.opencompare.app`；仓内不落证书/密钥明文。
 - **签名凭据 fail-closed**：`release.yml` mac 矩阵步骤在打包前逐一检查 6 个签名/公证 Secret（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）齐备，任一缺失即 `::error::` 列出缺失项并非零退出，绝不产出、上传或公开未签名裸包；无「跳过签名继续发版」的静默降级分支。
 - **API Key 物化**：`APPLE_API_KEY` 以 `.p8` base64 存放，`release.yml` 在打包前于 `$RUNNER_TEMP` 解码为权限 `600` 的仓库外临时文件，`Build installers` 步骤的 `APPLE_API_KEY` 指向该路径（electron-builder v26 / `@electron/notarize` 2.5 的 `notarytool --key` 需路径），打包后清理，日志不打印密钥内容。
@@ -72,6 +73,7 @@
 - **ac-no-electron-default**：三平台图标配置均显式指向 `build/` 下入库资产（不依赖 electron-builder 默认 `electron.icns` / `electron.ico`）；当测试机可定位 Electron 分发目录中的默认 `electron.icns` 时，断言其 SHA-256 与本仓 `build/icon.icns` 不同。
 - **ac-brand-docs-replaceable**：`docs/brand-assets.md` 存在，含「自制」「可替换」表述、四个核心资产路径（svg / png / icns / ico）与再生成命令；测试断言这些字符串与路径均可检索。
 - **ac-release-gates-green**：本项不新增依赖，`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm build:web` 全部通过。
+- **ac-builder-protocol-config**：解析 `electron-builder.yml` 后存在顶层 `protocols`，其中一项 `schemes` 含 `opencompare` 且 `name` 非空；`linux.desktop.entry.MimeType` 含 `x-scheme-handler/opencompare`；新增断言在 `release-packaging.test.ts` 中且既有断言未被删除或放宽。
 
 ## 非目标
 
@@ -100,13 +102,10 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_ecadd56de3f4c523`（自制品牌图标 + 打包图标接线 + 品牌资产手册）
+- WI：`wi_ws_1049cda9d94e3506`（`opencompare` 协议在打包配置中声明）
 - 日期：2026-10-20
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；跳过 UI 自测 `needSelfTest=false`）。
+- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；`needSelfTest=false`，跳过 UI 自测）。
 - 覆盖摘要：
-  - 新增 `build/icons/icon.svg`（1024×1024 视口，圆角矩形 + 线性渐变，双栏对比 / 分叉合并意象）与 `build/icons/generate-icons.mjs`（仅 Node 标准库，零新依赖，可重复生成、产物路径固定）。
-  - 入库 `build/icons/icon-{16,32,64,128,256,512,1024}.png`、`build/icon.png`（1024×1024）、`build/icon.icns`、`build/icon.ico`；替换品牌只需换 SVG 源并重跑脚本。
-  - `electron-builder.yml`：新增 `mac.icon: build/icon.icns` / `win.icon: build/icon.ico` / `linux.icon: build/icon.png` 与 `extraResources`（`build/icon.png` → `icon.png`）；`appId` / `productName` / targets / notarize / publish 未动。
-  - 新增 `docs/brand-assets.md`：自制 / 可替换表述、四个核心资产路径、`node build/icons/generate-icons.mjs` 再生成命令与替换步骤。
-  - `src/main/release-packaging.test.ts`：只增不改，新增品牌图标资产组（SVG 存在 / PNG 签名与 1024 尺寸 / 7 档多尺寸 / icns magic / ico 头 / 与 Electron 默认 icns SHA-256 不同）、打包图标接线组（三平台指向入库文件、`extraResources` 条目、packaged vs dev 路径同源）与窗口 / 关于面板断言；既有 6 Secrets、fail-closed、API Key 物化、唯一 Release、版本对齐断言均保留。
-- 注：运行时窗口 / dock / 关于面板 / 原生菜单接线（`src/shared/brand.ts`、`src/main/menu.ts`、`src/main/index.ts`）的 AC 定义落在新域 `desktop-shell`，本域只承载「资产存在 + 打包配置一致 + 文档可替换」。图标源为本仓自制几何图形，未使用 Electron 默认图标或第三方版权素材；本项不升版本、不打 Tag、不 publish。
+  - `electron-builder.yml`：新增顶层 `protocols`（`name: OpenCompare Compare Link`、`schemes: [opencompare]`），mac 打包即生成 `Info.plist` 的 `CFBundleURLTypes`；`linux.desktop.entry.MimeType: x-scheme-handler/opencompare`。`appId` / `productName` / 三平台 targets / icon / `mac.identity` / notarize / entitlements / `publish` 均未动，未升版本。
+  - `src/main/release-packaging.test.ts`：只增不改，新增 `describe('opencompare protocol declaration')` 两条断言——顶层 `protocols` 中存在含 `opencompare` 的 scheme 且 `name` 非空；Linux desktop entry 的 `MimeType` 含 `x-scheme-handler/opencompare`。既有 6 Secrets、fail-closed、API Key 物化、唯一 Release、版本对齐、图标资产与接线断言全部保留。
+- 注：运行时协议注册 / argv·`open-url` 接管 / 队列投递与 renderer 落地的 AC 定义落在新域 `launch`；本域只承载「打包配置声明 + 配置断言」。本 WI change pack 未提供 `tests/cases/**` / `tech.md` / `ux/**`，无新增折叠用例、无 tech/ux 手合。未做 Windows / Linux 真机注册表与桌面文件实测，未读取打包后的真实 `Info.plist`（由 product-qa 批次门覆盖）。

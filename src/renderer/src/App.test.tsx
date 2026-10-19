@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
+import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
 import { App } from './App'
@@ -1306,5 +1308,212 @@ describe('new compare dialog', () => {
     fireEvent.click(within(sessionTabs()).getByRole('tab', { name: /l1\.txt/ }))
     expect(screen.getByText('未保存：右')).toBeDefined()
     expect(screen.getByText('已修改（未保存）')).toBeDefined()
+  })
+})
+
+describe('launch request injection', () => {
+  const LEFT = '/memory/左 a.txt'
+  const RIGHT = '/memory/右 b.txt'
+  const FILE_REQUEST = { kind: 'file', left: LEFT, right: RIGHT } as const
+
+  interface InjectionPort {
+    readonly platform: PlatformPort
+    readonly calls: string[]
+    emit(payload: CompareRequestPayload): void
+    listenerCount(): number
+  }
+
+  /**
+   * PlatformPort with the optional launch stream: it holds requests that arrive
+   * before the ready signal (like the main-process queue) and records the order
+   * in which the workbench subscribes and announces itself.
+   */
+  function injectionPort(base: PlatformPort = createWebPlatformPort()): InjectionPort {
+    const listeners = new Set<(payload: CompareRequestPayload) => void>()
+    const queued: CompareRequestPayload[] = []
+    const calls: string[] = []
+    let ready = false
+
+    function deliver(payload: CompareRequestPayload): void {
+      for (const listener of [...listeners]) listener(payload)
+    }
+
+    return {
+      calls,
+      listenerCount: () => listeners.size,
+      emit: (payload) => {
+        if (ready) deliver(payload)
+        else queued.push(payload)
+      },
+      platform: {
+        ...base,
+        onCompareRequest: (listener) => {
+          calls.push('subscribe')
+          listeners.add(listener)
+          return () => {
+            calls.push('unsubscribe')
+            listeners.delete(listener)
+          }
+        },
+        compareRequestsReady: async () => {
+          calls.push('ready')
+          ready = true
+          while (queued.length > 0) deliver(queued.shift() as CompareRequestPayload)
+        }
+      }
+    }
+  }
+
+  async function seedPair(platform: PlatformPort): Promise<void> {
+    await platform.writeTextFile(LEFT, 'alpha\n')
+    await platform.writeTextFile(RIGHT, 'beta\n')
+  }
+
+  async function mountReady(port: InjectionPort): Promise<void> {
+    render(<Workbench platform={port.platform} />)
+    await waitFor(() => expect(port.calls).toContain('ready'))
+  }
+
+  function tabCount(): number {
+    const list = screen.queryByRole('tablist', { name: '会话' })
+    return list ? within(list).getAllByRole('tab').length : 0
+  }
+
+  function activeSession(): string {
+    return screen.getByRole('contentinfo').textContent ?? ''
+  }
+
+  function activeScene(): string | null {
+    const views = screen.getByRole('tablist', { name: '视图切换' })
+    return (
+      within(views)
+        .getAllByRole('tab')
+        .find((tab) => tab.getAttribute('aria-selected') === 'true')?.textContent ?? null
+    )
+  }
+
+  it('opens a file session from an injected request without a picker', async () => {
+    const base = createWebPlatformPort()
+    await seedPair(base)
+    const selectFile = vi.fn(base.selectFile)
+    const selectDirectory = vi.fn(base.selectDirectory)
+    const saveFile = vi.fn(base.saveFile)
+    const port = injectionPort({ ...base, selectFile, selectDirectory, saveFile })
+    await mountReady(port)
+
+    act(() => port.emit({ ok: true, request: FILE_REQUEST }))
+
+    await waitFor(() => expect(tabCount()).toBe(1))
+    expect(activeScene()).toBe('代码 Diff & 3-Way')
+    expect(activeSession()).toContain(`file:${LEFT} ↔ ${RIGHT}`)
+    expect(selectFile).not.toHaveBeenCalled()
+    expect(selectDirectory).not.toHaveBeenCalled()
+    expect(saveFile).not.toHaveBeenCalled()
+  })
+
+  it('opens a directory session from an injected request', async () => {
+    const base = createWebPlatformPort()
+    await base.writeTextFile('/memory/left-dir/same.txt', 'same\n')
+    await base.writeTextFile('/memory/right-dir/same.txt', 'same\n')
+    await base.writeTextFile('/memory/left-dir/only-left.txt', 'left\n')
+    const port = injectionPort(base)
+    await mountReady(port)
+
+    act(() =>
+      port.emit({
+        ok: true,
+        request: { kind: 'directory', left: '/memory/left-dir', right: '/memory/right-dir' }
+      })
+    )
+
+    await waitFor(() => expect(tabCount()).toBe(1))
+    expect(activeScene()).toBe('目录对比')
+    expect(activeSession()).toContain('directory:/memory/left-dir ↔ /memory/right-dir')
+  })
+
+  it('builds the very same session the manual entry builds for the pair', async () => {
+    const base = createWebPlatformPort()
+    await seedPair(base)
+    const port = injectionPort(base)
+    await mountReady(port)
+
+    act(() => port.emit({ ok: true, request: FILE_REQUEST }))
+    await waitFor(() => expect(tabCount()).toBe(1))
+    const injected = activeSession()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 左 a.txt ↔ 右 b.txt' }))
+    expect(tabCount()).toBe(0)
+
+    fireEvent.keyDown(document, { key: 'n', metaKey: true })
+    const panel = screen.getByRole('dialog', { name: '新建对比' })
+    fireEvent.change(within(panel).getByLabelText('左侧路径'), { target: { value: LEFT } })
+    fireEvent.change(within(panel).getByLabelText('右侧路径'), { target: { value: RIGHT } })
+    fireEvent.click(within(panel).getByRole('button', { name: '建立对比' }))
+
+    await waitFor(() => expect(tabCount()).toBe(1))
+    expect(activeSession()).toBe(injected)
+  })
+
+  it('reports a rejected request without touching the open sessions', async () => {
+    const base = createWebPlatformPort()
+    await seedPair(base)
+    const port = injectionPort(base)
+    await mountReady(port)
+
+    act(() => port.emit({ ok: true, request: FILE_REQUEST }))
+    await waitFor(() => expect(tabCount()).toBe(1))
+    const before = activeSession()
+
+    act(() => port.emit({ ok: false, message: '右侧路径不存在：/nope' }))
+
+    expect(screen.getByRole('alert').textContent).toContain('右侧路径不存在：/nope')
+    expect(tabCount()).toBe(1)
+    expect(activeSession()).toBe(before)
+  })
+
+  it('keeps a single effective subscription under StrictMode', async () => {
+    const base = createWebPlatformPort()
+    await seedPair(base)
+    const port = injectionPort(base)
+    render(
+      <StrictMode>
+        <Workbench platform={port.platform} />
+      </StrictMode>
+    )
+    await waitFor(() => expect(port.calls).toContain('ready'))
+    expect(port.listenerCount()).toBe(1)
+
+    act(() => port.emit({ ok: true, request: FILE_REQUEST }))
+    await waitFor(() => expect(tabCount()).toBe(1))
+    expect(tabCount()).toBe(1)
+    expect(port.listenerCount()).toBe(1)
+  })
+
+  it('releases the subscription on unmount', async () => {
+    const base = createWebPlatformPort()
+    await seedPair(base)
+    const port = injectionPort(base)
+    const view = render(<Workbench platform={port.platform} />)
+    await waitFor(() => expect(port.listenerCount()).toBe(1))
+
+    view.unmount()
+
+    expect(port.listenerCount()).toBe(0)
+    expect(port.calls).toContain('unsubscribe')
+    expect(() => port.emit({ ok: true, request: FILE_REQUEST })).not.toThrow()
+  })
+
+  it('signals readiness after subscribing and flushes a pre-mount request', async () => {
+    const base = createWebPlatformPort()
+    await seedPair(base)
+    const port = injectionPort(base)
+
+    port.emit({ ok: true, request: FILE_REQUEST })
+    expect(port.calls).toEqual([])
+
+    render(<Workbench platform={port.platform} />)
+
+    await waitFor(() => expect(tabCount()).toBe(1))
+    expect(port.calls).toEqual(['subscribe', 'ready'])
   })
 })

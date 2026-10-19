@@ -20,6 +20,7 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as 
 
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
   appId?: string
+  protocols?: Array<{ name?: string; schemes?: string[] }>
   extraResources?: Array<{ from?: string; to?: string }>
   mac?: {
     icon?: string
@@ -31,7 +32,12 @@ const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8
     target?: string[]
   }
   win?: { icon?: string; target?: string[] }
-  linux?: { icon?: string; maintainer?: string; target?: string[] }
+  linux?: {
+    icon?: string
+    maintainer?: string
+    target?: string[]
+    desktop?: { entry?: { MimeType?: string } }
+  }
   publish?: { provider?: string; releaseType?: string }
 }
 
@@ -494,5 +500,21 @@ describe('brand asset documentation', () => {
       expect(brandDoc).toContain(path)
     }
     expect(brandDoc).toContain('node build/icons/generate-icons.mjs')
+  })
+})
+
+describe('opencompare protocol declaration', () => {
+  it('declares the opencompare scheme for packaged bundles', () => {
+    const protocols = builder.protocols ?? []
+    expect(protocols.length).toBeGreaterThan(0)
+    const compare = protocols.find((protocol) => protocol.schemes?.includes('opencompare'))
+    expect(compare).toBeDefined()
+    expect(compare?.name?.trim()).toBeTruthy()
+  })
+
+  it('registers the scheme handler in the Linux desktop entry', () => {
+    expect(builder.linux?.desktop?.entry?.MimeType ?? '').toContain(
+      'x-scheme-handler/opencompare'
+    )
   })
 })

@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { IpcRendererEvent } from 'electron'
+import type { CompareRequestPayload } from '@shared/compareRequest'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 
@@ -32,7 +34,18 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
   temporaryDirectory: () =>
-    ipcRenderer.invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
+  onCompareRequest: (listener) => {
+    const forward = (_event: IpcRendererEvent, payload: CompareRequestPayload): void => {
+      listener(payload)
+    }
+    ipcRenderer.on(PLATFORM_CHANNELS.compareRequest, forward)
+    return () => {
+      ipcRenderer.removeListener(PLATFORM_CHANNELS.compareRequest, forward)
+    }
+  },
+  compareRequestsReady: () =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.compareRequestsReady) as Promise<void>
 }
 
 contextBridge.exposeInMainWorld('openComparePlatform', platform)

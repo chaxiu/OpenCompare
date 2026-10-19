@@ -1,8 +1,10 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { BRAND_NAME, buildAboutPanelOptions, resolveBrandIconPath } from '../shared/brand'
+import { PLATFORM_CHANNELS } from '../shared/platform/channels'
+import { startLaunch } from './launch'
 import { createMenuTemplate } from './menu'
-import { registerPlatformIpc } from './platform/electron-platform'
+import { registerPlatformIpc, statPath } from './platform/electron-platform'
 
 function brandIconPath(): string {
   return resolveBrandIconPath({
@@ -10,6 +12,10 @@ function brandIconPath(): string {
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath()
   })
+}
+
+function currentWindow(): BrowserWindow | null {
+  return BrowserWindow.getAllWindows()[0] ?? null
 }
 
 function createWindow(iconPath: string): void {
@@ -47,7 +53,52 @@ function createWindow(iconPath: string): void {
   }
 }
 
+/**
+ * Single-instance lock, protocol registration and launch intake. Must run
+ * before any window or IPC handler exists: the instance without the lock quits.
+ */
+const launch = startLaunch({
+  argv: process.argv,
+  execPath: process.execPath,
+  appPath: app.getAppPath(),
+  appEntry: process.defaultApp === true ? process.argv[1] : undefined,
+  defaultApp: process.defaultApp === true,
+  cwd: process.cwd(),
+  homeDir: app.getPath('home'),
+  isPackaged: app.isPackaged,
+  probe: { statPath },
+  requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
+  setProtocolClient: (scheme, execPath, args) =>
+    execPath === undefined
+      ? app.setAsDefaultProtocolClient(scheme)
+      : app.setAsDefaultProtocolClient(scheme, execPath, args),
+  registerIpc: (onRendererReady) =>
+    registerPlatformIpc({ onCompareRequestsReady: onRendererReady }),
+  quit: () => app.quit(),
+  isReady: () => app.isReady(),
+  getWindow: currentWindow,
+  createWindow: () => createWindow(brandIconPath()),
+  send: (payload) => {
+    currentWindow()?.webContents.send(PLATFORM_CHANNELS.compareRequest, payload)
+  }
+})
+
+if (launch !== null) {
+  // A second launch is redirected into this instance. Listening starts right
+  // after the lock is held; macOS `open-url` events may precede `whenReady`.
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    void launch.onSecondInstance(argv, workingDirectory)
+  })
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    void launch.onOpenUrl(url)
+  })
+}
+
 void app.whenReady().then(() => {
+  // The instance without the lock is quitting; it never builds a window.
+  if (launch === null) return
+
   const iconPath = brandIconPath()
 
   // Native About panel: same brand icon and name as the window, version from
@@ -63,11 +114,13 @@ void app.whenReady().then(() => {
     app.dock?.setIcon(iconPath)
   }
 
-  registerPlatformIpc()
-  createWindow(iconPath)
+  launch.onAppReady()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(iconPath)
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow(iconPath)
+      launch.notifyWindowCreated()
+    }
   })
 })
 
