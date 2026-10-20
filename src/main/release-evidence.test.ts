@@ -3,11 +3,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-// Read-only assertions over docs/release-evidence/v0.2.0.md. This file never
+// Read-only assertions over docs/release-evidence/v0.2.1.md. This file never
 // downloads, unpacks, mounts, signs, notarizes or writes to git; it only parses
 // the evidence Markdown so a missing/fabricated evidence record fails `pnpm test`.
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
-const evidencePath = join(repoRoot, 'docs/release-evidence/v0.2.0.md')
+const evidencePath = join(repoRoot, 'docs/release-evidence/v0.2.1.md')
 
 const PASSING_MARKERS = [
   'valid on disk',
@@ -31,7 +31,7 @@ const inspectReleaseEvidence = (doc: string): EvidenceReport => {
   const problems: string[] = []
   const text = doc.trim()
   if (!text) return { status: null, problems: ['证据文件缺失或为空'] }
-  if (!text.includes('v0.2.0')) problems.push('证据文件未声明 v0.2.0')
+  if (!text.includes('v0.2.1')) problems.push('证据文件未声明 v0.2.1')
 
   const statusMatch = text.match(/^\s*(?:-\s*)?status:\s*(\S+)\s*$/m)
   const status = statusMatch?.[1]
@@ -77,7 +77,7 @@ const readEvidence = (): string =>
 
 const verifiedFixture = (): string =>
   [
-    '# v0.2.0 本机 dmg/zip 签名公证取证证据',
+    '# v0.2.1 本机 dmg/zip 签名公证取证证据',
     'status: verified',
     '',
     'zip app: valid on disk',
@@ -97,22 +97,22 @@ const verifiedFixture = (): string =>
 
 const blockedFixture = (): string =>
   [
-    '# v0.2.0 本机 dmg/zip 签名公证取证证据',
+    '# v0.2.1 本机 dmg/zip 签名公证取证证据',
     'status: blocked',
     '',
-    'git ls-remote --tags origin refs/tags/v0.2.0',
+    'git ls-remote --tags origin refs/tags/v0.2.1',
     '',
-    'gh release view v0.2.0 --repo chaxiu/OpenCompare --json tagName,isDraft,isPrerelease,url,assets',
+    'gh release view v0.2.1 --repo chaxiu/OpenCompare --json tagName,isDraft,isPrerelease,url,assets',
     '',
     'release not found'
   ].join('\n')
 
-describe('v0.2.0 release evidence document', () => {
+describe('v0.2.1 release evidence document', () => {
   it('exists, is non-empty and carries a supported status', () => {
     expect(existsSync(evidencePath)).toBe(true)
     const doc = readEvidence()
     expect(doc.trim().length).toBeGreaterThan(0)
-    expect(doc).toContain('v0.2.0')
+    expect(doc).toContain('v0.2.1')
 
     const { status, problems } = inspectReleaseEvidence(doc)
     expect(problems).toEqual([])
@@ -121,8 +121,8 @@ describe('v0.2.0 release evidence document', () => {
 
   it('blocked record keeps readiness-gate raw output and escalation request', () => {
     const doc = readEvidence()
-    expect(doc).toContain('git ls-remote --tags origin refs/tags/v0.2.0')
-    expect(doc).toContain('gh release view v0.2.0 --repo chaxiu/OpenCompare')
+    expect(doc).toContain('git ls-remote --tags origin refs/tags/v0.2.1')
+    expect(doc).toContain('gh release view v0.2.1 --repo chaxiu/OpenCompare')
     expect(doc).toContain('release not found')
     expect(doc).toContain('缺失项')
     expect(doc).toContain('待人工动作')
