@@ -60,7 +60,8 @@ pnpm dist:linux       # Linux：AppImage / deb
 
 1. 先在 Ubuntu runner 上跑门禁（`install → lint → typecheck → test → build`），并断言 `package.json#version` 与 tag 语义版本（去掉 `v` 前缀）一致，失败即中止发布；
 2. 门禁通过后，在 macOS / Windows / Linux 三个 runner 上分别构建平台产物；macOS 步骤要求上述 6 项签名 / 公证 Secrets 齐备，任一缺失即失败（fail-closed）；
-3. 各平台断言打包产物旁 `latest*.yml` 内的 `version` 等于 tag，再汇聚上传到该 tag 的唯一 Release，确认每个 tag 恰好一个公开（非 Draft）Release。
+3. 各平台断言产物文件名与 `latest*.yml` 内的 `version` / `files[].url` 均等于 tag 版本，再汇聚上传到该 tag 的唯一 Release；
+4. macOS 打包后对实际 `.app` 执行 `codesign --verify --deep --strict`、`xcrun stapler validate`、`spctl -a -vv` 硬校验，并断言图标、bundle 身份与版本，任一失败即终止且不上传；`finalize` 后断言该 tag 恰好一个公开（非 Draft、非预发布）Release，且资产覆盖三平台与 `latest*.yml`。
 
 ## 项目结构
 

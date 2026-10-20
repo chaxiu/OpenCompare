@@ -186,24 +186,253 @@ jobs:
           APPLE_API_KEY: ${{ steps.api-key.outputs.key-path }}
         run: |
           if [ -n "${APPLE_API_KEY}" ]; then rm -f "${APPLE_API_KEY}"; fi
+      # The packaged bundle is the release surface, so prove it carries the brand
+      # icon and the tag identity before any artifact can be uploaded. Locate the
+      # real bundle instead of assuming an architecture directory.
+      - name: Locate the packaged app and assert its icon and version
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app="$(find release -maxdepth 2 -name 'OpenCompare.app' -type d -print -quit)"
+          if [ -z "${app}" ]; then
+            echo "::error::No OpenCompare.app found under release/; refusing to upload an unverified macOS bundle."
+            exit 1
+          fi
+          plist="${app}/Contents/Info.plist"
+          if [ ! -f "${plist}" ]; then
+            echo "::error::Missing ${plist}; refusing to upload an unverified macOS bundle."
+            exit 1
+          fi
+          if ! icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${plist}")"; then
+            echo "::error::Could not read CFBundleIconFile from ${plist}."
+            exit 1
+          fi
+          if [ -z "${icon_name}" ] || [ "${icon_name}" = "electron.icns" ]; then
+            echo "::error::CFBundleIconFile is '${icon_name}'; expected a non-Electron brand icon."
+            exit 1
+          fi
+          icon_resource="${app}/Contents/Resources/${icon_name}"
+          if [ ! -f "${icon_resource}" ]; then
+            case "${icon_name}" in
+              *.*) ;;
+              *) icon_resource="${icon_resource}.icns" ;;
+            esac
+          fi
+          if [ ! -s "${icon_resource}" ]; then
+            echo "::error::Packaged icon ${icon_resource} (CFBundleIconFile=${icon_name}) is missing or empty."
+            exit 1
+          fi
+          if [ "$(head -c 4 "${icon_resource}")" != "icns" ]; then
+            echo "::error::Packaged icon ${icon_resource} does not start with the 'icns' magic."
+            exit 1
+          fi
+          packaged_icon_sha="$(shasum -a 256 "${icon_resource}" | cut -d ' ' -f 1)"
+          electron_icns=""
+          for candidate in \
+            "node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns" \
+            "node_modules/electron/dist/resources/electron.icns"; do
+            if [ -f "${candidate}" ]; then
+              electron_icns="${candidate}"
+              break
+            fi
+          done
+          if [ -n "${electron_icns}" ]; then
+            default_icon_sha="$(shasum -a 256 "${electron_icns}" | cut -d ' ' -f 1)"
+            if [ "${packaged_icon_sha}" = "${default_icon_sha}" ]; then
+              echo "::error::Packaged icon ${icon_resource} is the Electron default icon (sha256 ${packaged_icon_sha})."
+              exit 1
+            fi
+          else
+            echo "Electron default electron.icns not found; skipping the SHA-256 default-icon comparison."
+          fi
+          packaged_png="${app}/Contents/Resources/icon.png"
+          if [ ! -s "${packaged_png}" ]; then
+            echo "::error::Missing packaged ${packaged_png} (extraResources build/icon.png)."
+            exit 1
+          fi
+          packaged_png_sha="$(shasum -a 256 "${packaged_png}" | cut -d ' ' -f 1)"
+          repo_png_sha="$(shasum -a 256 build/icon.png | cut -d ' ' -f 1)"
+          if [ "${packaged_png_sha}" != "${repo_png_sha}" ]; then
+            echo "::error::Packaged icon.png (${packaged_png_sha}) does not match build/icon.png (${repo_png_sha})."
+            exit 1
+          fi
+          if ! bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${plist}")"; then
+            echo "::error::Could not read CFBundleIdentifier from ${plist}."
+            exit 1
+          fi
+          if [ "${bundle_id}" != "com.opencompare.app" ]; then
+            echo "::error::CFBundleIdentifier is '${bundle_id}', expected com.opencompare.app."
+            exit 1
+          fi
+          if ! bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${plist}")"; then
+            echo "::error::Could not read CFBundleShortVersionString from ${plist}."
+            exit 1
+          fi
+          if [ "${bundle_version}" != "${tag}" ]; then
+            echo "::error::CFBundleShortVersionString is '${bundle_version}', expected tag version ${tag}."
+            exit 1
+          fi
+          echo "Verified ${app}: icon=${icon_name} bundle=${bundle_id} version=${bundle_version}"
+      # Signed-but-not-notarized bundles are indistinguishable from unsigned ones
+      # for the user, so verify the Developer ID signature, the stapled ticket
+      # (falling back to the app inside the built dmg) and Gatekeeper acceptance.
+      - name: Verify the app signature, notarization and Gatekeeper acceptance
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -uo pipefail
+          app="$(find release -maxdepth 2 -name 'OpenCompare.app' -type d -print -quit)"
+          if [ -z "${app}" ]; then
+            echo "::error::No OpenCompare.app found under release/; refusing to upload an unverified macOS bundle."
+            exit 1
+          fi
+          if ! codesign --verify --deep --strict --verbose=2 "${app}"; then
+            echo "::error::codesign --verify --deep --strict failed for ${app}."
+            exit 1
+          fi
+          if ! signature="$(codesign -dv --verbose=4 "${app}" 2>&1)"; then
+            echo "::error::codesign -dv failed for ${app}."
+            exit 1
+          fi
+          if ! grep -Fq 'Authority=Developer ID Application' <<< "${signature}"; then
+            echo "::error::The app is not signed with a Developer ID Application certificate: ${signature}"
+            exit 1
+          fi
+          if ! grep -Fq 'TeamIdentifier=3X4J53U6RY' <<< "${signature}"; then
+            echo "::error::The app signature does not carry TeamIdentifier=3X4J53U6RY: ${signature}"
+            exit 1
+          fi
+          if grep -Fq 'Signature=adhoc' <<< "${signature}"; then
+            echo "::error::The app is ad-hoc signed (Signature=adhoc); refusing to upload it."
+            exit 1
+          fi
+          if ! grep -Fq '(runtime)' <<< "${signature}"; then
+            echo "::error::The app signature does not enable the hardened runtime flag (runtime): ${signature}"
+            exit 1
+          fi
+          stapler_ok=0
+          if xcrun stapler validate "${app}"; then
+            stapler_ok=1
+          fi
+          if [ "${stapler_ok}" -ne 0 ]; then
+            echo "Verified the notarization ticket on ${app}."
+          else
+            dmg="$(find release -maxdepth 1 -name '*.dmg' -print -quit)"
+            if [ -z "${dmg}" ]; then
+              echo "::error::${app} is not stapled and no .dmg is available to verify the notarization ticket."
+              exit 1
+            fi
+            mount_dir="$(mktemp -d)"
+            detach_dmg() { hdiutil detach "${mount_dir}" >/dev/null 2>&1; return 0; }
+            trap detach_dmg EXIT
+            if ! hdiutil attach -nobrowse -readonly -mountpoint "${mount_dir}" "${dmg}" >/dev/null; then
+              echo "::error::Failed to mount ${dmg} to verify the notarization ticket."
+              exit 1
+            fi
+            mounted_app="$(find "${mount_dir}" -maxdepth 2 -name 'OpenCompare.app' -type d -print -quit)"
+            if [ -z "${mounted_app}" ]; then
+              echo "::error::No OpenCompare.app inside ${dmg}."
+              exit 1
+            fi
+            if ! xcrun stapler validate "${mounted_app}"; then
+              echo "::error::Notarization ticket is missing for ${mounted_app} inside ${dmg}."
+              exit 1
+            fi
+            detach_dmg
+            trap - EXIT
+            echo "Verified the notarization ticket inside ${dmg}."
+          fi
+          gatekeeper=""
+          if ! gatekeeper="$(spctl -a -vv --type execute "${app}" 2>&1)"; then
+            echo "::error::spctl rejected ${app}: ${gatekeeper}"
+            exit 1
+          fi
+          if ! grep -Fq 'accepted' <<< "${gatekeeper}" || ! grep -Fq 'Notarized Developer ID' <<< "${gatekeeper}"; then
+            echo "::error::spctl did not report an accepted, Notarized Developer ID app: ${gatekeeper}"
+            exit 1
+          fi
+          echo "Verified ${app}: Developer ID signature, notarization ticket and Gatekeeper acceptance."
       # The packaged update metadata (latest*.yml) must carry the tag version so
-      # the artifact names, the update feed and the release stay consistent.
+      # the artifact names, the update feed and the release stay consistent. Every
+      # artifact of this platform must be versioned, otherwise a stale build from
+      # another version could be uploaded alongside it.
       - name: Assert packaged version matches the tag
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME#v}"
           shopt -s nullglob
+          case "${{ matrix.target }}" in
+            mac) required_exts=(dmg zip) ;;
+            win) required_exts=(exe) ;;
+            linux) required_exts=(AppImage deb) ;;
+            *)
+              echo "::error::Unknown matrix target '${{ matrix.target }}'; refusing to upload unverified artifacts." >&2
+              exit 1
+              ;;
+          esac
+          status=0
+          for ext in "${required_exts[@]}"; do
+            artifacts=(release/*."${ext}")
+            if [ "${#artifacts[@]}" -eq 0 ]; then
+              echo "::error::No .${ext} artifact found under release/ for the ${{ matrix.target }} target." >&2
+              status=1
+              continue
+            fi
+            for artifact in "${artifacts[@]}"; do
+              name="$(basename "${artifact}")"
+              name_versions=""
+              if ! name_versions="$(printf '%s\n' "${name}" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | sort -u)"; then
+                name_versions=""
+              fi
+              if [ -z "${name_versions}" ]; then
+                echo "::error::Artifact ${name} does not carry a MAJOR.MINOR.PATCH version." >&2
+                status=1
+                continue
+              fi
+              while IFS= read -r found_version; do
+                if [ "${found_version}" != "${tag}" ]; then
+                  echo "::error::Artifact ${name} carries version ${found_version}, which does not match tag ${GITHUB_REF_NAME}." >&2
+                  status=1
+                fi
+              done <<< "${name_versions}"
+            done
+          done
           files=(release/latest*.yml)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::No latest*.yml update metadata found under release/." >&2
             exit 1
           fi
-          status=0
           for file in "${files[@]}"; do
-            version="$(FILE="${file}" node -e "const fs=require('fs');const {parse}=require('yaml');process.stdout.write(String(parse(fs.readFileSync(process.env.FILE,'utf8')).version))")"
-            echo "${file} version=${version}"
-            if [ "${version}" != "${tag}" ]; then
-              echo "::error::${file} version (${version}) does not match tag ${GITHUB_REF_NAME}." >&2
+            if ! FILE="${file}" TAG="${tag}" node -e '
+              const fs = require("fs")
+              const { parse } = require("yaml")
+              const file = process.env.FILE
+              const tag = process.env.TAG
+              const metadata = parse(fs.readFileSync(file, "utf8")) || {}
+              const problems = []
+              if (String(metadata.version) !== tag) {
+                problems.push(`version ${metadata.version} does not match tag ${tag}`)
+              }
+              if (metadata.path !== undefined && !String(metadata.path).includes(tag)) {
+                problems.push(`path ${metadata.path} does not match tag ${tag}`)
+              }
+              for (const entry of metadata.files || []) {
+                const url = String(entry.url || "")
+                if (!url.includes(tag)) {
+                  problems.push(`files[].url ${url} does not match tag ${tag}`)
+                }
+                if (entry.path !== undefined && !String(entry.path).includes(tag)) {
+                  problems.push(`files[].path ${entry.path} does not match tag ${tag}`)
+                }
+              }
+              if (problems.length > 0) {
+                for (const problem of problems) console.error(`::error::${file} ${problem}.`)
+                process.exit(1)
+              }
+              console.log(`${file} version=${metadata.version}`)
+            '; then
+              echo "::error::${file} update metadata does not match tag ${GITHUB_REF_NAME}." >&2
               status=1
             fi
           done
@@ -236,18 +465,70 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
-      # Enforce exactly one public release per tag: a leftover duplicate (or a
-      # stray draft) fails the run instead of silently advertising two releases.
+      # Enforce exactly one public release per tag across every API page: a
+      # leftover duplicate (or a stray draft/prerelease) fails the run instead of
+      # silently advertising two releases.
       - name: Verify the tag has exactly one public release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag_filter=".[] | select(.tag_name == \"${GITHUB_REF_NAME}\")"
-          count="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq "[${tag_filter}] | length")"
-          drafts="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq "[${tag_filter} | select(.draft)] | length")"
-          echo "releases for ${GITHUB_REF_NAME}: ${count} (drafts: ${drafts})"
-          if [ "${count}" -ne 1 ] || [ "${drafts}" -ne 0 ]; then
-            echo "::error::Expected exactly one public release for ${GITHUB_REF_NAME}, found ${count} (drafts: ${drafts})." >&2
+          tag_filter=".[][] | select(.tag_name == \"${GITHUB_REF_NAME}\")"
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter}] | length")"
+          drafts="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter} | select(.draft)] | length")"
+          prereleases="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter} | select(.prerelease)] | length")"
+          echo "releases for ${GITHUB_REF_NAME}: ${count} (drafts: ${drafts}, prereleases: ${prereleases})"
+          if [ "${count}" -ne 1 ] || [ "${drafts}" -ne 0 ] || [ "${prereleases}" -ne 0 ]; then
+            echo "::error::Expected exactly one public non-prerelease release for ${GITHUB_REF_NAME}, found ${count} (drafts: ${drafts}, prereleases: ${prereleases})." >&2
             exit 1
           fi
+      # A single public release is not enough: its assets must cover all three
+      # platforms plus the update metadata, and every versioned name must belong
+      # to this tag. Only asset names are read; nothing is downloaded.
+      - name: Assert the public release has every platform asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[.[][] | select(.tag_name == \"${GITHUB_REF_NAME}\")] | .[0].id // empty")"
+          if [ -z "${release_id}" ]; then
+            echo "::error::No release found for ${GITHUB_REF_NAME} while checking its assets." >&2
+            exit 1
+          fi
+          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate --slurp --jq '.[][] | .name')"
+          if [ -z "${assets}" ]; then
+            echo "::error::Release ${GITHUB_REF_NAME} has no assets." >&2
+            exit 1
+          fi
+          has_asset() {
+            local suffix="$1"
+            local name
+            while IFS= read -r name; do
+              if [ -n "${name}" ]; then
+                case "${name}" in
+                  *"${suffix}") return 0 ;;
+                esac
+              fi
+            done <<< "${assets}"
+            return 1
+          }
+          status=0
+          for suffix in .dmg .zip .exe .AppImage .deb latest-mac.yml latest.yml latest-linux.yml; do
+            if ! has_asset "${suffix}"; then
+              echo "::error::Release ${GITHUB_REF_NAME} is missing a ${suffix} asset." >&2
+              status=1
+            fi
+          done
+          while IFS= read -r name; do
+            if [ -z "${name}" ]; then continue; fi
+            case "${name}" in
+              latest*.yml) continue ;;
+              *"${tag}"*) ;;
+              *)
+                echo "::error::Release asset ${name} does not carry the tag version ${tag}." >&2
+                status=1
+                ;;
+            esac
+          done <<< "${assets}"
+          exit ${status}

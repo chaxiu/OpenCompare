@@ -58,3 +58,21 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 规划基线时 `main` 领先 `v0.1.2` 13 个提交（含签名 / 打包修复），这些提交未进入已发布的 v0.1.2 资产；13 只是规划基线快照，实际领先数以打 tag 时的 `main` 为准。
 - 远端 `v0.1.2` Release 为公开、非预发布，共 11 个资产：`latest-linux.yml`、`latest-mac.yml`、`latest.yml`、`OpenCompare-0.1.2-arm64-mac.zip(.blockmap)`、`OpenCompare-0.1.2-arm64.dmg(.blockmap)`、`OpenCompare-0.1.2.AppImage`、`OpenCompare.Setup.0.1.2.exe(.blockmap)`、`opencompare_0.1.2_amd64.deb`。
 - **不删除、不移动、不重打、不替换** `v0.1.2` 的 tag 与资产；tag 之后的修复由 v0.2.0 承接。后续如需修订只能发布更高版本，不改写历史。
+
+## 五、打包后硬校验（CI，上传前）
+
+`release.yml` 在 mac 打包后、上传前对**实际产出的 `OpenCompare.app`** 做硬校验，任一项失败即终止（`::error::` + `exit 1`）、不上传，绝不降级上传未签名 / 未公证包：
+
+1. **图标与版本身份**：定位 `release/**/OpenCompare.app`（不写死架构目录）；`Contents/Info.plist` 的 `CFBundleIconFile` 非空且非 `electron.icns`，对应 `Contents/Resources/<icon>.icns` 存在、非空且以 `icns` 为文件头；runner 上能定位 Electron 自带 `electron.icns` 时断言二者 SHA-256 不同；`Contents/Resources/icon.png` 与仓库 `build/icon.png` 的 SHA-256 相同；`CFBundleIdentifier` 为 `com.opencompare.app`，`CFBundleShortVersionString` 等于 tag 版本（去 `v`）。
+2. **签名与公证**（同一 `.app`）：
+   ```bash
+   codesign --verify --deep --strict --verbose=2 OpenCompare.app
+   codesign -dv --verbose=4 OpenCompare.app
+   xcrun stapler validate OpenCompare.app
+   spctl -a -vv --type execute OpenCompare.app
+   ```
+   `codesign -dv` 必须含 `Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY` 与 hardened runtime 标志 `runtime`，且不含 `Signature=adhoc`。若打包输出里的 `.app` 未直接 staple，则从同次产出的 `release/*.dmg` 挂载并校验其中同一个 `OpenCompare.app`（失败路径也保证 `hdiutil detach`）；两者均失败才算失败。`spctl` 必须返回 0 且输出含 `accepted` 与 `Notarized Developer ID`。
+3. **产物名与 `latest*.yml`**：各平台必需产物（mac `.dmg` / `.zip`、win `.exe`、linux `.AppImage` / `.deb`）的文件名只能携带 tag 版本；`latest*.yml` 的 `version`、`files[].url` 与存在的 `path` 也必须含 tag 版本。
+4. **唯一公开正式 Release**：`finalize` 后用 `gh api --paginate` 统计该 tag 的 Release，要求恰好 1 个且 `draft=false`、`prerelease=false`；该 Release 资产必须覆盖 `.dmg`、`.zip`、`.exe`、`.AppImage`、`.deb` 与 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`，版本化资产名均含 tag 版本。
+
+上述校验步骤与上传步骤没有 `continue-on-error` / `|| true` 等绕行路径；6 项 Secret 仍由人类录入，缺失即 fail-closed。
