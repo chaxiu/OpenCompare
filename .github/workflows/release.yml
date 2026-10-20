@@ -591,9 +591,15 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           tag_filter=".[][] | select(.tag_name == \"${RELEASE_TAG}\")"
-          count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter}] | length")"
-          drafts="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter} | select(.draft)] | length")"
-          prereleases="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter} | select(.prerelease)] | length")"
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate | jq -s "[${tag_filter}] | length")"
+          drafts="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate | jq -s "[${tag_filter} | select(.draft)] | length")"
+          prereleases="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate | jq -s "[${tag_filter} | select(.prerelease)] | length")"
+          for value in "${count}" "${drafts}" "${prereleases}"; do
+            if ! [[ "${value}" =~ ^[0-9]+$ ]]; then
+              echo "::error::Could not count the releases for ${RELEASE_TAG}; the GitHub API returned '${value}'." >&2
+              exit 1
+            fi
+          done
           echo "releases for ${RELEASE_TAG}: ${count} (drafts: ${drafts}, prereleases: ${prereleases})"
           if [ "${count}" -ne 1 ] || [ "${drafts}" -ne 0 ] || [ "${prereleases}" -ne 0 ]; then
             echo "::error::Expected exactly one public non-prerelease release for ${RELEASE_TAG}, found ${count} (drafts: ${drafts}, prereleases: ${prereleases})." >&2
@@ -608,12 +614,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           tag="${RELEASE_TAG#v}"
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[.[][] | select(.tag_name == \"${RELEASE_TAG}\")] | .[0].id // empty")"
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate | jq -s -r "[.[][] | select(.tag_name == \"${RELEASE_TAG}\")] | .[0].id // empty")"
           if [ -z "${release_id}" ]; then
             echo "::error::No release found for ${RELEASE_TAG} while checking its assets." >&2
             exit 1
           fi
-          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate --slurp --jq '.[][] | .name')"
+          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate | jq -s -r '.[][] | .name')"
           if [ -z "${assets}" ]; then
             echo "::error::Release ${RELEASE_TAG} has no assets." >&2
             exit 1

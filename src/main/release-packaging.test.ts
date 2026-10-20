@@ -731,10 +731,14 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as pending with v0.1.2 as the latest public release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
-    expect(readme).toMatch(/最新公开 Release 为 v0\.1\.2/)
+  it('reports the current tag as published with its release link', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readme).toContain(
+      `https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`
+    )
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(readme).not.toContain('待发布')
+    expect(readme).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
     expect(readme).not.toMatch(/正式版 v0\.2\.0/)
     expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
     expect(readme).not.toMatch(/发布状态：冻结/)
@@ -1213,17 +1217,42 @@ describe('single public release gate', () => {
   const step = releaseStepBody('Verify the tag has exactly one public release')
   const assetsStep = releaseStepBody('Assert the public release has every platform asset')
 
-  it('paginates every release page before counting', () => {
-    expect(step).toMatch(/gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases" --paginate --slurp/)
+  it('slurps every release page through jq -s before counting', () => {
+    expect(step).toMatch(
+      /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases" --paginate \| jq -s/
+    )
+    expect(step).not.toContain('--slurp')
     expect(step).toContain('.[][]')
     expect(step).toContain('select(.draft)')
     expect(step).toContain('select(.prerelease)')
     expect(step).toContain('[ "${count}" -ne 1 ]')
+    expect(step).toContain('[ "${drafts}" -ne 0 ]')
+    expect(step).toContain('[ "${prereleases}" -ne 0 ]')
+  })
+
+  it('fails the count gate when a count is empty or not an integer', () => {
+    expect(step).toContain('for value in "${count}" "${drafts}" "${prereleases}"')
+    expect(step).toContain('^[0-9]+$')
+    expect(step).toContain('::error::Could not count the releases')
+    expect(step).toContain('exit 1')
+  })
+
+  it('reads the release id and asset names through jq -s', () => {
+    expect(assetsStep).toContain(
+      'gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate | jq -s -r'
+    )
+    expect(assetsStep).toContain(
+      'gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate | jq -s -r'
+    )
+    expect(assetsStep).not.toContain('--slurp')
+    expect(assetsStep).toContain('if [ -z "${release_id}" ]')
+    expect(assetsStep).toContain('while checking its assets')
+    expect(assetsStep).toContain('if [ -z "${assets}" ]')
+    expect(assetsStep).toContain('has no assets')
   })
 
   it('requires the assets to cover all three platforms and latest*.yml', () => {
     expect(assetsStep).toContain('releases/${release_id}/assets')
-    expect(assetsStep).toContain('--paginate --slurp')
     for (const suffix of [
       '.dmg',
       '.zip',
@@ -1238,6 +1267,24 @@ describe('single public release gate', () => {
     }
     expect(assetsStep).toContain('has_asset')
     expect(assetsStep).toContain('does not carry the tag version')
+  })
+})
+
+describe('gh api option compatibility', () => {
+  // `gh api --slurp` is rejected when combined with --jq/--template; paginated
+  // JSON bodies have to be piped through `jq -s` instead.
+  const ghApiCommands = releaseWorkflow
+    .replace(/\\\r?\n\s*/g, ' ')
+    .split(/\r?\n/)
+    .filter((line) => /\bgh api\b/.test(line) && !line.trimStart().startsWith('#'))
+
+  it('never passes --slurp together with --jq or --template', () => {
+    expect(ghApiCommands.length).toBeGreaterThan(0)
+    for (const command of ghApiCommands) {
+      if (!command.includes('--slurp')) continue
+      expect(command).not.toContain('--jq')
+      expect(command).not.toContain('--template')
+    }
   })
 })
 
