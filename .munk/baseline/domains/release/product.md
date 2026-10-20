@@ -99,10 +99,10 @@
 - **ac-drift-facts-changelog**：`CHANGELOG.md` 含 `v0.1.2` 漂移事实：commit `7ea2cc6`、tag 对象 `c4a6a95`（annotated）、`v0.1.2` 是 main 的祖先、规划基线领先 13 个提交、远端 Release 公开且非预发布、11 个资产。
 - **ac-drift-facts-signing-doc**：`docs/release-signing.md` 含同一组 `v0.1.2` 只读事实（commit `7ea2cc6`、祖先关系、13 个提交基线、11 个资产、公开非预发布）。
 - **ac-drift-no-action-statement**：两处文档都含不动作声明，同时出现「不删除」「不移动」「不重打」「不替换」与「tag 之后的修复由 v0.2.0 承接」的等价表述。
-- **ac-test-tag-ancestor**：`release-packaging.test.ts` 用只读 git 命令断言祖孙关系按新语义成立——`v0.1.2..HEAD` 提交数大于 0，且当 `HEAD..v0.1.2` 非零时该 tag 的每条仅 tag 可达提交 `git cherry HEAD` 均为 `-`；在本仓库全量检出下该用例为通过（非 skip）。
-- **ac-test-tag-version-match**：测试用 `git show v0.1.2:package.json` 只读读取历史版本，断言其 `version` 为 `0.1.2`，与被记录的漂移事实一致。
-- **ac-test-skips-without-git-metadata**：当本地无 `.git` 或 `v0.1.2` tag 不可见时，上述两条 git 用例 skip 并给出原因，不产生假失败（不影响 `pnpm test` 在无 git 环境全绿）。
-- **ac-test-assertions-are-read-only**：仓库根目录的测试调用限定只读 git 子命令（`rev-parse` / `rev-list` / `show` / `cat-file` / `cherry` / `diff-tree` 等），测试源码中不出现对仓库根执行 `git tag`、`git push`、`git fetch`、`git merge`、`git rebase` 或 `gh release` 的代码路径；临时仓库的 git 写操作只发生在 `os.tmpdir()` 下。
+- **ac-test-tag-ancestor（已被取代）**：原「测试用只读 git 命令断言 `v0.1.2` 与 HEAD 的祖孙关系」的用例已删除，改由下面「发布测试套件环境自包含」项在 `os.tmpdir()` fixture 中覆盖同一语义；测试不再读取本仓真实 tag。
+- **ac-test-tag-version-match（已被取代）**：原 `git show v0.1.2:package.json` 断言已删除；`0.1.2` 版本事实只由 `CHANGELOG.md` / `docs/release-signing.md` 的只读文档断言（`driftFacts`）覆盖。
+- **ac-test-skips-without-git-metadata（已被取代）**：`gitMetadataSkipReason` / `it.skipIf` 机制已移除——测试不再因缺少 `.git` 或 tag 而 skip，而是在任何检出（干净 clone、源码 tarball、无 git）下按同一路径全跑。
+- **ac-test-assertions-are-read-only（口径收窄）**：测试对仓库根只读**文件**（`node:fs` 读配置 / 文档），不再在仓库根执行任何 git 子命令；所有 git 调用只发生在 `os.tmpdir()` 下的 fixture 仓库，测试源码中不出现对仓库根执行 `git tag`、`git push`、`git fetch`、`git merge`、`git rebase` 或 `gh release` 的代码路径。
 - **ac-ci-preflight-tag-ancestor**：`release.yml` 的 `gates` job 在 `pnpm test` 之前有只读祖先门 step，接受「`v0.1.2` 是 `HEAD` 严格祖先」或「仅 tag 可达提交逐条补丁等价（`git cherry` 全 `-`）」两种通过形态，并保留 `v0.1.2..HEAD` 领先提交数非零要求；任何失败形态以 `::error::` 输出并 `exit 1`。
 - **ac-ci-preflight-git-metadata**：`gates` job 的 `actions/checkout` 设置 `fetch-depth: 0`，使 tag 与历史在 CI 可见（与 preflight 断言配套）。
 - **ac-ci-preflight-version-semver**：前置门在版本比对前拒绝非 semver 的 `package.json#version`（如 `0.2`、`v0.2.0`），以 `::error::` 失败退出。
@@ -183,6 +183,18 @@
 - **ac-no-version-or-config-drift**：`package.json#version` 仍为 `0.2.0`；`appId` / `productName` / 签名身份 `Tao Zhu (3X4J53U6RY)` / targets / 依赖均未改。
 - **ac-gates-green**：`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm build:web`、`pnpm test` 全绿。
 
+### 发布测试套件环境自包含（干净 clone + 隔离 HOME 可复现）
+
+- **ac-ci-failure-reproduced**：复现以硬证据为前置——CI run `#39354321895` 的 gates 日志显示 checkout 的是 tag `v0.2.0` = `285ee28`，唯一失败用例 `release version gate > keeps v0.1.2 as an ancestor of HEAD with a non-zero lead` 报 `AssertionError: expected 2 to be +0`（旧 tag 树 336 行 `expect(behind).toBe(0)`）；在临时干净 clone（`v0.1.2` 指向远端轻量 tag `bb0c0b1`、空白临时 HOME）下 `pnpm test` 复现同一条断言，交付说明记录完整命令与原始输出后才动断言。
+- **ac-no-repo-git-read**：测试源码不再通过 `git` 读取仓库根 `.git` 或真实 tag——`gitMetadataSkipReason`、`driftTag` 的 `rev-list` / `show` / `cherry` 断言、repo-root `git()` 只读 helper 均已移除；有源码级断言（测试文件内不含 `cwd: repoRoot` 形式的 git 调用、不含已删除标识符，且必须含隔离 env 标记）。
+- **ac-fixture-isolated-global-config**：临时 HOME 的 `.gitconfig` 含 `commit.gpgSign=true`、`tag.gpgSign=true`、`init.defaultBranch=trunk`、`core.hooksPath=/nonexistent` 时 `pnpm test` 仍全绿（改动前 7 个 ancestry fixture 用例因 `gpg failed to sign the data` 失败，可复现）。
+- **ac-fixture-no-network**：fixture 仓库全部在 `os.tmpdir()` 下自建（独立 `opencompare-ancestry-*` 目录 + 独立 HOME），不读写仓库内外的持久 git 状态、不访问网络；`finally` 中用 `rmSync(dir, { recursive: true, force: true })` 清理，测试结束不留 tmpdir。
+- **ac-strict-ancestor-positive**：新增 fixture 用例覆盖 `v0.1.2` 为 HEAD 严格祖先且 `v0.1.2..HEAD` 领先 >0 的场景，日志含 `ref type=tag (annotated) commit=<sha>` 与 `is a strict ancestor of HEAD`，退出码 0。
+- **ac-tag-types**：annotated 与 lightweight 两种 tag 在同一 patch-equivalent 场景下分别输出 `ref type=tag (annotated)` / `ref type=commit (lightweight)` 且退出码 0。
+- **ac-gate-fail-closed**：divergent（`git cherry` 判 `+`）、仅有提交删除 `electron-builder.yml`、tag 不可见、`v0.1.2..HEAD` 为 0 四种场景均输出 `::error::` 且退出码非 0。
+- **ac-gates-green**：本项改动后 `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm test` 全部退出码 0。
+- **ac-clean-clone-green**：干净 clone（单分支、`fetch-depth: 0` 等价完整历史）+ 空白临时 HOME 下 `pnpm install --frozen-lockfile` 与 `pnpm test` 全绿；交付说明记录命令与通过计数。
+- **ac-release-semantics-untouched**：diff 不含 `.github/workflows/release.yml`、`electron-builder.yml`、`package.json` 依赖或脚本变更；无 tag / Release / push 操作（祖先门脚本仍作为被测对象从 workflow 原样读取并执行，不改成仓库脚本）。
 
 ## 非目标
 
@@ -207,6 +219,7 @@
 - 不改 `appId` / `productName` / 版本之外的包元数据；不引入 changesets、semantic-release 等版本工具，不新增依赖。
 - 不修历史：`v0.1.1` tag 内 `package.json#version` 实为 `0.1.0` 这个既存不一致只作为已知事实避开（不写「所有 v* tag 版本一致」断言、不回填、不改 tag），只对 `v0.1.2` 与当前版本断言。
 - v0.2.0 收敛项不改对比算法、会话模型、UI、图标资产与协议声明；不做 CHANGELOG 全历史重写，不产出英文版 Release Notes。
+- 测试套件环境自包含项**只改测试与必要的可测性**（主要 `src/main/release-packaging.test.ts`；`src/main/release-evidence.test.ts` 只断言文档文本、不执行 git，保持不动）：不改 `release.yml` 的任何发布语义（checkout ref、祖先门语义、单点预建唯一 Release、矩阵 `--publish never`、finalize 公开）、不改 `electron-builder.yml` / `package.json` 依赖或脚本、不新增依赖、不改产品代码或 UI；不把 gate 脚本抽成仓库脚本；不打 tag / 不移动 tag / 不 push / 不 publish / 不创建 Release；不试图让已冻结的 `v0.2.0` tag 树里的旧测试变绿（不移动 tag 就无法改变该树），本项只保证以 HEAD 为基础打出的后续 tag / 派发在干净环境可复现通过；不凭猜测放宽断言（先复现再改）。
 
 ## 实现约束
 
@@ -221,8 +234,10 @@
 - 签名/公证 Secrets 只接到 mac 矩阵步骤；版本对齐只做断言与失败，不改 version、不打 tag；`release.yml` 保持 `v*` tag 触发、`gates` 先行与单点预建 + 汇聚上传 + finalize 流程。
 - **版本身份单一来源**：`package.json#version` = `0.2.0`；文档里的字面版本由测试与 `package.json` 交叉比对，不允许测试硬编码版本却不与 `package.json` 同步（`ac-pkg-version-020` 与 `ac-release-notes-version-single-source` 一起兜住）。
 - **漂移事实的 13 只是规划基线快照**，不硬编码为实时真值（本项开工时 `main` 已领先 23 个提交，Wave 1 四项已合入）：文档措辞须体现「规划基线 13，实际以 tag 时 main 为准」；断言只校验「是祖先 + 领先数 > 0」，绝不写死 13 或 23 的等值比较。
-- **git 断言一律只读且不走 shell 拼接**：测试用 `execFileSync('git', ['rev-list', ...])` / `['show', 'v0.1.2:package.json']` 形式；CI preflight 用 `git rev-list --count` 与 `git rev-parse`，禁止 `git tag` / `push` / `fetch` / `merge` / `rebase`。
-- **浅克隆兼容**：`gates` checkout 配 `fetch-depth: 0`；单元测试在 `.git` 或 `v0.1.2` 缺失时 skip（`it.skipIf` / `describe.skipIf`），保证无 git 的沙箱环境仍 `pnpm test` 全绿，且不吞掉真实漂移。
+- **测试对仓库根只读文件、对 git 只读 fixture**：仓库根只用 `node:fs` 读配置 / 文档，不执行任何 git 子命令；所有 git 调用走统一 `fixtureGit(repo, args)` helper，只作用在 `os.tmpdir()` fixture 里，禁止 shell 拼接，禁止 `git tag` / `push` / `fetch` / `merge` / `rebase` 作用于本仓；CI preflight 仍只读（`git rev-list --count` / `git rev-parse` / `git cat-file` / `git cherry` / `git diff-tree`）。
+- **fixture 环境必须自包含**：`git init -b <显式分支>`（不依赖 `init.defaultBranch`）；身份走 `GIT_AUTHOR_*` / `GIT_COMMITTER_*`；固定 `GIT_CONFIG_GLOBAL=/dev/null`、`GIT_CONFIG_SYSTEM=/dev/null`、`GIT_CONFIG_NOSYSTEM=1`；丢弃所有继承的 `GIT_*`（`GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` / alternates 等）并指向独立临时 HOME；禁止 `...process.env` 直接带全局配置进 fixture。
+- **祖先门脚本仍从 `release.yml` 的 `Preflight v0.1.2 ancestry` 步骤读取并原样执行**：测试执行的是真实发布脚本，不复制一份到仓库脚本文件（旧 tag checkout 会缺文件）。
+- **`gates` checkout 配 `fetch-depth: 0`**：CI 侧仍需 tag 与完整历史可见；单测侧不再依赖该检出状态，干净 clone、源码 tarball 与无 git 环境走同一路径。
 - **断言落点复用现有资产**：扩展 `src/main/release-packaging.test.ts` 的既有 describe 组（`release version gate` / `release notes changelog` / `release signing credentials checklist` / `github release publishing`），不新建第二套测试文件；新增 UI/交互无关。
 - 既有两条「v0.1.2 姿态」用例改写为 v0.2.0 口径时，保留 `not.toMatch(/发布状态：冻结/)` 之类防回退守卫，并保留 README / 签名文档中 `v0.1.2` 漂移段落（否则 `ac-drift-facts-*` 会失去落点）。
 - `docs/release-notes/v0.2.0.md` 为纯 Markdown、零前端代码，作为人工创建 Release 时粘贴的来源文本；不引入自动生成脚本。
@@ -231,14 +246,17 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_cde26b56b1d77ba2`（v0.2.0 祖先门改为「严格祖先或逐提交补丁等价」+ 不改 tag 的 `workflow_dispatch` 补发入口）
+- WI：`wi_intake_9f203630577ffb1a`（发布测试套件环境自包含：移除仓库根 `.git` / 真实 tag 依赖，改 tmpdir 隔离 fixture）
 - 日期：2026-10-20
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿，391 tests / 26 files；`needSelfTest=false`，本轮跳过 UI 自测）。改动 4 文件、+531/−82，全部为源码 / 工作流 / 文档与配置断言单测，**未执行任何远端写操作**。
-- 事实核对（只读，本机）：远端 `refs/tags/v0.1.2` → `bb0c0b1`（轻量），`refs/tags/v0.2.0` → annotated `f385521` → commit `285ee28`；`git rev-list --count HEAD..bb0c0b1` = 2，两条提交 `bb0c0b15d5c94c4d4d79e43543124bcb58b093ae` 与 `b2c4e5196a4cfb524e4ea0e126597072cfa55a0f` 的 `git cherry HEAD` 判定均为 `-`（补丁等价、零内容丢失）。本地 `v0.1.2` 仍是 annotated `c4a6a95` → `7ea2cc6`，是 HEAD 祖先（`HEAD..v0.1.2` = 0）。旧门「必须是严格祖先」正是 Release 为空的原因。
+- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿，390 tests / 26 files；`needSelfTest=false`，本轮跳过 UI 自测）。改动 1 文件（`src/main/release-packaging.test.ts`，+173/−186），**未执行任何远端写操作**，未动 `release.yml` / `electron-builder.yml` / `package.json` 依赖与脚本。
+- 复现与验证证据（本机）：
+  - 病根：CI gates 日志 checkout 的是 tag `v0.2.0`=`285ee28` 的树，其中 336 行旧用例 `expect(behind).toBe(0)` 对上远端轻量 tag `v0.1.2`=`bb0c0b1`（`HEAD..v0.1.2`=2）必然失败；本地绿是因为本地 `v0.1.2` 是 annotated `7ea2cc6` 且为祖先。测试读本机 git 状态即是根因。
+  - 隔离 HOME 复验：临时 HOME 的 `.gitconfig` 写入 `commit.gpgSign=true` / `tag.gpgSign=true` / `init.defaultBranch=trunk` / `core.hooksPath=/nonexistent` 后跑 `npx vitest run src/main/release-packaging.test.ts` → `Test Files 1 passed (1)` / `Tests 103 passed (103)`（改动前该组 7 个 fixture 用例因 `gpg failed to sign the data` 失败）。
+  - 全量：`npx vitest run` → `Test Files 26 passed (26)` / `Tests 390 passed (390)`（较上轮 391 少 1：删掉 2 条读本仓 git 的用例，新增 1 条严格祖先正例）。
 - 覆盖摘要：
-  - `.github/workflows/release.yml`：新增 `workflow_dispatch`（`tag` 必填、默认 `v0.2.0`）与工作流级 `env.RELEASE_TAG`；`gates` 与打包矩阵 checkout 均 `ref: refs/tags/${RELEASE_TAG}`；新增 tag 格式校验与 tag 存在性断言（均在任何 install 之前）；原「v0.1.2 必须是 HEAD 严格祖先」重写为内联祖先门——ref 类型 + 解析 commit 日志、`v0.1.2..HEAD` 非零、严格祖先短路通过、否则逐条 `git cherry HEAD <sha>` 打印 `-`/`+`、`+`/枚举失败/受保护路径删除一律 fail-closed；全部 tag 相关逻辑改用 `${RELEASE_TAG}`。
-  - `src/main/release-packaging.test.ts`：新增 `v0.1.2 ancestry gate` 与 `manual re-run dispatch entry` 两组（解析 workflow 的 `run` 脚本在 `os.tmpdir()` 临时仓库执行 bash），覆盖补丁等价通过、真分叉拒绝、受保护路径删除拒绝、tag 不可解析 fail-closed、非零领先、dispatch 输入/ref/`RELEASE_TAG` 归一化与无绕行；旧「严格祖先」断言同步改为新语义，只读 git 白名单补 `cherry` / `diff-tree`。
-  - `docs/release-signing.md`：新增第五节「祖先门语义与补发入口（不改 tag）」，记录新语义、逐条日志口径、fail-closed 边界与 `workflow_dispatch` 补发用法；v0.1.2 漂移记录补上远端轻量 tag `bb0c0b1` 与两条 `-` 判定；原第五、六节顺延。
-  - `README.md`：状态行改为「v0.2.0 待发布；当前可下载的最新公开 Release 为 v0.1.2」，发布流程补上只读祖先门（严格祖先或逐条补丁等价）与 dispatch 补发一句。
-- 注：本 WI change pack 只提供 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**` —— 无新增折叠用例、无 tech/ux 手合。同域既有 `qa/release-workflow.md` 的期望已按 `RELEASE_TAG` / dispatch 同步改写（属定义一致性维护，非重跑）。
-- 后续注意：本项只让 dispatch 路径**可用**，不会自动补发；v0.2.0 的 Release 仍需人工从 `main` 手跑 `workflow_dispatch`（输入 `v0.2.0`）触发 CI，之后才能做本机产物取证（原 `docs/release-evidence/v0.2.0.md` 仍是 `status: blocked`）。
+  - 删除 `gitMetadataSkipReason` / `driftTag` / `it.skipIf` 与仓库根 `git()` 只读 helper 及其 `rev-list` / `show` / `cherry` 断言；v0.1.2 漂移事实改为只读文档断言（`driftFacts`）。
+  - 新增源码守卫用例：测试源码不得出现 `cwd: repoRoot` 形式的 git 调用与已删除标识符，且必须含 `GIT_CONFIG_GLOBAL = '/dev/null'` / `GIT_CONFIG_NOSYSTEM = '1'`。
+  - `FixtureRepo` 统一持有临时仓库 + 临时 HOME + 清洗后的 env：丢弃全部继承 `GIT_*`、`GIT_CONFIG_GLOBAL/SYSTEM=/dev/null`、`GIT_CONFIG_NOSYSTEM=1`、显式 `git init -b main` 与 `GIT_AUTHOR_*` / `GIT_COMMITTER_*` 身份；`runAncestryGate` 用同一 env 跑 workflow 内联门脚本；`disposeFixtureRepo` 在 `finally` 中 `rmSync(..., { recursive: true, force: true })` 清理仓库与 HOME。
+  - 新增 `strict-ancestor` 场景（tag 为 HEAD 严格祖先、领先 1，日志含 `is a strict ancestor of HEAD`、退出 0）；原有补丁等价 / 轻量 tag ref 类型 / 多提交链 / `+` 分叉 / 删除 `electron-builder.yml` / tag 不可见 / 零领先全部保留并改用隔离 fixture。
+- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无新增折叠用例、无 tech/ux 手合；新增同域用例 `qa/test-suite-isolated-fixtures.md` 记录本轮隔离验收与执行结果。
+- 后续注意：已冻结的 `v0.2.0` tag 树仍带旧测试，重跑 / 补发仍会在 `pnpm test` 挂掉（不移动 tag 无法改变该树）；修复只在 HEAD 及其后打出的 tag 生效。真实验收仍需一次干净 clone + 空白 HOME 的 `pnpm install --frozen-lockfile` + `pnpm test`（本机已用隔离 HOME 跑通整份 release 测试文件，未做整仓 clean-clone install）。

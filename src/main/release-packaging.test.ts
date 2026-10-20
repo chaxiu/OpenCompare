@@ -84,48 +84,10 @@ const releaseNotes = existsSync(releaseNotesPath) ? readFileSync(releaseNotesPat
 const firstHeading = (markdown: string): string =>
   markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
 
-// The v0.1.2 drift record is verified with read-only git plumbing only. When
-// the checkout has no `.git` (a plain source tarball) or the tag is not visible
-// (a shallow clone), the git cases skip with an explicit reason instead of
-// failing the suite.
-const driftTag = 'v0.1.2'
-
-const gitMetadataSkipReason = ((): string | null => {
-  if (!existsSync(join(repoRoot, '.git'))) return 'no local .git metadata'
-  try {
-    execFileSync('git', ['rev-parse', '--verify', '--quiet', `${driftTag}^{commit}`], {
-      cwd: repoRoot,
-      stdio: 'ignore'
-    })
-    return null
-  } catch {
-    return `${driftTag} is not visible to git`
-  }
-})()
-
-// Repository-root git access stays read-only, enforced at runtime rather than
-// only by a source scan. Writes happen exclusively in temporary fixture repos.
-const readOnlyGitSubcommands = [
-  'rev-parse',
-  'rev-list',
-  'show',
-  'cat-file',
-  'cherry',
-  'diff-tree'
-] as const
-
-const git = (args: string[]): string => {
-  const subcommand = args[0] ?? ''
-  if (!(readOnlyGitSubcommands as readonly string[]).includes(subcommand)) {
-    throw new Error(`git() only allows read-only subcommands in this repo, got: ${subcommand}`)
-  }
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim()
-}
-
-const gitTestName = (name: string): string =>
-  gitMetadataSkipReason === null
-    ? name
-    : `${name} [skipped without git metadata: ${gitMetadataSkipReason}]`
+// The v0.1.2 drift record is asserted from committed documentation only. The
+// ancestry fixture tests below build their own temporary repositories instead
+// of reading this checkout's `.git` or a real tag, so a clean clone or a source
+// tarball behaves exactly like local development.
 
 const driftFacts = [
   /7ea2cc6/,
@@ -369,50 +331,19 @@ describe('release version gate', () => {
     expect(releaseWorkflow).toMatch(/Verify the tag has exactly one public release/)
   })
 
-  it.skipIf(gitMetadataSkipReason !== null)(
-    gitTestName('keeps v0.1.2 a strict ancestor or patch-equivalent to HEAD with a non-zero lead'),
-    () => {
-      const ahead = Number(git(['rev-list', '--count', `${driftTag}..HEAD`]))
-      expect(ahead).toBeGreaterThan(0)
-      const behind = Number(git(['rev-list', '--count', `HEAD..${driftTag}`]))
-      if (behind > 0) {
-        // The remote lightweight v0.1.2 diverges from HEAD; every tag-only
-        // commit must be a patch already present in HEAD, i.e. `git cherry`
-        // marks it with `-` rather than `+`.
-        const decisions = git(['cherry', 'HEAD', driftTag])
-          .split('\n')
-          .filter((line) => line.trim().length > 0)
-        expect(decisions.length).toBeGreaterThan(0)
-        for (const line of decisions) {
-          expect(line.startsWith('- '), `unexpected git cherry decision: ${line}`).toBe(true)
-        }
-      }
-    }
-  )
-
-  it.skipIf(gitMetadataSkipReason !== null)(
-    gitTestName('reads the v0.1.2 package version from git history as 0.1.2'),
-    () => {
-      const taggedPackage = JSON.parse(git(['show', `${driftTag}:package.json`])) as {
-        version?: string
-      }
-      expect(taggedPackage.version).toBe('0.1.2')
-    }
-  )
-
-  it('only invokes read-only git subcommands against the repository', () => {
+  it('never reads the repository-root git metadata or a real tag', () => {
     const testSource = readFileSync(fileURLToPath(import.meta.url), 'utf8')
-    const invocations = [...testSource.matchAll(/\bgit\(\[([^\]]*)\]/g)]
-    const subcommands = invocations.map(
-      (match) => /['"]([a-z-]+)['"]/.exec(match[1])?.[1] ?? ''
-    )
-    expect(subcommands.length).toBeGreaterThanOrEqual(3)
-    for (const subcommand of subcommands) {
-      expect(readOnlyGitSubcommands as readonly string[]).toContain(subcommand)
+    // Built at runtime so these assertions do not match their own source text.
+    for (const forbidden of [
+      ['cwd', ': ', 'repoRoot'].join(''),
+      ['git', 'Metadata', 'Skip', 'Reason'].join(''),
+      ['drift', 'Tag'].join('')
+    ]) {
+      expect(testSource).not.toContain(forbidden)
     }
-    // Repository-root calls go through git(), which rejects writes at runtime.
-    expect(testSource).toMatch(/const readOnlyGitSubcommands = \[/)
-    expect(testSource).toMatch(/git\(\) only allows read-only subcommands/)
+    // Every git process runs in a tmpdir fixture with isolated config.
+    expect(testSource).toContain("GIT_CONFIG_GLOBAL = '/dev/null'")
+    expect(testSource).toContain("GIT_CONFIG_NOSYSTEM = '1'")
   })
 
   it('never spawns gh or a mutating command in the repository root', () => {
@@ -421,7 +352,9 @@ describe('release version gate', () => {
     expect(testSource).not.toMatch(/execFileSync\(\s*'gh'/)
     expect(testSource).not.toMatch(/spawnSync\(\s*'gh'/)
     // Mutating git calls only exist inside the tmpdir fixture helper.
-    expect(testSource).toContain('const fixtureGit = (cwd: string, args: string[]): string =>')
+    expect(testSource).toContain(
+      'const fixtureGit = (repo: FixtureRepo, args: string[]): string =>'
+    )
   })
 })
 
@@ -430,89 +363,144 @@ describe('release version gate', () => {
 // the workflow_dispatch re-run entry that must not move the tag.
 // ---------------------------------------------------------------------------
 
-type AncestryScenario = 'patch-equivalent' | 'divergent' | 'deletes-protected-path'
+type AncestryScenario =
+  | 'strict-ancestor'
+  | 'patch-equivalent'
+  | 'divergent'
+  | 'deletes-protected-path'
 
-// Tempdir fixtures are the only place this suite writes git state; the
-// repository-root git() helper above stays read-only.
-const fixtureGit = (cwd: string, args: string[]): string =>
+interface FixtureRepo {
+  dir: string
+  home: string
+  env: NodeJS.ProcessEnv
+}
+
+// Every fixture owns a temp repository and a temp HOME. Inherited GIT_*
+// variables (GIT_DIR, GIT_WORK_TREE, alternates, ...) are dropped, global and
+// system config are disabled, and the identity is explicit, so a hostile
+// ~/.gitconfig cannot leak into the suite.
+const createFixtureRepo = (): FixtureRepo => {
+  const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
+  const home = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-home-'))
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined || key.toUpperCase().startsWith('GIT_')) continue
+    env[key] = value
+  }
+  env.HOME = home
+  env.GIT_CONFIG_GLOBAL = '/dev/null'
+  env.GIT_CONFIG_SYSTEM = '/dev/null'
+  env.GIT_CONFIG_NOSYSTEM = '1'
+  env.GIT_AUTHOR_NAME = 'OpenCompare Test'
+  env.GIT_AUTHOR_EMAIL = 'test@opencompare.invalid'
+  env.GIT_COMMITTER_NAME = 'OpenCompare Test'
+  env.GIT_COMMITTER_EMAIL = 'test@opencompare.invalid'
+  return { dir, home, env }
+}
+
+const disposeFixtureRepo = (repo: FixtureRepo): void => {
+  rmSync(repo.dir, { recursive: true, force: true })
+  rmSync(repo.home, { recursive: true, force: true })
+}
+
+// Tempdir fixtures are the only place this suite writes git state.
+const fixtureGit = (repo: FixtureRepo, args: string[]): string =>
   execFileSync('git', args, {
-    cwd,
+    cwd: repo.dir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'OpenCompare Test',
-      GIT_AUTHOR_EMAIL: 'test@opencompare.invalid',
-      GIT_COMMITTER_NAME: 'OpenCompare Test',
-      GIT_COMMITTER_EMAIL: 'test@opencompare.invalid'
-    }
+    env: repo.env
   }).trim()
 
 const writeFixtureFile = (dir: string, name: string, content: string): void => {
   writeFileSync(join(dir, name), content)
 }
 
-const initFixtureRepo = (dir: string): void => {
-  fixtureGit(dir, ['init', '-b', 'main'])
-  writeFixtureFile(dir, 'package.json', '{"version":"9.9.9"}\n')
-  writeFixtureFile(dir, 'README.md', 'base\n')
-  writeFixtureFile(dir, 'electron-builder.yml', 'appId: com.opencompare.fixture\n')
-  fixtureGit(dir, ['add', '-A'])
-  fixtureGit(dir, ['commit', '-m', 'base'])
+const initFixtureRepo = (repo: FixtureRepo): void => {
+  fixtureGit(repo, ['init', '-b', 'main'])
+  writeFixtureFile(repo.dir, 'package.json', '{"version":"9.9.9"}\n')
+  writeFixtureFile(repo.dir, 'README.md', 'base\n')
+  writeFixtureFile(repo.dir, 'electron-builder.yml', 'appId: com.opencompare.fixture\n')
+  fixtureGit(repo, ['add', '-A'])
+  fixtureGit(repo, ['commit', '-m', 'base'])
+}
+
+const tagFixtureHead = (repo: FixtureRepo, tagKind: 'annotated' | 'lightweight'): void => {
+  fixtureGit(
+    repo,
+    tagKind === 'annotated'
+      ? ['tag', '-a', 'v0.1.2', '-m', 'v0.1.2', 'HEAD']
+      : ['tag', 'v0.1.2', 'HEAD']
+  )
 }
 
 const createAncestryFixture = (
   scenario: AncestryScenario,
   tagKind: 'annotated' | 'lightweight' = 'annotated'
-): { dir: string; tagOnlySha: string; headSha: string } => {
-  const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
-  initFixtureRepo(dir)
-  fixtureGit(dir, ['checkout', '-b', 'tag-side'])
-  if (scenario === 'deletes-protected-path') {
-    rmSync(join(dir, 'electron-builder.yml'))
-  } else {
-    writeFixtureFile(dir, 'README.md', scenario === 'divergent' ? 'tag side\n' : 'fix\n')
+): { repo: FixtureRepo; tagSha: string } => {
+  const repo = createFixtureRepo()
+  initFixtureRepo(repo)
+  if (scenario === 'strict-ancestor') {
+    const tagSha = fixtureGit(repo, ['rev-parse', 'HEAD'])
+    tagFixtureHead(repo, tagKind)
+    writeFixtureFile(repo.dir, 'README.md', 'post tag\n')
+    fixtureGit(repo, ['add', '-A'])
+    fixtureGit(repo, ['commit', '-m', 'head change'])
+    return { repo, tagSha }
   }
-  fixtureGit(dir, ['add', '-A'])
-  fixtureGit(dir, ['commit', '-m', 'tag-only change'])
-  const tagOnlySha = fixtureGit(dir, ['rev-parse', 'HEAD'])
-  fixtureGit(
-    dir,
-    tagKind === 'annotated'
-      ? ['tag', '-a', 'v0.1.2', '-m', 'v0.1.2', 'HEAD']
-      : ['tag', 'v0.1.2', 'HEAD']
-  )
-  fixtureGit(dir, ['checkout', 'main'])
+  fixtureGit(repo, ['checkout', '-b', 'tag-side'])
   if (scenario === 'deletes-protected-path') {
-    rmSync(join(dir, 'electron-builder.yml'))
+    rmSync(join(repo.dir, 'electron-builder.yml'))
   } else {
-    writeFixtureFile(dir, 'README.md', scenario === 'divergent' ? 'main side\n' : 'fix\n')
+    writeFixtureFile(repo.dir, 'README.md', scenario === 'divergent' ? 'tag side\n' : 'fix\n')
   }
-  fixtureGit(dir, ['add', '-A'])
-  fixtureGit(dir, ['commit', '-m', 'head change'])
-  const headSha = fixtureGit(dir, ['rev-parse', 'HEAD'])
-  return { dir, tagOnlySha, headSha }
+  fixtureGit(repo, ['add', '-A'])
+  fixtureGit(repo, ['commit', '-m', 'tag-only change'])
+  const tagSha = fixtureGit(repo, ['rev-parse', 'HEAD'])
+  tagFixtureHead(repo, tagKind)
+  fixtureGit(repo, ['checkout', 'main'])
+  if (scenario === 'deletes-protected-path') {
+    rmSync(join(repo.dir, 'electron-builder.yml'))
+  } else {
+    writeFixtureFile(repo.dir, 'README.md', scenario === 'divergent' ? 'main side\n' : 'fix\n')
+  }
+  fixtureGit(repo, ['add', '-A'])
+  fixtureGit(repo, ['commit', '-m', 'head change'])
+  return { repo, tagSha }
 }
 
-const runAncestryGate = (dir: string): { status: number; output: string } => {
-  const scriptPath = join(dir, 'ancestry-gate.sh')
+const runAncestryGate = (repo: FixtureRepo): { status: number; output: string } => {
+  const scriptPath = join(repo.dir, 'ancestry-gate.sh')
   writeFileSync(scriptPath, ancestryGateScript)
-  const result = spawnSync('bash', [scriptPath], { cwd: dir, encoding: 'utf8' })
+  const result = spawnSync('bash', [scriptPath], {
+    cwd: repo.dir,
+    encoding: 'utf8',
+    env: repo.env
+  })
   return {
     status: result.status ?? -1,
     output: `${result.stdout ?? ''}${result.stderr ?? ''}`
   }
 }
 
+const withFixtureRepo = (run: (repo: FixtureRepo) => void): void => {
+  const repo = createFixtureRepo()
+  try {
+    run(repo)
+  } finally {
+    disposeFixtureRepo(repo)
+  }
+}
+
 const withAncestryFixture = (
   scenario: AncestryScenario,
-  run: (fixture: { dir: string; tagOnlySha: string; headSha: string }) => void
+  run: (fixture: { repo: FixtureRepo; tagSha: string }) => void
 ): void => {
   const fixture = createAncestryFixture(scenario)
   try {
     run(fixture)
   } finally {
-    rmSync(fixture.dir, { recursive: true, force: true })
+    disposeFixtureRepo(fixture.repo)
   }
 }
 
@@ -528,64 +516,69 @@ describe('v0.1.2 ancestry gate', () => {
     expect(ancestryGateScript).not.toMatch(/\|\|\s*true/)
   })
 
+  it('passes when the tag is a strict ancestor with a non-zero lead', () => {
+    withAncestryFixture('strict-ancestor', ({ repo, tagSha }) => {
+      const { status, output } = runAncestryGate(repo)
+      expect(output).toContain(`ref type=tag (annotated) commit=${tagSha}`)
+      expect(output).toContain('v0.1.2..HEAD commits=1 HEAD..v0.1.2 commits=0')
+      expect(output).toContain('is a strict ancestor of HEAD; ancestry check passed.')
+      expect(status).toBe(0)
+    })
+  })
+
   it('passes when a tag-only commit is patch-equivalent and logs its SHA with -', () => {
-    withAncestryFixture('patch-equivalent', ({ dir, tagOnlySha }) => {
-      const { status, output } = runAncestryGate(dir)
-      expect(output).toContain(`ref type=tag (annotated) commit=${tagOnlySha}`)
-      expect(output).toContain(`v0.1.2-only commit ${tagOnlySha} cherry=-`)
+    withAncestryFixture('patch-equivalent', ({ repo, tagSha }) => {
+      const { status, output } = runAncestryGate(repo)
+      expect(output).toContain(`ref type=tag (annotated) commit=${tagSha}`)
+      expect(output).toContain(`v0.1.2-only commit ${tagSha} cherry=-`)
       expect(output).toContain('ancestry check passed')
       expect(status).toBe(0)
     })
   })
 
   it('logs every tag-only commit in a chain with its own decision', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
-    try {
-      initFixtureRepo(dir)
-      fixtureGit(dir, ['checkout', '-b', 'tag-side'])
-      writeFixtureFile(dir, 'README.md', 'fix one\n')
-      fixtureGit(dir, ['add', '-A'])
-      fixtureGit(dir, ['commit', '-m', 'tag-only one'])
-      const firstSha = fixtureGit(dir, ['rev-parse', 'HEAD'])
-      writeFixtureFile(dir, 'README.md', 'fix two\n')
-      fixtureGit(dir, ['add', '-A'])
-      fixtureGit(dir, ['commit', '-m', 'tag-only two'])
-      const secondSha = fixtureGit(dir, ['rev-parse', 'HEAD'])
-      fixtureGit(dir, ['tag', '-a', 'v0.1.2', '-m', 'v0.1.2', 'HEAD'])
-      fixtureGit(dir, ['checkout', 'main'])
-      writeFixtureFile(dir, 'README.md', 'fix one\n')
-      fixtureGit(dir, ['add', '-A'])
-      fixtureGit(dir, ['commit', '-m', 'head one'])
-      writeFixtureFile(dir, 'README.md', 'fix two\n')
-      fixtureGit(dir, ['add', '-A'])
-      fixtureGit(dir, ['commit', '-m', 'head two'])
+    withFixtureRepo((repo) => {
+      initFixtureRepo(repo)
+      fixtureGit(repo, ['checkout', '-b', 'tag-side'])
+      writeFixtureFile(repo.dir, 'README.md', 'fix one\n')
+      fixtureGit(repo, ['add', '-A'])
+      fixtureGit(repo, ['commit', '-m', 'tag-only one'])
+      const firstSha = fixtureGit(repo, ['rev-parse', 'HEAD'])
+      writeFixtureFile(repo.dir, 'README.md', 'fix two\n')
+      fixtureGit(repo, ['add', '-A'])
+      fixtureGit(repo, ['commit', '-m', 'tag-only two'])
+      const secondSha = fixtureGit(repo, ['rev-parse', 'HEAD'])
+      tagFixtureHead(repo, 'annotated')
+      fixtureGit(repo, ['checkout', 'main'])
+      writeFixtureFile(repo.dir, 'README.md', 'fix one\n')
+      fixtureGit(repo, ['add', '-A'])
+      fixtureGit(repo, ['commit', '-m', 'head one'])
+      writeFixtureFile(repo.dir, 'README.md', 'fix two\n')
+      fixtureGit(repo, ['add', '-A'])
+      fixtureGit(repo, ['commit', '-m', 'head two'])
 
-      const { status, output } = runAncestryGate(dir)
+      const { status, output } = runAncestryGate(repo)
       expect(output).toContain(`v0.1.2-only commit ${firstSha} cherry=-`)
       expect(output).toContain(`v0.1.2-only commit ${secondSha} cherry=-`)
       expect(status).toBe(0)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+    })
   })
 
   it('logs a lightweight tag as a commit ref with its resolved commit SHA', () => {
     const fixture = createAncestryFixture('patch-equivalent', 'lightweight')
     try {
-      const { status, output } = runAncestryGate(fixture.dir)
-      expect(output).toContain(
-        `ref type=commit (lightweight) commit=${fixture.tagOnlySha}`
-      )
+      const { status, output } = runAncestryGate(fixture.repo)
+      expect(output).toContain(`ref type=commit (lightweight) commit=${fixture.tagSha}`)
       expect(status).toBe(0)
     } finally {
-      rmSync(fixture.dir, { recursive: true, force: true })
+      disposeFixtureRepo(fixture.repo)
     }
   })
 
   it('rejects a tag-only commit whose patch is not present in HEAD', () => {
-    withAncestryFixture('divergent', ({ dir, tagOnlySha }) => {
-      const { status, output } = runAncestryGate(dir)
-      expect(output).toContain(`v0.1.2-only commit ${tagOnlySha} cherry=+`)
+    withAncestryFixture('divergent', ({ repo, tagSha }) => {
+      const { status, output } = runAncestryGate(repo)
+      expect(output).toContain(`v0.1.2-only commit ${tagSha} cherry=+`)
       expect(output).toContain('::error::')
       expect(output).toContain('not present in HEAD')
       expect(status).not.toBe(0)
@@ -593,38 +586,32 @@ describe('v0.1.2 ancestry gate', () => {
   })
 
   it('rejects a patch-equivalent tag-only commit that deletes a protected path', () => {
-    withAncestryFixture('deletes-protected-path', ({ dir, tagOnlySha }) => {
-      const { status, output } = runAncestryGate(dir)
-      expect(output).toContain(`v0.1.2-only commit ${tagOnlySha} cherry=-`)
+    withAncestryFixture('deletes-protected-path', ({ repo, tagSha }) => {
+      const { status, output } = runAncestryGate(repo)
+      expect(output).toContain(`v0.1.2-only commit ${tagSha} cherry=-`)
       expect(output).toContain('deletes the release-critical path electron-builder.yml')
       expect(status).not.toBe(0)
     })
   })
 
   it('fails closed when the tag cannot be resolved', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
-    try {
-      initFixtureRepo(dir)
-      const { status, output } = runAncestryGate(dir)
+    withFixtureRepo((repo) => {
+      initFixtureRepo(repo)
+      const { status, output } = runAncestryGate(repo)
       expect(output).toContain('::error::')
       expect(output).toContain('not visible')
       expect(status).not.toBe(0)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+    })
   })
 
   it('keeps the non-zero lead requirement', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
-    try {
-      initFixtureRepo(dir)
-      fixtureGit(dir, ['tag', 'v0.1.2', 'HEAD'])
-      const { status, output } = runAncestryGate(dir)
+    withFixtureRepo((repo) => {
+      initFixtureRepo(repo)
+      tagFixtureHead(repo, 'lightweight')
+      const { status, output } = runAncestryGate(repo)
       expect(output).toContain('no commits after v0.1.2')
       expect(status).not.toBe(0)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+    })
   })
 
   it('has no escape hatch on the gates path', () => {
