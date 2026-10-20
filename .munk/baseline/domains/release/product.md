@@ -17,12 +17,14 @@
 - **凭据清单与协助文案**：`docs/release-signing.md` 列出待人类录入的 6 项 GitHub Secrets 清单（名称/用途/获取方式/形态）、App Store Connect API Key 模式说明（Developer 角色、`.p8` 仅可下载一次、Key ID / Issuer ID）与协助录入文案；凭据一律经 GitHub Secrets / 环境变量注入，严禁写入仓库或日志。
 - **发布元数据（Linux `.deb` 前置）**：`package.json` 的 `author`（对象且含非空 `email`）、`license`、`homepage`；`electron-builder.yml` `linux.maintainer` 显式含 email。
 - **发布目标**：`electron-builder.yml` 声明 `publish: { provider: github, releaseType: release }`；实际发布改由 release.yml 单点预建 + `gh release upload` 完成（矩阵 `--publish never`），最终 Release 为公开（非 Draft）。
-- **发布工作流**：`.github/workflows/release.yml` 监听 `v*` tag，门禁 job（install `--frozen-lockfile` / lint / typecheck / test / build）先行。门禁末尾**单点预建该 tag 的唯一 Release**（`gh release create ... --draft --generate-notes`，注入 `GH_TOKEN`/`GH_REPO` 并显式带 `--repo`；若已存在则清理同名重复只留一个），随后 mac/win/linux 三平台矩阵 `electron-builder --<target> --publish never` 仅本地打包到 `release/`，再用 `gh release upload "${GITHUB_REF_NAME}" <三端全部产物> --clobber --repo` 汇聚上传到该唯一 Release；`finalize` job `gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest` 正式公开。Release 唯一性以 tag 为准，杜绝并发建单竞态。
+- **发布触发与 tag 单点解析**：`.github/workflows/release.yml` 监听 `v*` tag push，并额外声明 `workflow_dispatch`（输入 `tag`，required，默认 `v0.2.0`）用于不改 tag 的补发。工作流级 `env.RELEASE_TAG: ${{ inputs.tag || github.ref_name }}` 是唯一 tag 来源，版本断言、Release 预建 / 上传 / 公开、唯一性与资产校验全部引用 `RELEASE_TAG`；dispatch 路径不得把 `GITHUB_REF_NAME`（`main`）当 tag。
+- **发布工作流**：`.github/workflows/release.yml` 监听 `v*` tag，门禁 job（install `--frozen-lockfile` / lint / typecheck / test / build）先行。门禁末尾**单点预建该 tag 的唯一 Release**（`gh release create ... --draft --generate-notes`，注入 `GH_TOKEN`/`GH_REPO` 并显式带 `--repo`；若已存在则清理同名重复只留一个），随后 mac/win/linux 三平台矩阵 `electron-builder --<target> --publish never` 仅本地打包到 `release/`，再用 `gh release upload "${RELEASE_TAG}" <三端全部产物> --clobber --repo` 汇聚上传到该唯一 Release；`finalize` job `gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest` 正式公开。Release 唯一性以 tag 为准，杜绝并发建单竞态。
 - **发版版本单点**：`package.json#version` 为发版的唯一版本来源（当前 `0.2.0`），tag 语义版本与打包产物 `latest*.yml#version` 均须与其对齐，二者由 `release.yml` 对齐闸断言。
 - **Release Notes 草案**：根目录 `CHANGELOG.md`（Keep a Changelog / SemVer 口径）记录版本条目，新版本条目排在旧版本之上；`v0.2.0` 条目覆盖本版用户可见变化（顶栏常驻「新建对比」+ 免弹窗左右路径直传、启动参数与 `opencompare://compare` 注入 + 单实例接管、文件会话原位写回、自制品牌图标与窗口/关于同源）与升级方式。`docs/release-notes/v0.2.0.md` 是 v0.2.0 的 GitHub Release Notes **来源文本**（纯 Markdown、面向用户、无内部实现流水账、无 `TODO`/`TBD`/`FIXME` 占位），标题含 `v0.2.0` 且版本号与 `package.json#version` 由测试交叉比对。
-- **版本漂移记录（只读事实 + 不动作声明）**：`CHANGELOG.md` 与 `docs/release-signing.md` 两处记录同一组 `v0.1.2` 事实——annotated tag 对象 `c4a6a95` 指向 commit `7ea2cc6`；`v0.1.2` 是 `main` / `origin/main` 的祖先（无游离历史）；规划基线时 `main` 领先 13 个提交（只是规划基线快照，实际以打 tag 时 `main` 为准）；远端 Release 公开、非预发布、共 11 个资产；并声明**不删除 / 不移动 / 不重打 / 不替换** tag 与资产、tag 之后的修复由 `v0.2.0` 承接、后续只能发更高版本不改写历史。
-- **CI 只读发布前置断言（preflight）**：`release.yml` 的 `gates` job 在 `pnpm test` 之前新增只读 preflight step——拒绝非严格 semver 的 `package.json#version`（如 `0.2` / `v0.2.0`）、断言 `v0.1.2` 在本次 checkout 可见、是 `HEAD` 祖先（`HEAD..v0.1.2` 为 0）且领先提交数 > 0，失败一律 `::error::` + `exit 1`；`gates` 的 `actions/checkout` 设 `fetch-depth: 0` 使 tag 与历史在 CI 可见。preflight 只调用只读 git 子命令（`rev-parse` / `rev-list`），不触碰远端与 ref。
-- **正式版文档口径**：`README.md` 与 `docs/release-signing.md` 以「正式版经签名 + 公证流程产出」描述发版姿态（发布状态与发布姿态段均标注 `v0.2.0`，README 链接 `docs/release-notes/v0.2.0.md`），同时保留 6 项 Secret 清单与 fail-closed 表述不变；公证实际结果以 tag 触发的那次 CI 为准，不预先宣称未经验证的公证结果。
+- **版本漂移记录（只读事实 + 不动作声明）**：`CHANGELOG.md` 与 `docs/release-signing.md` 两处记录同一组 `v0.1.2` 事实——本地 annotated tag 对象 `c4a6a95` 指向 commit `7ea2cc6` 且为 `main` 祖先；远端 `v0.1.2` 是**轻量 tag**，指向 `bb0c0b1`，不在 `v0.2.0`（`285ee28`）祖先链上（`v0.1.2..HEAD`=29，`HEAD..v0.1.2`=2），两条仅远端 tag 可达提交（`bb0c0b1` / `b2c4e51`）经 `git cherry HEAD` 均为 `-`（补丁已等价存在于 HEAD，零内容丢失）；规划基线时 `main` 领先 13 个提交（只是规划基线快照，实际以打 tag 时 `main` 为准）；远端 Release 公开、非预发布、共 11 个资产；并声明**不删除 / 不移动 / 不重打 / 不替换** tag 与资产、tag 之后的修复由 `v0.2.0` 承接、后续只能发更高版本不改写历史。
+- **CI 只读发布前置门（版本 + 祖先）**：`release.yml` 的 `gates` job 在 `pnpm install` / `pnpm test` 之前依次执行：① tag 格式校验（`^v[0-9]+\.[0-9]+\.[0-9]+$`，不合格 `::error::` + `exit 1`），② checkout 后断言 `refs/tags/${RELEASE_TAG}` 可解析为 commit（不存在即失败），③ `package.json#version` 严格 semver，④ 祖先门。祖宗门**内联**在该步骤的 `run` 脚本里（不引用仓库内脚本文件——dispatch 会用 main 上的 workflow 去 checkout 旧 tag，新脚本在旧 tag 上不存在会误失败），语义为「`v0.1.2` 是 `HEAD` 严格祖先 **或** 所有仅 tag 可达提交逐条 `git cherry HEAD <sha>` 判定均为 `-`」；日志打印 `v0.1.2` 的 ref 类型（`git cat-file -t` 为 `commit` = 轻量 tag，`tag` = annotated tag）、解析到的 commit SHA、`v0.1.2..HEAD` / `HEAD..v0.1.2` 计数，以及每条仅 tag 可达提交的完整 SHA 与判定符号（`-` / `+`）。任一 `+`、仅 tag 可达提交无法枚举、tag 不可解析、或仅 tag 可达提交的 diff 删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`）时，门 `::error::` + 非零退出（fail-closed），后续质量门禁、打包矩阵与 finalize 均不运行；`v0.1.2..HEAD` 提交数为 0 也非零退出（发布必须携带 tag 之后的修复）。门只做只读 git 查询（`cat-file` / `rev-parse` / `rev-list` / `cherry` / `diff-tree`），不创建、移动、删除任何 tag / ref，不 push，不调用 `gh release` 写操作。`gates` 的 `actions/checkout` 设 `fetch-depth: 0` 使 tag 与历史在 CI 可见。
+- **`workflow_dispatch` 补发入口（不改 tag、不升版本）**：tag 已推送但 Release 未完成时，可从 `main` 手跑 `Release` 工作流，输入 `tag`（默认 `v0.2.0`）而不移动 tag。dispatch 运行使用 main 上的 workflow 文件，但 `gates` 与打包矩阵的 `actions/checkout` 都显式 `ref: refs/tags/${{ env.RELEASE_TAG }}`，构建的是该 tag 的源码；`package.json#version` 断言与 tag 版本一致。push `v*` 路径行为不变（gates 先行 → 三平台矩阵 `--publish never` → 单点预建 draft → finalize 唯一公开 Release），两条触发共用同一套步骤，不出现第二套分支逻辑。
+- **发布状态文档口径（如实、不预宣称）**：`README.md` 状态行为「v0.2.0 待发布；当前可下载的最新公开 Release 为 v0.1.2」，并保留 `docs/release-notes/v0.2.0.md` 链接；`docs/release-signing.md` 的发布姿态为「v0.2.0 待发布（发布路径已就绪）」并指向补发用法。两者保留 6 项 Secret 清单与 fail-closed 表述不变；公证实际结果以那次 CI 为准，不预先宣称未经验证的公证结果。
 - **仓库门面**：根目录 `README.md`（定位、核心能力、本地开发与构建打包）与 `LICENSE`（MIT 全文）。
 - **打包后硬校验（macOS `.app`，上传前）**：`release.yml` 在 `Build installers` 之后、`Upload installers` 之前对真实产出的 `OpenCompare.app` 做两组硬校验，任一失败即 `::error::` + `exit 1` 且不执行上传——(a) **图标与版本身份**：用 glob / `find release -maxdepth 2` 定位（不写死 `mac-arm64`），读 `Contents/Info.plist` 的 `CFBundleIconFile`（非空、非 `electron.icns`）、对应 `Contents/Resources/<icon>`（无扩展名补 `.icns`，存在、非空、头 4 字节 `icns`）、runner 上可定位 Electron 自带 `electron.icns` 时断言 SHA-256 不同、`Contents/Resources/icon.png` 与 `build/icon.png` SHA-256 相同、`CFBundleIdentifier` 为 `com.opencompare.app`、`CFBundleShortVersionString` 等于 tag 版本（去 `v`）；(b) **签名与公证**：`codesign --verify --deep --strict --verbose=2` 退出 0；`codesign -dv --verbose=4` 含 `Authority=Developer ID Application` / `TeamIdentifier=3X4J53U6RY` / hardened runtime 标志 `runtime` 且不含 `Signature=adhoc`；`xcrun stapler validate` 优先校验打包 `.app`，未直接 staple 时挂载 `release/*.dmg` 校验其中同一 `OpenCompare.app`（失败路径也 `hdiutil detach`）；`spctl -a -vv --type execute` 退出 0 且输出含 `accepted` 与 `Notarized Developer ID`。
 - **产物名与 `latest*.yml` 版本强断言**：各平台必需扩展名产物至少各一份（mac `.dmg` / `.zip`、win `.exe`、linux `.AppImage` / `.deb`），文件名含 tag 版本且同扩展名的所有产物都不含其它版本号（防旧版本残留被上传）；保留既有 `latest*.yml#version == tag` 断言与空目录守卫，并追加每个 `files[].url` 与存在时的 `path` 含 tag 版本。
@@ -42,7 +44,7 @@
 - **ac-release-workflow**：`.github/workflows/release.yml` 仍为 `v*` tag 触发、`gates` 先行；发布路径可保证 Release 对仓库外可见，且每个 tag 恰好一个 Release。
 - **ac-single-precreate**：`gates` Job 在矩阵启动前存在单点预建唯一 Release 的步骤，带 `GH_TOKEN` 与 `GH_REPO`，使用 `gh release create ... --draft --generate-notes`（不存在时才创建；存在重复同名 Release 时清理多余、只留一个）。
 - **ac-no-concurrent-publish**：`release` 矩阵中 `electron-builder` 参数为 `--publish never`，不再有 `--publish always`；打包产物仅落到本地 `release/`。
-- **ac-upload-clobber**：`release` 矩阵在打包后有 `gh release upload "${GITHUB_REF_NAME}" ... --clobber --repo "${GITHUB_REPOSITORY}"` 步骤，汇聚上传三端安装包与元数据（dmg/zip/exe/AppImage/deb/blockmap/latest*.yml），且能在 windows runner 的默认 shell 下正常运行。
+- **ac-upload-clobber**：`release` 矩阵在打包后有 `gh release upload "${RELEASE_TAG}" ... --clobber --repo "${GITHUB_REPOSITORY}"` 步骤，汇聚上传三端安装包与元数据（dmg/zip/exe/AppImage/deb/blockmap/latest*.yml），且能在 windows runner 的默认 shell 下正常运行。
 - **ac-finalize-repo**：`finalize` Job 的 `gh release edit` 命令带 `--repo "${GITHUB_REPOSITORY}"`，并注入 `GH_REPO`，`--draft=false --latest` 保持；不存在 `fatal: not a git repository` 的前置依赖。
 - **ac-unit-assertions**：`src/main/release-packaging.test.ts` 断言覆盖预建唯一 Release、`--publish never` + `gh release upload --clobber`、`finalize` 带 `--repo`；旧断言若与新流程冲突已随之更新。
 - **ac-config-tests**：release 配置断言单测覆盖元数据 / 打包目标 / 发布配置三组、6 Secrets 接线、fail-closed、legacy 凭据不再接线、签名身份、`appId` 与 6 项文档清单，由 `pnpm test` 执行并通过且不引入 Electron/DOM 依赖。
@@ -92,18 +94,18 @@
 - **ac-release-notes-file**：`docs/release-notes/v0.2.0.md` 存在且非空，首个一级标题包含 `v0.2.0`。
 - **ac-release-notes-no-placeholder**：`docs/release-notes/v0.2.0.md` 不含 `TODO` / `TBD` / `FIXME` 占位。
 - **ac-release-notes-version-single-source**：测试从 `docs/release-notes/v0.2.0.md` 标题提取版本号，断言其等于 `package.json#version`（改版本而漏改 Release Notes 时该用例失败）。
-- **ac-readme-posture-v020**：`README.md` 的发布状态行包含 `v0.2.0`，且包含指向 `docs/release-notes/v0.2.0.md` 的链接；不再出现「当前发布状态：正式版 v0.1.2」。
+- **ac-readme-posture-v020**：`README.md` 的发布状态行包含 `v0.2.0`，且包含指向 `docs/release-notes/v0.2.0.md` 的链接；状态为「v0.2.0 待发布；当前可下载的最新公开 Release 为 v0.1.2」，不再出现「当前发布状态：正式版 v0.2.0」或「正式版 v0.1.2」的已发布口径。
 - **ac-signing-doc-posture-v020**：`docs/release-signing.md` 的正式版发布姿态段标注 `v0.2.0`；`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` 六项与 fail-closed 表述原样保留。
 - **ac-drift-facts-changelog**：`CHANGELOG.md` 含 `v0.1.2` 漂移事实：commit `7ea2cc6`、tag 对象 `c4a6a95`（annotated）、`v0.1.2` 是 main 的祖先、规划基线领先 13 个提交、远端 Release 公开且非预发布、11 个资产。
 - **ac-drift-facts-signing-doc**：`docs/release-signing.md` 含同一组 `v0.1.2` 只读事实（commit `7ea2cc6`、祖先关系、13 个提交基线、11 个资产、公开非预发布）。
 - **ac-drift-no-action-statement**：两处文档都含不动作声明，同时出现「不删除」「不移动」「不重打」「不替换」与「tag 之后的修复由 v0.2.0 承接」的等价表述。
-- **ac-test-tag-ancestor**：`release-packaging.test.ts` 用只读 git 命令断言 `v0.1.2` 是 `HEAD` 的祖先，且 `v0.1.2..HEAD` 的提交数大于 0；在本仓库全量检出下该用例为通过（非 skip）。
+- **ac-test-tag-ancestor**：`release-packaging.test.ts` 用只读 git 命令断言祖孙关系按新语义成立——`v0.1.2..HEAD` 提交数大于 0，且当 `HEAD..v0.1.2` 非零时该 tag 的每条仅 tag 可达提交 `git cherry HEAD` 均为 `-`；在本仓库全量检出下该用例为通过（非 skip）。
 - **ac-test-tag-version-match**：测试用 `git show v0.1.2:package.json` 只读读取历史版本，断言其 `version` 为 `0.1.2`，与被记录的漂移事实一致。
 - **ac-test-skips-without-git-metadata**：当本地无 `.git` 或 `v0.1.2` tag 不可见时，上述两条 git 用例 skip 并给出原因，不产生假失败（不影响 `pnpm test` 在无 git 环境全绿）。
-- **ac-test-assertions-are-read-only**：测试文件内调用的 git 子命令集合限定为只读子命令（`rev-parse` / `rev-list` / `show` / `cat-file`），测试源码中不出现执行 `git tag`、`git push`、`git fetch`、`git merge`、`git rebase` 或 `gh release` 的代码路径。
-- **ac-ci-preflight-tag-ancestor**：`release.yml` 的 `gates` job 在 `pnpm test` 之前新增 preflight step，断言 `v0.1.2` 是 `HEAD` 祖先且领先提交数非零，失败时以 `::error::` 输出并 `exit 1`。
+- **ac-test-assertions-are-read-only**：仓库根目录的测试调用限定只读 git 子命令（`rev-parse` / `rev-list` / `show` / `cat-file` / `cherry` / `diff-tree` 等），测试源码中不出现对仓库根执行 `git tag`、`git push`、`git fetch`、`git merge`、`git rebase` 或 `gh release` 的代码路径；临时仓库的 git 写操作只发生在 `os.tmpdir()` 下。
+- **ac-ci-preflight-tag-ancestor**：`release.yml` 的 `gates` job 在 `pnpm test` 之前有只读祖先门 step，接受「`v0.1.2` 是 `HEAD` 严格祖先」或「仅 tag 可达提交逐条补丁等价（`git cherry` 全 `-`）」两种通过形态，并保留 `v0.1.2..HEAD` 领先提交数非零要求；任何失败形态以 `::error::` 输出并 `exit 1`。
 - **ac-ci-preflight-git-metadata**：`gates` job 的 `actions/checkout` 设置 `fetch-depth: 0`，使 tag 与历史在 CI 可见（与 preflight 断言配套）。
-- **ac-ci-preflight-version-semver**：preflight step 在版本比对前拒绝非 semver 的 `package.json#version`（如 `0.2`、`v0.2.0`），以 `::error::` 失败退出。
+- **ac-ci-preflight-version-semver**：前置门在版本比对前拒绝非 semver 的 `package.json#version`（如 `0.2`、`v0.2.0`），以 `::error::` 失败退出。
 - **ac-latest-yml-gate-preserved**：`release.yml` 仍保留「Assert packaged version matches the tag」步骤，逐个校验 `release/latest*.yml` 的 `version` 等于 tag，且无匹配文件时报错退出；测试断言该步骤与 glob / 空目录守卫未被删除。
 - **ac-release-model-unchanged**：测试断言发布模型未被改写：仍为 tag 触发、`gates` 先跑、矩阵 `--publish never`、单点预建 draft、`finalize` 公开，且 workflow 引用的 secrets 集合仍为六项 + `GITHUB_TOKEN`。
 - **ac-existing-v012-assertions-updated**：原先锁定「README 是 v0.1.2 正式版」「签名文档是 v0.1.2 姿态」的两条用例改为断言 v0.2.0 口径（不是删除覆盖），同时 README / 签名文档仍保留 `v0.1.2` 漂移说明。
@@ -117,14 +119,14 @@
 - **ac-icon-resource-exists**：断言 `Contents/Resources/<CFBundleIconFile>`（无扩展名时补 `.icns`）存在、字节数 > 0、前 4 字节为 `icns`；否则失败退出。
 - **ac-icon-not-electron-default**：当 `node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns` 等 Electron 默认图标可定位时，断言打包图标 SHA-256 与之不同；不可定位时该比较跳过但「非 `electron.icns` 名」断言仍生效。
 - **ac-app-resource-png-matches**：断言 `Contents/Resources/icon.png` 的 SHA-256 与仓库 `build/icon.png` 相同；不同即失败退出。
-- **ac-app-bundle-identity**：断言 `CFBundleIdentifier == com.opencompare.app`、`CFBundleShortVersionString == ${GITHUB_REF_NAME#v}`；任一不等即失败退出。
+- **ac-app-bundle-identity**：断言 `CFBundleIdentifier == com.opencompare.app`、`CFBundleShortVersionString == ${RELEASE_TAG#v}`（RELEASE_TAG 为解析后的 tag，push 与 dispatch 同源）；任一不等即失败退出。
 - **ac-codesign-verify-deep-strict**：对上述 `.app` 执行 `codesign --verify --deep --strict --verbose=2`；非零退出即 `::error::` + `exit 1`。
 - **ac-codesign-developer-id**：`codesign -dv --verbose=4` 输出含 `Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY` 与 hardened runtime 标志 `runtime`，且不含 `Signature=adhoc`；任一不满足即失败退出。
 - **ac-stapler-validate**：`.app` 的 `xcrun stapler validate` 退出 0；未被直接 staple 时从 `release/*.dmg` 挂载并对其中的 `OpenCompare.app` 校验成功；两者皆失败即 `::error::` + `exit 1`，且挂载在失败路径也会 detach。
 - **ac-spctl-notarized**：对同一 `.app` 执行 `spctl -a -vv --type execute`，退出 0 且合并输出含 `accepted` 与 `Notarized Developer ID`；否则失败退出。
 - **ac-checks-before-upload**：上述图标 / 证书 / 公证 / 产物名 / `latest*.yml` 校验步骤都出现在 `Upload installers to the tag's release` 之前；`release.yml` 全文不含 `continue-on-error: true`、`|| true`、`--no-verify`，上传步骤不带 `if: always()`。
 - **ac-credentials-before-build**：6 项 Secret 齐备检查步骤索引早于 `Build installers`；缺失时错误信息含缺失 Secret 名与 `docs/release-signing.md`，并以非零码退出。
-- **ac-artifact-names-versioned**：mac 至少有 `.dmg` 与 `.zip`、win 至少有 `.exe`、linux 至少有 `.AppImage` 与 `.deb` 的产物，文件名均含 `${GITHUB_REF_NAME#v}`；同扩展名出现不含该版本的文件时断言失败。
+- **ac-artifact-names-versioned**：mac 至少有 `.dmg` 与 `.zip`、win 至少有 `.exe`、linux 至少有 `.AppImage` 与 `.deb` 的产物，文件名均含 `${RELEASE_TAG#v}`；同扩展名出现不含该版本的文件时断言失败。
 - **ac-latest-metadata-urls**：保留既有 `latest*.yml` 的 `version == tag` 断言与空目录守卫，并断言每个文件的 `files[].url`（及存在时的 `path`）含 tag 版本；任一不符即失败退出。
 - **ac-finalize-single-public**：`finalize` 用 `gh api --paginate` 统计该 tag 的 Release，断言 count == 1、draft 数 == 0、prerelease 数 == 0；否则 `::error::` + `exit 1`。
 - **ac-finalize-assets-complete**：断言该 Release 资产数 > 0，且至少各一份 `.dmg`、`.zip`、`.exe`、`.AppImage`、`.deb`、`latest-mac.yml`、`latest.yml`、`latest-linux.yml`；版本化资产名含 tag 版本，否则失败退出。
@@ -155,8 +157,37 @@
 - **ac-doc-assertion**：`pnpm test` 中的只读文档断言覆盖该证据文件：文件缺失、`status` 非 `verified`/`blocked`、`verified` 分支缺少任一必需标记（两处 `valid on disk`、两处 `The validate action worked!`、两处 `accepted` + `source=Notarized Developer ID`、两个 sha256）或 `blocked` 分支出现通过标记时测试失败。
 - **ac-no-artifacts-committed**：本 WI 的改动文件只有证据 Markdown（及只读断言测试），dmg / zip / `.app` / 解包目录等产物不进入 git 变更。
 
+### v0.2.0 祖先门补丁等价语义与 dispatch 补发入口
+
+- **ac-ancestry-patch-equivalent**：当 `v0.1.2` 不是 `HEAD` 严格祖先、但所有仅 `v0.1.2` 可达提交逐条 `git cherry HEAD` 判定均为 `-` 时，祖先门退出码为 0，流程继续。
+- **ac-ancestry-per-commit-log**：门日志对每个仅 tag 可达提交打印完整 SHA 与判定符号（`-` / `+`），便于人工复核。
+- **ac-ancestry-ref-type-log**：门日志打印 `v0.1.2` 的 ref 类型（轻量 / annotated，取自 `git cat-file -t` 为 `commit` / `tag`）以及解析到的 commit SHA。
+- **ac-ancestry-true-fork**：任一仅 tag 可达提交判定为 `+` 时，门输出 `::error::` 并以非零码退出，后续质量门禁、打包矩阵与 finalize 均不运行。
+- **ac-ancestry-enumeration-fail**：仅 tag 可达提交无法枚举（`git rev-list` 失败、tag 不可解析等）时，门非零退出（fail-closed），不得按通过处理。
+- **ac-ancestry-protected-deletion**：任一仅 tag 可达提交的 diff 删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`）时，即使 `git cherry` 判为 `-`，门仍非零退出。
+- **ac-ancestry-ahead-nonzero**：保留原有非零领先要求：`v0.1.2..HEAD` 提交数为 0 时门非零退出（发布必须携带 tag 之后的修复）。
+- **ac-ancestry-readonly**：祖先门只做只读 git 查询；整个 workflow 与测试不创建、不移动、不删除任何 tag / ref，不 push，不调用 `gh release` 写操作，输出不含任何 secret 值。
+- **ac-dispatch-entry**：`release.yml` 声明 `workflow_dispatch`，输入名 `tag`，默认值 `v0.2.0`；不依赖 push tag 即可启动。
+- **ac-dispatch-tag-validation**：dispatch 输入的 tag 不匹配 `^v[0-9]+\.[0-9]+\.[0-9]+$`，或 `refs/tags/<tag>` 在 checkout 中不存在时，工作流在构建前非零退出。
+- **ac-dispatch-build-ref**：dispatch 运行的 gates 与 release 矩阵 checkout 均显式使用 `ref: refs/tags/<tag>`（tag 为解析后的输入 / 触发 tag），`package.json#version` 取自该 tag 且与 tag 版本一致。
+- **ac-dispatch-tag-normalization**：所有 tag 相关逻辑（版本断言、Release 创建、上传、公开、唯一 Release 与资产校验）使用统一解析的 `RELEASE_TAG`；dispatch 路径下不得把分支名 `GITHUB_REF_NAME`（`main`）当作 tag 使用。
+- **ac-push-unchanged**：push `v*` 触发路径仍存在且行为不变：gates 先行 → 三平台矩阵 `--publish never` → 单点预建 draft → finalize 唯一公开 Release；步骤顺序与现有硬校验全部保留。
+- **ac-gate-before-install**：祖先门与版本一致性校验位于 `pnpm install` / `pnpm test` 之前（快速失败）。
+- **ac-tests-equivalence**：测试在 `os.tmpdir()` 临时 git 仓库构造「tag-only 提交补丁已等价存在于 HEAD」场景，执行 workflow 中真实的门脚本，断言退出 0 且输出含该提交 SHA 与 `-`。
+- **ac-tests-divergence**：测试用临时 git 仓库构造两类拒绝场景——存在判定为 `+` 的 tag-only 提交；tag-only 提交删除受保护路径——断言门非零退出。
+- **ac-tests-dispatch-workflow**：测试断言 `workflow_dispatch` 入口存在、输入 `tag` 默认 `v0.2.0`、checkout `ref` 为 `refs/tags/<tag>`、tag 相关步骤不再使用 `${GITHUB_REF_NAME}`。
+- **ac-tests-failclosed**：测试断言门失败路径有显式 `exit 1` / 非零返回，且发布路径无 `|| true`、`continue-on-error` 等绕行。
+- **ac-docs-ancestry**：`docs/release-signing.md` 记录新语义（严格祖先 **或** 逐提交补丁等价；`+` 或无法枚举均 fail-closed）与逐条日志口径，同时保留现有 v0.1.2 漂移事实与「不删除、不移动、不重打、不替换」承诺。
+- **ac-docs-rerun**：`docs/release-signing.md` 写明补发用法：从 main 手跑 `workflow_dispatch`，输入 `tag` 默认 `v0.2.0`，构建取 `refs/tags/<tag>`，不改 tag、不升版本。
+- **ac-readme-status**：`README.md` 状态行改为「v0.2.0 待发布；当前可下载的最新公开 Release 为 v0.1.2」，不再出现「正式版 v0.2.0」的已发布口径，并保留 v0.2.0 发布说明链接。
+- **ac-no-version-or-config-drift**：`package.json#version` 仍为 `0.2.0`；`appId` / `productName` / 签名身份 `Tao Zhu (3X4J53U6RY)` / targets / 依赖均未改。
+- **ac-gates-green**：`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm build:web`、`pnpm test` 全绿。
+
 
 ## 非目标
+
+- 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
+- 不改发布模型（单点预建唯一 Release + 矩阵 `--publish never` + finalize 公开）、不升版本、不改历史 / `CHANGELOG.md` / `docs/release-notes/v0.2.0.md` 内容口径、不改 `appId` / `productName` / 签名身份 / targets / 依赖 / `electron-builder.yml` 发布配置、不新增 secrets、不做 UI 改动。
 
 - 不做 Windows / Linux 的代码签名或公证（签名/公证仅覆盖 macOS Developer ID）。
 - 不进行自动更新（auto-update）与发布密钥托管服务。
@@ -195,18 +226,19 @@
 - **断言落点复用现有资产**：扩展 `src/main/release-packaging.test.ts` 的既有 describe 组（`release version gate` / `release notes changelog` / `release signing credentials checklist` / `github release publishing`），不新建第二套测试文件；新增 UI/交互无关。
 - 既有两条「v0.1.2 姿态」用例改写为 v0.2.0 口径时，保留 `not.toMatch(/发布状态：冻结/)` 之类防回退守卫，并保留 README / 签名文档中 `v0.1.2` 漂移段落（否则 `ac-drift-facts-*` 会失去落点）。
 - `docs/release-notes/v0.2.0.md` 为纯 Markdown、零前端代码，作为人工创建 Release 时粘贴的来源文本；不引入自动生成脚本。
+- **祖先门必须内联在 `release.yml` 的步骤里**：dispatch 使用 main 上的 workflow 文件，但 gates 会 checkout `refs/tags/<tag>`，引用仓库内新脚本会在旧 tag 上找不到文件而误失败。门须可被 vitest 直接执行：测试解析 `.github/workflows/release.yml` 取出该步骤的 `run` 脚本，在 `os.tmpdir()` 下的临时 git 仓库里跑 `bash`，不得改动本仓 refs。
+- **tag 解析统一走一个工作流级 env**（`RELEASE_TAG: ${{ inputs.tag || github.ref_name }}`）：push 与 dispatch 共用同一套发布步骤，不写两套分支逻辑；除 `RELEASE_TAG` 定义处外，tag 相关步骤不得再读 `GITHUB_REF_NAME`。与新语义冲突的旧断言必须同步修正（祖先必须严格祖先、README「正式版 v0.2.0」、测试内只读 git 子命令白名单），但 driftFacts、v0.1.2 资产保护、硬校验顺序等断言不得削弱。
 
 ## 最近交付证明
 
-- WI：`wi_ws_4b44f17868ca3e77`（本机 v0.2.0 dmg/zip 签名公证取证与证据落盘）
+- WI：`wi_intake_cde26b56b1d77ba2`（v0.2.0 祖先门改为「严格祖先或逐提交补丁等价」+ 不改 tag 的 `workflow_dispatch` 补发入口）
 - 日期：2026-10-20
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；`needSelfTest=false`，跳过 UI 自测）。取证结果为 **`status: blocked`**：只读就绪门不满足，按 prd 的 blocked 分支停手升级，**未产生任何「通过」输出与产物 sha256**。
-- 就绪门实测（macOS 15.6.1 / arm64，取证时间 `2026-10-20T08:14:11+08:00`，HEAD `d64ce1d`）：
-  - `git ls-remote --tags origin refs/tags/v0.2.0` → 空输出（退出码 0），远端**不存在** `v0.2.0` tag。
-  - `gh api repos/chaxiu/OpenCompare/contents/package.json?ref=v0.2.0` → HTTP 404 `No commit found for the ref v0.2.0`（退出码 1）。
-  - `gh release view v0.2.0 --repo chaxiu/OpenCompare --json ...` → `release not found`（退出码 1）；`gh release list --limit 10` 只有 `v0.1.2`（Latest）、`v0.1.1`（Pre-release）、`v0.1.0`（Pre-release），无 `v0.2.0`。
-  - `git tag --list v0.2.0` → 空输出，本机也未由本 WI 创建 tag；本机无 `release/` 目录，未被用作任何证据来源。
-- 覆盖摘要（改动面 2 文件，均为新增）：
-  - `docs/release-evidence/v0.2.0.md`（152 行）：机器与系统版本、带时区 ISO 8601 取证时间、仓库工作目录与本地 HEAD；就绪门每步的**可复制重放命令 + 原始 stdout/stderr + 退出码**；缺失项对照表（逐条对应 4 条就绪门）；明确列出**未执行**的取证动作（下载 / `shasum -a 256` / `ditto -x -k` / `hdiutil attach` / `codesign` / `stapler` / `spctl` / plist 图标事实 / 版本一致性 / `hdiutil detach`）；待人工动作（打 annotated tag `v0.2.0` 并 push → 等 CI 签名公证并上传唯一公开 Release → 回复后重建本 WI 复跑就绪门）；升级说明。
-  - `src/main/release-evidence.test.ts`（198 行）：只读解析证据 Markdown（`node:fs`，不 import Electron，不下载 / 不解包 / 不挂载 / 不签名 / 不写 git），校验标题含 `v0.2.0`、`status` ∈ {`verified`,`blocked`}；`verified` 分支要求 ≥2 处 `valid on disk` / `satisfies its Designated Requirement` / `The validate action worked!` / `accepted` / `source=Notarized Developer ID` 且 ≥2 个不同 SHA-256；`blocked` 分支出现任一通过标记即失败。
-- 注：本 WI change pack 只提供 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**` —— 无新增折叠用例、无 tech/ux 手合；同域既有 `qa/release-workflow.md` / `qa/electron-builder-targets.md` 等用例本轮未重跑（发布动作归人与 Host）。**v0.2.0 的 tag / Release / 产物仍未就绪**，本机取证须在人工打 tag 并等 CI 出包后重建 WI 继续。
+- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿，391 tests / 26 files；`needSelfTest=false`，本轮跳过 UI 自测）。改动 4 文件、+531/−82，全部为源码 / 工作流 / 文档与配置断言单测，**未执行任何远端写操作**。
+- 事实核对（只读，本机）：远端 `refs/tags/v0.1.2` → `bb0c0b1`（轻量），`refs/tags/v0.2.0` → annotated `f385521` → commit `285ee28`；`git rev-list --count HEAD..bb0c0b1` = 2，两条提交 `bb0c0b15d5c94c4d4d79e43543124bcb58b093ae` 与 `b2c4e5196a4cfb524e4ea0e126597072cfa55a0f` 的 `git cherry HEAD` 判定均为 `-`（补丁等价、零内容丢失）。本地 `v0.1.2` 仍是 annotated `c4a6a95` → `7ea2cc6`，是 HEAD 祖先（`HEAD..v0.1.2` = 0）。旧门「必须是严格祖先」正是 Release 为空的原因。
+- 覆盖摘要：
+  - `.github/workflows/release.yml`：新增 `workflow_dispatch`（`tag` 必填、默认 `v0.2.0`）与工作流级 `env.RELEASE_TAG`；`gates` 与打包矩阵 checkout 均 `ref: refs/tags/${RELEASE_TAG}`；新增 tag 格式校验与 tag 存在性断言（均在任何 install 之前）；原「v0.1.2 必须是 HEAD 严格祖先」重写为内联祖先门——ref 类型 + 解析 commit 日志、`v0.1.2..HEAD` 非零、严格祖先短路通过、否则逐条 `git cherry HEAD <sha>` 打印 `-`/`+`、`+`/枚举失败/受保护路径删除一律 fail-closed；全部 tag 相关逻辑改用 `${RELEASE_TAG}`。
+  - `src/main/release-packaging.test.ts`：新增 `v0.1.2 ancestry gate` 与 `manual re-run dispatch entry` 两组（解析 workflow 的 `run` 脚本在 `os.tmpdir()` 临时仓库执行 bash），覆盖补丁等价通过、真分叉拒绝、受保护路径删除拒绝、tag 不可解析 fail-closed、非零领先、dispatch 输入/ref/`RELEASE_TAG` 归一化与无绕行；旧「严格祖先」断言同步改为新语义，只读 git 白名单补 `cherry` / `diff-tree`。
+  - `docs/release-signing.md`：新增第五节「祖先门语义与补发入口（不改 tag）」，记录新语义、逐条日志口径、fail-closed 边界与 `workflow_dispatch` 补发用法；v0.1.2 漂移记录补上远端轻量 tag `bb0c0b1` 与两条 `-` 判定；原第五、六节顺延。
+  - `README.md`：状态行改为「v0.2.0 待发布；当前可下载的最新公开 Release 为 v0.1.2」，发布流程补上只读祖先门（严格祖先或逐条补丁等价）与 dispatch 补发一句。
+- 注：本 WI change pack 只提供 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**` —— 无新增折叠用例、无 tech/ux 手合。同域既有 `qa/release-workflow.md` 的期望已按 `RELEASE_TAG` / dispatch 同步改写（属定义一致性维护，非重跑）。
+- 后续注意：本项只让 dispatch 路径**可用**，不会自动补发；v0.2.0 的 Release 仍需人工从 `main` 手跑 `workflow_dispatch`（输入 `v0.2.0`）触发 CI，之后才能做本机产物取证（原 `docs/release-evidence/v0.2.0.md` 仍是 `status: blocked`）。
