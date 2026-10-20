@@ -2,6 +2,30 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## v0.2.0
+
+本版聚焦「打开对比更快、写回更直接、品牌更完整」：不用系统文件弹窗即可用左右真实路径建立对比，并支持启动参数与 `opencompare://compare` 直接注入；文件会话可原位写回；应用图标与关于面板统一为 OpenCompare 自有品牌。
+
+### 新增
+
+- **顶栏常驻「新建对比」**：空态与已有会话时入口都在，打开文件 / 打开文件夹 / 直接粘贴或输入左右两个真实路径三合一；`Cmd/Ctrl+N` 唤起，`Enter` 提交、`Esc` 关闭。
+- **免弹窗路径直传**：左右路径支持含空格、中文、Unicode、引号包裹、`~` 展开与相对路径；校验失败就地提示，不建空会话、不替换现有会话。
+- **启动参数与 URL scheme 注入**：`--left <path> --right <path>`（含 `=` 形式）与 `opencompare://compare?left=…&right=…` 都能直达对比；单实例锁保证第二次启动 / 再点链接时聚焦已有窗口并接管请求。
+- **文件会话原位写回**：代码 / CSV / JSON·YAML 文件会话的「保存左/右文件」直接写回已加载的真实路径，不再弹系统保存对话框；合并结果与快照导出仍走系统保存对话框。
+- **自有品牌图标**：窗口、macOS dock、安装包（dmg / zip / exe / AppImage / deb）与「关于」面板使用同一套 OpenCompare 品牌图标、应用名与版本号，不再回落到 Electron 默认品牌。
+
+### 升级方式
+
+下载 v0.2.0 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `Setup.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+
+### v0.1.2 漂移记录（只读事实，不改写历史）
+
+- annotated tag `v0.1.2` 的 tag 对象为 `c4a6a95`，指向 commit `7ea2cc6`。
+- `v0.1.2` 是 `main` / `origin/main` 的祖先（`main..v0.1.2` 为 0 个提交），不存在 tag 游离历史；漂移的实质是 tag 之后的修复没有进入已发布资产。
+- 规划基线时 `main` 领先 `v0.1.2` 13 个提交（含签名 / 打包修复），这些提交未进入已发布的 v0.1.2 资产；13 只是规划基线快照，实际领先数以打 tag 时的 `main` 为准。
+- 远端 `v0.1.2` Release 为公开、非预发布，共 11 个资产：`latest-linux.yml`、`latest-mac.yml`、`latest.yml`、`OpenCompare-0.1.2-arm64-mac.zip(.blockmap)`、`OpenCompare-0.1.2-arm64.dmg(.blockmap)`、`OpenCompare-0.1.2.AppImage`、`OpenCompare.Setup.0.1.2.exe(.blockmap)`、`opencompare_0.1.2_amd64.deb`。
+- **不删除、不移动、不重打、不替换** `v0.1.2` 的 tag 与资产；tag 之后的修复由 v0.2.0 承接。后续如需修订只能发布更高版本，不改写历史。
+
 ## v0.1.2
 
 首个按正式版路径发布的版本。macOS 构建经 **Developer ID 签名 + Apple 公证** 流程产出，由 CI 发布为每个 tag 唯一的公开 Release。

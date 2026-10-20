@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -55,6 +56,50 @@ const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md'), 'utf8
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 
 const changelog = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')
+
+const releaseNotesPath = join(repoRoot, 'docs/release-notes/v0.2.0.md')
+const releaseNotes = existsSync(releaseNotesPath) ? readFileSync(releaseNotesPath, 'utf8') : ''
+
+const firstHeading = (markdown: string): string =>
+  markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
+
+// The v0.1.2 drift record is verified with read-only git plumbing only. When
+// the checkout has no `.git` (a plain source tarball) or the tag is not visible
+// (a shallow clone), the git cases skip with an explicit reason instead of
+// failing the suite.
+const driftTag = 'v0.1.2'
+
+const gitMetadataSkipReason = ((): string | null => {
+  if (!existsSync(join(repoRoot, '.git'))) return 'no local .git metadata'
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `${driftTag}^{commit}`], {
+      cwd: repoRoot,
+      stdio: 'ignore'
+    })
+    return null
+  } catch {
+    return `${driftTag} is not visible to git`
+  }
+})()
+
+const git = (args: string[]): string =>
+  execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim()
+
+const gitTestName = (name: string): string =>
+  gitMetadataSkipReason === null
+    ? name
+    : `${name} [skipped without git metadata: ${gitMetadataSkipReason}]`
+
+const driftFacts = [
+  /7ea2cc6/,
+  /c4a6a95/,
+  /annotated/,
+  /祖先/,
+  /13 个提交/,
+  /公开/,
+  /非预发布/,
+  /11 个资产/
+]
 
 // App Store Connect API key mode: certificate + team id + .p8 key trio.
 const signingSecrets = [
@@ -218,9 +263,40 @@ describe('release signing secrets wiring', () => {
 })
 
 describe('release version gate', () => {
+  it('pins package.json to the v0.2.0 release version', () => {
+    expect(pkg.version).toBe('0.2.0')
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/)
+  })
+
   it('asserts package.json version matches the tag before packaging', () => {
     expect(releaseWorkflow).toMatch(/Assert the tag matches package\.json version/)
     expect(releaseWorkflow).toMatch(/\$\{GITHUB_REF_NAME#v\}/)
+  })
+
+  it('rejects a non-semver package version before comparing it to the tag', () => {
+    const semverGuard = releaseWorkflow.indexOf('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+    const comparison = releaseWorkflow.indexOf('if [ "${version}" != "${tag}" ]; then')
+    expect(semverGuard).toBeGreaterThan(-1)
+    expect(comparison).toBeGreaterThan(-1)
+    expect(semverGuard).toBeLessThan(comparison)
+    expect(releaseWorkflow).toMatch(/is not a valid semver/)
+  })
+
+  it('fetches the full history in the gates checkout so tags are visible', () => {
+    expect(releaseWorkflow).toMatch(
+      /name: Quality gates[\s\S]*?uses: actions\/checkout@v4\s*\n\s*with:\s*\n\s*fetch-depth: 0/
+    )
+  })
+
+  it('runs a read-only version and v0.1.2 ancestry preflight before the tests', () => {
+    const preflight = releaseWorkflow.indexOf('name: Preflight release version and v0.1.2 ancestry')
+    const tests = releaseWorkflow.indexOf('- run: pnpm test')
+    expect(preflight).toBeGreaterThan(-1)
+    expect(tests).toBeGreaterThan(preflight)
+    expect(releaseWorkflow).toMatch(/git rev-list --count v0\.1\.2\.\.HEAD/)
+    expect(releaseWorkflow).toMatch(/git rev-list --count HEAD\.\.v0\.1\.2/)
+    expect(releaseWorkflow).toMatch(/::error::/)
+    expect(releaseWorkflow).toMatch(/exit 1/)
   })
 
   it('asserts the packaged latest*.yml version matches the tag', () => {
@@ -228,8 +304,72 @@ describe('release version gate', () => {
     expect(releaseWorkflow).toMatch(/latest\*\.yml/)
   })
 
+  it('keeps the latest*.yml gate glob and its empty-directory guard', () => {
+    expect(releaseWorkflow).toMatch(/files=\(release\/latest\*\.yml\)/)
+    expect(releaseWorkflow).toMatch(/No latest\*\.yml update metadata found/)
+    expect(releaseWorkflow).toMatch(/does not match tag/)
+  })
+
+  it('keeps the tag-triggered gates-first publish model intact', () => {
+    const gates = releaseWorkflow.indexOf('name: Quality gates')
+    const matrix = releaseWorkflow.indexOf('name: Package ${{ matrix.target }}')
+    const finalize = releaseWorkflow.indexOf('name: Publish the GitHub Release')
+    expect(releaseWorkflow).toMatch(/tags:\s*\n\s*-\s*'v\*'/)
+    expect(gates).toBeGreaterThan(-1)
+    expect(matrix).toBeGreaterThan(gates)
+    expect(finalize).toBeGreaterThan(matrix)
+    expect(releaseWorkflow).toMatch(/needs: gates/)
+    expect(releaseWorkflow).toMatch(/needs: release/)
+    expect(releaseWorkflow).toMatch(/--publish never/)
+    expect(releaseWorkflow).toMatch(/--draft=false --latest/)
+  })
+
   it('enforces exactly one public release per tag', () => {
     expect(releaseWorkflow).toMatch(/Verify the tag has exactly one public release/)
+  })
+
+  it.skipIf(gitMetadataSkipReason !== null)(
+    gitTestName('keeps v0.1.2 as an ancestor of HEAD with a non-zero lead'),
+    () => {
+      const ahead = Number(git(['rev-list', '--count', `${driftTag}..HEAD`]))
+      const behind = Number(git(['rev-list', '--count', `HEAD..${driftTag}`]))
+      expect(behind).toBe(0)
+      expect(ahead).toBeGreaterThan(0)
+    }
+  )
+
+  it.skipIf(gitMetadataSkipReason !== null)(
+    gitTestName('reads the v0.1.2 package version from git history as 0.1.2'),
+    () => {
+      const taggedPackage = JSON.parse(git(['show', `${driftTag}:package.json`])) as {
+        version?: string
+      }
+      expect(taggedPackage.version).toBe('0.1.2')
+    }
+  )
+
+  it('only invokes read-only git subcommands in this test file', () => {
+    const testSource = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    const invocations = [
+      ...testSource.matchAll(/execFileSync\('git', \[([^\]]*)\]/g),
+      ...testSource.matchAll(/\bgit\(\[([^\]]*)\]/g)
+    ]
+    const subcommands = invocations.map(
+      (match) => /['"]([a-z-]+)['"]/.exec(match[1])?.[1] ?? ''
+    )
+    expect(subcommands.length).toBeGreaterThanOrEqual(3)
+    for (const subcommand of subcommands) {
+      expect(['rev-parse', 'rev-list', 'show', 'cat-file']).toContain(subcommand)
+    }
+  })
+
+  it('never spawns a mutating git or release publishing command', () => {
+    const testSource = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    // Only execFileSync is imported, and it is never used to run `gh`; git
+    // itself goes through the read-only subcommand allowlist asserted above.
+    expect(testSource).toMatch(/import \{ execFileSync \} from 'node:child_process'/)
+    expect(testSource).not.toMatch(/execFileSync\(\s*'gh'/)
+    expect(testSource).not.toMatch(/execFileSync\(\s*'git', \[(?!')/)
   })
 })
 
@@ -254,10 +394,17 @@ describe('release signing credentials checklist', () => {
     expect(signingDoc).toMatch(/Apple Developer Program/)
   })
 
-  it('documents the v0.1.2 formal-release posture instead of the former freeze', () => {
-    expect(signingDoc).toMatch(/v0\.1\.2/)
-    expect(signingDoc).toMatch(/正式版/)
+  it('documents the v0.2.0 formal-release posture instead of the former freeze', () => {
+    expect(signingDoc).toMatch(/正式版发布姿态（v0\.2\.0）/)
     expect(signingDoc).not.toMatch(/发布冻结/)
+    // The v0.1.2 drift record stays documented rather than being deleted.
+    expect(signingDoc).toMatch(/v0\.1\.2/)
+  })
+
+  it('records the v0.1.2 drift facts in the signing doc', () => {
+    for (const fact of driftFacts) {
+      expect(signingDoc).toMatch(fact)
+    }
   })
 
   it('lists the six secrets and fail-closed behavior in the README', () => {
@@ -267,8 +414,10 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('presents the README as the v0.1.2 formal release', () => {
-    expect(readme).toMatch(/v0\.1\.2/)
+  it('presents the README as the v0.2.0 formal release', () => {
+    expect(readme).toMatch(/当前发布状态：正式版 v0\.2\.0/)
+    expect(readme).toContain('docs/release-notes/v0.2.0.md')
+    expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
     expect(readme).not.toMatch(/发布状态：冻结/)
   })
 })
@@ -281,6 +430,57 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/fail-closed/)
     expect(changelog).toMatch(/唯一/)
     expect(changelog).toMatch(/latest\*\.yml/)
+  })
+
+  it('puts the v0.2.0 entry above the v0.1.2 entry', () => {
+    const current = changelog.indexOf('## v0.2.0')
+    const previous = changelog.indexOf('## v0.1.2')
+    expect(current).toBeGreaterThan(-1)
+    expect(previous).toBeGreaterThan(current)
+  })
+
+  it('covers the user-visible v0.2.0 changes', () => {
+    const section = changelog.slice(changelog.indexOf('## v0.2.0'), changelog.indexOf('## v0.1.2'))
+    for (const keyword of [
+      '新建对比',
+      '路径',
+      '启动参数',
+      'opencompare://',
+      '图标',
+      '原位写回'
+    ]) {
+      expect(section).toContain(keyword)
+    }
+  })
+
+  it('records the v0.1.2 drift facts in the changelog', () => {
+    for (const fact of driftFacts) {
+      expect(changelog).toMatch(fact)
+    }
+  })
+
+  it('keeps the v0.1.2 no-action statement in both release documents', () => {
+    for (const doc of [changelog, signingDoc]) {
+      for (const phrase of ['不删除', '不移动', '不重打', '不替换']) {
+        expect(doc).toContain(phrase)
+      }
+      expect(doc).toMatch(/tag 之后的修复由 v0\.2\.0 承接/)
+    }
+  })
+
+  it('ships the v0.2.0 release notes as paste-ready source text', () => {
+    expect(existsSync(releaseNotesPath)).toBe(true)
+    expect(releaseNotes.trim().length).toBeGreaterThan(0)
+    expect(firstHeading(releaseNotes)).toMatch(/v0\.2\.0/)
+  })
+
+  it('keeps placeholder markers out of the release notes', () => {
+    expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+  })
+
+  it('keeps the release notes version in sync with package.json', () => {
+    const headingVersion = /v(\d+\.\d+\.\d+)/.exec(firstHeading(releaseNotes))?.[1] ?? ''
+    expect(headingVersion).toBe(pkg.version)
   })
 })
 

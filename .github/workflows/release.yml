@@ -15,7 +15,11 @@ jobs:
     name: Quality gates
     runs-on: ubuntu-latest
     steps:
+      # Full history and tags are required by the read-only preflight below,
+      # which proves the previously published v0.1.2 tag is an ancestor of HEAD.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.3
@@ -23,6 +27,34 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Read-only preflight, run before the tag comparison and before anything
+      # is installed or built: the package version must be a strict
+      # MAJOR.MINOR.PATCH, and the published v0.1.2 tag must stay an ancestor of
+      # HEAD with a non-zero lead. That proves the release does not rewrite
+      # history and that the post-tag fixes land in v0.2.0 (see CHANGELOG.md /
+      # docs/release-signing.md). Nothing here mutates tags, refs or remotes.
+      - name: Preflight release version and v0.1.2 ancestry
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json version (${version}) is not a valid semver MAJOR.MINOR.PATCH; refusing to publish."
+            exit 1
+          fi
+          if ! git rev-parse --verify --quiet 'v0.1.2^{commit}' > /dev/null; then
+            echo "::error::Tag v0.1.2 is not visible in this checkout; fetch-depth: 0 is required for the ancestry preflight."
+            exit 1
+          fi
+          ahead="$(git rev-list --count v0.1.2..HEAD)"
+          behind="$(git rev-list --count HEAD..v0.1.2)"
+          echo "v0.1.2..HEAD commits=${ahead} HEAD..v0.1.2 commits=${behind}"
+          if [ "${behind}" -ne 0 ]; then
+            echo "::error::v0.1.2 is not an ancestor of HEAD (${behind} commits reachable only from the tag); refusing to publish a rewritten history."
+            exit 1
+          fi
+          if [ "${ahead}" -le 0 ]; then
+            echo "::error::HEAD has no commits after v0.1.2; the release must carry the post-tag fixes."
+            exit 1
+          fi
       # Fail before anything is built when the tag and the package version drift:
       # the tag's semantic version (minus the `v` prefix) must equal
       # package.json#version, otherwise the release would ship mismatched assets.

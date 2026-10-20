@@ -2,7 +2,7 @@
 
 OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application 签名** 与 **Apple 公证（Notarization）**，否则 Gatekeeper 会拦截、无法作为合规正式版分发。相关配置已接线，但**凭据必须由人类录入**，AI 不获取、不录入、不在本地执行公证。缺凭据时 CI 显式失败（fail-closed），**绝不产出、上传或公开未签名裸包**。
 
-> **当前状态：v0.1.2 正式版路径（已解冻）。** 公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；签名 + 公证的实际结果以 tag 触发的那次 CI 为准。
+> **当前状态：v0.2.0 正式版路径（已解冻）。** 公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；签名 + 公证的实际结果以 tag 触发的那次 CI 为准。
 >
 > **凭据录入：** Developer ID 证书与 App Store Connect API Key 由人类按标准协助机制录入 **GitHub CI Secrets**（只进 Secrets，禁止写入仓库、构建脚本或日志）；6 项 Secret 齐备后推送 `v*` 标签即可由 CI 产出签名 + 公证的包。
 
@@ -41,11 +41,20 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 >
 > 录入完成后，推送 `v*` 标签（`package.json#version` 需与 tag 一致）即由 CI 产出签名 + 公证的 macOS 包，并发布为该版本唯一的公开 Release。
 
-## 三、正式版发布姿态（v0.1.2）
+## 三、正式版发布姿态（v0.2.0）
 
 - 发布已解冻：正式版经 **Developer ID 签名 + Apple 公证** 流程产出，由 `v*` tag 触发的 CI 发布为每个版本唯一的公开 Release（详见 `README.md` 的「发布流程」）。
-- 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。
+- 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。6 项 Secret 清单与录入方式见上文第一节。
+- 本版发布说明见 `docs/release-notes/v0.2.0.md`。
 - 如需查看 Release：
   ```bash
   gh release list --repo chaxiu/OpenCompare
   ```
+
+## 四、v0.1.2 漂移记录（只读事实，不改写历史）
+
+- annotated tag `v0.1.2` 的 tag 对象为 `c4a6a95`，指向 commit `7ea2cc6`。
+- `v0.1.2` 是 `main` / `origin/main` 的祖先（`main..v0.1.2` 为 0 个提交），不存在 tag 游离历史；漂移的实质是 tag 之后的修复没有进入已发布资产。
+- 规划基线时 `main` 领先 `v0.1.2` 13 个提交（含签名 / 打包修复），这些提交未进入已发布的 v0.1.2 资产；13 只是规划基线快照，实际领先数以打 tag 时的 `main` 为准。
+- 远端 `v0.1.2` Release 为公开、非预发布，共 11 个资产：`latest-linux.yml`、`latest-mac.yml`、`latest.yml`、`OpenCompare-0.1.2-arm64-mac.zip(.blockmap)`、`OpenCompare-0.1.2-arm64.dmg(.blockmap)`、`OpenCompare-0.1.2.AppImage`、`OpenCompare.Setup.0.1.2.exe(.blockmap)`、`opencompare_0.1.2_amd64.deb`。
+- **不删除、不移动、不重打、不替换** `v0.1.2` 的 tag 与资产；tag 之后的修复由 v0.2.0 承接。后续如需修订只能发布更高版本，不改写历史。
