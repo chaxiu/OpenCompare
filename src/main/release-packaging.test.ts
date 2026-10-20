@@ -20,6 +20,11 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as 
   homepage?: string
 }
 
+// The release documents and workflow defaults are asserted against the version
+// declared in package.json, so a future bump only needs to touch package.json.
+const currentVersion = pkg.version ?? ''
+const currentTag = `v${currentVersion}`
+
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
   appId?: string
   protocols?: Array<{ name?: string; schemes?: string[] }>
@@ -78,8 +83,13 @@ const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 
 const changelog = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')
 
-const releaseNotesPath = join(repoRoot, 'docs/release-notes/v0.2.0.md')
+const releaseNotesPath = join(repoRoot, `docs/release-notes/${currentTag}.md`)
 const releaseNotes = existsSync(releaseNotesPath) ? readFileSync(releaseNotesPath, 'utf8') : ''
+
+const previousReleaseNotesPath = join(repoRoot, 'docs/release-notes/v0.2.0.md')
+const previousReleaseNotes = existsSync(previousReleaseNotesPath)
+  ? readFileSync(previousReleaseNotesPath, 'utf8')
+  : ''
 
 const firstHeading = (markdown: string): string =>
   markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
@@ -262,9 +272,10 @@ describe('release signing secrets wiring', () => {
 })
 
 describe('release version gate', () => {
-  it('pins package.json to the v0.2.0 release version', () => {
-    expect(pkg.version).toBe('0.2.0')
+  it('pins package.json to the v0.2.1 release version', () => {
+    expect(pkg.version).toBe('0.2.1')
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(currentTag).toBe(`v${pkg.version}`)
   })
 
   it('asserts package.json version matches the tag before packaging', () => {
@@ -631,11 +642,11 @@ describe('manual re-run dispatch entry', () => {
     return start === -1 ? '' : releaseWorkflow.slice(start, end === -1 ? undefined : end)
   })()
 
-  it('declares workflow_dispatch with a tag input defaulting to v0.2.0', () => {
+  it('declares workflow_dispatch with a tag input defaulting to the current tag', () => {
     expect(dispatchBlock).not.toBe('')
     expect(dispatchBlock).toMatch(/inputs:\s*\n\s+tag:\s*\n/)
     expect(dispatchBlock).toMatch(/required:\s*true/)
-    expect(dispatchBlock).toMatch(/default:\s*'v0\.2\.0'/)
+    expect(dispatchBlock).toContain(`default: '${currentTag}'`)
   })
 
   it('resolves one RELEASE_TAG and checks out refs/tags/<tag> in both jobs', () => {
@@ -699,8 +710,9 @@ describe('release signing credentials checklist', () => {
     expect(signingDoc).toMatch(/Apple Developer Program/)
   })
 
-  it('documents the v0.2.0 formal-release posture instead of the former freeze', () => {
-    expect(signingDoc).toMatch(/正式版发布姿态（v0\.2\.0）/)
+  it('documents the current formal-release posture instead of the former freeze', () => {
+    expect(signingDoc).toContain(`正式版发布姿态（${currentTag}）`)
+    expect(signingDoc).toContain(`docs/release-notes/${currentTag}.md`)
     expect(signingDoc).not.toMatch(/发布冻结/)
     // The v0.1.2 drift record stays documented rather than being deleted.
     expect(signingDoc).toMatch(/v0\.1\.2/)
@@ -719,13 +731,19 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports v0.2.0 as pending with v0.1.2 as the latest public release', () => {
-    expect(readme).toMatch(/当前发布状态：v0\.2\.0 待发布/)
+  it('reports the current tag as pending with v0.1.2 as the latest public release', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
     expect(readme).toMatch(/最新公开 Release 为 v0\.1\.2/)
-    expect(readme).toContain('docs/release-notes/v0.2.0.md')
+    expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
     expect(readme).not.toMatch(/正式版 v0\.2\.0/)
     expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
     expect(readme).not.toMatch(/发布状态：冻结/)
+  })
+
+  it('keeps the README workflow_dispatch default in sync with the workflow', () => {
+    const flow = readme.slice(readme.indexOf('## 发布流程'), readme.indexOf('## 项目结构'))
+    expect(flow).toContain(`默认 \`${currentTag}\``)
+    expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 })
 
@@ -739,15 +757,27 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/latest\*\.yml/)
   })
 
-  it('puts the v0.2.0 entry above the v0.1.2 entry', () => {
-    const current = changelog.indexOf('## v0.2.0')
+  it('orders the current, v0.2.0 and v0.1.2 entries newest first', () => {
+    const current = changelog.indexOf(`## ${currentTag}`)
+    const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    expect(previous).toBeGreaterThan(current)
+    expect(superseded).toBeGreaterThan(current)
+    expect(previous).toBeGreaterThan(superseded)
   })
 
-  it('covers the user-visible v0.2.0 changes', () => {
-    const section = changelog.slice(changelog.indexOf('## v0.2.0'), changelog.indexOf('## v0.1.2'))
+  it('explains why v0.2.1 ships and keeps the v0.2.0 user-visible changes', () => {
+    const section = changelog.slice(
+      changelog.indexOf(`## ${currentTag}`),
+      changelog.indexOf('## v0.2.0')
+    )
+    for (const phrase of [
+      '从未公开发布',
+      '用户可见变化与 v0.2.0 相同',
+      '不依赖本机 git 状态'
+    ]) {
+      expect(section).toContain(phrase)
+    }
     for (const keyword of [
       '新建对比',
       '路径',
@@ -771,14 +801,33 @@ describe('release notes changelog', () => {
       for (const phrase of ['不删除', '不移动', '不重打', '不替换']) {
         expect(doc).toContain(phrase)
       }
-      expect(doc).toMatch(/tag 之后的修复由 v0\.2\.0 承接/)
+    }
+    expect(changelog).toMatch(/tag 之后的修复由 v0\.2\.0 承接/)
+    expect(signingDoc).toContain(`tag 之后的修复由 ${currentTag} 承接`)
+  })
+
+  it('ships the current release notes as paste-ready source text', () => {
+    expect(existsSync(releaseNotesPath)).toBe(true)
+    expect(releaseNotes.trim().length).toBeGreaterThan(0)
+    expect(firstHeading(releaseNotes)).toContain(currentTag)
+  })
+
+  it('covers the v0.2.0 user-visible changes in the current release notes', () => {
+    for (const keyword of [
+      '新建对比',
+      '路径',
+      '启动参数',
+      'opencompare://',
+      '图标',
+      '原位写回'
+    ]) {
+      expect(releaseNotes).toContain(keyword)
     }
   })
 
-  it('ships the v0.2.0 release notes as paste-ready source text', () => {
-    expect(existsSync(releaseNotesPath)).toBe(true)
-    expect(releaseNotes.trim().length).toBeGreaterThan(0)
-    expect(firstHeading(releaseNotes)).toMatch(/v0\.2\.0/)
+  it('keeps the v0.2.0 release notes as history', () => {
+    expect(existsSync(previousReleaseNotesPath)).toBe(true)
+    expect(firstHeading(previousReleaseNotes)).toMatch(/v0\.2\.0/)
   })
 
   it('keeps placeholder markers out of the release notes', () => {
