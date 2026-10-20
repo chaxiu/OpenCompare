@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -51,6 +52,26 @@ const macEntitlements = entitlementsPath
 
 const releaseWorkflow = readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8')
 
+interface WorkflowStep {
+  name?: string
+  run?: string
+  uses?: string
+  with?: Record<string, string>
+}
+
+const workflow = parse(releaseWorkflow) as {
+  jobs?: Record<string, { steps?: WorkflowStep[] }>
+}
+const gatesSteps: WorkflowStep[] = workflow.jobs?.gates?.steps ?? []
+const gateStep = (name: string): WorkflowStep | undefined =>
+  gatesSteps.find((step) => step.name === name)
+
+// The ancestry gate is inlined in the workflow on purpose: workflow_dispatch
+// runs the workflow from main, while gates check out refs/tags/<tag>, so a
+// repository script would be missing on an older tag. The tests below run this
+// exact `run` body in temporary git repositories.
+const ancestryGateScript = gateStep('Preflight v0.1.2 ancestry')?.run ?? ''
+
 const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md'), 'utf8')
 
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
@@ -82,8 +103,24 @@ const gitMetadataSkipReason = ((): string | null => {
   }
 })()
 
-const git = (args: string[]): string =>
-  execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim()
+// Repository-root git access stays read-only, enforced at runtime rather than
+// only by a source scan. Writes happen exclusively in temporary fixture repos.
+const readOnlyGitSubcommands = [
+  'rev-parse',
+  'rev-list',
+  'show',
+  'cat-file',
+  'cherry',
+  'diff-tree'
+] as const
+
+const git = (args: string[]): string => {
+  const subcommand = args[0] ?? ''
+  if (!(readOnlyGitSubcommands as readonly string[]).includes(subcommand)) {
+    throw new Error(`git() only allows read-only subcommands in this repo, got: ${subcommand}`)
+  }
+  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim()
+}
 
 const gitTestName = (name: string): string =>
   gitMetadataSkipReason === null
@@ -156,7 +193,7 @@ describe('github release publishing', () => {
     // explicitly so no checkout / git context is required.
     expect(releaseWorkflow).toMatch(/GH_REPO: \$\{\{ github\.repository \}\}/)
     expect(releaseWorkflow).toMatch(
-      /gh release create\s+"\$\{GITHUB_REF_NAME\}"[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"[\s\S]*?--draft[\s\S]*?--generate-notes/
+      /gh release create\s+"\$\{RELEASE_TAG\}"[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"[\s\S]*?--draft[\s\S]*?--generate-notes/
     )
     // Duplicates left behind by an earlier race are pruned, keeping one.
     expect(releaseWorkflow).toMatch(/gh api --method DELETE/)
@@ -169,13 +206,13 @@ describe('github release publishing', () => {
 
   it('uploads each platform artifacts into the single release with --clobber', () => {
     expect(releaseWorkflow).toMatch(
-      /gh release upload\s+"\$\{GITHUB_REF_NAME\}"[\s\S]*?--clobber[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"/
+      /gh release upload\s+"\$\{RELEASE_TAG\}"[\s\S]*?--clobber[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"/
     )
   })
 
   it('promotes the tag release to public with an explicit --repo', () => {
     expect(releaseWorkflow).toMatch(
-      /gh release edit\s+"\$\{GITHUB_REF_NAME\}"\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--draft=false\s+--latest/
+      /gh release edit\s+"\$\{RELEASE_TAG\}"\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--draft=false\s+--latest/
     )
   })
 })
@@ -270,7 +307,7 @@ describe('release version gate', () => {
 
   it('asserts package.json version matches the tag before packaging', () => {
     expect(releaseWorkflow).toMatch(/Assert the tag matches package\.json version/)
-    expect(releaseWorkflow).toMatch(/\$\{GITHUB_REF_NAME#v\}/)
+    expect(releaseWorkflow).toMatch(/\$\{RELEASE_TAG#v\}/)
   })
 
   it('rejects a non-semver package version before comparing it to the tag', () => {
@@ -288,15 +325,19 @@ describe('release version gate', () => {
     )
   })
 
-  it('runs a read-only version and v0.1.2 ancestry preflight before the tests', () => {
-    const preflight = releaseWorkflow.indexOf('name: Preflight release version and v0.1.2 ancestry')
+  it('runs the read-only version and v0.1.2 ancestry gates before the tests', () => {
+    const version = releaseWorkflow.indexOf('name: Preflight package version')
+    const ancestry = releaseWorkflow.indexOf('name: Preflight v0.1.2 ancestry')
+    const install = releaseWorkflow.indexOf('- run: pnpm install --frozen-lockfile')
     const tests = releaseWorkflow.indexOf('- run: pnpm test')
-    expect(preflight).toBeGreaterThan(-1)
-    expect(tests).toBeGreaterThan(preflight)
-    expect(releaseWorkflow).toMatch(/git rev-list --count v0\.1\.2\.\.HEAD/)
-    expect(releaseWorkflow).toMatch(/git rev-list --count HEAD\.\.v0\.1\.2/)
-    expect(releaseWorkflow).toMatch(/::error::/)
-    expect(releaseWorkflow).toMatch(/exit 1/)
+    expect(version).toBeGreaterThan(-1)
+    expect(ancestry).toBeGreaterThan(version)
+    expect(install).toBeGreaterThan(ancestry)
+    expect(tests).toBeGreaterThan(install)
+    expect(ancestryGateScript).toMatch(/git rev-list --count "\$\{tag\}\.\.HEAD"/)
+    expect(ancestryGateScript).toMatch(/git rev-list --count "HEAD\.\.\$\{tag\}"/)
+    expect(ancestryGateScript).toMatch(/::error::/)
+    expect(ancestryGateScript).toMatch(/exit 1/)
   })
 
   it('asserts the packaged latest*.yml version matches the tag', () => {
@@ -329,12 +370,23 @@ describe('release version gate', () => {
   })
 
   it.skipIf(gitMetadataSkipReason !== null)(
-    gitTestName('keeps v0.1.2 as an ancestor of HEAD with a non-zero lead'),
+    gitTestName('keeps v0.1.2 a strict ancestor or patch-equivalent to HEAD with a non-zero lead'),
     () => {
       const ahead = Number(git(['rev-list', '--count', `${driftTag}..HEAD`]))
-      const behind = Number(git(['rev-list', '--count', `HEAD..${driftTag}`]))
-      expect(behind).toBe(0)
       expect(ahead).toBeGreaterThan(0)
+      const behind = Number(git(['rev-list', '--count', `HEAD..${driftTag}`]))
+      if (behind > 0) {
+        // The remote lightweight v0.1.2 diverges from HEAD; every tag-only
+        // commit must be a patch already present in HEAD, i.e. `git cherry`
+        // marks it with `-` rather than `+`.
+        const decisions = git(['cherry', 'HEAD', driftTag])
+          .split('\n')
+          .filter((line) => line.trim().length > 0)
+        expect(decisions.length).toBeGreaterThan(0)
+        for (const line of decisions) {
+          expect(line.startsWith('- '), `unexpected git cherry decision: ${line}`).toBe(true)
+        }
+      }
     }
   )
 
@@ -348,28 +400,294 @@ describe('release version gate', () => {
     }
   )
 
-  it('only invokes read-only git subcommands in this test file', () => {
+  it('only invokes read-only git subcommands against the repository', () => {
     const testSource = readFileSync(fileURLToPath(import.meta.url), 'utf8')
-    const invocations = [
-      ...testSource.matchAll(/execFileSync\('git', \[([^\]]*)\]/g),
-      ...testSource.matchAll(/\bgit\(\[([^\]]*)\]/g)
-    ]
+    const invocations = [...testSource.matchAll(/\bgit\(\[([^\]]*)\]/g)]
     const subcommands = invocations.map(
       (match) => /['"]([a-z-]+)['"]/.exec(match[1])?.[1] ?? ''
     )
     expect(subcommands.length).toBeGreaterThanOrEqual(3)
     for (const subcommand of subcommands) {
-      expect(['rev-parse', 'rev-list', 'show', 'cat-file']).toContain(subcommand)
+      expect(readOnlyGitSubcommands as readonly string[]).toContain(subcommand)
+    }
+    // Repository-root calls go through git(), which rejects writes at runtime.
+    expect(testSource).toMatch(/const readOnlyGitSubcommands = \[/)
+    expect(testSource).toMatch(/git\(\) only allows read-only subcommands/)
+  })
+
+  it('never spawns gh or a mutating command in the repository root', () => {
+    const testSource = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    expect(testSource).toMatch(/import \{ execFileSync, spawnSync \} from 'node:child_process'/)
+    expect(testSource).not.toMatch(/execFileSync\(\s*'gh'/)
+    expect(testSource).not.toMatch(/spawnSync\(\s*'gh'/)
+    // Mutating git calls only exist inside the tmpdir fixture helper.
+    expect(testSource).toContain('const fixtureGit = (cwd: string, args: string[]): string =>')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// v0.1.2 ancestry gate (strict ancestor OR per-commit patch equivalence) and
+// the workflow_dispatch re-run entry that must not move the tag.
+// ---------------------------------------------------------------------------
+
+type AncestryScenario = 'patch-equivalent' | 'divergent' | 'deletes-protected-path'
+
+// Tempdir fixtures are the only place this suite writes git state; the
+// repository-root git() helper above stays read-only.
+const fixtureGit = (cwd: string, args: string[]): string =>
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'OpenCompare Test',
+      GIT_AUTHOR_EMAIL: 'test@opencompare.invalid',
+      GIT_COMMITTER_NAME: 'OpenCompare Test',
+      GIT_COMMITTER_EMAIL: 'test@opencompare.invalid'
+    }
+  }).trim()
+
+const writeFixtureFile = (dir: string, name: string, content: string): void => {
+  writeFileSync(join(dir, name), content)
+}
+
+const initFixtureRepo = (dir: string): void => {
+  fixtureGit(dir, ['init', '-b', 'main'])
+  writeFixtureFile(dir, 'package.json', '{"version":"9.9.9"}\n')
+  writeFixtureFile(dir, 'README.md', 'base\n')
+  writeFixtureFile(dir, 'electron-builder.yml', 'appId: com.opencompare.fixture\n')
+  fixtureGit(dir, ['add', '-A'])
+  fixtureGit(dir, ['commit', '-m', 'base'])
+}
+
+const createAncestryFixture = (
+  scenario: AncestryScenario,
+  tagKind: 'annotated' | 'lightweight' = 'annotated'
+): { dir: string; tagOnlySha: string; headSha: string } => {
+  const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
+  initFixtureRepo(dir)
+  fixtureGit(dir, ['checkout', '-b', 'tag-side'])
+  if (scenario === 'deletes-protected-path') {
+    rmSync(join(dir, 'electron-builder.yml'))
+  } else {
+    writeFixtureFile(dir, 'README.md', scenario === 'divergent' ? 'tag side\n' : 'fix\n')
+  }
+  fixtureGit(dir, ['add', '-A'])
+  fixtureGit(dir, ['commit', '-m', 'tag-only change'])
+  const tagOnlySha = fixtureGit(dir, ['rev-parse', 'HEAD'])
+  fixtureGit(
+    dir,
+    tagKind === 'annotated'
+      ? ['tag', '-a', 'v0.1.2', '-m', 'v0.1.2', 'HEAD']
+      : ['tag', 'v0.1.2', 'HEAD']
+  )
+  fixtureGit(dir, ['checkout', 'main'])
+  if (scenario === 'deletes-protected-path') {
+    rmSync(join(dir, 'electron-builder.yml'))
+  } else {
+    writeFixtureFile(dir, 'README.md', scenario === 'divergent' ? 'main side\n' : 'fix\n')
+  }
+  fixtureGit(dir, ['add', '-A'])
+  fixtureGit(dir, ['commit', '-m', 'head change'])
+  const headSha = fixtureGit(dir, ['rev-parse', 'HEAD'])
+  return { dir, tagOnlySha, headSha }
+}
+
+const runAncestryGate = (dir: string): { status: number; output: string } => {
+  const scriptPath = join(dir, 'ancestry-gate.sh')
+  writeFileSync(scriptPath, ancestryGateScript)
+  const result = spawnSync('bash', [scriptPath], { cwd: dir, encoding: 'utf8' })
+  return {
+    status: result.status ?? -1,
+    output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+  }
+}
+
+const withAncestryFixture = (
+  scenario: AncestryScenario,
+  run: (fixture: { dir: string; tagOnlySha: string; headSha: string }) => void
+): void => {
+  const fixture = createAncestryFixture(scenario)
+  try {
+    run(fixture)
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true })
+  }
+}
+
+describe('v0.1.2 ancestry gate', () => {
+  it('inlines the gate script with ref-type, per-commit and fail-closed logging', () => {
+    expect(ancestryGateScript).toContain("tag='v0.1.2'")
+    expect(ancestryGateScript).toContain('git cat-file -t')
+    expect(ancestryGateScript).toContain('git cherry HEAD')
+    expect(ancestryGateScript).toContain('ref type=')
+    expect(ancestryGateScript).toContain('cherry=${decision}')
+    expect(ancestryGateScript).toContain('git diff-tree')
+    expect(ancestryGateScript).toMatch(/exit 1/)
+    expect(ancestryGateScript).not.toMatch(/\|\|\s*true/)
+  })
+
+  it('passes when a tag-only commit is patch-equivalent and logs its SHA with -', () => {
+    withAncestryFixture('patch-equivalent', ({ dir, tagOnlySha }) => {
+      const { status, output } = runAncestryGate(dir)
+      expect(output).toContain(`ref type=tag (annotated) commit=${tagOnlySha}`)
+      expect(output).toContain(`v0.1.2-only commit ${tagOnlySha} cherry=-`)
+      expect(output).toContain('ancestry check passed')
+      expect(status).toBe(0)
+    })
+  })
+
+  it('logs every tag-only commit in a chain with its own decision', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
+    try {
+      initFixtureRepo(dir)
+      fixtureGit(dir, ['checkout', '-b', 'tag-side'])
+      writeFixtureFile(dir, 'README.md', 'fix one\n')
+      fixtureGit(dir, ['add', '-A'])
+      fixtureGit(dir, ['commit', '-m', 'tag-only one'])
+      const firstSha = fixtureGit(dir, ['rev-parse', 'HEAD'])
+      writeFixtureFile(dir, 'README.md', 'fix two\n')
+      fixtureGit(dir, ['add', '-A'])
+      fixtureGit(dir, ['commit', '-m', 'tag-only two'])
+      const secondSha = fixtureGit(dir, ['rev-parse', 'HEAD'])
+      fixtureGit(dir, ['tag', '-a', 'v0.1.2', '-m', 'v0.1.2', 'HEAD'])
+      fixtureGit(dir, ['checkout', 'main'])
+      writeFixtureFile(dir, 'README.md', 'fix one\n')
+      fixtureGit(dir, ['add', '-A'])
+      fixtureGit(dir, ['commit', '-m', 'head one'])
+      writeFixtureFile(dir, 'README.md', 'fix two\n')
+      fixtureGit(dir, ['add', '-A'])
+      fixtureGit(dir, ['commit', '-m', 'head two'])
+
+      const { status, output } = runAncestryGate(dir)
+      expect(output).toContain(`v0.1.2-only commit ${firstSha} cherry=-`)
+      expect(output).toContain(`v0.1.2-only commit ${secondSha} cherry=-`)
+      expect(status).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('never spawns a mutating git or release publishing command', () => {
-    const testSource = readFileSync(fileURLToPath(import.meta.url), 'utf8')
-    // Only execFileSync is imported, and it is never used to run `gh`; git
-    // itself goes through the read-only subcommand allowlist asserted above.
-    expect(testSource).toMatch(/import \{ execFileSync \} from 'node:child_process'/)
-    expect(testSource).not.toMatch(/execFileSync\(\s*'gh'/)
-    expect(testSource).not.toMatch(/execFileSync\(\s*'git', \[(?!')/)
+  it('logs a lightweight tag as a commit ref with its resolved commit SHA', () => {
+    const fixture = createAncestryFixture('patch-equivalent', 'lightweight')
+    try {
+      const { status, output } = runAncestryGate(fixture.dir)
+      expect(output).toContain(
+        `ref type=commit (lightweight) commit=${fixture.tagOnlySha}`
+      )
+      expect(status).toBe(0)
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a tag-only commit whose patch is not present in HEAD', () => {
+    withAncestryFixture('divergent', ({ dir, tagOnlySha }) => {
+      const { status, output } = runAncestryGate(dir)
+      expect(output).toContain(`v0.1.2-only commit ${tagOnlySha} cherry=+`)
+      expect(output).toContain('::error::')
+      expect(output).toContain('not present in HEAD')
+      expect(status).not.toBe(0)
+    })
+  })
+
+  it('rejects a patch-equivalent tag-only commit that deletes a protected path', () => {
+    withAncestryFixture('deletes-protected-path', ({ dir, tagOnlySha }) => {
+      const { status, output } = runAncestryGate(dir)
+      expect(output).toContain(`v0.1.2-only commit ${tagOnlySha} cherry=-`)
+      expect(output).toContain('deletes the release-critical path electron-builder.yml')
+      expect(status).not.toBe(0)
+    })
+  })
+
+  it('fails closed when the tag cannot be resolved', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
+    try {
+      initFixtureRepo(dir)
+      const { status, output } = runAncestryGate(dir)
+      expect(output).toContain('::error::')
+      expect(output).toContain('not visible')
+      expect(status).not.toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the non-zero lead requirement', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-ancestry-'))
+    try {
+      initFixtureRepo(dir)
+      fixtureGit(dir, ['tag', 'v0.1.2', 'HEAD'])
+      const { status, output } = runAncestryGate(dir)
+      expect(output).toContain('no commits after v0.1.2')
+      expect(status).not.toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('has no escape hatch on the gates path', () => {
+    const gatesBlock = releaseWorkflow.slice(
+      releaseWorkflow.indexOf('name: Quality gates'),
+      releaseWorkflow.indexOf('name: Package ${{ matrix.target }}')
+    )
+    expect(gatesBlock).not.toContain('continue-on-error')
+    expect(gatesBlock).not.toContain('|| true')
+  })
+})
+
+describe('manual re-run dispatch entry', () => {
+  const dispatchBlock = ((): string => {
+    const start = releaseWorkflow.indexOf('workflow_dispatch:')
+    const end = releaseWorkflow.indexOf('permissions:')
+    return start === -1 ? '' : releaseWorkflow.slice(start, end === -1 ? undefined : end)
+  })()
+
+  it('declares workflow_dispatch with a tag input defaulting to v0.2.0', () => {
+    expect(dispatchBlock).not.toBe('')
+    expect(dispatchBlock).toMatch(/inputs:\s*\n\s+tag:\s*\n/)
+    expect(dispatchBlock).toMatch(/required:\s*true/)
+    expect(dispatchBlock).toMatch(/default:\s*'v0\.2\.0'/)
+  })
+
+  it('resolves one RELEASE_TAG and checks out refs/tags/<tag> in both jobs', () => {
+    expect(releaseWorkflow).toMatch(
+      /RELEASE_TAG:\s*\$\{\{\s*inputs\.tag\s*\|\|\s*github\.ref_name\s*\}\}/
+    )
+    const tagCheckouts = [
+      ...releaseWorkflow.matchAll(/ref:\s*refs\/tags\/\$\{\{\s*env\.RELEASE_TAG\s*\}\}/g)
+    ]
+    expect(tagCheckouts.length).toBe(2)
+    expect(releaseWorkflow).not.toMatch(/GITHUB_REF_NAME/)
+  })
+
+  it('validates the tag format and its existence before install', () => {
+    const validate = gateStep('Validate the release tag')?.run ?? ''
+    const exists = gateStep('Assert the release tag exists in the checkout')?.run ?? ''
+    expect(validate).toContain('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+    expect(validate).toMatch(/exit 1/)
+    expect(exists).toContain('refs/tags/${RELEASE_TAG}')
+    expect(exists).toMatch(/exit 1/)
+    const install = releaseWorkflow.indexOf('- run: pnpm install --frozen-lockfile')
+    expect(releaseWorkflow.indexOf('name: Validate the release tag')).toBeLessThan(install)
+    expect(
+      releaseWorkflow.indexOf('name: Assert the release tag exists in the checkout')
+    ).toBeLessThan(install)
+  })
+
+  it('keeps the push v* trigger and the gates-first publish model', () => {
+    expect(releaseWorkflow).toMatch(/push:\s*\n\s+tags:\s*\n\s*-\s*'v\*'/)
+    const gates = releaseWorkflow.indexOf('name: Quality gates')
+    const matrix = releaseWorkflow.indexOf('name: Package ${{ matrix.target }}')
+    const finalize = releaseWorkflow.indexOf('name: Publish the GitHub Release')
+    expect(gates).toBeGreaterThan(-1)
+    expect(matrix).toBeGreaterThan(gates)
+    expect(finalize).toBeGreaterThan(matrix)
+    expect(releaseWorkflow).toMatch(/needs: gates/)
+    expect(releaseWorkflow).toMatch(/needs: release/)
+    expect(releaseWorkflow).toMatch(/--publish never/)
+    expect(releaseWorkflow).toMatch(/--draft=false --latest/)
   })
 })
 
@@ -414,9 +732,11 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('presents the README as the v0.2.0 formal release', () => {
-    expect(readme).toMatch(/当前发布状态：正式版 v0\.2\.0/)
+  it('reports v0.2.0 as pending with v0.1.2 as the latest public release', () => {
+    expect(readme).toMatch(/当前发布状态：v0\.2\.0 待发布/)
+    expect(readme).toMatch(/最新公开 Release 为 v0\.1\.2/)
     expect(readme).toContain('docs/release-notes/v0.2.0.md')
+    expect(readme).not.toMatch(/正式版 v0\.2\.0/)
     expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
     expect(readme).not.toMatch(/发布状态：冻结/)
   })
@@ -781,7 +1101,7 @@ describe('packaged macOS app icon and identity assertions', () => {
     expect(step).toContain('CFBundleIdentifier')
     expect(step).toContain('com.opencompare.app')
     expect(step).toContain('CFBundleShortVersionString')
-    expect(step).toContain('${GITHUB_REF_NAME#v}')
+    expect(step).toContain('${RELEASE_TAG#v}')
   })
 })
 

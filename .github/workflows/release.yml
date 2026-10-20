@@ -1,25 +1,51 @@
 name: Release
 
-# Triggered by a version tag (`v*`): gates first, then a cross-platform
-# packaging matrix that publishes the artifacts to a GitHub Release.
+# Triggered by a version tag (`v*`), or manually through `workflow_dispatch`
+# to re-run an existing tag without moving it: gates first, then a
+# cross-platform packaging matrix that publishes the artifacts to the tag's
+# single GitHub Release. Both paths resolve one RELEASE_TAG so every step
+# (version assertion, release lookup/creation, upload, finalize) agrees.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build (vMAJOR.MINOR.PATCH)'
+        required: true
+        default: 'v0.2.0'
+        type: string
 
 permissions:
   contents: write
+
+env:
+  # push supplies the pushed tag through github.ref_name; workflow_dispatch
+  # runs from main, so the human-entered tag is the only source of truth there.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   gates:
     name: Quality gates
     runs-on: ubuntu-latest
     steps:
-      # Full history and tags are required by the read-only preflight below,
-      # which proves the previously published v0.1.2 tag is an ancestor of HEAD.
+      # workflow_dispatch runs from main, so reject a malformed tag before any
+      # checkout; a well-formed but unknown tag fails the refs/tags checkout.
+      - name: Validate the release tag
+        run: |
+          if ! [[ "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag (${RELEASE_TAG}) is not a valid vMAJOR.MINOR.PATCH tag; refusing to publish."
+            exit 1
+          fi
+          echo "Release tag: ${RELEASE_TAG}"
+      # Full history and tags are required by the read-only ancestry gate below.
+      # The explicit ref makes a dispatch run build the requested tag instead of
+      # the main branch it was started from; push runs resolve to the same tag.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.3
@@ -27,44 +53,132 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # Read-only preflight, run before the tag comparison and before anything
-      # is installed or built: the package version must be a strict
-      # MAJOR.MINOR.PATCH, and the published v0.1.2 tag must stay an ancestor of
-      # HEAD with a non-zero lead. That proves the release does not rewrite
-      # history and that the post-tag fixes land in v0.2.0 (see CHANGELOG.md /
-      # docs/release-signing.md). Nothing here mutates tags, refs or remotes.
-      - name: Preflight release version and v0.1.2 ancestry
+      - name: Assert the release tag exists in the checkout
+        run: |
+          if ! git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}^{commit}" > /dev/null; then
+            echo "::error::refs/tags/${RELEASE_TAG} is not present in this checkout; refusing to publish."
+            exit 1
+          fi
+          echo "Checked out ${RELEASE_TAG} at $(git rev-parse HEAD)"
+      # Read-only preflight, run before anything is installed or built: the
+      # package version must be a strict MAJOR.MINOR.PATCH.
+      - name: Preflight package version
         run: |
           version="$(node -p "require('./package.json').version")"
           if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::package.json version (${version}) is not a valid semver MAJOR.MINOR.PATCH; refusing to publish."
             exit 1
           fi
-          if ! git rev-parse --verify --quiet 'v0.1.2^{commit}' > /dev/null; then
-            echo "::error::Tag v0.1.2 is not visible in this checkout; fetch-depth: 0 is required for the ancestry preflight."
+          echo "package.json version: ${version}"
+      # Read-only ancestry gate, run before anything is installed or built. The
+      # previously published v0.1.2 tag must either be a strict ancestor of HEAD
+      # (no rewritten history) or every commit reachable only from the tag must
+      # be patch-equivalent in HEAD (`git cherry` prints `-`). The two tag-only
+      # commits on the remote lightweight v0.1.2 are a cherry-equivalent replay:
+      # nothing from the published release is lost. Every decision is logged per
+      # commit; a `+`, an unreadable commit list, or a deleted release-critical
+      # path fails closed. Nothing here mutates tags, refs or remotes.
+      - name: Preflight v0.1.2 ancestry
+        run: |
+          set -uo pipefail
+          tag='v0.1.2'
+          if ! tag_type="$(git cat-file -t "${tag}" 2>/dev/null)"; then
+            echo "::error::Tag ${tag} is not visible in this checkout; fetch-depth: 0 is required for the ancestry preflight."
             exit 1
           fi
-          ahead="$(git rev-list --count v0.1.2..HEAD)"
-          behind="$(git rev-list --count HEAD..v0.1.2)"
-          echo "v0.1.2..HEAD commits=${ahead} HEAD..v0.1.2 commits=${behind}"
-          if [ "${behind}" -ne 0 ]; then
-            echo "::error::v0.1.2 is not an ancestor of HEAD (${behind} commits reachable only from the tag); refusing to publish a rewritten history."
+          if ! tag_commit="$(git rev-parse --verify --quiet "${tag}^{commit}")"; then
+            echo "::error::Tag ${tag} (${tag_type}) cannot be resolved to a commit; failing closed."
             exit 1
           fi
+          case "${tag_type}" in
+            tag) tag_kind='annotated' ;;
+            commit) tag_kind='lightweight' ;;
+            *) tag_kind='unknown' ;;
+          esac
+          echo "${tag} ref type=${tag_type} (${tag_kind}) commit=${tag_commit}"
+          if ! ahead="$(git rev-list --count "${tag}..HEAD")"; then
+            echo "::error::Could not count commits after ${tag}; failing closed."
+            exit 1
+          fi
+          if ! behind="$(git rev-list --count "HEAD..${tag}")"; then
+            echo "::error::Could not count commits reachable only from ${tag}; failing closed."
+            exit 1
+          fi
+          echo "${tag}..HEAD commits=${ahead} HEAD..${tag} commits=${behind}"
           if [ "${ahead}" -le 0 ]; then
-            echo "::error::HEAD has no commits after v0.1.2; the release must carry the post-tag fixes."
+            echo "::error::HEAD has no commits after ${tag}; the release must carry the post-tag fixes."
             exit 1
           fi
+          if [ "${behind}" -eq 0 ]; then
+            echo "${tag} is a strict ancestor of HEAD; ancestry check passed."
+            exit 0
+          fi
+          # Not a strict ancestor: every tag-only commit must be a patch already
+          # present in HEAD, and must not delete a release-critical path.
+          echo "${tag} is not a strict ancestor of HEAD (${behind} commits reachable only from the tag); checking per-commit patch equivalence."
+          if ! tag_only="$(git rev-list "HEAD..${tag}")"; then
+            echo "::error::Could not enumerate the commits reachable only from ${tag}; failing closed."
+            exit 1
+          fi
+          if [ -z "${tag_only}" ]; then
+            echo "::error::HEAD..${tag} reported ${behind} commits but none could be enumerated; failing closed."
+            exit 1
+          fi
+          status=0
+          while IFS= read -r sha; do
+            if [ -z "${sha}" ]; then continue; fi
+            if ! decision="$(git cherry HEAD "${sha}" | awk -v want="${sha}" '$2 == want { print $1 }')"; then
+              echo "::error::git cherry HEAD ${sha} failed; cannot prove patch equivalence, failing closed."
+              exit 1
+            fi
+            if [ -z "${decision}" ]; then
+              echo "::error::git cherry HEAD ${sha} produced no decision; failing closed."
+              exit 1
+            fi
+            echo "${tag}-only commit ${sha} cherry=${decision}"
+            case "${decision}" in
+              '-') ;;
+              '+')
+                echo "::error::${sha} is reachable only from ${tag} and its patch is not present in HEAD (git cherry '+'); refusing to publish a rewritten history."
+                status=1
+                ;;
+              *)
+                echo "::error::Unexpected git cherry decision '${decision}' for ${sha}; failing closed."
+                status=1
+                ;;
+            esac
+            if ! name_status="$(git diff-tree --no-commit-id --name-status -r -m --root "${sha}")"; then
+              echo "::error::Could not read the diff of ${sha}; failing closed."
+              exit 1
+            fi
+            while IFS=$'\t' read -r diff_status diff_path; do
+              if [ -z "${diff_status:-}" ]; then continue; fi
+              case "${diff_status}" in
+                D*) ;;
+                *) continue ;;
+              esac
+              case "${diff_path:-}" in
+                .github/workflows/*|build/*|electron-builder.yml|package.json)
+                  echo "::error::${sha} deletes the release-critical path ${diff_path}; refusing to publish."
+                  status=1
+                  ;;
+              esac
+            done <<< "${name_status}"
+          done <<< "${tag_only}"
+          if [ "${status}" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All ${tag}-only commits are patch-equivalent in HEAD; ancestry check passed."
       # Fail before anything is built when the tag and the package version drift:
       # the tag's semantic version (minus the `v` prefix) must equal
       # package.json#version, otherwise the release would ship mismatched assets.
       - name: Assert the tag matches package.json version
         run: |
           version="$(node -p "require('./package.json').version")"
-          tag="${GITHUB_REF_NAME#v}"
-          echo "tag=${GITHUB_REF_NAME} package.json=${version}"
+          tag="${RELEASE_TAG#v}"
+          echo "tag=${RELEASE_TAG} package.json=${version}"
           if [ "${version}" != "${tag}" ]; then
-            echo "::error::package.json version (${version}) does not match tag ${GITHUB_REF_NAME}; bump the version or move the tag."
+            echo "::error::package.json version (${version}) does not match tag ${RELEASE_TAG}; bump the version or move the tag."
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
@@ -84,19 +198,19 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           readarray -t ids < <(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-            --jq ".[] | select(.tag_name == \"${GITHUB_REF_NAME}\") | .id")
+            --jq ".[] | select(.tag_name == \"${RELEASE_TAG}\") | .id")
 
           if [ "${#ids[@]}" -eq 0 ]; then
-            echo "No release for ${GITHUB_REF_NAME}; creating a draft."
-            gh release create "${GITHUB_REF_NAME}" \
+            echo "No release for ${RELEASE_TAG}; creating a draft."
+            gh release create "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --title "${GITHUB_REF_NAME}" \
+              --title "${RELEASE_TAG}" \
               --draft \
               --generate-notes
           else
-            echo "Keeping release ${ids[0]} for ${GITHUB_REF_NAME}."
+            echo "Keeping release ${ids[0]} for ${RELEASE_TAG}."
             for id in "${ids[@]:1}"; do
-              echo "Pruning duplicate release ${id} for ${GITHUB_REF_NAME}."
+              echo "Pruning duplicate release ${id} for ${RELEASE_TAG}."
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
             done
           fi
@@ -116,7 +230,10 @@ jobs:
             target: linux
     runs-on: ${{ matrix.os }}
     steps:
+      # Dispatch runs start on main; package the tag the gates validated.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.3
@@ -193,7 +310,7 @@ jobs:
         if: matrix.target == 'mac'
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${RELEASE_TAG#v}"
           app="$(find release -maxdepth 2 -name 'OpenCompare.app' -type d -print -quit)"
           if [ -z "${app}" ]; then
             echo "::error::No OpenCompare.app found under release/; refusing to upload an unverified macOS bundle."
@@ -360,7 +477,7 @@ jobs:
       - name: Assert packaged version matches the tag
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${RELEASE_TAG#v}"
           shopt -s nullglob
           case "${{ matrix.target }}" in
             mac) required_exts=(dmg zip) ;;
@@ -392,7 +509,7 @@ jobs:
               fi
               while IFS= read -r found_version; do
                 if [ "${found_version}" != "${tag}" ]; then
-                  echo "::error::Artifact ${name} carries version ${found_version}, which does not match tag ${GITHUB_REF_NAME}." >&2
+                  echo "::error::Artifact ${name} carries version ${found_version}, which does not match tag ${RELEASE_TAG}." >&2
                   status=1
                 fi
               done <<< "${name_versions}"
@@ -432,7 +549,7 @@ jobs:
               }
               console.log(`${file} version=${metadata.version}`)
             '; then
-              echo "::error::${file} update metadata does not match tag ${GITHUB_REF_NAME}." >&2
+              echo "::error::${file} update metadata does not match tag ${RELEASE_TAG}." >&2
               status=1
             fi
           done
@@ -451,7 +568,7 @@ jobs:
             echo "No release artifacts found under release/." >&2
             exit 1
           fi
-          gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
+          gh release upload "${RELEASE_TAG}" "${assets[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
 
   # The release stays a draft while the matrix uploads, then is promoted once
   # every platform has contributed its artifacts.
@@ -464,7 +581,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+        run: gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
       # Enforce exactly one public release per tag across every API page: a
       # leftover duplicate (or a stray draft/prerelease) fails the run instead of
       # silently advertising two releases.
@@ -473,13 +590,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag_filter=".[][] | select(.tag_name == \"${GITHUB_REF_NAME}\")"
+          tag_filter=".[][] | select(.tag_name == \"${RELEASE_TAG}\")"
           count="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter}] | length")"
           drafts="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter} | select(.draft)] | length")"
           prereleases="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[${tag_filter} | select(.prerelease)] | length")"
-          echo "releases for ${GITHUB_REF_NAME}: ${count} (drafts: ${drafts}, prereleases: ${prereleases})"
+          echo "releases for ${RELEASE_TAG}: ${count} (drafts: ${drafts}, prereleases: ${prereleases})"
           if [ "${count}" -ne 1 ] || [ "${drafts}" -ne 0 ] || [ "${prereleases}" -ne 0 ]; then
-            echo "::error::Expected exactly one public non-prerelease release for ${GITHUB_REF_NAME}, found ${count} (drafts: ${drafts}, prereleases: ${prereleases})." >&2
+            echo "::error::Expected exactly one public non-prerelease release for ${RELEASE_TAG}, found ${count} (drafts: ${drafts}, prereleases: ${prereleases})." >&2
             exit 1
           fi
       # A single public release is not enough: its assets must cover all three
@@ -490,15 +607,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[.[][] | select(.tag_name == \"${GITHUB_REF_NAME}\")] | .[0].id // empty")"
+          tag="${RELEASE_TAG#v}"
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --slurp --jq "[.[][] | select(.tag_name == \"${RELEASE_TAG}\")] | .[0].id // empty")"
           if [ -z "${release_id}" ]; then
-            echo "::error::No release found for ${GITHUB_REF_NAME} while checking its assets." >&2
+            echo "::error::No release found for ${RELEASE_TAG} while checking its assets." >&2
             exit 1
           fi
           assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate --slurp --jq '.[][] | .name')"
           if [ -z "${assets}" ]; then
-            echo "::error::Release ${GITHUB_REF_NAME} has no assets." >&2
+            echo "::error::Release ${RELEASE_TAG} has no assets." >&2
             exit 1
           fi
           has_asset() {
@@ -516,7 +633,7 @@ jobs:
           status=0
           for suffix in .dmg .zip .exe .AppImage .deb latest-mac.yml latest.yml latest-linux.yml; do
             if ! has_asset "${suffix}"; then
-              echo "::error::Release ${GITHUB_REF_NAME} is missing a ${suffix} asset." >&2
+              echo "::error::Release ${RELEASE_TAG} is missing a ${suffix} asset." >&2
               status=1
             fi
           done

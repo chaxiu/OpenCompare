@@ -2,7 +2,7 @@
 
 对标的 **Beyond Compare 5 Pro** 的现代跨平台桌面对比与三向合并工具。基于 Electron + React 19 + TypeScript，一套代码同时构建桌面应用与浏览器预览。
 
-> ✅ **当前发布状态：正式版 v0.2.0。** 本版用户可见变化见 [`docs/release-notes/v0.2.0.md`](docs/release-notes/v0.2.0.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
+> ⏳ **当前发布状态：v0.2.0 待发布；当前可下载的最新公开 Release 为 v0.1.2。** v0.2.0 的用户可见变化见 [`docs/release-notes/v0.2.0.md`](docs/release-notes/v0.2.0.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 对开发者与运维团队最常用的四类对比，OpenCompare 内置了可直接试跑的完整样本，并支持打开/保存本地真实文件：
 
@@ -56,9 +56,9 @@ pnpm dist:linux       # Linux：AppImage / deb
 
 ## 发布流程
 
-推送 `v*` 标签即触发 GitHub Actions（`.github/workflows/release.yml`）：
+推送 `v*` 标签即触发 GitHub Actions（`.github/workflows/release.yml`）。若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`（默认 `v0.2.0`）；构建统一 checkout `refs/tags/<tag>`，不改 tag、不升版本。
 
-1. 先在 Ubuntu runner 上跑门禁（`install → lint → typecheck → test → build`），并断言 `package.json#version` 与 tag 语义版本（去掉 `v` 前缀）一致，失败即中止发布；
+1. 先在 Ubuntu runner 上跑门禁（`install → lint → typecheck → test → build`），并在安装/测试前跑只读祖先门（`v0.1.2` 必须是 `HEAD` 严格祖先，或仅 tag 可达提交逐条补丁等价）与 `package.json#version` / tag 语义版本一致性校验，失败即中止发布；
 2. 门禁通过后，在 macOS / Windows / Linux 三个 runner 上分别构建平台产物；macOS 步骤要求上述 6 项签名 / 公证 Secrets 齐备，任一缺失即失败（fail-closed）；
 3. 各平台断言产物文件名与 `latest*.yml` 内的 `version` / `files[].url` 均等于 tag 版本，再汇聚上传到该 tag 的唯一 Release；
 4. macOS 打包后对实际 `.app` 执行 `codesign --verify --deep --strict`、`xcrun stapler validate`、`spctl -a -vv` 硬校验，并断言图标、bundle 身份与版本，任一失败即终止且不上传；`finalize` 后断言该 tag 恰好一个公开（非 Draft、非预发布）Release，且资产覆盖三平台与 `latest*.yml`。

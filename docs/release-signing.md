@@ -2,7 +2,7 @@
 
 OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application 签名** 与 **Apple 公证（Notarization）**，否则 Gatekeeper 会拦截、无法作为合规正式版分发。相关配置已接线，但**凭据必须由人类录入**，AI 不获取、不录入、不在本地执行公证。缺凭据时 CI 显式失败（fail-closed），**绝不产出、上传或公开未签名裸包**。
 
-> **当前状态：v0.2.0 正式版路径（已解冻）。** 公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；签名 + 公证的实际结果以 tag 触发的那次 CI 为准。
+> **当前状态：v0.2.0 待发布（发布路径已就绪）。** 公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
 >
 > **凭据录入：** Developer ID 证书与 App Store Connect API Key 由人类按标准协助机制录入 **GitHub CI Secrets**（只进 Secrets，禁止写入仓库、构建脚本或日志）；6 项 Secret 齐备后推送 `v*` 标签即可由 CI 产出签名 + 公证的包。
 
@@ -53,13 +53,25 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 
 ## 四、v0.1.2 漂移记录（只读事实，不改写历史）
 
-- annotated tag `v0.1.2` 的 tag 对象为 `c4a6a95`，指向 commit `7ea2cc6`。
-- `v0.1.2` 是 `main` / `origin/main` 的祖先（`main..v0.1.2` 为 0 个提交），不存在 tag 游离历史；漂移的实质是 tag 之后的修复没有进入已发布资产。
+- 本地 annotated tag `v0.1.2` 的 tag 对象为 `c4a6a95`，指向 commit `7ea2cc6`，该 commit 是 `main` / `origin/main` 的祖先；远端 `v0.1.2` 是轻量 tag，指向 commit `bb0c0b1`，该 commit 不在 `v0.2.0`（`285ee28`）的祖先链上（`v0.1.2..HEAD`=29，`HEAD..v0.1.2`=2）。两条仅远端 tag 可达提交（`bb0c0b1` / `b2c4e51`）经 `git cherry HEAD` 判定均为 `-`：补丁已等价存在于 `HEAD`，零内容丢失。漂移的实质是 tag 之后的修复没有进入已发布资产。
 - 规划基线时 `main` 领先 `v0.1.2` 13 个提交（含签名 / 打包修复），这些提交未进入已发布的 v0.1.2 资产；13 只是规划基线快照，实际领先数以打 tag 时的 `main` 为准。
 - 远端 `v0.1.2` Release 为公开、非预发布，共 11 个资产：`latest-linux.yml`、`latest-mac.yml`、`latest.yml`、`OpenCompare-0.1.2-arm64-mac.zip(.blockmap)`、`OpenCompare-0.1.2-arm64.dmg(.blockmap)`、`OpenCompare-0.1.2.AppImage`、`OpenCompare.Setup.0.1.2.exe(.blockmap)`、`opencompare_0.1.2_amd64.deb`。
 - **不删除、不移动、不重打、不替换** `v0.1.2` 的 tag 与资产；tag 之后的修复由 v0.2.0 承接。后续如需修订只能发布更高版本，不改写历史。
 
-## 五、打包后硬校验（CI，上传前）
+## 五、祖先门语义与补发入口（不改 tag）
+
+`release.yml` 的祖先门不再要求 `v0.1.2` 必须是 `HEAD` 的严格祖先，而是「**严格祖先** 或 **逐提交补丁等价**」：
+
+- 先打印 `v0.1.2` 的 ref 类型与解析到的 commit SHA：`git cat-file -t` 返回 `commit` 即轻量 tag，返回 `tag` 即 annotated tag。
+- `v0.1.2..HEAD` 提交数必须非零：发布必须携带 tag 之后的修复。
+- 当 `v0.1.2` 不是严格祖先时，逐条列出仅 tag 可达提交，对每个提交执行 `git cherry HEAD <sha>`，日志打印完整 SHA 与判定符号（`-` 等价 / `+` 不等价）。
+- 任一条为 `+`、无法枚举仅 tag 可达提交、或无法完成 `git cherry` 判定时，门以 `::error::` + 非零退出（fail-closed），后续质量门禁、打包矩阵与 finalize 均不运行。
+- 仅 tag 可达提交的 diff 若删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`），即使 `git cherry` 判为 `-` 也非零退出。
+- 祖先门只做只读 git 查询，不创建、移动、删除任何 tag / ref，不 push，也不调用 `gh release` 写操作。
+
+**补发用法（不改 tag、不升版本）**：`v0.2.0` tag 已推送但 Release 未完成时，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入已存在的 `tag`（默认 `v0.2.0`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
+
+## 六、打包后硬校验（CI，上传前）
 
 `release.yml` 在 mac 打包后、上传前对**实际产出的 `OpenCompare.app`** 做硬校验，任一项失败即终止（`::error::` + `exit 1`）、不上传，绝不降级上传未签名 / 未公证包：
 
