@@ -718,3 +718,219 @@ describe('opencompare protocol declaration', () => {
     )
   })
 })
+
+// ---------------------------------------------------------------------------
+// Release hardening: packaged-app assertions, signature/notarization checks,
+// artifact naming and the single public release gate.
+// ---------------------------------------------------------------------------
+
+const releaseStepBody = (name: string): string => {
+  const label = `- name: ${name}`
+  const start = releaseWorkflow.indexOf(label)
+  expect(start, `missing workflow step: ${name}`).toBeGreaterThan(-1)
+  const boundaries = [
+    releaseWorkflow.indexOf('\n      - ', start + label.length),
+    releaseWorkflow.indexOf('\n\n  ', start + label.length)
+  ].filter((index) => index !== -1)
+  const next = boundaries.length > 0 ? Math.min(...boundaries) : -1
+  return releaseWorkflow.slice(start, next === -1 ? undefined : next)
+}
+
+describe('packaged macOS app icon and identity assertions', () => {
+  const step = releaseStepBody('Locate the packaged app and assert its icon and version')
+
+  it('runs only on the mac matrix target', () => {
+    expect(step).toMatch(/if: matrix\.target == 'mac'/)
+  })
+
+  it('locates the real OpenCompare.app without hard-coding an arch directory', () => {
+    expect(step).toContain("find release -maxdepth 2 -name 'OpenCompare.app'")
+    expect(step).not.toMatch(/mac-arm64|mac-x64/)
+    expect(step).toContain('No OpenCompare.app found')
+    expect(step).toContain('::error::')
+    expect(step).toContain('exit 1')
+  })
+
+  it('requires a non-empty, non-Electron CFBundleIconFile', () => {
+    expect(step).toContain('CFBundleIconFile')
+    expect(step).toContain('electron.icns')
+    expect(step).toContain("PlistBuddy -c 'Print :CFBundleIconFile'")
+  })
+
+  it('requires the icns resource to exist with a real icns header', () => {
+    expect(step).toContain('Contents/Resources/')
+    expect(step).toContain('head -c 4')
+    expect(step).toContain('icns')
+  })
+
+  it('compares the packaged icon against the Electron default when it is locatable', () => {
+    expect(step).toContain(
+      'node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns'
+    )
+    expect(step).toContain('shasum -a 256')
+    expect(step).toContain('skipping the SHA-256 default-icon comparison')
+  })
+
+  it('requires the packaged icon.png to be byte-identical to build/icon.png', () => {
+    expect(step).toContain('Contents/Resources/icon.png')
+    expect(step).toContain('build/icon.png')
+    expect(step).toContain('does not match build/icon.png')
+  })
+
+  it('pins the bundle identifier and the tag version in Info.plist', () => {
+    expect(step).toContain('CFBundleIdentifier')
+    expect(step).toContain('com.opencompare.app')
+    expect(step).toContain('CFBundleShortVersionString')
+    expect(step).toContain('${GITHUB_REF_NAME#v}')
+  })
+})
+
+describe('macOS signature, notarization and Gatekeeper hard checks', () => {
+  const step = releaseStepBody(
+    'Verify the app signature, notarization and Gatekeeper acceptance'
+  )
+
+  it('runs only on the mac matrix target', () => {
+    expect(step).toMatch(/if: matrix\.target == 'mac'/)
+  })
+
+  it('verifies the deep strict signature and exits on failure', () => {
+    expect(step).toContain('codesign --verify --deep --strict --verbose=2')
+    expect(step).toContain('codesign --verify --deep --strict failed')
+    expect(step).toContain('::error::')
+    expect(step).toContain('exit 1')
+  })
+
+  it('requires a Developer ID signature with the team id and hardened runtime', () => {
+    expect(step).toContain('codesign -dv --verbose=4')
+    expect(step).toContain('Authority=Developer ID Application')
+    expect(step).toContain('TeamIdentifier=3X4J53U6RY')
+    expect(step).toContain('Signature=adhoc')
+    expect(step).toContain('(runtime)')
+  })
+
+  it('validates the stapled ticket, falling back to the app inside the dmg', () => {
+    expect(step).toContain('xcrun stapler validate')
+    expect(step).toContain('hdiutil attach -nobrowse -readonly')
+    expect(step).toContain('hdiutil detach')
+    expect(step).toContain('trap detach_dmg EXIT')
+    expect(step).toContain("find release -maxdepth 1 -name '*.dmg'")
+  })
+
+  it('requires Gatekeeper to accept a notarized Developer ID app', () => {
+    expect(step).toContain('spctl -a -vv --type execute')
+    expect(step).toContain('accepted')
+    expect(step).toContain('Notarized Developer ID')
+  })
+})
+
+describe('packaged artifact names and update metadata', () => {
+  const step = releaseStepBody('Assert packaged version matches the tag')
+
+  it('requires the versioned artifact of every platform', () => {
+    expect(step).toContain('case "${{ matrix.target }}" in')
+    expect(step).toContain('mac) required_exts=(dmg zip)')
+    expect(step).toContain('win) required_exts=(exe)')
+    expect(step).toContain('linux) required_exts=(AppImage deb)')
+  })
+
+  it('rejects artifacts that do not carry the tag version', () => {
+    expect(step).toContain('[0-9]+\\.[0-9]+\\.[0-9]+')
+    expect(step).toContain('does not match tag')
+  })
+
+  it('keeps the latest*.yml gate glob, its empty guard and the version check', () => {
+    expect(step).toContain('files=(release/latest*.yml)')
+    expect(step).toContain('No latest*.yml update metadata found')
+    expect(step).toContain('String(metadata.version) !== tag')
+  })
+
+  it('requires the update metadata urls and paths to carry the tag version', () => {
+    expect(step).toContain('files[].url')
+    expect(step).toContain('files[].path')
+    expect(step).toContain('path ${metadata.path}')
+    expect(step).toContain('update metadata does not match tag')
+  })
+})
+
+describe('single public release gate', () => {
+  const step = releaseStepBody('Verify the tag has exactly one public release')
+  const assetsStep = releaseStepBody('Assert the public release has every platform asset')
+
+  it('paginates every release page before counting', () => {
+    expect(step).toMatch(/gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases" --paginate --slurp/)
+    expect(step).toContain('.[][]')
+    expect(step).toContain('select(.draft)')
+    expect(step).toContain('select(.prerelease)')
+    expect(step).toContain('[ "${count}" -ne 1 ]')
+  })
+
+  it('requires the assets to cover all three platforms and latest*.yml', () => {
+    expect(assetsStep).toContain('releases/${release_id}/assets')
+    expect(assetsStep).toContain('--paginate --slurp')
+    for (const suffix of [
+      '.dmg',
+      '.zip',
+      '.exe',
+      '.AppImage',
+      '.deb',
+      'latest-mac.yml',
+      'latest.yml',
+      'latest-linux.yml'
+    ]) {
+      expect(assetsStep).toContain(suffix)
+    }
+    expect(assetsStep).toContain('has_asset')
+    expect(assetsStep).toContain('does not carry the tag version')
+  })
+})
+
+describe('hard verification order and fail-closed upload path', () => {
+  const indexOfStep = (name: string): number => releaseWorkflow.indexOf(`- name: ${name}`)
+
+  it('runs credentials → build → app checks → signature checks → artifact checks → upload', () => {
+    const credentials = indexOfStep('Require macOS signing and notarization credentials')
+    const build = indexOfStep('Build installers')
+    const appChecks = indexOfStep('Locate the packaged app and assert its icon and version')
+    const signature = indexOfStep(
+      'Verify the app signature, notarization and Gatekeeper acceptance'
+    )
+    const artifacts = indexOfStep('Assert packaged version matches the tag')
+    const upload = indexOfStep("Upload installers to the tag's release")
+    for (const index of [credentials, build, appChecks, signature, artifacts, upload]) {
+      expect(index).toBeGreaterThan(-1)
+    }
+    expect(credentials).toBeLessThan(build)
+    expect(build).toBeLessThan(appChecks)
+    expect(appChecks).toBeLessThan(signature)
+    expect(signature).toBeLessThan(artifacts)
+    expect(artifacts).toBeLessThan(upload)
+  })
+
+  it('keeps no escape hatch on the upload path', () => {
+    expect(releaseWorkflow).not.toContain('continue-on-error')
+    expect(releaseWorkflow).not.toContain('|| true')
+    expect(releaseWorkflow).not.toContain('--no-verify')
+    const upload = releaseStepBody("Upload installers to the tag's release")
+    expect(upload).not.toMatch(/if:\s*always\(\)/)
+  })
+})
+
+describe('release hardening documentation', () => {
+  it('documents the post-build hard checks and the single public release gate', () => {
+    expect(signingDoc).toContain('打包后硬校验')
+    expect(signingDoc).toContain('codesign --verify --deep --strict')
+    expect(signingDoc).toContain('xcrun stapler validate')
+    expect(signingDoc).toContain('spctl -a -vv')
+    expect(signingDoc).toContain('失败即终止')
+    expect(signingDoc).toContain('不上传')
+    expect(signingDoc).toContain('唯一公开')
+  })
+
+  it('keeps the README release flow in sync', () => {
+    const flow = readme.slice(readme.indexOf('## 发布流程'), readme.indexOf('## 项目结构'))
+    expect(flow).toContain('codesign --verify --deep --strict')
+    expect(flow).toContain('xcrun stapler validate')
+    expect(flow).toContain('spctl -a -vv')
+  })
+})
