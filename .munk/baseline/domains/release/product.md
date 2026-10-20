@@ -29,6 +29,9 @@
 - **唯一公开正式 Release 与资产完整性断言**：`finalize` 后用 `gh api --paginate`（`--slurp` 跨分页）统计该 tag 的 Release，断言 count == 1 且 `draft` 数 == 0、`prerelease` 数 == 0；再断言该 Release 资产非空并覆盖 `.dmg`、`.zip`、`.exe`、`.AppImage`、`.deb` 与 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`，版本化资产名含 tag 版本（只读资产名，不下载内容）。
 - **上传路径无绕行（fail-closed 显式化）**：`release.yml` 全文不含 `continue-on-error: true`、`|| true`、`--no-verify`，上传步骤不带 `if: always()`；硬校验步骤顺序固定为 六项 Secret 检查 → `.p8` 物化 → `Build installers` → 图标/版本身份 → 签名/公证 → 产物名与 `latest*.yml` → `Upload installers`。
 - **发布配置断言单测**：Node 环境下读取仓库根配置做断言（`src/main/release-packaging.test.ts`，`node:fs` + `node:path`，不 import Electron），让缺失字段在 `pnpm test` 失败而非 tag 触发的 CI 才暴露。
+- **本机发版产物取证与证据落盘**：在 macOS 上对 `v*` tag 触发的**真实公开 Release 产物**做只读取证，证据写入 `docs/release-evidence/<tag>.md`（当前 `v0.2.0.md`）。流程 = **只读就绪门**（`git ls-remote --tags origin refs/tags/<tag>`、`gh api .../contents/package.json?ref=<tag>`、`gh release view <tag> --json tagName,isDraft,isPrerelease,url,assets` 确认恰好一个公开非 draft 非 prerelease Release 且含含版本号的 dmg / zip / `latest-mac.yml` / `latest.yml`）→ **下载到仓库外临时目录**（记录绝对路径、下载时间、来源 URL，产物二进制不入库）→ **记录 SHA-256 与字节数** → **两条独立解包路径**（zip 用 `ditto -x -k`，dmg 用 `hdiutil attach -nobrowse -readonly -mountpoint`，结束含失败路径必须 `hdiutil detach`）→ 对两个 `OpenCompare.app` 各跑 `codesign --verify --deep --strict --verbose=2` / `codesign -dv --verbose=4` / `xcrun stapler validate` / `spctl -a -vv --type execute` → **签名身份与图标事实**（`Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY`、hardened runtime `(runtime)`、不含 `Signature=adhoc`；`CFBundleIconFile` 非空非 `electron.icns`、对应 icns 路径与 SHA-256、`Contents/Resources/icon.png` 与 `build/icon.png` 同 SHA-256、`CFBundleIdentifier`、`CFBundleShortVersionString`）→ **版本一致性核对**（产物名 / `latest*.yml#version` 与 `files[].url` / `CFBundleShortVersionString` / tag 全为同一版本）。
+- **取证 blocked 分支**：就绪门任一条件不满足即**立即停手并升级 Owner**，证据文档写 `status: blocked`，只记录探查命令原始输出、缺失项与待人工动作（打 tag / 触发 CI / 下载产物）；不得写入任何「通过」输出或 sha256，不得用本地 `release/` 目录、本地打包或未签名产物替代。
+- **证据只读断言单测**：`src/main/release-evidence.test.ts` 只读解析证据 Markdown（不下载、不解包、不挂载、不签名、不写 git），文件缺失、`status` 非 `verified`/`blocked`、`verified` 分支缺任一必需标记、`blocked` 分支出现通过标记时 `pnpm test` 失败。
 
 ## 验收
 
@@ -135,6 +138,23 @@
 - **ac-no-remote-writes-added**：本项不新增 `git tag` / `git push` / `gh release create|edit|upload|delete` 调用（既有预建/上传/公开步骤保持原样），不执行任何远端写操作，不创建或公开 Release。
 - **ac-gates-green**：不新增依赖，`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm build:web` 全部通过。
 
+### 本机发版产物取证证据（v0.2.0）
+
+- **ac-evidence-doc-exists**：`docs/release-evidence/v0.2.0.md` 存在、非空，标题含 `v0.2.0`，且含 `status:` 字段，取值为 `verified` 或 `blocked`。
+- **ac-readiness-readonly**：文档记录 `git ls-remote --tags origin refs/tags/v0.2.0` 与 `gh release view v0.2.0 ...` 的原始输出；本 WI 的改动路径中不含任何 tag / Release / 上传动作产生的远端变化（`git tag --list v0.2.0` 在本机仍非本 WI 创建）。
+- **ac-artifact-provenance**：`status: verified` 时，文档记录 dmg 与 zip 的 Release 资产名、下载 URL、下载到仓库外的本地绝对路径与下载时间，且全文不以仓库 `release/` 本地构建目录或本地打包产物作为证据来源。
+- **ac-sha256-recorded**：`status: verified` 时，dmg 与 zip 各自记录 `shasum -a 256` 的 64 位小写十六进制值与字节数，且与文档中产物文件名一一对应。
+- **ac-codesign-verify-both**：`status: verified` 时，zip 解包（`ditto -x -k`）与 dmg 挂载（`hdiutil attach -nobrowse -readonly`）得到的两个 `OpenCompare.app` 都记录了 `codesign --verify --deep --strict --verbose=2` 原始输出，且每份输出含 `valid on disk` 与 `satisfies its Designated Requirement`。
+- **ac-stapler-both**：`status: verified` 时，两个 app 的 `xcrun stapler validate` 原始输出都含 `The validate action worked!`。
+- **ac-spctl-both**：`status: verified` 时，两个 app 的 `spctl -a -vv --type execute` 原始输出都含 `accepted` 与 `source=Notarized Developer ID`，且退出码为 0。
+- **ac-signing-identity**：`status: verified` 时，文档记录 `codesign -dv --verbose=4` 中的 `Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY`、`flags=...(runtime)`，且该输出不含 `Signature=adhoc`。
+- **ac-icon-facts**：`status: verified` 时，文档记录 `CFBundleIconFile`（非空且非 `electron.icns`）、`Contents/Resources` 下对应 icns 的实际路径与 SHA-256、`Contents/Resources/icon.png` 与仓库 `build/icon.png` 的 SHA-256 相同。
+- **ac-version-consistency**：`status: verified` 时，dmg / zip 文件名、`latest-mac.yml` 与 `latest.yml` 的 `version` 及 `files[].url`、`CFBundleShortVersionString` 均为 `0.2.0`，且 Release 的 `tagName` 为 `v0.2.0`。
+- **ac-dmg-detached**：dmg 取证结束后记录 `hdiutil detach` 命令与输出，且文档记录取证后无残留挂载点。
+- **ac-blocked-no-fabrication**：`status: blocked` 时，文档只含就绪门命令与原始输出、缺失项、待人工动作与升级说明，不含任何 `valid on disk` / `The validate action worked!` / `source=Notarized Developer ID` 的「通过」记录、不含产物 sha256，也不出现本地打包或仓库 `release/` 产物；同时已向 Owner 升级等待产物。
+- **ac-doc-assertion**：`pnpm test` 中的只读文档断言覆盖该证据文件：文件缺失、`status` 非 `verified`/`blocked`、`verified` 分支缺少任一必需标记（两处 `valid on disk`、两处 `The validate action worked!`、两处 `accepted` + `source=Notarized Developer ID`、两个 sha256）或 `blocked` 分支出现通过标记时测试失败。
+- **ac-no-artifacts-committed**：本 WI 的改动文件只有证据 Markdown（及只读断言测试），dmg / zip / `.app` / 解包目录等产物不进入 git 变更。
+
 
 ## 非目标
 
@@ -151,7 +171,8 @@
 - v0.2.0 收敛项只做「发版元信息收敛 + 只读一致性断言」：**不打 tag、不 push、不 publish、不创建或公开 Release**，不修改任何远端 Release 及其资产（含 v0.1.2 的 11 个资产）——这些动作由人与 Host 完成并触发 `human_required`。
 - 不删除 / 不移动 / 不重打 `v0.1.2`（以及 `v0.1.0` / `v0.1.1`）tag，不替换已发布资产，不改写任何历史提交。
 - 不改发布模型与签名链路：`tags: v*` 触发、`gates → 矩阵 --publish never → finalize`、单点预建 draft、六项 Secret 与 fail-closed 逻辑、`electron-builder.yml` 的签名/公证/图标/protocol 配置全部不动；不新增 Secret。
-- 不在本机执行 `codesign` / `stapler` / `spctl` 实证，不产出 `docs/release-evidence/`（归 release-hardening / local-evidence）；不把「CI 绿了」当签名/公证证据。
+- 发版流水线加固项本身不在 CI 之外改签名链路；本机 `codesign` / `stapler` / `spctl` 实证与 `docs/release-evidence/` 归「本机发版产物取证」项，且不把「CI 绿了」当签名/公证证据。
+- 本机取证项只做**只读取证 + 证据落盘**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release 资产；不在本机重新打包、签名、公证；不改 `release.yml` / `electron-builder.yml` / entitlements / 签名文档；不删除或重打任何历史 tag 与资产；不改产品 UI / 会话 / 对比算法 / 版本号，不跑 self-test 或真机点选；dmg / zip / `.app` / 解包目录一律不入库，不记录任何证书、密码、`.p8` 或 Secret 内容；产物不可得时不以未签名 / 未公证 / 本地构建产物充数，不臆造命令输出。
 - 不改 `appId` / `productName` / 版本之外的包元数据；不引入 changesets、semantic-release 等版本工具，不新增依赖。
 - 不修历史：`v0.1.1` tag 内 `package.json#version` 实为 `0.1.0` 这个既存不一致只作为已知事实避开（不写「所有 v* tag 版本一致」断言、不回填、不改 tag），只对 `v0.1.2` 与当前版本断言。
 - v0.2.0 收敛项不改对比算法、会话模型、UI、图标资产与协议声明；不做 CHANGELOG 全历史重写，不产出英文版 Release Notes。
@@ -177,17 +198,15 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_0e0bd93e46d6cd56`（发版流水线加固：图标 / 版本断言、签名公证硬校验与唯一公开 Release）
+- WI：`wi_ws_4b44f17868ca3e77`（本机 v0.2.0 dmg/zip 签名公证取证与证据落盘）
 - 日期：2026-10-20
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；`needSelfTest=false`，跳过 UI 自测）。**不含任何发布动作**：未打 tag、未 push、未 publish，未调用 `gh release`、未创建或公开 Release，远端 `v0.1.2` 的 tag 与 11 个资产未动。
-- 覆盖摘要（改动面 4 文件：`.github/workflows/release.yml`、`src/main/release-packaging.test.ts`、`docs/release-signing.md`、`README.md`）：
-  - `release.yml` mac 矩阵新增 **`Locate the packaged app and assert its icon and version`**（`if: matrix.target == 'mac'`）：`find release -maxdepth 2 -name 'OpenCompare.app'` 定位真实 bundle；`PlistBuddy` 读 `CFBundleIconFile`（非空、非 `electron.icns`）、资源存在非空且头 4 字节 `icns`（无扩展名补 `.icns`）、可定位 `node_modules/electron/dist/**/electron.icns` 时 SHA-256 不同否则打印跳过、`Contents/Resources/icon.png` 与 `build/icon.png` SHA-256 相等、`CFBundleIdentifier == com.opencompare.app`、`CFBundleShortVersionString == ${GITHUB_REF_NAME#v}`；全部失败路径 `::error::` + `exit 1`。
-  - `release.yml` 新增 **`Verify the app signature, notarization and Gatekeeper acceptance`**：`codesign --verify --deep --strict --verbose=2`；`codesign -dv --verbose=4` 必须含 `Authority=Developer ID Application` / `TeamIdentifier=3X4J53U6RY` / `(runtime)` 且不含 `Signature=adhoc`；`xcrun stapler validate` 先校验 `.app`，失败时 `hdiutil attach -nobrowse -readonly` 挂载 `release/*.dmg` 校验其中同一 `OpenCompare.app`（`trap` 保证失败路径 detach）；`spctl -a -vv --type execute` 退出 0 且输出含 `accepted` 与 `Notarized Developer ID`。
-  - **`Assert packaged version matches the tag`** 强化（保留 glob / 空目录守卫 / version 断言）：按 `matrix.target` 要求 mac `.dmg`+`.zip`、win `.exe`、linux `.AppImage`+`.deb`；逐个产物用 `grep -Eo '[0-9]+\.[0-9]+\.[0-9]+'` 取版本，任一不等于 tag 即失败；`latest*.yml` 用 node 一次性校验 `version`、顶层 `path`、每个 `files[].url` 与 `files[].path` 均含 tag 版本。
-  - **`Verify the tag has exactly one public release`** 改为 `gh api .../releases --paginate --slurp --jq '.[][] | ...'`，统计 count / drafts / prereleases 三项，任一不为 1 / 0 / 0 即 `::error::` + `exit 1`（原实现单页 `per_page=100` 且缺 `prereleases` 统计）。
-  - 新增 **`Assert the public release has every platform asset`**：取该 tag 的 release id 后经 assets 接口 `--paginate --slurp` 只读资产名，要求非空且覆盖 `.dmg`/`.zip`/`.exe`/`.AppImage`/`.deb`/`latest-mac.yml`/`latest.yml`/`latest-linux.yml`，非 `latest*.yml` 资产名必须含 tag 版本。
-  - 步骤顺序实测为 六项 Secret 检查(134) → `.p8` 物化(156) → `Build installers`(174) → `.p8` 清理(183) → 图标/版本身份(192) → 签名/公证(280) → 产物与 `latest*.yml`(360) → `Upload installers`(442)；`release.yml` 全文无 `continue-on-error`、无 `if: always()`。
-  - `docs/release-signing.md` 新增「五、打包后硬校验（CI，上传前）」小节（四条：图标/版本身份、签名公证四条命令与 dmg 回退、产物名与 latest 元数据、唯一公开 Release + 资产完整性；声明无绕行路径），六项 Secret 清单与 v0.1.2 漂移记录原样保留；`README.md` 发布流程第 3 条改写并新增第 4 条对应说明。
-  - `src/main/release-packaging.test.ts` **只增不改**：新增 5 个 describe（`packaged macOS app icon and identity assertions` / `macOS signature, notarization and Gatekeeper hard checks` / `packaged artifact names and update metadata` / `single public release gate` / `hard verification order and fail-closed upload path` / `release hardening documentation`）共 23 条 it，静态断言 workflow 文本与文档，既有断言逐条保留。
-- 注：本 WI change pack 只提供 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**` —— 无新增折叠用例、无 tech/ux 手合；同域既有 `qa/release-workflow.md` / `qa/electron-builder-targets.md` 等用例本轮未重跑（发布动作归人与 Host）。未做 `codesign` / `stapler` / `spctl` 本机实证（归 release-hardening / local-evidence），未读取远端 Release 实时状态；CI 的首次真实生效以人打下一个 tag 为准。
-
+- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；`needSelfTest=false`，跳过 UI 自测）。取证结果为 **`status: blocked`**：只读就绪门不满足，按 prd 的 blocked 分支停手升级，**未产生任何「通过」输出与产物 sha256**。
+- 就绪门实测（macOS 15.6.1 / arm64，取证时间 `2026-10-20T08:14:11+08:00`，HEAD `d64ce1d`）：
+  - `git ls-remote --tags origin refs/tags/v0.2.0` → 空输出（退出码 0），远端**不存在** `v0.2.0` tag。
+  - `gh api repos/chaxiu/OpenCompare/contents/package.json?ref=v0.2.0` → HTTP 404 `No commit found for the ref v0.2.0`（退出码 1）。
+  - `gh release view v0.2.0 --repo chaxiu/OpenCompare --json ...` → `release not found`（退出码 1）；`gh release list --limit 10` 只有 `v0.1.2`（Latest）、`v0.1.1`（Pre-release）、`v0.1.0`（Pre-release），无 `v0.2.0`。
+  - `git tag --list v0.2.0` → 空输出，本机也未由本 WI 创建 tag；本机无 `release/` 目录，未被用作任何证据来源。
+- 覆盖摘要（改动面 2 文件，均为新增）：
+  - `docs/release-evidence/v0.2.0.md`（152 行）：机器与系统版本、带时区 ISO 8601 取证时间、仓库工作目录与本地 HEAD；就绪门每步的**可复制重放命令 + 原始 stdout/stderr + 退出码**；缺失项对照表（逐条对应 4 条就绪门）；明确列出**未执行**的取证动作（下载 / `shasum -a 256` / `ditto -x -k` / `hdiutil attach` / `codesign` / `stapler` / `spctl` / plist 图标事实 / 版本一致性 / `hdiutil detach`）；待人工动作（打 annotated tag `v0.2.0` 并 push → 等 CI 签名公证并上传唯一公开 Release → 回复后重建本 WI 复跑就绪门）；升级说明。
+  - `src/main/release-evidence.test.ts`（198 行）：只读解析证据 Markdown（`node:fs`，不 import Electron，不下载 / 不解包 / 不挂载 / 不签名 / 不写 git），校验标题含 `v0.2.0`、`status` ∈ {`verified`,`blocked`}；`verified` 分支要求 ≥2 处 `valid on disk` / `satisfies its Designated Requirement` / `The validate action worked!` / `accepted` / `source=Notarized Developer ID` 且 ≥2 个不同 SHA-256；`blocked` 分支出现任一通过标记即失败。
+- 注：本 WI change pack 只提供 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**` —— 无新增折叠用例、无 tech/ux 手合；同域既有 `qa/release-workflow.md` / `qa/electron-builder-targets.md` 等用例本轮未重跑（发布动作归人与 Host）。**v0.2.0 的 tag / Release / 产物仍未就绪**，本机取证须在人工打 tag 并等 CI 出包后重建 WI 继续。
