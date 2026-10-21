@@ -91,9 +91,9 @@ const previousReleaseNotes = existsSync(previousReleaseNotesPath)
   ? readFileSync(previousReleaseNotesPath, 'utf8')
   : ''
 
-// The last publicly released notes stay on v0.2.1 while the current version is
-// still pending; the current notes only carry the EMFILE fix.
-const lastReleasedNotesPath = join(repoRoot, 'docs/release-notes/v0.2.1.md')
+// The last publicly released notes stay on v0.2.2 while the current version is
+// still pending; the current notes carry the dangling-link tolerance.
+const lastReleasedNotesPath = join(repoRoot, 'docs/release-notes/v0.2.2.md')
 const lastReleasedNotes = existsSync(lastReleasedNotesPath)
   ? readFileSync(lastReleasedNotesPath, 'utf8')
   : ''
@@ -286,7 +286,7 @@ describe('release version gate', () => {
     expect(changelog).toContain(`## ${currentTag}`)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 
@@ -743,11 +743,14 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as published and links its public release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(readme).toContain(`releases/tag/${currentTag}`)
+  it('reports the current tag as pending and links the latest public release', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
+    // The latest public release stays on the previous tag until this one ships.
+    expect(readme).toContain('最新公开 Release 为 [v0.2.2]')
+    expect(readme).toContain('releases/tag/v0.2.2')
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain(`${currentTag} 待发布`)
+    expect(readme).not.toContain(`${currentTag} 已发布`)
+    expect(readme).not.toContain('当前发布状态：v0.2.2')
     expect(readme).not.toContain('最新公开 Release 为 [v0.2.1]')
     expect(readme).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
     expect(readme).not.toMatch(/正式版 v0\.2\.0/)
@@ -755,9 +758,19 @@ describe('release signing credentials checklist', () => {
     expect(readme).not.toMatch(/发布状态：冻结/)
   })
 
-  it('reports the signing doc status as published for the current tag', () => {
-    expect(signingDoc).toContain(`当前状态：${currentTag} 已发布`)
-    expect(signingDoc).not.toContain(`${currentTag} 待发布`)
+  it('reports the signing doc status as pending for the current tag', () => {
+    expect(signingDoc).toContain(`当前状态：${currentTag} 待发布`)
+    expect(signingDoc).not.toContain(`${currentTag} 已发布`)
+    expect(signingDoc).not.toContain('当前状态：v0.2.2')
+  })
+
+  it('attributes the dangling-link bug to v0.2.2 and earlier in the README', () => {
+    const issues = readme.slice(readme.indexOf('## 已知问题'))
+    expect(issues).toContain('v0.2.2 及更早')
+    expect(issues).toContain('悬空符号链接')
+    expect(issues).toContain('不可读项')
+    expect(issues).toContain('已跳过')
+    expect(issues).toContain('当前版本已修复')
   })
 
   it('attributes the file-handle bug to v0.2.1 and earlier in the README', () => {
@@ -786,17 +799,30 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/latest\*\.yml/)
   })
 
-  it('orders the current, v0.2.0 and v0.1.2 entries newest first', () => {
+  it('orders the current, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
     const current = changelog.indexOf(`## ${currentTag}`)
+    const previousEntry = changelog.indexOf('## v0.2.2')
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    expect(superseded).toBeGreaterThan(current)
+    expect(previousEntry).toBeGreaterThan(current)
+    expect(superseded).toBeGreaterThan(previousEntry)
     expect(previous).toBeGreaterThan(superseded)
   })
 
-  it('documents the file-handle fix in the current changelog entry', () => {
+  it('documents the dangling-link fix in the current changelog entry', () => {
     const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf('## v0.2.2')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const section = changelog.slice(start, end)
+    for (const phrase of ['悬空符号链接', '不可读项', '已跳过', '摘要直写缓存']) {
+      expect(section).toContain(phrase)
+    }
+  })
+
+  it('keeps the v0.2.2 changelog entry as history', () => {
+    const start = changelog.indexOf('## v0.2.2')
     const end = changelog.indexOf('## v0.2.1')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -854,25 +880,25 @@ describe('release notes changelog', () => {
     expect(firstHeading(releaseNotes)).toContain(currentTag)
   })
 
-  it('covers the v0.2.1 user-visible changes in the still-public release notes', () => {
+  it('covers the still-public v0.2.2 release notes', () => {
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
-    for (const keyword of [
-      '新建对比',
-      '路径',
-      '启动参数',
-      'opencompare://',
-      '图标',
-      '原位写回'
-    ]) {
+    for (const keyword of ['EMFILE', 'ENFILE', '8 路', '有界并发', '文件句柄耗尽']) {
       expect(lastReleasedNotes).toContain(keyword)
     }
   })
 
-  it('records the file-handle fix in the current release notes', () => {
-    for (const phrase of ['EMFILE', 'ENFILE', '8 路', '有界并发', '文件句柄耗尽']) {
+  it('records the dangling-link fix in the current release notes', () => {
+    for (const phrase of [
+      '悬空符号链接',
+      '不可读项',
+      '已跳过 N 个不可读项/悬空链接',
+      '摘要直写缓存',
+      '134 万',
+      '10.67 GiB'
+    ]) {
       expect(releaseNotes).toContain(phrase)
     }
-    expect(releaseNotes).toMatch(/v0\.2\.1 及更早/)
+    expect(releaseNotes).toMatch(/v0\.2\.2 及更早/)
     expect(releaseNotes).toContain('升级')
   })
 
