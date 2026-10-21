@@ -8,6 +8,7 @@
 - **高速 / 增量策略**：先比文件大小、再比修改时间；二者都不足以判定差异时才读取内容做 **SHA-256** 内容哈希确认（覆盖「大小相同但内容不同」）；已比对条目按（路径 / 大小 / 修改时间）缓存，重复比对不重复读内容与哈希。输出带状态的左右树 + 按状态文件计数。
 - **双栏目录对比视图**：左右双栏树、目录展开/折叠、逐行差异语义徽章（复用 `DiffBadge` / `--color-diff-*`）、目录行显示其后代差异聚合计数；一键过滤 `全部 / 仅差异 / 左独有 / 右独有 / 相同`，过滤后仅保留匹配条目及其祖先目录。
 - **目录树窗口化渲染（大目录不 OOM）**：`DirectoryView` 不再对整树做 `filterDirectoryTree` + 左右 `projectDirectoryTree` 克隆；改为由 `src/core/directory/rows.ts` 的纯行模型 `buildDirectoryRowModel(root, filter, side, collapsedPaths)` 按 `(root, filter, side, 折叠集合)` 一次前序遍历产出「可视行索引」（只持节点引用 + depth + 是否展开，不复制节点、不复制 children），`TreeView` 用 `@tanstack/react-virtual` 只渲染视口行 + 常量 overscan（`ROW_OVERSCAN = 10`），占位总高 = 行数 × `DIRECTORY_ROW_HEIGHT`（24px = `h-6`）。DOM 节点数与渲染行数有界、不随总条目数线性增长。工作台 `visibleCounts` 亦改为按过滤档从根节点 `counts` 直接派生（`visibleDirectoryCounts`），不再为统计克隆过滤树。五段过滤、左右投影、展开/折叠、选中、双击下钻、逐级返回的状态语义与四态统计、对比结果全部保持不变。
+- **超大行数（≥150 万行）行 ↔ 滚动偏移映射（`src/core/directory/rows.ts` 纯函数 + `TreeView` DOM 应用）**：`rows.length * DIRECTORY_ROW_HEIGHT` 一旦超过浏览器布局上限（2^24 px）就会被静默截断，导致尾部行永远滚不到（实测右栏 1,516,096 行时 `scrollTop` 最大只能覆盖前 699,050 行，尾部 53.9% 不可达）。本期引入具名常量 `DIRECTORY_MAX_TREE_HEIGHT = 16_777_215`（`< 2^24`）与纯函数 `createDirectoryScrollMap(rowCount, viewportHeight)`：总高未超限时退化为恒等映射（`row * 24`，像素含义逐位不变），超限时容器高度钉在 `DIRECTORY_MAX_TREE_HEIGHT`、每行按 `maxScrollOffset / (rows - 1)` 步长共享可达偏移（`offsetForIndex` 严格递增、末行恰好落在 `maxScrollOffset`），并以连续锚点 `rowPositionForOffset` / `rowTop` 驱动渲染窗口，避免尾部压缩死区。`TreeView` 仍用 `@tanstack/react-virtual` 观测面板滚动偏移与视口高度，但渲染窗口改由该纯映射给出（`visibleRange` + `rowTop`），容器加 `overflow-clip` 防止 overscan 行撑大滚动区；行高仍为 `DIRECTORY_ROW_HEIGHT = 24`，`role="tree"` / `role="treeitem"` / `aria-level` / `title` 与既有 props（`scrollElement` / `initialScrollTop` / `selectedPath` / `onTogglePath` / `onSelectPath` / `onOpenFile`）契约不变。五档过滤、展开/折叠、选中、下钻与逐级返回、双栏独立滚动、四态统计语义与取值全部保持不变。
 - **取数与下钻**：本地真实目录选择（左/右各经 `PlatformPort.selectDirectory`，Electron 原生对话框、Web 模式降级提示）；内置样本目录一键加载（`pnpm dev` 与 `pnpm dev:web` 均可）；双击差异文件（`added`/`removed`/`modified`）按其类型把左右内容带入对应文件级视图并切换会话（代码/文本 → 代码双栏 Diff；CSV/TSV → CSV 视图；JSON/YAML → 结构化视图；左独有右侧空、右独有左侧空）。
 - **下钻来源绑定与返回上级目录视图**：目录树下钻生成的文件级会话记录**来源目录会话**（`parentDirectoryId`）与会话 id 前缀（`file:{parentId}::{relativePath}`），两个不同目录会话对同一相对路径的下钻互不覆盖；文件级视图顶部提供明确的「返回上级目录视图」导航（左箭头按钮 + 「来源目录对比：<目录会话标题>」说明），一步回到发起本次下钻的目录会话，可反复「下钻 → 返回」。不实现目录级下钻栈 / 面包屑 / 前进后退历史（树已展示完整层级，下钻止于文件级）。
 - **往返目录状态保持（按目录会话归口）**：过滤档位、目录树折叠/展开集合、左右面板滚动位置、树行选中项由工作台壳层按目录会话 id 保存并受控回填，不依赖组件挂载生命周期；目录视图因下钻卸载重建后，上述状态原样恢复，且不同目录会话之间互不串味。状态仅保持于当前运行期内存，不跨重启/跨窗口持久化。
@@ -72,6 +73,15 @@
 - **ac-visible-counts-parity**：5 档过滤下状态栏 `visibleCounts` 与既有 `countTreeFiles(filterDirectoryTree(root, filter))` 四态计数逐项相等（`conflict` 恒为 0）；根目录无匹配文件时四态全为 0。
 - **ac-drilldown-restore**：在过滤 + 折叠 + 选中 + 滚动到非零位置后卸载视图，再以 shell 保存的同一状态重挂载（等价下钻返回）：两栏 `scrollTop` 恢复为保存值（±1），选中行 `aria-selected="true"` 且位于渲染窗口内，折叠目录的子项不渲染，过滤档高亮与行集保持原档，根节点仍为第 0 行。
 - **ac-existing-suites-green**：`pnpm test` 既有 `src/core/directory/**`、样本与 renderer 套件零回归；`code_gates` 六条（install / lint / typecheck / build / build:web / test）全绿。
+- **ac-height-capped**：当 `rows.length * DIRECTORY_ROW_HEIGHT > 16_777_215` 时，`role="tree"` 容器的内联高度 ≤ 16,777,215px（例如 1,516,096 行时断言 `parseFloat(tree.style.height) <= 16777215`）；当行数 ≤ 699,050 时高度恰为 `rows.length * 24`（小树路径恒等，不引入像素偏差）。
+- **ac-last-row-reachable**：在 1,516,096 行的 rows 上把面板滚动容器置到最大可滚动偏移后，渲染窗口包含 index = `rows.length - 1`，且该行 `title`、`aria-level`、状态徽标与 `rows.at(len - 1)` 完全一致。
+- **ac-any-index-reachable**：对同一 1,516,096 行 rows，取 index ∈ {0, len/4, len/2, 3len/4, len-1} 以及尾部目录（如 `source-code/...`、`workspace/...`）所在索引，按其映射偏移滚动后渲染窗口都包含目标行且内容正确；映射 `offsetForIndex(i)` 严格递增，且 `offsetForIndex(len - 1) <= maxScrollOffset`（无压缩死区、无跳跃空洞）。
+- **ac-dom-bounded**：任意滚动位置下 `role="treeitem"` 数量 ≤ 80；1,516,096 行 fixture 与 5,000 行 fixture 在同一相对位置的 DOM 元素总数差异 ≤ 10%（渲染量不随总行数增长）。
+- **ac-filter-parity**：在 ≥70 万行 fixture 上，五档过滤（全部 / 仅差异 / 左独有 / 右独有 / 相同）两侧的可见行数，以及首行、中间行、末行的相对路径与 `filterDirectoryTree → projectDirectoryTree → 前序遍历` 语义逐条一致。
+- **ac-collapse-semantics**：折叠再展开任意（含顶层大）目录后，行数与 `rows.at(i)` 的节点/深度/open 一致；展开后该目录最后一个子项可被滚动到并渲染，DOM 仍有界。
+- **ac-huge-rows-drilldown-restore**（prd `ac-drilldown-restore`）：在超大行数下选中尾部行后下钻、再逐级返回重挂载，滚动偏移恢复到同一行（误差 ≤1px）且选中行位于渲染窗口内、`aria-selected="true"`。
+- **ac-stats-unchanged**：五档过滤下 `CompositionLegend` / `visibleCounts` 的四态计数与修复前取值完全相同（不改四态语义与统计口径）。
+- **ac-existing-tests**：现有 `src/renderer/src/views/DirectoryView.test.tsx` 与 `App.test.tsx` 中目录对比相关用例语义不变并全部通过（滚动比例、restore、empty-filter 文案、DOM 上限等）。
 - **ac-batch-multi-dir-per-call**：对含 ≥ 8 个目录的临时 fixture 扫描，记录到的批量列目录调用中至少有一次携带 ≥ 2 个目录路径，且总批量调用次数严格小于被扫描目录数（证明一个往返覆盖多个目录）。
 - **ac-default-concurrency-16**：对含 ≥ 32 个可列目录的 fixture，用默认参数扫描：实测在飞批量请求峰值 ≥ 16，且 ≤ 遍历并发上限常量；该默认常量在单一来源导出且数值 ≥ 16。
 - **ac-concurrency-cap**：显式传入并发上限（如 4）扫描同一 fixture：实测在飞峰值 ≤ 4，产出的树、`index` 键集合、四态计数与 `skipped` 与默认并发下逐项相等。
@@ -140,6 +150,12 @@
 - **摘要分块大小单一来源导出**（`compare.ts` 的 `DEFAULT_DIGEST_BATCH_SIZE`），可在测试经 `digestBatchSize` 覆盖；每结算一块才写该块成功项的 `cache.hashes`，取消时不写未结算块。核心不感知 `operationId`，只透传 `signal`。
 
 ## 最近交付证明
+
+- WI：`wi_intake_faea4044a6334067`（目录树超大行数（≥150 万行）尾部不可达修复，`kind: fix`）
+- 日期：2026-10-22
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 含新增 1,516,096 行 / 70 万行用例全绿）。
+- 覆盖摘要：`src/core/directory/rows.ts` 新增 `DIRECTORY_MAX_TREE_HEIGHT = 16_777_215` 与纯函数 `createDirectoryScrollMap(rowCount, viewportHeight)`（返回 `contentHeight` / `maxScrollOffset` / `scaled` / `offsetForIndex` / `rowPositionForOffset` / `indexForOffset` / `visibleRange` / `rowTop`）：总高未超限时退化为 `index * 24` 恒等映射，超限时容器高钉在 2^24 以下、行按 `maxScrollOffset / (rows - 1)` 步长共享可达偏移，末行恰好落在 `maxScrollOffset`，`rowPositionForOffset` 给出连续锚点消除尾部死区。`TreeView` 仍以 `useVirtualizer` 观测滚动偏移与视口高度，但渲染窗口改由该映射产出（`visibleRange` + `rowTop`），容器加 `overflow-clip` 防止 overscan 行撑大滚动区；其余行渲染结构、`aria-level` / `title` / 状态徽标与 props 契约不变。测试：`rows.test.ts` 增 `createDirectoryScrollMap` 三条（上限内恒等、越界首行切换压缩映射、1,516,096 行高度封顶且索引严格递增可达）+ 70 万行 comparison 三条（五档 × 两侧 filter/project parity、四态计数 parity、10 万条目录折叠展开）；新增 `TreeView.test.tsx`（jsdom 640px 视口）六条（1.5M 行高度封顶与小树像素恒等、最大偏移处渲染末行、采样索引与尾部目录按映射可达、任意位置/总行数下窗口有界、尾部行选中后重挂载恢复、重展开 87,500 文件目录仍能滚到末子项），fixture 由新增 `src/test/largeDirectory.ts` 合成（8 × 100,000 文件）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例，全局 tech / design 折叠跳过；prd 的 `ac-drilldown-restore` 与既有同名验收（过滤+折叠+选中+滚动往返）语义不同，折叠为 `ac-huge-rows-drilldown-restore` 以保留两条口径。
 
 - WI：`wi_ws_90a06ca6d557d5cd`（扫描/哈希进度与可取消，`kind: feature`）
 - 日期：2026-10-21
