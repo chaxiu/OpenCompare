@@ -23,6 +23,7 @@ import type { DirectoryDiffNode } from '@core/directory/compare'
 import { countTreeFiles, filterDirectoryTree } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
+import { isOperationCancelled } from '@core/io'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { DropdownMenu } from '@renderer/components/DropdownMenu'
@@ -31,7 +32,7 @@ import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
 import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
-import { cx } from '@renderer/components/utils'
+import { cx, formatBytes } from '@renderer/components/utils'
 import { CodeView } from '@renderer/views/CodeView'
 import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
@@ -105,6 +106,21 @@ interface DirectoryScroll {
 }
 
 const EMPTY_SCROLL: DirectoryScroll = { left: 0, right: 0 }
+
+/** Live progress of the directory comparison currently running, if any. */
+interface DirectoryProgressState {
+  readonly phase: 'scan' | 'digest'
+  readonly files: number
+  readonly bytes: number
+  /** The cancel action was clicked and the comparison has not settled yet. */
+  readonly cancelling: boolean
+}
+
+/** One directory comparison's cancellable identity, shared with the platform. */
+interface ActiveDirectoryOperation {
+  readonly id: string
+  readonly controller: AbortController
+}
 
 const VIEW_OPTIONS: readonly { value: SceneId; label: string; icon: JSX.Element }[] = [
   { value: 'directory', label: '目录对比', icon: <FolderTree aria-hidden className="size-3.5" /> },
@@ -191,6 +207,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [codeMerge, setCodeMerge] = useState<Record<string, CodeMergeState>>({})
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
+  const [directoryProgress, setDirectoryProgress] = useState<DirectoryProgressState | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryStates, setDirectoryStates] = useState<Record<string, DirectoryViewState>>({})
@@ -203,6 +220,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [compareDialogOpen, setCompareDialogOpen] = useState(false)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
+  /** The directory comparison that can still be cancelled, if one is running. */
+  const activeDirectoryOperation = useRef<ActiveDirectoryOperation | null>(null)
   /** Latest launch-request handler; the subscription itself is installed once. */
   const launchRequest = useRef<(payload: CompareRequestPayload) => void>(() => undefined)
 
@@ -491,10 +510,27 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     next: ComparisonSides,
     onError?: (message: string) => void
   ): Promise<boolean> {
+    opSequence.current += 1
+    const operation: ActiveDirectoryOperation = {
+      id: `directory-${opSequence.current}-${Math.random().toString(36).slice(2, 8)}`,
+      controller: new AbortController()
+    }
+    activeDirectoryOperation.current = operation
     setDirectoryBusy(true)
     setNotice(null)
+    setDirectoryProgress({ phase: 'scan', files: 0, bytes: 0, cancelling: false })
     try {
-      const comparison = await compareSides(platform, next, cache.current)
+      const comparison = await compareSides(platform, next, cache.current, {
+        signal: operation.controller.signal,
+        operationId: operation.id,
+        onProgress: (progress) => {
+          setDirectoryProgress((current) =>
+            current === null
+              ? current
+              : { ...current, phase: progress.phase, files: progress.files, bytes: progress.bytes }
+          )
+        }
+      })
       upsertSession(createDirectorySession(comparison, next))
       setStatus('ready')
       // A comparison that succeeded with unreadable entries is still a success:
@@ -504,13 +540,35 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       }
       return true
     } catch (cause) {
+      // Cancellation never commits a session; the shell keeps what it had.
+      if (isOperationCancelled(cause)) {
+        report('已取消本次目录对比，工作台保持取消前的状态。', 'info')
+        return false
+      }
       const message = cause instanceof Error ? cause.message : String(cause)
       if (onError) onError(message)
       else report(message)
       return false
     } finally {
+      activeDirectoryOperation.current = null
+      setDirectoryProgress(null)
       setDirectoryBusy(false)
     }
+  }
+
+  /**
+   * Stops the running directory comparison: abort the core first (so no new
+   * batch starts), then ask the platform to destroy its in-flight streams. A
+   * platform failure here never changes the UI outcome.
+   */
+  function cancelDirectoryCompare(): void {
+    const operation = activeDirectoryOperation.current
+    if (operation === null) return
+    setDirectoryProgress((current) =>
+      current === null ? current : { ...current, cancelling: true }
+    )
+    operation.controller.abort()
+    void platform.cancelOperation(operation.id).catch(() => undefined)
   }
 
   /**
@@ -1083,6 +1141,40 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         >
           {notice}
         </p>
+      ) : null}
+
+      {/* Directory-comparison progress lives on the shell so the empty state and
+          an open session show the very same live bar. */}
+      {directoryProgress ? (
+        <div
+          role="status"
+          aria-label="目录对比进度"
+          aria-live="polite"
+          className="flex shrink-0 items-center gap-3 border-b border-line-subtle bg-surface-sunken px-3 py-1 text-2xs"
+        >
+          <span className="shrink-0 font-medium text-content-primary">
+            {directoryProgress.phase === 'scan' ? '正在扫描目录' : '正在校验内容'}
+          </span>
+          <span aria-hidden className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-surface-hover">
+            <span className="block h-full w-1/2 animate-pulse rounded-full bg-accent" />
+          </span>
+          <span className="shrink-0 text-content-secondary">
+            已扫描 {directoryProgress.files} 个文件
+          </span>
+          <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+          <span className="shrink-0 text-content-muted">
+            已处理 {formatBytes(directoryProgress.bytes)}
+          </span>
+          <ToolbarButton
+            size="sm"
+            className="ml-auto"
+            onClick={cancelDirectoryCompare}
+            disabled={directoryProgress.cancelling}
+            title="停止本次目录对比并保持当前工作台状态"
+          >
+            取消
+          </ToolbarButton>
+        </div>
       ) : null}
 
       <main className="flex min-h-0 flex-1 flex-col">

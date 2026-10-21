@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   compareDirectories,
@@ -34,10 +35,14 @@ import type {
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import {
   DEFAULT_STAT_CONCURRENCY,
+  activeDigestStreamCount,
+  cancelOperation,
+  digestFiles,
   listDirectories,
   registerPlatformIpc
 } from './electron-platform'
-import type { ListableStat } from './electron-platform'
+import type { DigestReadStream, ListableStat } from './electron-platform'
+import { OperationCancelledError } from '@core/io'
 
 const { handlers, dialogs } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -83,6 +88,8 @@ const platform: PlatformPort = {
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   digestFiles: (paths, options) =>
     invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<readonly FileDigest[]>,
+  cancelOperation: (operationId) =>
+    invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
   writeTextFile: (path, content, modifiedMs) =>
     invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
@@ -792,4 +799,262 @@ describe.skipIf(REAL_LEFT === undefined || REAL_RIGHT === undefined)('real proje
     expect(comparison.fileCount).toBe(same + added + removed + modified)
     expect(comparison.skipped).toBeGreaterThanOrEqual(1)
   }, 900_000)
+})
+
+describe('digest cancellation', () => {
+  /** A stream that stays open until it is destroyed, like a real file read. */
+  class HangingStream implements DigestReadStream {
+    destroyed = false
+    destroyError: Error | undefined
+    private release: (() => void) | undefined
+
+    destroy(error?: Error): void {
+      this.destroyed = true
+      this.destroyError = error
+      this.release?.()
+    }
+
+    [Symbol.asyncIterator](): AsyncIterator<Buffer> {
+      return {
+        next: async (): Promise<IteratorResult<Buffer>> => {
+          if (!this.destroyed) {
+            await new Promise<void>((resolve) => {
+              this.release = resolve
+            })
+          }
+          if (this.destroyError !== undefined) throw this.destroyError
+          return { done: true, value: undefined }
+        }
+      }
+    }
+  }
+
+  /** A stream that yields fixed bytes once its shared gate opens. */
+  class GatedStream implements DigestReadStream {
+    private destroyedWith: Error | undefined
+
+    constructor(
+      private readonly gate: Promise<void>,
+      private readonly payload: Buffer
+    ) {}
+
+    destroy(error?: Error): void {
+      this.destroyedWith = error
+    }
+
+    async *[Symbol.asyncIterator](): AsyncGenerator<Buffer, void, unknown> {
+      await this.gate
+      if (this.destroyedWith !== undefined) throw this.destroyedWith
+      yield this.payload
+    }
+  }
+
+  /** A real file read whose first chunk waits for `gate`; destroy also releases it. */
+  function gatedRealStream(path: string, gate: Promise<void>): DigestReadStream {
+    const inner = createReadStream(path)
+    let releaseDestroy!: () => void
+    const destroyed = new Promise<void>((resolve) => {
+      releaseDestroy = resolve
+    })
+    let destroyError: Error | undefined
+    return {
+      async *[Symbol.asyncIterator](): AsyncGenerator<Buffer, void, unknown> {
+        await Promise.race([gate, destroyed])
+        if (destroyError !== undefined) throw destroyError
+        for await (const chunk of inner) yield chunk as Buffer
+      },
+      destroy(error?: Error): void {
+        destroyError = error
+        releaseDestroy()
+        inner.destroy()
+      }
+    }
+  }
+
+  async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+    const started = Date.now()
+    while (!predicate()) {
+      if (Date.now() - started > timeoutMs) throw new Error('timed out waiting for a condition')
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+  }
+
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  async function errorOf(promise: Promise<unknown>): Promise<unknown> {
+    return promise.then(
+      () => 'resolved',
+      (error: unknown) => error
+    )
+  }
+
+  it('destroys every in-flight stream and rejects instead of returning partial slots', async () => {
+    const streams: HangingStream[] = []
+    const run = digestFiles(['/virtual/a.bin', '/virtual/b.bin', '/virtual/c.bin'], {
+      operationId: 'streams-op',
+      concurrency: 2,
+      streamFactory: () => {
+        const stream = new HangingStream()
+        streams.push(stream)
+        return stream
+      }
+    })
+
+    await waitUntil(() => streams.length === 2 && activeDigestStreamCount() === 2)
+    await cancelOperation('streams-op')
+
+    const error = await errorOf(run)
+    expect(error).toBeInstanceOf(OperationCancelledError)
+    expect((error as OperationCancelledError).code).toBe('ECANCELED')
+    expect(streams.every((stream) => stream.destroyed)).toBe(true)
+    await delay(20)
+    expect(activeDigestStreamCount()).toBe(0)
+  })
+
+  it('treats unknown and repeated ids as harmless and reclaims finished operations', async () => {
+    const root = await scratchRoot()
+    const file = join(root, 'done.txt')
+    await writeFile(file, 'done')
+
+    const normal = await digestFiles([file], { operationId: 'normal-op' })
+    expect(normal[0]).toMatchObject({ ok: true })
+    expect(activeDigestStreamCount()).toBe(0)
+
+    await expect(cancelOperation('never-registered')).resolves.toBeUndefined()
+    await expect(cancelOperation('normal-op')).resolves.toBeUndefined()
+    await expect(cancelOperation('normal-op')).resolves.toBeUndefined()
+
+    // A stale id must not reach any other live operation.
+    const streams: HangingStream[] = []
+    const other = digestFiles(['/other/only.bin'], {
+      operationId: 'other-op',
+      streamFactory: () => {
+        const stream = new HangingStream()
+        streams.push(stream)
+        return stream
+      }
+    })
+    await waitUntil(() => streams.length === 1)
+    await cancelOperation('normal-op')
+    expect(streams[0].destroyed).toBe(false)
+
+    await cancelOperation('other-op')
+    expect(await errorOf(other)).toBeInstanceOf(OperationCancelledError)
+  })
+
+  it('scopes cancellation to one operation and lets the other finish correctly', async () => {
+    let releaseGate!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    const aStreams: HangingStream[] = []
+    const bStreams: GatedStream[] = []
+    const payload = Buffer.from('hello')
+
+    const a = digestFiles(['/a/one.txt', '/a/two.txt'], {
+      operationId: 'op-a',
+      concurrency: 2,
+      streamFactory: () => {
+        const stream = new HangingStream()
+        aStreams.push(stream)
+        return stream
+      }
+    })
+    const b = digestFiles(['/b/one.txt', '/b/two.txt'], {
+      operationId: 'op-b',
+      concurrency: 2,
+      streamFactory: () => {
+        const stream = new GatedStream(gate, payload)
+        bStreams.push(stream)
+        return stream
+      }
+    })
+
+    await waitUntil(() => aStreams.length === 2 && bStreams.length === 2)
+    await cancelOperation('op-a')
+    expect(await errorOf(a)).toBeInstanceOf(OperationCancelledError)
+    // B still holds both of its streams after A was cancelled.
+    expect(activeDigestStreamCount()).toBe(2)
+
+    releaseGate()
+    const results = await b
+    const expected = createHash('sha256').update(payload).digest('hex')
+    expect(results).toEqual([
+      { path: '/b/one.txt', ok: true, sha256: expected, bytes: payload.length },
+      { path: '/b/two.txt', ok: true, sha256: expected, bytes: payload.length }
+    ])
+    expect(activeDigestStreamCount()).toBe(0)
+  })
+
+  it('leaves no stream behind and re-compares the same real pair after a cancel', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    await mkdir(join(left, 'nested'), { recursive: true })
+    await mkdir(join(right, 'nested'), { recursive: true })
+    await writeFile(join(left, 'same.txt'), 'identical')
+    await writeFile(join(right, 'same.txt'), 'identical')
+    await writeFile(join(left, 'nested', 'deep.txt'), 'deep')
+    await writeFile(join(right, 'nested', 'deep.txt'), 'deep')
+    await stamp(join(left, 'same.txt'), 1_000_000)
+    await stamp(join(right, 'same.txt'), 1_000_000)
+    await stamp(join(left, 'nested', 'deep.txt'), 1_000_000)
+    await stamp(join(right, 'nested', 'deep.txt'), 1_000_000)
+
+    const list = (path: string) => platform.listDirectory(path)
+    const baseline = await compareDirectories(
+      left,
+      right,
+      list,
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: (paths) => platform.digestFiles(paths),
+        listDirectories: (paths) => platform.listDirectories(paths)
+      }
+    )
+
+    // The gate never opens: only cancelling can settle these reads.
+    const gate = new Promise<void>(() => undefined)
+    const cancelled = compareDirectories(
+      left,
+      right,
+      list,
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: (paths) =>
+          digestFiles(paths, {
+            operationId: 'real-cancel',
+            streamFactory: (path) => gatedRealStream(path, gate)
+          }),
+        listDirectories: (paths) => platform.listDirectories(paths)
+      }
+    )
+
+    await waitUntil(() => activeDigestStreamCount() > 0)
+    await cancelOperation('real-cancel')
+    expect(await errorOf(cancelled)).toBeInstanceOf(OperationCancelledError)
+    expect(activeDigestStreamCount()).toBe(0)
+
+    const retried = await compareDirectories(
+      left,
+      right,
+      list,
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: (paths) => platform.digestFiles(paths, { operationId: 'real-retry' }),
+        listDirectories: (paths) => platform.listDirectories(paths)
+      }
+    )
+    expect(retried.counts).toEqual(baseline.counts)
+    expect(retried.skipped).toBe(baseline.skipped)
+    expect(activeDigestStreamCount()).toBe(0)
+  })
 })

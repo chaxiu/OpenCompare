@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
-import { mapWithLimit, toReadableIoError } from '@core/io'
+import { OperationCancelledError, mapWithLimit, toReadableIoError } from '@core/io'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
@@ -152,6 +152,20 @@ function parseConcurrencyOptions(value: unknown): DigestFilesOptions & ListDirec
     unknown
   >
   return typeof record.concurrency === 'number' ? { concurrency: record.concurrency } : {}
+}
+
+/** Digest options arrive over IPC, so `operationId` is validated the same way. */
+function parseDigestOptions(value: unknown): LocalDigestFilesOptions {
+  const record = (typeof value === 'object' && value !== null ? value : {}) as Record<
+    string,
+    unknown
+  >
+  const options: { concurrency?: number; operationId?: string } = {}
+  if (typeof record.concurrency === 'number') options.concurrency = record.concurrency
+  if (typeof record.operationId === 'string' && record.operationId.length > 0) {
+    options.operationId = record.operationId
+  }
+  return options
 }
 
 function parseDialogRequest(value: unknown): DialogRequest {
@@ -366,24 +380,99 @@ async function readLocalTextFile(path: string): Promise<string> {
   }
 }
 
+/** The minimal read-stream surface the digest owns and can destroy. */
+export interface DigestReadStream extends AsyncIterable<Buffer> {
+  destroy(error?: Error): void
+}
+
+/** Test seam replacing `createReadStream`; defaults to `node:fs`. */
+export type DigestStreamFactory = (path: string) => DigestReadStream
+
+/** In-flight read streams of one digest operation. */
+interface DigestOperation {
+  cancelled: boolean
+  readonly streams: Set<DigestReadStream>
+}
+
+const digestOperations = new Map<string, DigestOperation>()
+let activeDigestStreams = 0
+
+/**
+ * Live raw-byte read streams across every digest operation. Cancelling must
+ * drive this back to zero: a leaked handle would hit `EMFILE` on the next run.
+ */
+export function activeDigestStreamCount(): number {
+  return activeDigestStreams
+}
+
+/** Reads the live cancellation flag; never narrowed away by the compiler. */
+function isOperationCancelled(operation: DigestOperation | undefined): boolean {
+  return operation !== undefined && operation.cancelled
+}
+
+function registerDigestOperation(operationId: string): DigestOperation {
+  const existing = digestOperations.get(operationId)
+  if (existing !== undefined) return existing
+  const operation: DigestOperation = { cancelled: false, streams: new Set() }
+  digestOperations.set(operationId, operation)
+  return operation
+}
+
+/**
+ * Cancels every in-flight stream registered under `operationId`. Unknown and
+ * repeated ids resolve harmlessly; the owning `digestFiles` call rejects with
+ * {@link OperationCancelledError} instead of returning partial slots.
+ */
+export async function cancelOperation(operationId: string): Promise<void> {
+  const operation = digestOperations.get(operationId)
+  if (operation === undefined) return
+  operation.cancelled = true
+  for (const stream of [...operation.streams]) {
+    stream.destroy(new OperationCancelledError())
+  }
+}
+
 /**
  * Streams one file's raw bytes through SHA-256. The bytes are never decoded as
  * text, so invalid UTF-8 stays distinguishable; one handle is held per file and
- * the caller bounds how many files stream at once.
+ * the caller bounds how many files stream at once. With an operation attached
+ * the stream is registered so `cancelOperation` can destroy it mid-read.
  */
-async function digestLocalFile(path: string): Promise<FileDigestSuccess> {
+async function digestLocalFile(
+  path: string,
+  operation: DigestOperation | undefined,
+  streamFactory: DigestStreamFactory
+): Promise<FileDigestSuccess> {
+  if (isOperationCancelled(operation)) throw new OperationCancelledError()
   const hash = createHash('sha256')
-  const stream = createReadStream(path)
+  const stream = streamFactory(path)
   let bytes = 0
+
+  if (operation !== undefined) {
+    operation.streams.add(stream)
+    activeDigestStreams += 1
+    // Cancellation may have raced the registration: kill this handle at once.
+    if (isOperationCancelled(operation)) stream.destroy(new OperationCancelledError())
+  }
+
   try {
     for await (const chunk of stream) {
-      const buffer = chunk as Buffer
+      const buffer = chunk
       bytes += buffer.length
       hash.update(buffer)
     }
+  } catch (error) {
+    if (isOperationCancelled(operation)) throw new OperationCancelledError()
+    throw error
   } finally {
+    if (operation !== undefined) {
+      operation.streams.delete(stream)
+      activeDigestStreams -= 1
+    }
     stream.destroy()
   }
+
+  if (isOperationCancelled(operation)) throw new OperationCancelledError()
   return { path, ok: true, sha256: hash.digest('hex'), bytes }
 }
 
@@ -400,24 +489,49 @@ function digestSampleFile(path: string): FileDigestSuccess {
   }
 }
 
+/** Local digest options: the shared contract plus the injectable stream seam. */
+export interface LocalDigestFilesOptions extends DigestFilesOptions {
+  /** Test seam replacing `createReadStream`; defaults to `node:fs`. */
+  readonly streamFactory?: DigestStreamFactory
+}
+
 /**
  * Digests a batch of files' raw bytes in input order. A readable failure only
  * fails that one item — one unreadable file must not cost the whole comparison —
  * while descriptor exhaustion still rejects, since it would fail every read.
+ *
+ * With an `operationId` the call registers its in-flight streams, so
+ * `cancelOperation` can destroy them and make the whole batch reject instead of
+ * returning partial slots; the registry entry is always released afterwards.
  */
 export async function digestFiles(
   paths: readonly string[],
-  options: DigestFilesOptions = {}
+  options: LocalDigestFilesOptions = {}
 ): Promise<readonly FileDigest[]> {
-  return mapWithLimit(paths, options, async (path): Promise<FileDigest> => {
-    try {
-      return isSamplePath(path) ? digestSampleFile(path) : await digestLocalFile(path)
-    } catch (error) {
-      const code = errorCode(error)
-      if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
-      return { path, ok: false, reason: readableFailure('文件', error, path).message }
-    }
-  })
+  const operationId = options.operationId
+  const operation = operationId === undefined ? undefined : registerDigestOperation(operationId)
+  if (isOperationCancelled(operation)) throw new OperationCancelledError()
+
+  const streamFactory = options.streamFactory ?? ((path: string) => createReadStream(path))
+  try {
+    return await mapWithLimit(paths, options, async (path): Promise<FileDigest> => {
+      if (isOperationCancelled(operation)) throw new OperationCancelledError()
+      try {
+        return isSamplePath(path)
+          ? digestSampleFile(path)
+          : await digestLocalFile(path, operation, streamFactory)
+      } catch (error) {
+        if (error instanceof OperationCancelledError || isOperationCancelled(operation)) {
+          throw new OperationCancelledError()
+        }
+        const code = errorCode(error)
+        if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
+        return { path, ok: false, reason: readableFailure('文件', error, path).message }
+      }
+    })
+  } finally {
+    if (operationId !== undefined) digestOperations.delete(operationId)
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -509,8 +623,12 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   ipcMain.handle(
     PLATFORM_CHANNELS.digestFiles,
     (_event, paths: unknown, options: unknown) =>
-      digestFiles(parsePathArray(paths, 'file'), parseConcurrencyOptions(options))
+      digestFiles(parsePathArray(paths, 'file'), parseDigestOptions(options))
   )
+  ipcMain.handle(PLATFORM_CHANNELS.cancelOperation, (_event, operationId: unknown) => {
+    if (typeof operationId !== 'string' || operationId.length === 0) return
+    return cancelOperation(operationId)
+  })
   ipcMain.handle(PLATFORM_CHANNELS.readTextFile, (_event, path: unknown) => {
     const target = assertPath(path)
     if (!isSamplePath(target)) return readLocalTextFile(target)

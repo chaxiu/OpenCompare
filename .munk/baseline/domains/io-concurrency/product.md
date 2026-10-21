@@ -11,6 +11,8 @@ IO 并发治理域：跨 `directory` / `snapshot` / `foundation`（Electron 主�
 - **接入点四：递进式目录遍历（`scanDirectory`）**：队列 + 批量取数 + 有界并发——分层收集待列目录、一次批量往返覆盖多个目录，批量调用经 `mapWithLimit` 限制在飞数（遍历默认并发 `DEFAULT_TRAVERSAL_CONCURRENCY = 16`，可经 `ScanDirectoryOptions.concurrency` 覆盖）；`list` / 批量调用失败经 `toReadableIoError` 转换后抛出，首错停发、等在飞收敛、绝不返回部分树。**遍历并发与 `stat` 预算是两个独立常量**，互不代偿，也不得通过抬高 `DEFAULT_IO_CONCURRENCY`（内容读取/摘要默认 8）来达成。
 - **接入点五：批量字节摘要（`PlatformPort.digestFiles`，语义归 `content-digest` 域）**：主进程 `digestFiles` 按批经 `mapWithLimit(paths, options, …)` 流式读取文件原始字节算 sha256，一条流一个句柄，默认窗口沿用 `DEFAULT_IO_CONCURRENCY`；单文件读取失败只标记该项失败，`EMFILE` / `ENFILE` 经 `toReadableIoError` 整批 reject（由 `compare.ts` 的 `digestContentCandidates` 转成可读错误），不被逐文件失败吞掉。本域只拥有窗口与句柄错误口径，摘要算法与平台缝归 `content-digest`。
 - **可读句柄错误（`FileHandleExhaustedError` / `toReadableIoError`）**：识别 `EMFILE` / `ENFILE`，在核心层边界转换为中文错误，消息包含「文件句柄」并保留原始错误码线索（EMFILE / ENFILE）；其他错误原样透传，不改平台层既有抛错结构。UI 侧复用工作台既有 `notice` / `report` 就地提示，不静默吞、不崩窗口、不生成空目录会话。
+- **取消错误与 abort 竞速（`src/core/io.ts`，纯核心层）**：新增 `OperationCancelledError`（`name = 'OperationCancelledError'`、`code = 'ECANCELED'`、中文消息含「已取消」）、`isOperationCancelled(error)`、`throwIfAborted(signal)` 与 `abortable(operation, signal)`。`abortable` 与 signal 竞速：signal 已触发时立即以取消错误 reject 并给被放弃的 promise 挂 `catch`，未触发时正常透传结果/错误并解绑监听；`toReadableIoError` 仍只转换 `EMFILE` / `ENFILE`，取消错误原样透传。
+- **主进程在途摘要流注册表（`src/main/platform/electron-platform.ts`）**：按 `operationId` 记录该次摘要全部在途 `ReadStream` 与「已取消」标记；`cancelOperation(operationId)` 同步置标记并 `destroy` 每条流（带取消错误），使该次 `digestFiles` 整批 reject 而非返回部分槽位，未启动的文件不再开流；操作结束（成功 / 失败 / 取消）在 `finally` 回收注册项。导出 `activeDigestStreamCount()` 供断言，要求取消后（最迟 100ms 内）归零——注销的句柄即 EMFILE 隐患，归本域句柄生命周期口径。
 - **README「已知问题」段**：明确写出 v0.2.1 及更早版本拖入大目录可能触发 `EMFILE`，且当前版本已修复（有界并发读取 + 可读错误提示）。
 
 ## 验收
@@ -27,6 +29,11 @@ IO 并发治理域：跨 `directory` / `snapshot` / `foundation`（Electron 主�
 - **ac-fd-exhaustion-fatal**：批量列目录的 `stat` / `readdir` 抛 `EMFILE` 或 `ENFILE` 时，`compareDirectories` reject 可读中文错误（消息含「文件句柄」与原始错误码），该失败**不**被计入 `skipped`。
 - **ac-no-partial-tree**：扫描进行中遇到上述致死错误（或批量返回缺少被请求目录的槽位）时，调用方拿到的是 reject，`scanDirectory` 不返回任何部分 `ScannedTree`，`compareDirectories` 不返回 `DirectoryComparison`；`mapWithLimit` 的「首错停发、等在飞收敛、绝不返回部分结果」语义在批量扫描路径上成立。
 - **ac-bounded-traversal-batch**：对含 ≥ 32 个可列目录的 fixture 用默认参数扫描，实测在飞批量请求峰值 ≥ 16 且 ≤ 遍历并发上限常量；显式传入上限（如 4）时峰值 ≤ 4，且树、`index` 键集合、四态计数与 `skipped` 与默认并发下逐项相等。
+- **ac-cancel-error-contract**：`OperationCancelledError` 的 `name === 'OperationCancelledError'`、`code === 'ECANCELED'`、消息含「已取消」；`isOperationCancelled` 能识别它，`toReadableIoError` 不把它改写成句柄错误。
+- **ac-abort-race**：用永不 resolve 的假平台调用挂住一个批次后 `abort()`，`abortable` 立即以取消错误 reject（不等在飞 promise 收敛），且被放弃的 promise 不产生 unhandled rejection。
+- **ac-cancel-main-streams-zero**：主进程 `digestFiles(paths, { operationId })` 正在流式读取（经可注入流工厂挂住）时调用 `cancelOperation(operationId)`：该次 `digestFiles` 以取消错误 reject、不返回部分槽位；reject 时（最迟 100ms 内）导出的活动读取流计数归零，每个注入流都收到 `destroy`。
+- **ac-cancel-registry-idempotent**：`cancelOperation` 对未知 `operationId` 与同一 id 的重复调用均 resolve 不抛；一次正常结束的 `digestFiles` 之后其注册项已回收（同 id 的 `cancelOperation` 不再影响其他并发操作）。
+- **ac-cancel-operation-scoped**：同一平台实例上并发两个摘要操作 A 与 B（不同 `operationId`，均挂住）：取消 A 只让 A 以取消错误 reject，B 随后正常 resolve 且槽位内容正确；B 的活动流计数在 A 取消后仍 > 0。
 
 ## 非目标
 
@@ -36,6 +43,7 @@ IO 并发治理域：跨 `directory` / `snapshot` / `foundation`（Electron 主�
 - 本域不改 `PlatformPort` 契约语义与既有 channel / preload 白名单形态；新增平台能力（如批量字节摘要）归 `content-digest` / `foundation` 域，本域只规定其并发窗口与句柄错误口径。
 - 不改目录对比语义、过滤、下钻、同步 / 模板逻辑与 UI 布局；不顺带做「体验优化」类改动。
 - 不引入新的第三方并发库或运行时依赖（不引 p-limit / p-queue 之类）。
+- 不做进度上报语义与进度 UI：批次计数、阶段名与 `onProgress` 契约归 `directory` 域，本域只提供「批次可被中断」的竞速原语；不做暂停 / 恢复 / 断点续传，不做取消确认对话框。
 
 ## 实现约束
 
@@ -46,8 +54,16 @@ IO 并发治理域：跨 `directory` / `snapshot` / `foundation`（Electron 主�
 - 默认值和上限只存在一处、各自单一来源导出：`DEFAULT_IO_CONCURRENCY`（内容读取 / 摘要，8）、`DEFAULT_TRAVERSAL_CONCURRENCY`（遍历在飞批量调用，16）、`DEFAULT_STAT_CONCURRENCY`（整批共享的 `stat` 预算，16）；调用点不得重复硬编码数字，测试经可选参数覆盖。
 - README「已知问题」与修复交付使用同一行口径，写事实不写空话。
 - 交付前 `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm test`（含 build:web）全绿。
+- **取消必须是竞速而非等待收敛**：批次用 `abortable` 与 signal `Promise.race`，被放弃的在途 promise 挂 `catch`（不得 unhandled rejection）；取消错误 `OperationCancelledError` 放 `src/core/io.ts`，核心与主进程经 `@core/io` 共用，`toReadableIoError` 保持只转换 `EMFILE` / `ENFILE`。
+- **注册表必须按操作隔离且必回收**：`operationId` 只由 renderer 生成、只在平台层有意义，核心不感知；置标记 + `destroy` 同步完成，`digestFiles` 的 `finally` 删除注册项；取消后活动流计数必须归零，不留句柄（否则下一次对比 EMFILE）。未带 `operationId` 的既有调用行为完全不变。
 
 ## 最近交付证明
+
+- WI：`wi_ws_90a06ca6d557d5cd`（扫描/哈希进度与可取消，`kind: feature`）
+- 日期：2026-10-21
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 全绿，含新增取消用例）。
+- 覆盖摘要：`src/core/io.ts` 新增 `OperationCancelledError`（`code: 'ECANCELED'`）、`isOperationCancelled`、`throwIfAborted`、`abortable`（abort 竞速 + 被放弃 promise 挂 `catch`，取消错误不经 `toReadableIoError` 改写）。主进程 `electron-platform.ts` 新增 `DigestOperation` 注册表（按 `operationId` 记在途流与取消标记）、导出 `cancelOperation` / `activeDigestStreamCount`、`DigestStreamFactory` 注入缝；`digestLocalFile` 登记/回收流并在取消时 `destroy`，`digestFiles` 在 `finally` 回收注册项、取消整批 reject 不返回部分槽位。`electron-platform.test.ts` 新增「digest cancellation」4 条（destroy 全部在途流并拒绝而非部分槽位、未知/重复 id 幂等且正常结束后回收、A/B 并行取消只影响 A、取消后无残留流并可重比同一真实目录对）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例；扫描/摘要进度语义归 `domains/directory`，`operationId` 契约与 Web 回退归 `domains/content-digest` / `domains/foundation`。
 
 - WI：`wi_ws_deb41e1c6a5a2b8f`（目录条目批量 IPC 与 ≥16 路有界遍历，`kind: feature`）
 - 日期：2026-10-21

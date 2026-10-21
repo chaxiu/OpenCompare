@@ -27,6 +27,7 @@ import type {
 } from './compare'
 import {
   compareScannedTrees,
+  createScanProgressMerger,
   digestContentCandidates,
   readContentCandidates,
   scanDirectory
@@ -449,9 +450,11 @@ export async function compareDirectorySides(
   options: ComparisonIoOptions = {}
 ): Promise<DirectoryComparison> {
   try {
+    // Directory sides of a mixed pair still report one monotonic scan stream.
+    const sideReporter = createScanProgressMerger(options.onProgress)
     const [leftSide, rightSide] = await Promise.all([
-      resolveSide(left, 'left', list, options),
-      resolveSide(right, 'right', list, options)
+      resolveSide(left, 'left', list, { ...options, onProgress: sideReporter() }),
+      resolveSide(right, 'right', list, { ...options, onProgress: sideReporter() })
     ])
 
     const mounts = [leftSide.mount, rightSide.mount].filter(

@@ -36,6 +36,8 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<
       readonly FileDigest[]
     >,
+  cancelOperation: (operationId) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
   writeTextFile: (path, content, modifiedMs) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,

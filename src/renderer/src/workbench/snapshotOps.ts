@@ -21,7 +21,12 @@ import { REMOTE_SNAPSHOT, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { FileDialogFilter, PlatformPort } from '@shared/platform/types'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { scanDirectory } from '@core/directory/compare'
-import type { ComparisonCache, DirectoryComparison } from '@core/directory/compare'
+import type {
+  ComparisonCache,
+  ComparisonIoOptions,
+  DirectoryComparison,
+  ProgressReporter
+} from '@core/directory/compare'
 import {
   SNAPSHOT_MOUNT_ROOT,
   SnapshotContentError,
@@ -163,13 +168,35 @@ export function seedSnapshotCache(cache: ComparisonCache, sides: ComparisonSides
   }
 }
 
+/** Workbench-supplied progress, cancellation and digest tuning of one comparison. */
+export interface CompareSidesOptions {
+  /** Aborts scanning and digesting; the comparison rejects without a result. */
+  readonly signal?: AbortSignal
+  /** Ties the platform digest calls to one cancellable operation. */
+  readonly operationId?: string
+  readonly onProgress?: ProgressReporter
+  /** Test/support override of the digest chunk size. */
+  readonly digestBatchSize?: number
+}
+
 /** Compares two sides (either real directory or mounted snapshot) and refreshes the cache. */
 export function compareSides(
   platform: PlatformPort,
   sides: ComparisonSides,
-  cache: ComparisonCache
+  cache: ComparisonCache,
+  options: CompareSidesOptions = {}
 ): Promise<DirectoryComparison> {
   seedSnapshotCache(cache, sides)
+  const { operationId, digestBatchSize } = options
+  const ioOptions: ComparisonIoOptions = {
+    signal: options.signal,
+    onProgress: options.onProgress,
+    digestBatchSize,
+    // One `operationId` covers every digest chunk of this comparison.
+    digestFiles: (paths) =>
+      platform.digestFiles(paths, operationId === undefined ? undefined : { operationId }),
+    listDirectories: (paths) => platform.listDirectories(paths)
+  }
   return compareDirectorySides(
     sides.left,
     sides.right,
@@ -177,10 +204,7 @@ export function compareSides(
     (path) => platform.readTextFile(path),
     cache,
     undefined,
-    {
-      digestFiles: (paths) => platform.digestFiles(paths),
-      listDirectories: (paths) => platform.listDirectories(paths)
-    }
+    ioOptions
   )
 }
 
