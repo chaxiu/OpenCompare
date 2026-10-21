@@ -19,7 +19,8 @@
 - **发布目标**：`electron-builder.yml` 声明 `publish: { provider: github, releaseType: release }`；实际发布改由 release.yml 单点预建 + `gh release upload` 完成（矩阵 `--publish never`），最终 Release 为公开（非 Draft）。
 - **发布触发与 tag 单点解析**：`.github/workflows/release.yml` 监听 `v*` tag push，并额外声明 `workflow_dispatch`（输入 `tag`，required，默认 `v0.2.1`）用于不改 tag 的补发。工作流级 `env.RELEASE_TAG: ${{ inputs.tag || github.ref_name }}` 是唯一 tag 来源，版本断言、Release 预建 / 上传 / 公开、唯一性与资产校验全部引用 `RELEASE_TAG`；dispatch 路径不得把 `GITHUB_REF_NAME`（`main`）当 tag。
 - **发布工作流**：`.github/workflows/release.yml` 监听 `v*` tag，门禁 job（install `--frozen-lockfile` / lint / typecheck / test / build）先行。门禁末尾**单点预建该 tag 的唯一 Release**（`gh release create ... --draft --generate-notes`，注入 `GH_TOKEN`/`GH_REPO` 并显式带 `--repo`；若已存在则清理同名重复只留一个），随后 mac/win/linux 三平台矩阵 `electron-builder --<target> --publish never` 仅本地打包到 `release/`，再用 `gh release upload "${RELEASE_TAG}" <三端全部产物> --clobber --repo` 汇聚上传到该唯一 Release；`finalize` job `gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest` 正式公开。Release 唯一性以 tag 为准，杜绝并发建单竞态。
-- **发版版本单点**：`package.json#version` 为发版的唯一版本来源（当前 `0.2.1`），tag 语义版本与打包产物 `latest*.yml#version` 均须与其对齐，二者由 `release.yml` 对齐闸断言。
+- **发版版本单点**：`package.json#version` 为发版的唯一版本来源（当前 `0.2.2`），tag 语义版本与打包产物 `latest*.yml#version` 均须与其对齐，二者由 `release.yml` 对齐闸断言。
+- **版本收敛的机械耦合面**：改 `package.json#version` 会连带 `release-packaging.test.ts` 的版本断言、`docs/release-signing.md` 姿态行、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、README 状态行与发布流程默认 tag 一起漂移。v0.2.2 起测试一律从 `package.json#version` 派生 `currentTag` 再互相校验（CHANGELOG 标题、发布说明文件名/标题、README 状态行、workflow dispatch default），版本字面量只允许出现在文档标题 / 文件名等文档标识位置。
 - **Release Notes 草案**：根目录 `CHANGELOG.md`（Keep a Changelog / SemVer 口径）记录版本条目，新版本条目排在旧版本之上。`## v0.2.1` 位于 `## v0.2.0` 之上并说明首发替代缘由（v0.2.0 从未公开发布、用户可见变化与 v0.2.0 相同、发布门测试改为不依赖本机 git 状态），同时保留 v0.2.0 的用户可见要点（顶栏常驻「新建对比」+ 免弹窗左右路径直传、启动参数与 `opencompare://compare` 注入 + 单实例接管、文件会话原位写回、自制品牌图标与窗口/关于同源）与升级方式；`docs/release-notes/v0.2.1.md` 是当前版本的 GitHub Release Notes **来源文本**（纯 Markdown、面向用户、无内部实现流水账、无 `TODO`/`TBD`/`FIXME` 占位），标题版本与 `package.json#version` 由测试交叉比对；`docs/release-notes/v0.2.0.md` 保留为历史文件（不被删除或改写）。
 - **版本漂移记录（只读事实 + 不动作声明）**：`CHANGELOG.md` 与 `docs/release-signing.md` 两处记录同一组 `v0.1.2` 事实——本地 annotated tag 对象 `c4a6a95` 指向 commit `7ea2cc6` 且为 `main` 祖先；远端 `v0.1.2` 是**轻量 tag**，指向 `bb0c0b1`，不在 `v0.2.0`（`285ee28`）祖先链上（`v0.1.2..HEAD`=29，`HEAD..v0.1.2`=2），两条仅远端 tag 可达提交（`bb0c0b1` / `b2c4e51`）经 `git cherry HEAD` 均为 `-`（补丁已等价存在于 HEAD，零内容丢失）；规划基线时 `main` 领先 13 个提交（只是规划基线快照，实际以打 tag 时 `main` 为准）；远端 Release 公开、非预发布、共 11 个资产；并声明**不删除 / 不移动 / 不重打 / 不替换** tag 与资产、tag 之后的修复由 `v0.2.1` 承接（`docs/release-signing.md`）／`v0.2.0` 承接（`CHANGELOG.md` 的 v0.2.0 条目保留原措辞）、后续只能发更高版本不改写历史。
 - **CI 只读发布前置门（版本 + 祖先）**：`release.yml` 的 `gates` job 在 `pnpm install` / `pnpm test` 之前依次执行：① tag 格式校验（`^v[0-9]+\.[0-9]+\.[0-9]+$`，不合格 `::error::` + `exit 1`），② checkout 后断言 `refs/tags/${RELEASE_TAG}` 可解析为 commit（不存在即失败），③ `package.json#version` 严格 semver，④ 祖先门。祖宗门**内联**在该步骤的 `run` 脚本里（不引用仓库内脚本文件——dispatch 会用 main 上的 workflow 去 checkout 旧 tag，新脚本在旧 tag 上不存在会误失败），语义为「`v0.1.2` 是 `HEAD` 严格祖先 **或** 所有仅 tag 可达提交逐条 `git cherry HEAD <sha>` 判定均为 `-`」；日志打印 `v0.1.2` 的 ref 类型（`git cat-file -t` 为 `commit` = 轻量 tag，`tag` = annotated tag）、解析到的 commit SHA、`v0.1.2..HEAD` / `HEAD..v0.1.2` 计数，以及每条仅 tag 可达提交的完整 SHA 与判定符号（`-` / `+`）。任一 `+`、仅 tag 可达提交无法枚举、tag 不可解析、或仅 tag 可达提交的 diff 删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`）时，门 `::error::` + 非零退出（fail-closed），后续质量门禁、打包矩阵与 finalize 均不运行；`v0.1.2..HEAD` 提交数为 0 也非零退出（发布必须携带 tag 之后的修复）。门只做只读 git 查询（`cat-file` / `rev-parse` / `rev-list` / `cherry` / `diff-tree`），不创建、移动、删除任何 tag / ref，不 push，不调用 `gh release` 写操作。`gates` 的 `actions/checkout` 设 `fetch-depth: 0` 使 tag 与历史在 CI 可见。
@@ -226,6 +227,22 @@
 - **ac-readme-test-matches**：测试对 README 发布状态的断言与第 5 行一致（含上述 URL），且 `pnpm test` 中该断言通过。
 - **ac-gates-green**：`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm test` 全部退出码 0。
 
+### v0.2.2 版本收敛与发布说明（EMFILE 修复承接）
+
+- **ac-version-0-2-2**：`package.json#version` 严格等于 `0.2.2`，且 `CHANGELOG.md` 存在 `## v0.2.2` 标题。
+- **ac-version-single-source**：`src/main/release-packaging.test.ts` 中不出现 `'0.2.2'` / `'v0.2.2'` 字面量，也不再出现 `toBe('0.2.1')` 的版本钉死；所有版本相关断言值均由读取到的 `package.json#version` 派生。
+- **ac-preflight-version-derived**：`release.yml` 的 `Preflight package version` 与 `Assert the tag matches package.json version` 两步的版本来源仍是 `node -p "require('./package.json').version"`，步骤内无内联版本号。
+- **ac-changelog-v022**：`CHANGELOG.md` 中 `## v0.2.2` 的位置早于 `## v0.2.1`，该段包含 `8` 路有界并发、`EMFILE`、`ENFILE`、`https://github.com/chaxiu/OpenCompare/issues/2` 四个可断言片段。
+- **ac-release-notes-v022**：`docs/release-notes/v0.2.2.md` 存在，首个 `# ` 标题含 `v0.2.2`；正文含「大目录对比不再崩溃 / 句柄耗尽可读提示」的用户可见变化，以及面向「v0.2.1 及更早」用户的升级建议；不含 `TODO` / `TBD` / `FIXME` 占位符。
+- **ac-readme-status-pending**：`README.md` 状态行同时满足：含 `当前发布状态：v0.2.2 待发布`、含 `最新公开 Release 为 v0.2.1`、含 `docs/release-notes/v0.2.2.md`，且不含 `v0.2.2 已发布`。
+- **ac-readme-known-issues**：`README.md`「已知问题」段声明故障版本为「v0.2.1 及更早」，并声明当前版本已修复（8 路有界并发 + 文件句柄耗尽可读提示），不再把故障归给当前版本。
+- **ac-signing-doc-posture**：`docs/release-signing.md` 含 `正式版发布姿态（v0.2.2）`、含 `docs/release-notes/v0.2.2.md`、含 `tag 之后的修复由 v0.2.2 承接`。
+- **ac-dispatch-default-derived**：`release.yml` 的 `workflow_dispatch` tag 默认值字符串等于 `v${package.json#version}`，且 `README.md`「发布流程」段含同一默认值文本；两处一致。
+- **ac-test-retarget-keeps-intent**：版本变更导致的三处既有断言按原位重定标且强度不降——(a) README 发布姿态断言由「已发布」改为「待发布」并断言最新公开 Release 链接指向 v0.2.1；(b) 「当前发布说明承载上一版用户可见变化」的关键词断言改为对 `docs/release-notes/v0.2.1.md` 断言，另对 v0.2.2 说明断言 EMFILE/并发关键词；(c) v0.2.1 首发替代说明的切片边界固定为 `## v0.2.1`..`## v0.2.0`，不被新增的 `## v0.2.2` 拓宽。
+- **ac-no-workflow-order-change**：`release.yml` 的 job 名、步骤名与顺序、`needs`、`push: tags: ['v*']` 触发条件、`--publish never`、finalize 断言均与改动前逐项相同；`git diff` 仅涉及 `workflow_dispatch` 默认值一行。
+- **ac-no-release-side-effects**：本项不创建 tag、不 push、不 publish、不创建 Release；仓内不出现新的发布执行脚本或凭据。
+- **ac-gates-green**：`.munk/code-gates.json` 的 `lint` / `typecheck` / `build` / `build-web` / `test` 全部通过。
+
 ## 非目标
 
 - 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
@@ -252,6 +269,7 @@
 - v0.2.1 首发替代项只做**版本与发布文档 / 发布测试对齐**：不改发布语义、打包配置（`electron-builder.yml`、`build/`）、依赖与 `pnpm-lock.yaml`；不创建、不推送任何 tag，不创建或修改任何 GitHub Release；不碰 v0.1.x 与 v0.2.0 的 tag 与 Release；不做实机安装 / 签名 / 公证验收，不跑 self_test；不改任何用户可见功能、UI、交互或算法（v0.2.1 用户可见变化与 v0.2.0 完全相同）；不删除或改写 v0.2.0 发布说明与取证记录（保留为历史）；不重写 v0.1.2 漂移历史，也不新增其他版本线。
 - 测试套件环境自包含项**只改测试与必要的可测性**（主要 `src/main/release-packaging.test.ts`；`src/main/release-evidence.test.ts` 只断言文档文本、不执行 git，保持不动）：不改 `release.yml` 的任何发布语义（checkout ref、祖先门语义、单点预建唯一 Release、矩阵 `--publish never`、finalize 公开）、不改 `electron-builder.yml` / `package.json` 依赖或脚本、不新增依赖、不改产品代码或 UI；不把 gate 脚本抽成仓库脚本；不打 tag / 不移动 tag / 不 push / 不 publish / 不创建 Release；不试图让已冻结的 `v0.2.0` tag 树里的旧测试变绿（不移动 tag 就无法改变该树），本项只保证以 HEAD 为基础打出的后续 tag / 派发在干净环境可复现通过；不凭猜测放宽断言（先复现再改）。
 - 发布后自检 `gh api` 组合修复项**只改发布后自检命令与其静态断言**：不改打包目标、electron-builder 配置、签名 / 公证配置、Secrets 清单或发布模型（tag → Release）；不重指、删除或新建任何 tag；不 push、不 dispatch、不建 / 改 Release；不跑实机验收或 UI 自测；不重构 CI 其他 job（gates / build / upload）与无关测试，不顺手加 lint 规则或抽脚本模块；不改 v0.1.2 漂移记录与历史发布说明。
+- v0.2.2 收敛项只做**版本收敛与发布文档对齐**（承接已合入 `main` 的 EMFILE 修复，merge `4c028f5` / 修复提交 `a24cdd2`）：不改 `src/core/`、`src/main/`（除 `release-packaging.test.ts` 的版本断言）、`src/renderer/`、`src/preload/`、`src/shared/` 的业务逻辑；不改 `src/main/release-evidence.test.ts` 与 `docs/release-evidence/v0.2.1.md`；不新建 `docs/release-evidence/v0.2.2.md`、不补写 v0.2.2 取证；不清理 `0.2.0` / `0.2.1` 历史发布文档；不改既有功能测试与门禁行为断言口径（除上述三处版本耦合重定标外不放宽、不删除）；不改 `release.yml` 步骤顺序 / 发布模型 / fail-closed 配置 / 祖先门与单 Release 断言；不做新功能、不调并发默认值（保持 8）、不做顺手重构；不建 tag / 不 push / 不 publish / 不建 Release。
 
 ## 实现约束
 
@@ -264,7 +282,7 @@
 - 品牌资产唯一入库位置为 `build/`（及 `build/icons/`），二进制产物必须提交；生成脚本只使用 Node 标准库与本机现有系统工具（如 macOS `iconutil`），不新增依赖；品牌名统一 `OpenCompare`，图标与关于信息必须同源，禁止多处各写一份。
 - 沿用现有 `electron-builder.yml` 配置模式，只新增必需字段（如 `mac.identity`），不重排既有配置；`mac.notarize: true`、`hardenedRuntime`、entitlements 与打包目标保持不变。配置断言单测沿用 Node 环境读取仓库根配置的方式（`node:fs` + `node:path`，不 import Electron），落在现有 `src/main/release-packaging.test.ts`。文档与 README 保持既有发布冻结口径，只替换凭据模式相关内容，不新增文档体系。
 - 签名/公证 Secrets 只接到 mac 矩阵步骤；版本对齐只做断言与失败，不改 version、不打 tag；`release.yml` 保持 `v*` tag 触发、`gates` 先行与单点预建 + 汇聚上传 + finalize 流程。
-- **版本身份单一来源**：`package.json#version` = `0.2.1`；文档里的字面版本由测试与 `package.json` 交叉比对，测试优先用 `currentVersion` / `currentTag`（由 `package.json` 推导）而非硬编码（`ac-pkg-version` 与 `ac-packaging-test-sync` 一起兜住）。
+- **版本身份单一来源**：`package.json#version` = `0.2.2`；文档里的字面版本由测试与 `package.json` 交叉比对，测试优先用 `currentVersion` / `currentTag`（由 `package.json` 推导）而非硬编码（`ac-pkg-version` 与 `ac-packaging-test-sync` 一起兜住）。
 - **漂移事实的 13 只是规划基线快照**，不硬编码为实时真值（本项开工时 `main` 已领先 23 个提交，Wave 1 四项已合入）：文档措辞须体现「规划基线 13，实际以 tag 时 main 为准」；断言只校验「是祖先 + 领先数 > 0」，绝不写死 13 或 23 的等值比较。
 - **测试对仓库根只读文件、对 git 只读 fixture**：仓库根只用 `node:fs` 读配置 / 文档，不执行任何 git 子命令；所有 git 调用走统一 `fixtureGit(repo, args)` helper，只作用在 `os.tmpdir()` fixture 里，禁止 shell 拼接，禁止 `git tag` / `push` / `fetch` / `merge` / `rebase` 作用于本仓；CI preflight 仍只读（`git rev-list --count` / `git rev-parse` / `git cat-file` / `git cherry` / `git diff-tree`）。
 - **fixture 环境必须自包含**：`git init -b <显式分支>`（不依赖 `init.defaultBranch`）；身份走 `GIT_AUTHOR_*` / `GIT_COMMITTER_*`；固定 `GIT_CONFIG_GLOBAL=/dev/null`、`GIT_CONFIG_SYSTEM=/dev/null`、`GIT_CONFIG_NOSYSTEM=1`；丢弃所有继承的 `GIT_*`（`GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` / alternates 等）并指向独立临时 HOME；禁止 `...process.env` 直接带全局配置进 fixture。
@@ -274,7 +292,7 @@
 - 既有「v0.1.2 姿态」类用例已收敛为按当前 tag（`currentTag`）断言，保留 `not.toMatch(/发布状态：冻结/)` 之类防回退守卫，并保留 README / 签名文档中 `v0.1.2` 漂移段落（否则 `ac-drift-facts-*` 会失去落点）。
 - `docs/release-notes/v0.2.1.md` 为纯 Markdown、零前端代码，作为人工创建 Release 时粘贴的来源文本；`v0.2.0.md` 保留为历史文件；不引入自动生成脚本。
 - **祖先门必须内联在 `release.yml` 的步骤里**：dispatch 使用 main 上的 workflow 文件，但 gates 会 checkout `refs/tags/<tag>`，引用仓库内新脚本会在旧 tag 上找不到文件而误失败。门须可被 vitest 直接执行：测试解析 `.github/workflows/release.yml` 取出该步骤的 `run` 脚本，在 `os.tmpdir()` 下的临时 git 仓库里跑 `bash`，不得改动本仓 refs。
-- **版本字面量从 `package.json` 推导**：`src/main/release-packaging.test.ts` 用 `const currentVersion = pkg.version` / `const currentTag = \`v${currentVersion}\`` 驱动 release notes 路径、dispatch 默认 tag、README 状态行、CHANGELOG 段序等断言，避免下一版再次硬编码漂移（`'0.2.1'` 只允许出现在「当前版本钉住」这一条断言里）。
+- **版本字面量从 `package.json` 推导**：`src/main/release-packaging.test.ts` 用 `const currentVersion = pkg.version` / `const currentTag = \`v${currentVersion}\`` 驱动 release notes 路径、dispatch 默认 tag、README 状态行、CHANGELOG 段序等断言，避免下一版再次硬编码漂移。**v0.2.2 起连「当前版本钉住」那条断言也取消**：`release-packaging.test.ts` 里不出现 `'0.2.2'` / `'v0.2.2'` 字面量，版本一致性全部经 `currentTag` 互校（CHANGELOG 标题、发布说明文件名与首标题、README 状态行、workflow dispatch 默认值）。
 - **v0.2.1 取证文件只做只读记录**：`docs/release-evidence/v0.2.1.md` 落 `status: blocked`，只含就绪门命令原始输出、缺失项、待人工动作与升级说明；不得提前写入任何通过标记（`valid on disk` / `The validate action worked!` / `source=Notarized Developer ID`）或产物 SHA-256；`v0.2.0.md` 保留为历史且不再更新。
 - **改动范围收敛**：允许改 `package.json`、`CHANGELOG.md`、`README.md`、`docs/release-signing.md`、`.github/workflows/release.yml`（仅 `workflow_dispatch.inputs.tag.default`）、`docs/release-notes/v0.2.1.md`（新增）、`docs/release-evidence/v0.2.1.md`（新增）、`src/main/release-packaging.test.ts`、`src/main/release-evidence.test.ts`；触发方式、gates-first 顺序、`refs/tags/<tag>` checkout 次数与发布语义一律不动。
 - **不额外新增门**：走既有 `code_gates`（install / lint / typecheck / build / build:web / test），不为本项加新脚本或新 gate。
@@ -286,13 +304,10 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_7774770085728eac`（修复 release 发布自检的非法 `gh` 组合 `--slurp` + `--jq`）
-- 日期：2026-10-20
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿，attempt 001，396 tests / 26 files；`needSelfTest=false` 且本轮跳过 UI 自测）。改动 2 文件（`release.yml` +16/−…、`release-packaging.test.ts` +59/−…），未新增依赖。
-- 改动事实：
-  - `.github/workflows/release.yml` 5 处发布后自检由 `gh api ... --paginate --slurp --jq` 改为 `gh api ... --paginate | jq -s`（取 release id / 资产名用 `jq -s -r`），保留 `.[][]` 分页语义、tag 过滤、draft / prerelease 计数、`-ne 1` 三项判定与 8 类资产后缀 / `has_asset` / 版本名断言。
-  - 计数步骤新增 `for value in "${count}" "${drafts}" "${prereleases}"` + `^[0-9]+$` 校验，空值 / 非整数即 `::error::Could not count the releases` + `exit 1`；release_id / assets 空值仍显式 `exit 1`。
-  - `src/main/release-packaging.test.ts`：去掉 `--paginate --slurp` 断言，改为断言 `--paginate | jq -s`（含 `.[][]` / `select(.draft)` / `select(.prerelease)` / `-ne 1` / `-ne 0`）与 `jq -s -r` 取 id/资产名；新增计数空值 / 非整数失败断言；新增 `gh api option compatibility` 全文件扫描组（含 `--slurp` 的行不得同时含 `--jq` / `--template`）；README 状态断言改为已发布态（`v0.2.1 已发布` + `releases/tag/v0.2.1`，且不再出现 `待发布` / `最新公开 Release 为 v0.1.2`）。
-- 证据：本机 `gh 2.97.0` 复现 `the --slurp option is not supported with --jq or --template`；CI run `39358768053` 的 finalize 失败发生在发布后自检而非产物；v0.2.1 已是唯一公开 Release（11 个资产）。
-- 注：本 WI change pack 只提供 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 fold、无 tech/ux 手合；新增 `qa/release-selfcheck-gh-api-jq.md` 记录本轮验收，并把 `qa/v021-release-substitution.md` 里已过期的 README「待发布」口径标注为历史。
-- 后续注意：本次只修了自检脚本，**未在本机验证真实 CI**——下一步是负责人推 main 后以 `workflow_dispatch(tag=v0.2.1)` 幂等重跑，确认 finalize job 变绿；若 CI runner 的 `gh` / `jq` 版本行为与本地不同，优先怀疑 `jq -s` 的多页数组语义（`.[][]`）与空输出退出码。`--slurp` 与 `--jq` 的互斥应作为长期回归断言保留，新增任何 `gh api` 分页命令都走 `| jq -s`。
+- WI：`wi_intake_b7a851eeb41ce4d4`（v0.2.2 版本收敛与发布说明，承接已合入 main 的 EMFILE 修复；`kind: chore/release`）
+- 日期：2026-10-21
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；门禁 attempt 001 的 install / lint / typecheck / build / build:web / test 全绿）。
+- 覆盖摘要：`package.json#version` `0.2.1` → `0.2.2`；`CHANGELOG.md` 顶部新增 `## v0.2.2`（8 路有界并发、EMFILE / ENFILE 可读提示、回指 Issue #2）；新增 `docs/release-notes/v0.2.2.md`；`README.md` 状态行翻为「v0.2.2 待发布 + 最新公开 Release 为 v0.2.1」并指向新发布说明，「已知问题」改为故障版本「v0.2.1 及更早」+ 当前版本已修复；`docs/release-signing.md` 姿态行 / 姿态标题 / 补发默认 tag / 「tag 之后的修复由 v0.2.2 承接」同步；`release.yml` 仅改 `workflow_dispatch.inputs.tag.default` 一行（`v0.2.2`）；`release-packaging.test.ts` 删除 `toBe('0.2.1')` 钉死与全部 `'0.2.2'` / `'v0.2.2'` 字面量，改由 `currentTag` 派生并互校 CHANGELOG 标题 / 发布说明首标题 / README 状态行 / workflow 默认值，同时新增 v0.2.2 CHANGELOG 与发布说明关键词用例、README 已知问题归属用例，并把「上一版用户可见变化」断言改锚 `docs/release-notes/v0.2.1.md`、把 v0.2.1 替代说明切片边界固定为 `## v0.2.1`..`## v0.2.0`。
+- 证据：`git diff --stat` 6 文件（`release.yml` 1 行、`package.json` 1 行、`CHANGELOG.md` +14、`README.md` 4 行、`docs/release-signing.md` 10 行、`release-packaging.test.ts` +67/−…），另有新增 `docs/release-notes/v0.2.2.md`；未新增依赖、未改发布模型与签名 / 公证配置。
+- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 fold、无 tech/ux 手合；本轮验收按 AC 逐条落档为 `qa/v022-version-convergence.md`。
+- 后续注意：① 版本一改即触发「机械耦合面」连锁（测试断言 + 签名文档姿态 + workflow dispatch 默认值 + README 状态行 / 发布流程），下个版本收敛项应直接复用 `currentTag` 派生路线，别再引入版本字面量；② workflow dispatch 默认值已指向 `v0.2.2`，而 tag 尚未创建，此刻手动 dispatch 会在「Assert the release tag exists in the checkout」显式失败（预期 fail-closed，不加旁路）；③ v0.2.2 发布说明与 CHANGELOG 是用户可见文案的唯一来源，真实发布后需把 README 状态行从「待发布」翻回「已发布 + releases/tag/v0.2.2」，并同步 `release-packaging.test.ts` 的对应断言。
