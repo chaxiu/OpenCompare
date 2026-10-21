@@ -110,8 +110,12 @@ const EMPTY_SCROLL: DirectoryScroll = { left: 0, right: 0 }
 /** Live progress of the directory comparison currently running, if any. */
 interface DirectoryProgressState {
   readonly phase: 'scan' | 'digest'
+  /** Whole-pipeline cumulative files; never decreases across the phase switch. */
   readonly files: number
+  /** Whole-pipeline cumulative bytes; never decreases across the phase switch. */
   readonly bytes: number
+  /** Files settled inside the current phase (what the digest copy shows). */
+  readonly phaseFiles: number
   /** The cancel action was clicked and the comparison has not settled yet. */
   readonly cancelling: boolean
 }
@@ -526,7 +530,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     activeDirectoryOperation.current = operation
     setDirectoryBusy(true)
     setNotice(null)
-    setDirectoryProgress({ phase: 'scan', files: 0, bytes: 0, cancelling: false })
+    setDirectoryProgress({ phase: 'scan', files: 0, bytes: 0, phaseFiles: 0, cancelling: false })
     try {
       const comparison = await compareSides(platform, next, cache.current, {
         signal: operation.controller.signal,
@@ -535,7 +539,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           setDirectoryProgress((current) =>
             current === null
               ? current
-              : { ...current, phase: progress.phase, files: progress.files, bytes: progress.bytes }
+              : {
+                  ...current,
+                  phase: progress.phase,
+                  files: progress.files,
+                  bytes: progress.bytes,
+                  phaseFiles: progress.phaseFiles
+                }
           )
         }
       })
@@ -1167,8 +1177,20 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             <span className="block h-full w-1/2 animate-pulse rounded-full bg-accent" />
           </span>
           <span className="shrink-0 text-content-secondary">
-            已扫描 {directoryProgress.files} 个文件
+            {directoryProgress.phase === 'scan'
+              ? `已扫描 ${directoryProgress.files} 个文件`
+              : `已校验 ${directoryProgress.phaseFiles} 个文件`}
           </span>
+          {directoryProgress.phase === 'digest' ? (
+            <>
+              <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+              {/* The phase increment above is this run's progress; this is the
+                  whole pipeline, so the number never drops at the hand-over. */}
+              <span className="shrink-0 text-content-secondary">
+                累计 {directoryProgress.files} 个文件
+              </span>
+            </>
+          ) : null}
           <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
           <span className="shrink-0 text-content-muted">
             已处理 {formatBytes(directoryProgress.bytes)}

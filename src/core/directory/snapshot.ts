@@ -451,10 +451,10 @@ export async function compareDirectorySides(
 ): Promise<DirectoryComparison> {
   try {
     // Directory sides of a mixed pair still report one monotonic scan stream.
-    const sideReporter = createScanProgressMerger(options.onProgress)
+    const sideProgress = createScanProgressMerger(options.onProgress)
     const [leftSide, rightSide] = await Promise.all([
-      resolveSide(left, 'left', list, { ...options, onProgress: sideReporter() }),
-      resolveSide(right, 'right', list, { ...options, onProgress: sideReporter() })
+      resolveSide(left, 'left', list, { ...options, onProgress: sideProgress.reporter() }),
+      resolveSide(right, 'right', list, { ...options, onProgress: sideProgress.reporter() })
     ])
 
     const mounts = [leftSide.mount, rightSide.mount].filter(
@@ -472,11 +472,14 @@ export async function compareDirectorySides(
     // Snapshot-mounted paths have no file behind them, so only real directory
     // files may go through the byte digest; the snapshot side keeps hashing its
     // inline text with {@link sha256Hex}, exactly as the wire format captured it.
+    // Digest progress continues from the directory sides' scan totals.
+    const digestBase = sideProgress.totals()
     const digestOptions: ComparisonIoOptions =
       options.digestFiles === undefined || options.digestible !== undefined
-        ? options
+        ? { ...options, progressBase: digestBase }
         : {
             ...options,
+            progressBase: digestBase,
             digestible: (path) =>
               !mounts.some((mount) => path.startsWith(`${mount.mountPath}/`))
           }
