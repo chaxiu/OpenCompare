@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronRight, FileCode2, FileText, Folder, FolderOpen } from 'lucide-react'
 import type { DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import type { DirectoryRowModel } from '@core/directory/rows'
-import { DIRECTORY_ROW_HEIGHT } from '@core/directory/rows'
+import { DIRECTORY_ROW_HEIGHT, createDirectoryScrollMap } from '@core/directory/rows'
 import { DiffBadge } from './DiffBadge'
 import { cx } from './utils'
 
@@ -147,6 +147,9 @@ export function TreeView({
   readonly onSelectPath: (path: string) => void
   readonly onOpenFile?: (node: DirectoryDiffNode) => void
 }): JSX.Element {
+  // The virtualiser is used for what it observes (the panel's scroll offset
+  // and viewport height); the row window itself comes from the pure scroll map
+  // below, which caps the container height at the browser layout limit.
   // TanStack Virtual's returned functions are intentionally not memoizable.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -157,22 +160,33 @@ export function TreeView({
     initialOffset: initialScrollTop
   })
 
+  const offset = virtualizer.scrollOffset ?? initialScrollTop
+  const viewportHeight = virtualizer.scrollRect?.height ?? 0
+  const scrollMap = createDirectoryScrollMap(rows.length, viewportHeight)
+  const range = scrollMap.visibleRange(offset, ROW_OVERSCAN)
+  const windowedRows: { readonly index: number; readonly top: number }[] = []
+  for (let index = range.start; index <= range.end; index += 1) {
+    windowedRows.push({ index, top: scrollMap.rowTop(index, offset) })
+  }
+
   return (
     <div
       role="tree"
       aria-label={label}
-      className="relative min-w-max"
-      style={{ height: rows.length * DIRECTORY_ROW_HEIGHT }}
+      // `overflow-clip` keeps the overscan rows from extending the panel's
+      // scrollable area now that row tops are mapped rather than stacked.
+      className="relative min-w-max overflow-clip"
+      style={{ height: scrollMap.contentHeight }}
     >
-      {virtualizer.getVirtualItems().map((item) => {
-        const row = rows.at(item.index)
+      {windowedRows.map(({ index, top }) => {
+        const row = rows.at(index)
         if (!row) return null
         return (
           <div
             key={row.node.relativePath}
             role="none"
             className="absolute top-0 left-0 min-w-full"
-            style={{ height: DIRECTORY_ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
+            style={{ height: DIRECTORY_ROW_HEIGHT, transform: `translateY(${top}px)` }}
           >
             <TreeRow
               node={row.node}

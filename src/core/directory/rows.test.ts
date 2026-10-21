@@ -8,7 +8,19 @@ import {
   projectDirectoryTree
 } from './filter'
 import type { DirectoryFilter } from './filter'
-import { buildDirectoryRowModel, visibleDirectoryCounts } from './rows'
+import {
+  LARGE_FILES_PER_DIRECTORY,
+  LARGE_ROW_COUNT,
+  LARGE_SIDE_FILES_PER_DIRECTORY,
+  createLargeDirectoryComparison
+} from '../../test/largeDirectory'
+import {
+  DIRECTORY_MAX_TREE_HEIGHT,
+  DIRECTORY_ROW_HEIGHT,
+  buildDirectoryRowModel,
+  createDirectoryScrollMap,
+  visibleDirectoryCounts
+} from './rows'
 
 interface Spec {
   readonly name: string
@@ -302,4 +314,222 @@ describe('visibleDirectoryCounts', () => {
       modified: 1
     })
   })
+})
+
+/* ------------------------------------------------------------------ */
+/* Scroll mapping (browser height cap)                                 */
+/* ------------------------------------------------------------------ */
+
+describe('createDirectoryScrollMap', () => {
+  const VIEWPORT = 640
+  /** Exactly the rows whose natural height still fits below 2^24. */
+  const FITTING_ROWS = Math.floor(DIRECTORY_MAX_TREE_HEIGHT / DIRECTORY_ROW_HEIGHT)
+
+  it('is the identity while the natural height fits the browser cap', () => {
+    expect(FITTING_ROWS * DIRECTORY_ROW_HEIGHT).toBeLessThanOrEqual(DIRECTORY_MAX_TREE_HEIGHT)
+    expect((FITTING_ROWS + 1) * DIRECTORY_ROW_HEIGHT).toBeGreaterThan(DIRECTORY_MAX_TREE_HEIGHT)
+
+    for (const rowCount of [0, 1, 5_000, FITTING_ROWS]) {
+      const map = createDirectoryScrollMap(rowCount, VIEWPORT)
+      expect(map.scaled).toBe(false)
+      expect(map.contentHeight).toBe(rowCount * DIRECTORY_ROW_HEIGHT)
+      expect(map.maxScrollOffset).toBe(Math.max(0, rowCount * DIRECTORY_ROW_HEIGHT - VIEWPORT))
+      for (const index of [0, Math.floor(rowCount / 2), rowCount - 1]) {
+        if (index < 0) continue
+        expect(map.offsetForIndex(index)).toBe(index * DIRECTORY_ROW_HEIGHT)
+      }
+    }
+
+    const map = createDirectoryScrollMap(FITTING_ROWS, VIEWPORT)
+    expect(map.rowPositionForOffset(4_800)).toBe(200)
+    expect(map.indexForOffset(4_800)).toBe(200)
+    expect(map.rowTop(206, 4_800)).toBe(206 * DIRECTORY_ROW_HEIGHT)
+    const range = map.visibleRange(4_800, 10)
+    expect(range.start).toBe(190)
+    expect(range.end).toBe(237)
+  })
+
+  it('switches to the compressed map at the first row above the cap', () => {
+    expect(createDirectoryScrollMap(FITTING_ROWS, VIEWPORT).scaled).toBe(false)
+    const overflow = createDirectoryScrollMap(FITTING_ROWS + 1, VIEWPORT)
+    expect(overflow.scaled).toBe(true)
+    expect(overflow.contentHeight).toBe(DIRECTORY_MAX_TREE_HEIGHT)
+  })
+
+  it('caps 1,516,096 rows below 2^24 and keeps every index reachable', () => {
+    const rowCount = 1_516_096
+    const map = createDirectoryScrollMap(rowCount, VIEWPORT)
+
+    expect(map.scaled).toBe(true)
+    expect(map.contentHeight).toBe(DIRECTORY_MAX_TREE_HEIGHT)
+    expect(map.contentHeight).toBeLessThan(2 ** 24)
+    expect(map.maxScrollOffset).toBe(DIRECTORY_MAX_TREE_HEIGHT - VIEWPORT)
+    // No dead zone: the last row lands on the last reachable pixel.
+    expect(map.offsetForIndex(rowCount - 1)).toBeLessThanOrEqual(map.maxScrollOffset)
+    expect(map.offsetForIndex(rowCount - 1)).toBeCloseTo(map.maxScrollOffset, 6)
+    // At the bottom the viewport's top row is exactly one screen of rows back.
+    expect(map.indexForOffset(map.maxScrollOffset)).toBe(
+      rowCount - Math.ceil(VIEWPORT / DIRECTORY_ROW_HEIGHT)
+    )
+
+    let previous = -1
+    for (let index = 0; index < rowCount; index += 997) {
+      const offset = map.offsetForIndex(index)
+      expect(offset).toBeGreaterThan(previous)
+      previous = offset
+      const range = map.visibleRange(offset, 10)
+      expect(range.start).toBeLessThanOrEqual(index)
+      expect(range.end).toBeGreaterThanOrEqual(index)
+      // The mapped row is inside the viewport, not merely somewhere in content.
+      const top = map.rowTop(index, offset)
+      expect(top).toBeGreaterThanOrEqual(offset - 0.001)
+      expect(top).toBeLessThanOrEqual(offset + VIEWPORT)
+    }
+    for (const base of [0, Math.floor(rowCount / 4), Math.floor(rowCount / 2), rowCount - 2]) {
+      expect(map.offsetForIndex(base + 1)).toBeGreaterThan(map.offsetForIndex(base))
+    }
+
+    // At the maximum offset the final row is the one at the bottom of the view.
+    const tail = map.visibleRange(map.maxScrollOffset, 10)
+    expect(tail.end).toBe(rowCount - 1)
+    expect(map.rowTop(rowCount - 1, map.maxScrollOffset)).toBeCloseTo(
+      map.maxScrollOffset + VIEWPORT - DIRECTORY_ROW_HEIGHT,
+      6
+    )
+    expect(tail.end - tail.start + 1).toBeLessThanOrEqual(80)
+  })
+})
+
+interface BigPlainRow {
+  readonly relativePath: string
+  readonly name: string
+  readonly kind: 'file' | 'directory'
+  readonly depth: number
+  readonly status: FileDiffStatus
+}
+
+/** Lazy pre-order over filter → project, so 700k rows never sit in an array. */
+function* bigOracleRows(
+  root: DirectoryDiffNode,
+  filter: DirectoryFilter,
+  side: 'left' | 'right',
+  collapsed: readonly string[]
+): Generator<BigPlainRow> {
+  const filtered = filterDirectoryTree(root, filter)
+  const projected = filtered ? projectDirectoryTree(filtered, side) : null
+  if (!projected) return
+  const collapsedSet = new Set(collapsed)
+  const stack: { node: DirectoryDiffNode; depth: number }[] = [{ node: projected, depth: 0 }]
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop() as { node: DirectoryDiffNode; depth: number }
+    yield { relativePath: node.relativePath, name: node.name, kind: node.kind, depth, status: node.status }
+    if (node.kind === 'directory' && !collapsedSet.has(node.relativePath)) {
+      for (let index = node.children.length - 1; index >= 0; index -= 1) {
+        stack.push({ node: node.children[index], depth: depth + 1 })
+      }
+    }
+  }
+}
+
+function sampledIndices(length: number): number[] {
+  const indices = new Set<number>([
+    0,
+    1,
+    Math.floor(length / 4),
+    Math.floor(length / 2),
+    Math.floor((length * 3) / 4),
+    length - 2,
+    length - 1
+  ])
+  for (let step = 1; step <= 20; step += 1) indices.add(Math.floor((length * step) / 21))
+  return [...indices].filter((index) => index >= 0 && index < length).sort((a, b) => a - b)
+}
+
+describe('700k-row comparison', () => {
+  let cached: DirectoryComparison | undefined
+  function big(): DirectoryComparison {
+    cached ??= createLargeDirectoryComparison()
+    return cached
+  }
+
+  it('matches filter → project → pre-order for every filter and side', () => {
+    const fixture = big()
+    expect(buildDirectoryRowModel(fixture.root, 'all', 'left', []).length).toBe(LARGE_ROW_COUNT)
+    expect(buildDirectoryRowModel(fixture.root, 'all', 'right', []).length).toBe(LARGE_ROW_COUNT)
+
+    for (const filter of DIRECTORY_FILTERS) {
+      for (const side of ['left', 'right'] as const) {
+        const model = buildDirectoryRowModel(fixture.root, filter, side, [])
+        const samples = new Set(sampledIndices(model.length))
+        let index = 0
+        for (const expected of bigOracleRows(fixture.root, filter, side, [])) {
+          if (samples.has(index)) {
+            const row = model.at(index)
+            expect(row?.node.relativePath).toBe(expected.relativePath)
+            expect(row?.node.name).toBe(expected.name)
+            expect(row?.node.kind).toBe(expected.kind)
+            expect(row?.node.status).toBe(expected.status)
+            expect(row?.depth).toBe(expected.depth)
+          }
+          index += 1
+        }
+        expect(index).toBe(model.length)
+      }
+    }
+  }, 180_000)
+
+  it('keeps the four-state counts identical to counting the filtered tree', () => {
+    const fixture = big()
+    for (const filter of DIRECTORY_FILTERS) {
+      expect(visibleDirectoryCounts(fixture.root, filter)).toEqual(
+        countTreeFiles(filterDirectoryTree(fixture.root, filter))
+      )
+    }
+  }, 180_000)
+
+  it('collapses and re-expands a 100k-entry directory without moving the other rows', () => {
+    const fixture = big()
+    const collapsedPath = 'dir-3'
+    // Pre-order: root, then each directory row followed by its visible files.
+    const directoryIndex = 1 + 3 * (1 + LARGE_SIDE_FILES_PER_DIRECTORY)
+    const expanded = buildDirectoryRowModel(fixture.root, 'all', 'left', [])
+    const collapsed = buildDirectoryRowModel(fixture.root, 'all', 'left', [collapsedPath])
+
+    expect(expanded.length).toBe(LARGE_ROW_COUNT)
+    expect(collapsed.length).toBe(LARGE_ROW_COUNT - LARGE_SIDE_FILES_PER_DIRECTORY)
+    expect(expanded.at(directoryIndex)?.open).toBe(true)
+    expect(collapsed.at(directoryIndex)?.open).toBe(false)
+    // The collapsed directory keeps its own row; its subtree is what disappears.
+    expect(collapsed.at(directoryIndex)?.node.relativePath).toBe(collapsedPath)
+    expect(collapsed.at(directoryIndex + 1)?.node.relativePath).toBe('dir-4')
+    expect(
+      expanded.at(directoryIndex + LARGE_SIDE_FILES_PER_DIRECTORY)?.node.relativePath
+    ).toBe(`${collapsedPath}/file-${LARGE_FILES_PER_DIRECTORY - 1}.ts`)
+    for (const index of [0, 1, directoryIndex - 1]) {
+      expect(collapsed.at(index)?.node).toBe(expanded.at(index)?.node)
+    }
+    // Everything after the hidden subtree keeps its order, one subtree earlier.
+    expect(collapsed.at(directoryIndex + 1)?.node).toBe(
+      expanded.at(directoryIndex + 1 + LARGE_SIDE_FILES_PER_DIRECTORY)?.node
+    )
+
+    const reopened = buildDirectoryRowModel(fixture.root, 'all', 'left', [])
+    for (const index of sampledIndices(expanded.length)) {
+      const before = expanded.at(index)
+      const after = reopened.at(index)
+      expect(after?.node).toBe(before?.node)
+      expect(after?.depth).toBe(before?.depth)
+      expect(after?.open).toBe(before?.open)
+    }
+
+    // The 100,000th child of the re-expanded directory is addressable again and
+    // falls inside the render window at its mapped scroll offset.
+    const lastChild = directoryIndex + LARGE_SIDE_FILES_PER_DIRECTORY
+    const map = createDirectoryScrollMap(expanded.length, 640)
+    expect(map.offsetForIndex(lastChild)).toBeLessThanOrEqual(map.maxScrollOffset)
+    const range = map.visibleRange(map.offsetForIndex(lastChild), 10)
+    expect(range.start).toBeLessThanOrEqual(lastChild)
+    expect(range.end).toBeGreaterThanOrEqual(lastChild)
+    expect(range.end - range.start + 1).toBeLessThanOrEqual(80)
+  }, 180_000)
 })
