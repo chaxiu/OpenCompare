@@ -12,6 +12,7 @@ export const PLATFORM_CHANNELS = {
   listDirectories: 'platform:list-directories',
   readTextFile: 'platform:read-text-file',
   digestFiles: 'platform:digest-files',
+  cancelOperation: 'platform:cancel-operation',
   writeTextFile: 'platform:write-text-file',
   exists: 'platform:exists',
   statPath: 'platform:stat-path',

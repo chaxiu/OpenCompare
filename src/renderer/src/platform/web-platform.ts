@@ -9,6 +9,7 @@ import type {
   SelectFileOptions
 } from '@shared/platform/types'
 import { sha256Bytes } from '@core/directory/hash'
+import { OperationCancelledError } from '@core/io'
 
 declare global {
   interface Window {
@@ -147,6 +148,13 @@ export function createWebPlatformPort(): PlatformPort {
     return path
   }
 
+  /**
+   * Web cancellation has no real streams to destroy, so it records the id and
+   * lets a digest request carrying it fail with the same error type the desktop
+   * runtime raises. Ids are never reused, so the marker stays harmless.
+   */
+  const cancelledOperations = new Set<string>()
+
   function writeNode(path: string, content: string, modifiedMs?: number): void {
     assertWritable(path)
     const parent = path.slice(0, path.lastIndexOf('/'))
@@ -258,7 +266,11 @@ export function createWebPlatformPort(): PlatformPort {
     },
     // Same raw-byte SHA-256 as the main process (`node:crypto`), computed with
     // the pure JS core so the web runtime stays free of Node and WebCrypto.
-    digestFiles: async (paths) => {
+    digestFiles: async (paths, options) => {
+      const operationId = options?.operationId
+      if (operationId !== undefined && cancelledOperations.has(operationId)) {
+        throw new OperationCancelledError()
+      }
       const encoder = new TextEncoder()
       return paths.map<FileDigest>((path) => {
         const node = nodes.get(path)
@@ -271,6 +283,9 @@ export function createWebPlatformPort(): PlatformPort {
         const bytes = encoder.encode(node.content)
         return { path, ok: true, sha256: sha256Bytes(bytes), bytes: bytes.length }
       })
+    },
+    cancelOperation: async (operationId) => {
+      cancelledOperations.add(operationId)
     },
     writeTextFile: async (path, content, modifiedMs) => {
       writeNode(path, content, modifiedMs)

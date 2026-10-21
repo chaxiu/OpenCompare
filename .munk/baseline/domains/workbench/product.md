@@ -13,6 +13,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **顶栏常驻「新建对比」与手工路径直传**：`Workbench` 顶栏在空态与已有会话时都渲染可点击的「新建对比」（仅 `directoryBusy` 期间 disabled），不因已有会话消失，也不替换 / 隐藏既有「打开文件」「打开文件夹」。点击或按 `Cmd/Ctrl+N`（非 macOS 为 `Ctrl+N`；对话框已打开时不重复叠层）打开 `role="dialog"` 的「新建对比」对话框：左右两个路径输入框（可直接键入或粘贴）+「打开文件」「打开文件夹」两个选择器动作 +「建立对比」；`Enter` 提交、`Esc` 关闭、焦点初始落在左侧输入框，输入框内 `Cmd/Ctrl+A` 等编辑快捷键不被拦截；提交进行中按钮 disabled 且重复 `Enter` 不发起第二个请求。提交时唯一校验入口是 `@shared/compareRequest` 的 `parseManualPaths` + `resolveCompareRequest`（`homeDir` / `baseDir` 由 `PlatformPort.homeDirectory()` / `workingDirectory()` 显式提供，probe 走 `statPath`），通过后只按 `kind` 路由到既有 `openFilePair` / `runSidesCompare(directorySides(left, right))`，不另造解析、校验或会话模型；成功则关闭对话框并按既有 `upsertSession` 语义新增或复用（同路径对不产生第二个 tab）一个会话。任何失败（校验 / 探测 / 会话构建）只在对话框内以一行 `role="alert"` 展示中文原因、对话框保持打开，`sessions` / `activeId` / `status` / 状态栏与当前视图都不变，绝不新建空白 tab。对话框内的「打开文件 / 打开文件夹」复用同一套选择器流程与失败就地提示。
 - **启动注入请求落地**：`Workbench` 挂载时经 `PlatformPort.onCompareRequest`（可选成员）订阅一次、卸载时退订，并在订阅注册之后调用 `compareRequestsReady()` 通知主进程投递队列；成功 payload（`kind: file` / `directory`）直接走既有 `openCompareRequest` 建会话 / 切到该会话，失败 payload 只走既有 notice，`sessions` / `activeId` / `status` 不变、不建空 tab；端口没有这两项能力时等价于「无注入」且不报错。该链路的 AC 定义归 `launch` 域，本域只承载「注入请求复用既有会话入口」这一层。
 - **对比跳过提示（容错契约归 `io-tolerance` 域，本域承载渲染）**：目录对比成功且 `skipped > 0` 时，工作台复用既有 `notice`（单行 `role="alert"`）通道、`noticeTone: 'info'`（`text-diff-added`，非 `text-danger`）显示「已跳过 N 个不可读项/悬空链接」；目录视图在过滤栏下方同步展示同一计数。`skipped === 0` 时不出现该提示。此类跳过是成功对比的一部分，不建空会话、不改会话状态；快照导出成功提示在 `skipped > 0` 时追加「，跳过 N 个不可读项」。
+- **目录对比进度与取消（壳层编排）**：每次工作台发起的目录对比（空态「打开文件夹」、新建对比对话框、目录视图选择左右目录、启动注入请求）生成一个 `operationId` 与 `AbortController`，`signal` 透传核心、`operationId` 透传 `platform.digestFiles`；对比进行中在**工作台壳层**显示常驻进度条（`role="status"`），文本含阶段名、「已扫描 N 个文件」与已处理字节数（复用 `formatBytes`），并提供「取消」按钮，空态与已有会话两种情形都可见；取消先 `abort()` 再调用 `platform.cancelOperation(operationId)`（后者失败只忽略、不改变 UI 结局），点击后到对比 settle 前按钮禁用。取消后进度条消失、`directoryBusy` 复位，走既有 `notice`（`noticeTone: 'info'`）提示含「已取消」；既有会话、活动标签、状态栏统计与当前视图在取消前后逐项不变（只有成功对比才 `upsertSession`）。空闲（无目录对比在跑）与取消完成后都不渲染进度条 / 取消按钮。
 - **目录状态栏计数的运行时派生（语义归 `directory` 域）**：活动目录会话的状态栏四态计数由 `visibleDirectoryCounts(comparison.root, filter)` 按过滤档直接从根节点聚合派生，不再为统计克隆过滤树（`filterDirectoryTree` + `countTreeFiles`）；`conflict` 恒为 0，与折叠用例 `directory` 域 `ac-visible-counts-parity` 同一口径。切换过滤档 / 会话时计数随运行时结果更新。
 - **回归保留**：新建对比链路不介入既有路径——拖拽双路径仍按 `handleDroppedFiles` 建会话，标签切换仍保留工作副本与脏标记，目录下钻与「返回上级目录视图」的过滤 / 折叠 / 选中状态保持。
 - **真实路径拖入窗口**：空首屏与有会话时均可拖入真实路径——恰好 2 个同类路径（两文件 / 两目录）直接建同一会话模型；1 个路径作为左侧基准填入 + info 提示；>2 个或文件目录混合则明确提示、不建会话、不改既有会话。拖入阻断浏览器/窗口默认导航，应用停留原状态；真实绝对路径解析经平台缝（preload / `webUtils.getPathForFile` 或 main IPC 白名单），renderer 不猜测路径。
@@ -73,6 +74,9 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-drag-drop-regression**：向窗口拖入两个同类真实路径仍按既有 `handleDroppedFiles` 建立会话（一文件一目录时提示且不建会话），不依赖新建对比对话框。
 - **ac-drilldown-return-regression**：目录会话下钻文件得到文件会话后，点「返回上级目录视图」回到来源目录会话，过滤 / 折叠 / 选中状态保持。
 - **ac-tab-switch-keeps-buffer**：由手工路径建立的两个代码会话来回切换后，未保存工作副本与脏标记均保留，切回时视图显示的是工作副本。
+- **ac-progress-ui-live**：renderer 组件测试中发起目录对比并让平台摘要挂起：界面出现 `role="status"` 的进度条，文本含「已扫描」与文件数、「已处理」与字节数以及一个可访问名为「取消」的按钮；推进一个扫描批次后文本中的已扫描文件数变大；对比成功后进度条消失。
+- **ac-cancel-keeps-ui-state**：renderer 组件测试中已有目录会话 A 在屏时发起 B 的目录对比并点击「取消」：`cancelOperation` 收到与 `digestFiles` 相同的 `operationId`；取消后会话列表与顺序、`activeId`、状态栏统计、当前目录视图内容与取消前逐项一致，不新增标签，`notice` 文本含「已取消」且 tone 为 info，`busy` 复位、进度条消失，同一对目录随后可再次发起对比。
+- **ac-progress-cancel-idle**：没有目录对比在跑时（空闲、文件对打开、同步 / 模板预览与确认）不渲染进度条与取消按钮；取消完成后再次空闲同样无残留。
 
 ## 非目标
 
@@ -87,7 +91,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - 不做打包分发、代码签名、公证、自动更新、CI 发布。
 - 真实入口不做「最近打开 / 历史记录 / 收藏夹 / 书签」；不做 OS 级集成（Finder「打开方式」、命令行路径参数、macOS `open-file` 事件、拖到 Dock）；不做单侧智能配对（同名文件 / 同父兄弟 / 路径记忆）——单路径拖入只做左栏填充 + 提示；不做多选批量选择（一律左右各一次）。
 - 会话标签只做切换 / 关闭 / 未保存提示：不做「保存并关闭」第三分支与关闭前自动保存；不做批量关闭（关闭全部 / 关闭其他）、标签拖拽重排、右键菜单、溢出「更多」菜单；不做 `Cmd+W` 等快捷键、会话恢复 / 崩溃恢复 / 最近打开 / 会话持久化。目录下钻、返回上级目录视图与往返状态保持已由 directory 域交付（会话模型仅新增 `parentDirectoryId` 来源标识），本域只消费它来避免关闭来源目录后出现断头；原位保存与导出已由 code-diff-merge / snapshot 域交付。
-- 不删改内置样本、不重构 `loadSampleSessions` 既有加载路径；不新增对比能力品类、不改目录对比 / Diff / CSV / 结构化算法内核。
+- 不删改内置样本、不重构 `loadSampleSessions` 既有加载路径；不新增对比能力品类、不改目录对比 / Diff / CSV / 结构化算法内核。进度条与取消只覆盖目录对比：不做暂停 / 恢复 / 断点续传、不做取消确认对话框、不做取消后自动重试（取消即一次性终止），不给快照导出 / 同步 / 模板 / 下钻加进度或取消，也不新增 main → renderer 的进度事件通道（进度由核心批次结算结果在 renderer 侧汇总）。
 
 ## 实现约束
 
@@ -97,8 +101,15 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - 等宽字体使用系统字体栈，不引入需网络的 web font。
 - 视觉索引只写 change pack `ux/design-baseline.md`，不自己改 `.munk/baseline/**`。
 - 「新建对比」只用既有 `components/Dialog`（新增 `initialFocusRef` 以把初始焦点放到左侧输入框）、`ToolbarButton` 与 `main.css` token，不写死颜色尺寸、不新增设计系统；`parseManualPaths` / `resolveCompareRequest` 是唯一校验入口，renderer 不另写解析、规范化或错误码，错误文案直接用 `error.message`。会话创建只复用 `openFilePair` / `runSidesCompare`，`upsertSession` / `activeId` 状态机不改。
+- **进度 / 取消复用现有通道与 token**：进度条复用 `formatBytes` / `ToolbarButton` / 状态栏与 `notice` 既有语义 token（`bg-surface-sunken` / `border-line-subtle` / `text-content-*` / `bg-accent`），不新建页面、不改既有布局层级、不使用硬编码颜色；进度条放壳层以便空态可见，取消按钮点击后到对比 settle 前 `disabled`，避免重复取消。取消路径只调 `controller.abort()` + `platform.cancelOperation(id)`，成功后不 `upsertSession`、不切会话、不动状态栏。
 
 ## 最近交付证明
+
+- WI：`wi_ws_90a06ca6d557d5cd`（扫描/哈希进度与可取消，`kind: feature`）
+- 日期：2026-10-21
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 全绿，含新增进度/取消 UI 用例）。
+- 覆盖摘要：`Workbench.tsx` 新增 `DirectoryProgressState` / `ActiveDirectoryOperation` 与 `directoryProgress` 状态：`runSidesCompare` 每次生成 `directory-<序号>-<随机后缀>` 的 `operationId` 与 `AbortController`，把 `signal` / `operationId` / `onProgress` 传给 `compareSides`（`snapshotOps.ts` 的 `CompareSidesOptions` 再透传 `compareDirectorySides` 并把 `operationId` 绑到 `platform.digestFiles`），`finally` 复位 busy/进度；取消走 `cancelDirectoryCompare`（置 `cancelling` → `abort()` → `platform.cancelOperation(id).catch` 忽略失败）；`isOperationCancelled` 分支走 `report('已取消本次目录对比，工作台保持取消前的状态。', 'info')` 且不建会话。壳层新增 `role="status"` 进度条（阶段名 + 已扫描 N 个文件 + 已处理 `formatBytes` + 取消按钮），空态与有会话同时可见。`App.test.tsx` 新增「directory progress and cancel UI」3 条（实时 scan/digest 文本推进且成功后消失、取消后 `cancelOperation` 收到同一 id 且会话/activeId/状态栏/目录视图不变并出 info notice、空闲时不渲染进度条）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例；核心进度/取消语义归 `domains/directory`，平台取消能力归 `domains/foundation`，流销毁归 `domains/io-concurrency`。
 
 - WI：`wi_ws_1049cda9d94e3506`（renderer 侧接收启动注入请求并复用既有会话入口）
 - 日期：2026-10-20

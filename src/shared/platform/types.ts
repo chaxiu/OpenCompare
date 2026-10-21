@@ -93,6 +93,11 @@ export type FileDigest = FileDigestSuccess | FileDigestFailure
 export interface DigestFilesOptions {
   /** In-flight streaming reads; defaults to the platform's bounded window. */
   readonly concurrency?: number
+  /**
+   * Identifies the comparison this digest belongs to, so
+   * {@link PlatformPort.cancelOperation} can stop its in-flight streams.
+   */
+  readonly operationId?: string
 }
 
 export interface PlatformPort {
@@ -142,6 +147,12 @@ export interface PlatformPort {
     paths: readonly string[],
     options?: DigestFilesOptions
   ): Promise<readonly FileDigest[]>
+  /**
+   * Cancels the in-flight work registered under `operationId`: the affected
+   * `digestFiles` call rejects with the cancellation error instead of returning
+   * partial slots. Unknown and repeated ids resolve harmlessly.
+   */
+  cancelOperation(operationId: string): Promise<void>
   /**
    * Writes UTF-8 text. When `modifiedMs` is given the file's modification time
    * is set to it afterwards, which lets a copy keep the source's metadata so the

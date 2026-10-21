@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { CompareRequestPayload } from '@shared/compareRequest'
@@ -50,6 +50,7 @@ describe('preload bridge', () => {
         'listDirectories',
         'readTextFile',
         'digestFiles',
+        'cancelOperation',
         'writeTextFile',
         'exists',
         'statPath',
@@ -60,6 +61,34 @@ describe('preload bridge', () => {
         'compareRequestsReady'
       ].sort()
     )
+  })
+
+  it('forwards metric and cancellation capabilities over their whitelisted channels', async () => {
+    await platform.digestFiles(['/tmp/a.bin'], { operationId: 'directory-1' })
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.digestFiles, ['/tmp/a.bin'], {
+      operationId: 'directory-1'
+    })
+
+    await platform.cancelOperation('directory-1')
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.cancelOperation, 'directory-1')
+    expect(PLATFORM_CHANNELS.cancelOperation).toBe('platform:cancel-operation')
+  })
+
+  it('keeps the renderer on PlatformPort instead of Electron or Node I/O', () => {
+    function collect(directory: string): string[] {
+      return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(directory, entry.name)
+        if (entry.isDirectory()) return collect(path)
+        if (!/\.(ts|tsx)$/.test(entry.name) || /\.test\.(ts|tsx)$/.test(entry.name)) return []
+        return [path]
+      })
+    }
+
+    for (const file of collect(join(process.cwd(), 'src/renderer'))) {
+      const source = readFileSync(file, 'utf8')
+      expect(source, file).not.toMatch(/from ['"]electron['"]/)
+      expect(source, file).not.toMatch(/from ['"]node:(fs|crypto)['"]/)
+    }
   })
 
   it('never leaks Node or the raw ipcRenderer onto the window', () => {

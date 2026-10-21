@@ -21,6 +21,9 @@
 - **批量取数与有界遍历（`src/core/directory/compare.ts`）**：`scanDirectory` 从「逐层串行、一个目录一次 `list`」改为**队列 + 批量取数 + 有界并发**——按层收集待列目录，一次 `listDirectories` 往返携带多个目录（默认批大小 `DEFAULT_DIRECTORY_BATCH_SIZE = 8`，队列不足时按 `ceil(待列数 / 并发)` 收缩但不少于 2），由 `mapWithLimit` 限制在飞批量调用（默认 `DEFAULT_TRAVERSAL_CONCURRENCY = 16`，可经 `ScanDirectoryOptions.concurrency` 覆盖）。批量/并发只改「怎么取数」：树结构、按名称 `localeCompare` 排序、`index` 相对路径键、四态配对、`skipped` 计数口径与不可列子树容错与串行基线逐项一致；批量槽位缺失或槽位顺序与请求不符即整次 reject，绝不返回部分 `ScannedTree`。既有 `scanDirectory(rootPath, list)` 调用形态保留，缺批量能力时由 `perDirectoryBatches` 适配为批形态。
 - **内容读取的有界并发与句柄错误（横切契约，归 `io-concurrency` 域）**：`compareDirectories` 的候选正文读取经 `@core/io` 的 `mapWithLimit` 走默认 `DEFAULT_IO_CONCURRENCY`（8）窗口，`scanDirectory` 单层 `list` 失败转成可读句柄错误；`compareDirectories` / `compareDirectorySides` 新增可选 `ConcurrencyOptions` 尾参供测试收窄窗口。`EMFILE` / `ENFILE` 统一转成「文件句柄」可读错误向上抛，不返回部分结果。
 - **内容确认的字节摘要（横切契约，归 `content-digest` 域）**：目录对比的内容确认改为先按 size/mtime 快路径 + `(path, size, modifiedMs)` 缓存算出待确认路径，再经 `PlatformPort.digestFiles` 对**原始字节**批量取 SHA-256（不读 UTF-8 正文），摘要写回同一 `ComparisonCache.hashes`；未提供摘要能力时回退既有文本读取路径。`compareDirectories` 尾参类型为 `ComparisonIoOptions`（`ConcurrencyOptions` + 可选 `digestFiles` / `digestible`）。非法 UTF-8 的二进制内容因此能被判 `modified` 而不被解码抹平；四态语义、缓存键与失效钩子不变。
+- **扫描 / 摘要进度（`src/core/directory/compare.ts`）**：`scanDirectory` / `compareDirectories` / `compareDirectorySides` 新增可选 `onProgress(progress)` 尾参，每结算一个真实批次（批量列目录或摘要分块）最多回报一次 `{ phase: 'scan' | 'digest', files, bytes }`。扫描阶段统计已发现（非 `broken`）文件数与其 `size` 之和，两侧扫描经 `createScanProgressMerger` 合并成**一条单调不减**的流；摘要阶段从 0 起累计本阶段已结算文件数（含逐文件失败项）与成功项 `bytes` 之和。计数按阶段累计、不做跨阶段相加、不做定时器插值/预估；全缓存二次对比不产生 `files > 0` 的 digest 事件。
+- **摘要分块与进度步长（`src/core/directory/compare.ts`）**：`digestContentCandidates` 不再把所有待确认路径压成一次请求，改按导出常量 `DEFAULT_DIGEST_BATCH_SIZE`（64）顺序分块调用 `digestFiles`，每结算一块才写该块成功项的 `cache.hashes` 并回报一次 digest 进度；块大小可经 `ComparisonIoOptions.digestBatchSize` 覆盖（低于 1 回退默认）。单块内仍由平台层有界并发。
+- **核心层取消（`src/core/directory/compare.ts` + `src/core/io.ts`）**：`ScanDirectoryOptions` / `ComparisonIoOptions` 新增可选 `signal: AbortSignal`；扫描与摘要每个批次边界检查，abort 后不再发起新批次；在飞批次经 `abortable` 与 signal **竞速**立即以取消错误 reject——即使平台调用永不 resolve 也不得挂住。取消是独立失败路径：`scanDirectory` / `compareDirectories` / `compareDirectorySides` 取消即 reject，**绝不返回部分树、部分对比结果或空树**，`OperationCancelledError` 不会被转成 `FileHandleExhaustedError`、不计入 `skipped`；被中断块的路径不写缓存，已结算块保留，随后用同一缓存重新对比结果与未取消基线逐项相等。
 - **不可读项 / 悬空链接容错（横切契约，归 `io-tolerance` 域）**：`scanDirectory` 跳过平台标注的 `broken` 条目与不可列举子树并累计 `ScannedTree.skipped`（根目录失败仍 reject）；`compareDirectories` / `compareDirectorySides` 把两侧 `skipped` 与正文不可读对汇总到 `DirectoryComparison.skipped`，正文读取失败的文件对判 `modified` 而不中止整次对比；`fileCount` 仍等于 `same + added + removed + modified`。坏项不进任何状态计数。
 
 ## 验收
@@ -77,6 +80,14 @@
 - **ac-skipped-semantics**：fixture 中悬空符号链接与不可读条目仍出现在返回条目里并各计 `skipped` 1 次；一个不可列子树只计 `skipped` 1 次且不出现在树中，扫描仍整体成功；fixture 中的 `.git`、`node_modules` 目录被正常列出并参与对比，不被静默跳过。
 - **ac-root-unreadable-rejects**：根目录自身不可列时 `scanDirectory` / `compareDirectories` 以错误 reject（消息含「无法读取目录」与路径），不返回空树。
 - **ac-compat-existing-scan**：现有 `scanDirectory(rootPath, list)` 调用形态（`snapshot.ts` / `directoryOps.ts` / `loadSampleSessions.ts` 与既有测试）继续可用；未提供批量能力时扫描结果与批量路径一致。
+- **ac-progress-scan-monotonic**：真实临时小目录 fixture（多级嵌套、≥ 3 个待列批次、两侧文件数 ≥ 10）上 `compareDirectories` 带 `onProgress`：收到 ≥ 2 条 `phase === 'scan'` 事件，其 `files` 与 `bytes` 序列各自单调不减；最后一条 scan 事件的 `files` 等于两侧文件总数，`bytes` 等于两侧文件 `size` 之和。
+- **ac-progress-digest-chunks**：fixture 中放 N 个 size 与 mtime 相同、内容不同的文件（N 可被 `digestBatchSize` 覆盖值整除且 ≥ 2 块），`compareDirectories` 传 `{ digestBatchSize: 2, onProgress }`：收到与块数相等的 `phase === 'digest'` 事件，其 `files` 递增到 N、`bytes` 最终等于这些文件真实字节数之和，且每个事件在对应分块 settle 之后才出现。
+- **ac-progress-no-timer**：用可手动 resolve 的假 `digestFiles`（首个分块挂起）：挂起期间 `phase === 'digest'` 事件数为 0；resolve 该分块后事件数恰好 +1 且数值等于该块结果；整个对比结束后事件数不再增长（不存在定时器驱动的虚构进度）。
+- **ac-cancel-error-type**：摘要阶段 abort 后 `compareDirectories` 与 `compareDirectorySides` 均以 `OperationCancelledError` reject（`name === 'OperationCancelledError'`、`code === 'ECANCELED'`、消息含「已取消」），且错误不被转成 `FileHandleExhaustedError`、不计入 `skipped`、不返回任何 `DirectoryComparison`。
+- **ac-cancel-during-scan**：用永不 resolve 的假 `listDirectories` 挂住扫描中批次后 abort：`scanDirectory` / `compareDirectories` 在 1 秒内以取消错误 reject；abort 之后 `listDirectories` 调用次数不再增加（不再发起新批次）。
+- **ac-cancel-during-digest**：用永不 resolve 的假 `digestFiles` 挂住摘要分块后 abort：`compareDirectories` 在 1 秒内以取消错误 reject，abort 后 `digestFiles` 调用次数不再增加，后续分块一个都不发出。
+- **ac-cancel-no-partial-cache**：分块为 2 且第 2 块被取消的对比结束后，返回的 `ComparisonCache.hashes` 只含第 1 块已成功结算文件的条目，被中断块的路径没有任何写入；随后用同一缓存重新对比同一对目录成功，四态计数与未取消基线逐项相等。
+- **ac-cancel-then-recompare**：取消一次真实临时小目录对比后，用同一平台实例、新 `operationId` 重新对比同一对目录成功完成，四态计数、`skipped` 与未取消基线逐项相等，主进程活动读取流为 0（无句柄残留、无 EMFILE）。
 - **ac-no-regression**：`pnpm test` 全绿，既有 `compare` / `snapshot` / `sync` / `template` / `electron-platform` / `preload` / renderer 套件零回归；`readTextFile`、`writeTextFile`、`statPath` 等既有能力行为不变；`.ocsnap.json` 快照线格式不变。
 
 ## 非目标
@@ -91,7 +102,7 @@
 - **不做往返状态跨重启持久化**：过滤/折叠/滚动/选中只保持于当前运行期内存（按目录会话 id），不落盘、不做跨窗口同步，也不为此引入全局状态管理库或持久化层。
 - 不做会话关闭与未保存提示（`session-tabs-lifecycle` 子项）、不做原位保存与结果导出（`save-in-place-and-export` 子项）。
 - 不做三向或超过两个目录的对比；不做快捷键绑定、命令面板、主题切换与浅色皮肤；不做打包分发、签名、公证、自动更新、CI 发布。
-- **不做扫描进度与取消**：不引入进度事件 / 进度条 / 状态栏进度、不引入取消信号 / 操作标识 / 在途流销毁；不新增持久化缓存、不改缓存键 `(path, size, modifiedMs)` 与失效语义。
+- **不做跨进程进度推送与取消之外的调度**：不新增 `webContents.send` 类 main → renderer 进度事件（进度只由核心批次结算结果在 renderer 侧汇总）；不做暂停 / 恢复 / 断点续传、不做取消确认对话框、不做取消后自动重试（取消就是一次性终止）；不给快照导出 / 同步 / 模板 / 下钻加进度或取消。不新增持久化缓存、不改缓存键 `(path, size, modifiedMs)` 与失效语义。
 - **不新增默认忽略规则**：`.git` / `node_modules` / 隐藏文件一律照列；不把不可读条目、悬空链接、不可列子树改成整次失败，也不把 EMFILE/ENFILE 吞成 `skipped`。
 - 不改样本 answer key（`src/shared/fixtures/` 的 `status` 字段）；不改 `.munk/baseline/**`（由 Delivery 折入）。
 - **窗口化不改数据语义与取数契约**：不改四态语义、对比 / 合并算法、行级 diff、快照线格式与发布模型；不动 `src/main/**` 扫描与 IPC、`src/preload/**`、`src/shared/platform/**`（批量列目录扫描层已由 `wi_ws_deb41e1c6a5a2b8f` 落地，其契约与语义本期不改）；不新增默认忽略规则、不砍 unreadable / 悬空链接 / 不可读子树的容错。
@@ -123,9 +134,18 @@
 - 不改 `.munk/code-gates.json` 的六条命令与顺序；不新增依赖（`@tanstack/react-virtual` 已在依赖中，CSV 视图已有同款用法）。
 - **遍历复用既有并发工具，不引新依赖**：批量取数经 `@core/io` 的 `mapWithLimit`（保序、首错停发、等在飞收敛、绝不返回部分结果）与 `toReadableIoError`；不引 `p-limit` / `p-queue`。**遍历并发（默认 16）与主进程 `stat` 预算（默认 16）是两个独立常量**，各自单一来源导出（`DEFAULT_TRAVERSAL_CONCURRENCY` / `DEFAULT_STAT_CONCURRENCY`）并可在测试中传入覆盖值；不得靠抬高 `DEFAULT_IO_CONCURRENCY`（摘要/内容读取默认 8）来达成遍历默认值，调用点不重复硬编码数字。
 - **批量能力按新增能力 + 可选参数接入**：`scanDirectory(rootPath, list, options?)` 与 `ComparisonIoOptions`（extends `ScanDirectoryOptions`）尾参可选，既有调用点不必改写；真实运行路径（`directoryOps` 的 `compareRoots` / `syncIo` 扫描、`snapshotOps` 的对比与快照导出、`loadSampleSessions`）与 `compareDirectorySides` 均透传 `listDirectories`。
-- 排序、`skipped` 计数位置与失败容错分支沿用 `compare.ts` 既有口径，不重排索引结构。
+- **排序、`skipped` 计数位置与失败容错分支沿用 `compare.ts` 既有口径，不重排索引结构。**
+- **进度与取消都是可选尾参**：既有 `scanDirectory(rootPath, list)` / `compareDirectories(...)` 位置参数与既有测试继续可用；进度语义为各阶段内累计（digest 从 0 开始），每结算一个批量 / 分块最多回报一次，禁止按文件逐条刷屏、禁止定时器与预估插值。
+- **批次挂起必须用 abort 竞速**（`@core/io` 的 `abortable`，即 `Promise.race` 或等价），而不是「等在飞收敛」；这样取消停止时间上界与平台调用是否响应无关。被放弃的在途 promise 必须挂 `catch`，不得产生 unhandled rejection。
+- **摘要分块大小单一来源导出**（`compare.ts` 的 `DEFAULT_DIGEST_BATCH_SIZE`），可在测试经 `digestBatchSize` 覆盖；每结算一块才写该块成功项的 `cache.hashes`，取消时不写未结算块。核心不感知 `operationId`，只透传 `signal`。
 
 ## 最近交付证明
+
+- WI：`wi_ws_90a06ca6d557d5cd`（扫描/哈希进度与可取消，`kind: feature`）
+- 日期：2026-10-21
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 全绿，含新增进度/取消用例）。
+- 覆盖摘要：`compare.ts` 新增 `DEFAULT_DIGEST_BATCH_SIZE = 64`、`DirectoryProgress` / `ProgressReporter`、`createScanProgressMerger` 与 `ScanDirectoryOptions` 的 `signal` / `onProgress`；`scanDirectory` 每结算一个批量列目录批次回报一次 scan 进度（只计非 `broken` 文件与其 `size`），两级批次边界均 `throwIfAborted`，在飞 `listDirectories` 经 `abortable` 竞速；`digestContentCandidates` 改按块顺序 `digestFiles`（每块 settle 后写 cache 并回报 digest 进度，失败项仍记 `unreadable`），文本回退分支同样 `abortable` 且取消错误原样上抛；`compareDirectories` / `compareDirectorySides`（`snapshot.ts`）两侧扫描经 `createScanProgressMerger` 合并为一条单调流。取消即 reject，不返回部分树/部分结果，`OperationCancelledError` 不转 `FileHandleExhaustedError`、不计 `skipped`。`compare.test.ts` 新增「directory progress and cancellation」9 条（scan 单调且终值等于两侧文件/字节、每分块一次 digest 事件、挂起块零事件无定时器插值、摘要取消错误形态、挂起扫描 1s 内拒绝且不再发批次、挂起摘要块取消后不发后续块、只保留已结算块缓存后重比一致、全缓存二次对比无 digest 事件）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例，全局 tech / design 折叠跳过；取消错误与 abort 竞速口径折叠在 `domains/io-concurrency`，`operationId` 分块语义折叠在 `domains/content-digest`，进度条 / 取消按钮折叠在 `domains/workbench`，平台缝与 Web 同构折叠在 `domains/foundation`。
 
 - WI：`wi_ws_4829ebe71d4e966e`（真实修改原位保存回磁盘与结果导出为文件产物，`kind: feature`）
 - 日期：2026-10-19

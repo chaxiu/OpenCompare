@@ -5,7 +5,8 @@
 ## 范围
 
 - **核心字节入口（`src/core/directory/hash.ts`，纯核心层）**：新增 `sha256Bytes(bytes: Uint8Array): string`，对字节序列本身算 SHA-256，返回 64 位小写 hex；既有 `sha256Hex(text)` 签名与输出不变，内部改为 `sha256Bytes(new TextEncoder().encode(text))`。不引入新依赖、不新建并行哈希模块，仍零 Electron / DOM 依赖，可在 vitest `node` 环境直接单测。
-- **平台能力 `PlatformPort.digestFiles(paths, options?)`（`src/shared/platform/types.ts`）**：一次请求携带一批绝对路径，按**输入顺序**返回每个文件的结果。成功项为 `{ path, ok: true, sha256, bytes }`（`sha256` 为原始字节的 64 位小写 hex，`bytes` 为实际处理字节数）；失败项为 `{ path, ok: false, reason }`，单个文件失败只标记该项，**不因一个坏文件让整批失败**。`DigestFilesOptions` 仅含可选 `concurrency`。返回值类型 `FileDigest = FileDigestSuccess | FileDigestFailure`。
+- **平台能力 `PlatformPort.digestFiles(paths, options?)`（`src/shared/platform/types.ts`）**：一次请求携带一批绝对路径，按**输入顺序**返回每个文件的结果。成功项为 `{ path, ok: true, sha256, bytes }`（`sha256` 为原始字节的 64 位小写 hex，`bytes` 为实际处理字节数）；失败项为 `{ path, ok: false, reason }`，单个文件失败只标记该项，**不因一个坏文件让整批失败**。`DigestFilesOptions` 含可选 `concurrency` 与可选 `operationId`；返回值类型 `FileDigest = FileDigestSuccess | FileDigestFailure`。
+- **摘要批量可取消（横切契约，`operationId` + `cancelOperation`）**：带 `operationId` 的一次 `digestFiles` 把全部在途读取流登记到该操作；`PlatformPort.cancelOperation(operationId)` 到达后销毁这些流、阻止未启动文件继续开流，`digestFiles` 以 `OperationCancelledError` **整批 reject 而不是返回部分槽位**；操作结束（成功 / 失败 / 取消）后注册项回收，未知 id 与重复调用幂等 resolve。取消是独立失败路径，不被当成逐文件失败。摘要分块（一次 `digestFiles` 带多少路径）由核心 `DEFAULT_DIGEST_BATCH_SIZE` 决定并可在测试经 `digestBatchSize` 覆盖，见 `directory` 域；本域只保证「一块是一批、取消整批不落地」。Web 实现以已取消 id 集合复刻同一错误形态（幂等、未取消时行为不变）。
 - **Electron 主进程实现（`src/main/platform/electron-platform.ts`）**：用 `node:crypto` 的 `createHash('sha256')` 对 `createReadStream` 的输出**流式**更新，绝不先 `readFile(path,'utf8')` 再哈希；一条文件流只持有一个句柄，`stream.destroy()` 在 finally 收尾；整批经既有 `@core/io` 的 `mapWithLimit` 有界并发（默认沿用 `DEFAULT_IO_CONCURRENCY`）。`/samples/**` 样本按 UTF-8 字节编码后摘要（样本本质为文本）。读取失败按 `readableFailure` 产出可读原因；`EMFILE` / `ENFILE` 经 `toReadableIoError` **整批 reject**，不被逐文件失败吞掉。
 - **Web 运行时实现（`src/renderer/src/platform/web-platform.ts`）**：不碰 `node:crypto` / 异步 WebCrypto，用核心 `sha256Bytes` 对内存 FS 节点的 UTF-8 字节直接算，对同一字节序列与主进程给出相同 hex；路径不存在 / 是目录时返回带可读原因的失败项。
 - **IPC 缝（`src/shared/platform/channels.ts` / `src/preload/index.ts`）**：新通道 `platform:digest-files` 只登记在 `PLATFORM_CHANNELS` 单一来源，preload 仅按该白名单转发并 cast 为 `readonly FileDigest[]`；`PlatformPort` 表面新增且仅新增该能力，renderer 不直接 import `electron` / `node:crypto`。
@@ -27,12 +28,16 @@
 - **ac-digest-unreadable-tolerant**：摘要能力对单个不可读文件回报失败项（不 reject 整批），目录对比据此把该对判 `modified` 并计入 `skipped`，不中断整次对比。
 - **ac-digest-emfile-fatal**：摘要读取遇到 `EMFILE` / `ENFILE` 时，整次对比以既有可读中文错误（含错误码）结束，不被当作逐文件失败吞掉。
 - **ac-digest-seam-whitelist**：新 IPC 通道名只出现在 `PLATFORM_CHANNELS` 单一来源，preload 仅白名单转发；`PlatformPort` 表面新增且仅新增该摘要能力，renderer 不直接 import `electron` / `node:crypto`。
+- **ac-digest-cancel-no-partial**：带 `operationId` 的 `digestFiles` 在一批流式读取中途被 `cancelOperation` 时整批以取消错误 reject，不返回任何部分槽位；已启动的流全部销毁、活动流计数归零。
+- **ac-digest-cancel-idempotent**：`cancelOperation` 对未知 `operationId` 与同一 id 的重复调用均 resolve 不抛；正常结束的 `digestFiles` 之后注册项已回收，同 id 的后续取消不影响其他并发操作。
+- **ac-digest-cancel-scoped**：同一平台实例上并发 A / B 两个摘要操作（不同 `operationId`，均挂住），取消 A 只让 A 以取消错误 reject，B 随后正常 resolve 且槽位内容正确。
+- **ac-digest-cancel-web-parity**：Web 平台的 `cancelOperation` 幂等（未知 id、重复调用均 resolve），`digestFiles` 在操作已取消时以取消错误 reject，未取消时返回值与既有断言一致；两平台取消错误形态相同（`name` / `code` / 消息含「已取消」）。
 - **ac-digest-no-regression**：`pnpm test` 全绿，既有 `compare` / `snapshot` / `sync` / `template` / `electron-platform` / `preload` / renderer 套件与四态计数零回归；`.ocsnap.json` 的字段、序列化顺序与快照 sha256 口径不变（仍是文本 UTF-8 摘要）。
 
 ## 非目标
 
 - 不做批量 / 分页列目录、遍历并发改造、`stat` 预算（后续 WI）。
-- 不做进度上报、进度 UI、取消按钮与取消错误（后续 WI）。
+- **不做进度语义与进度 UI**：`onProgress` 的阶段/计数口径、进度条与取消按钮归 `directory` / `workbench` 域；本域只保证「一批摘要可被取消且不返回部分槽位」，不做定时器插值、不做跨进程进度推送，不做暂停 / 恢复 / 断点续传，不做取消后自动重试。
 - 不改四态语义、对比 / 合并算法、缓存键、缓存失效钩子语义。
 - 不改 `.ocsnap.json` 快照线格式、导入校验、内联文本策略；快照构建 / 导出的哈希口径保持文本摘要。
 - 不新增持久化哈希缓存、不改发布模型。
@@ -48,8 +53,16 @@
 - 平台缝扩展以新增能力 + 可选参数方式接入：`compareDirectories` / `compareDirectorySides` 的既有调用与既有测试签名保持可用，未提供摘要能力时回退到既有文本读取路径；renderer 真实运行路径必须传摘要能力。
 - 缓存写入时机与键保持 `(path, size, modifiedMs)`；命中即不再请求摘要。失败项不写缓存。
 - 新通道必须在 `PLATFORM_CHANNELS` 中登记；preload 测试的表面清单同步更新；`ac-*` 断言写进 `pnpm test`（code_gates 六条不变：install / lint / typecheck / build / build:web / test）。
+- **`operationId` 是可选尾参**：未带 `operationId` 的既有 `digestFiles` 调用行为完全不变；注册表按 id 隔离并在 `finally` 回收，取消后不得留下活动流或残留注册项（否则下一次对比 EMFILE）。取消错误用 `@core/io` 的 `OperationCancelledError`，Web 实现引用同一类型，保证两平台错误形态一致。
+- **分块写缓存时机**：一块 settle 后才写该块成功项，取消时未结算块不写；缓存键 `(path, size, modifiedMs)` 与失效语义不变。
 
 ## 最近交付证明
+
+- WI：`wi_ws_90a06ca6d557d5cd`（扫描/哈希进度与可取消，`kind: feature`）
+- 日期：2026-10-21
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 全绿）。
+- 覆盖摘要：`DigestFilesOptions` 仅新增可选 `operationId`（`concurrency` 语义不变），`PlatformPort.digestFiles` 在带 id 时整批可取消：主进程按 id 登记在途 `ReadStream`，`cancelOperation` 置标记 + `destroy` 每条流并阻止未启动文件开流，`digestFiles` 以 `OperationCancelledError` 整批 reject 不返回部分槽位，`finally` 回收注册项；未带 id 的调用完全不变。Web 实现用已取消 id 集合复刻同签名 `cancelOperation`（幂等）与取消错误；`compare.ts` 的分块 `digestFiles` 每块 settle 后才写 `cache.hashes`。`electron-platform.test.ts`「digest cancellation」4 条 + `web-platform.test.ts`「web digest cancellation」2 条覆盖不返回部分槽位、幂等/回收、A/B 隔离、取消后无残留可重比、Web 同构与未取消行为不变。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例；核心进度与分块步长归 `domains/directory`，abort 竞速与流生命周期归 `domains/io-concurrency`，通道白名单与平台表面归 `domains/foundation`。
 
 - WI：`wi_ws_f67675b0f814cd10`（主进程流式字节 SHA-256 与 Web 同构回退，`kind: feature`）
 - 日期：2026-10-21

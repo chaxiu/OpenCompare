@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
-import type { DigestFiles, ListDirectories, ListDirectory } from './compare'
+import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { DigestFiles, DirectoryProgress, ListDirectories, ListDirectory } from './compare'
 import type { DirectoryListing } from '@shared/platform/types'
 import {
   DEFAULT_DIRECTORY_BATCH_SIZE,
+  DEFAULT_DIGEST_BATCH_SIZE,
   DEFAULT_TRAVERSAL_CONCURRENCY,
   compareDirectories,
   compareScannedTrees,
@@ -11,6 +15,7 @@ import {
   planContentReads,
   scanDirectory
 } from './compare'
+import { compareDirectorySides } from './snapshot'
 import {
   DIRECTORY_FILTERS,
   countTreeFiles,
@@ -19,7 +24,7 @@ import {
   projectDirectoryTree
 } from './filter'
 import { sha256Bytes, sha256Hex } from './hash'
-import { DEFAULT_IO_CONCURRENCY, FileHandleExhaustedError } from '../io'
+import { DEFAULT_IO_CONCURRENCY, FileHandleExhaustedError, OperationCancelledError } from '../io'
 
 interface FakeFile {
   readonly text: string
@@ -973,5 +978,431 @@ describe('batched directory scan', () => {
     expect(batched.counts).toEqual(baseline.counts)
     expect(batched.root).toEqual(baseline.root)
     expect(batched.skipped).toBe(baseline.skipped)
+  })
+})
+
+describe('directory progress and cancellation', () => {
+  const scratchRoots: string[] = []
+
+  afterEach(async () => {
+    await Promise.all(scratchRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  })
+
+  async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+    const started = Date.now()
+    while (!predicate()) {
+      if (Date.now() - started > timeoutMs) throw new Error('timed out waiting for a condition')
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+  }
+
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  /** Settles a promise into its value/error, or `'timeout'` after `ms`. */
+  async function settleWithin<T>(promise: Promise<T>, ms: number): Promise<unknown> {
+    return Promise.race([
+      promise.then(
+        () => 'resolved',
+        (error: unknown) => error
+      ),
+      delay(ms).then(() => 'timeout')
+    ])
+  }
+
+  /** A real directory listing capability over the local file system. */
+  const listReal: ListDirectory = async (path) => {
+    const entries = await readdir(path, { withFileTypes: true })
+    return Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = join(path, entry.name)
+        const info = await stat(entryPath)
+        return {
+          name: entry.name,
+          path: entryPath,
+          isDirectory: info.isDirectory(),
+          size: info.size,
+          modifiedMs: info.mtimeMs
+        }
+      })
+    )
+  }
+
+  const listRealBatch: ListDirectories = (paths) =>
+    Promise.all(
+      paths.map(async (path): Promise<DirectoryListing> => {
+        try {
+          return { path, ok: true, entries: await listReal(path) }
+        } catch (error) {
+          return { path, ok: false, reason: (error as Error).message }
+        }
+      })
+    )
+
+  interface RealTreeStats {
+    readonly files: number
+    readonly bytes: number
+  }
+
+  /** Multi-level real tree: root files, 10 child dirs, one nested level each. */
+  async function writeRealTree(root: string, side: 'left' | 'right'): Promise<RealTreeStats> {
+    await mkdir(root, { recursive: true })
+    let files = 0
+    let bytes = 0
+    let index = 0
+    async function put(path: string, size: number): Promise<void> {
+      await writeFile(path, 'x'.repeat(size))
+      // Distinct mtimes keep the fast path decisive: no digest is needed here.
+      const stamp = new Date((side === 'left' ? 1_000_000 : 2_000_000) + index)
+      await utimes(path, stamp, stamp)
+      files += 1
+      bytes += size
+      index += 1
+    }
+
+    for (let position = 0; position < 4; position += 1) {
+      await put(join(root, `root-${position}.txt`), 10 + position)
+    }
+    for (let directory = 0; directory < 10; directory += 1) {
+      const child = join(root, `dir-${directory}`)
+      await mkdir(child)
+      await put(join(child, `file-${directory}.txt`), 20 + directory)
+      const deep = join(child, 'deep')
+      await mkdir(deep)
+      await put(join(deep, `deep-${directory}.txt`), 30 + directory)
+    }
+    return { files, bytes }
+  }
+
+  async function createRealPair(): Promise<{
+    readonly left: string
+    readonly right: string
+    readonly leftStats: RealTreeStats
+    readonly rightStats: RealTreeStats
+  }> {
+    const root = await mkdtemp(join(tmpdir(), 'opencompare-progress-'))
+    scratchRoots.push(root)
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    const leftStats = await writeRealTree(left, 'left')
+    const rightStats = await writeRealTree(right, 'right')
+    return { left, right, leftStats, rightStats }
+  }
+
+  /** Same size and mtime on both sides, different bytes: every pair needs a digest. */
+  function digestTree(count: number, size: number): FakeTree {
+    const left: Record<string, FakeFile> = {}
+    const right: Record<string, FakeFile> = {}
+    for (let index = 0; index < count; index += 1) {
+      const name = `f-${index}.txt`
+      left[name] = {
+        text: '',
+        size,
+        modifiedMs: 0,
+        bytes: new Uint8Array(size).fill(65 + index)
+      }
+      right[name] = {
+        text: '',
+        size,
+        modifiedMs: 0,
+        bytes: new Uint8Array(size).fill(97 + index)
+      }
+    }
+    return { left, right }
+  }
+
+  function digestEvents(events: readonly DirectoryProgress[]): readonly DirectoryProgress[] {
+    return events.filter((event) => event.phase === 'digest')
+  }
+
+  function scanEvents(events: readonly DirectoryProgress[]): readonly DirectoryProgress[] {
+    return events.filter((event) => event.phase === 'scan')
+  }
+
+  it('reports monotonic scan totals that end at both sides’ files and bytes', async () => {
+    const pair = await createRealPair()
+    const events: DirectoryProgress[] = []
+
+    const comparison = await compareDirectories(
+      pair.left,
+      pair.right,
+      listReal,
+      async () => '',
+      createComparisonCache(),
+      undefined,
+      {
+        listDirectories: listRealBatch,
+        onProgress: (event) => events.push(event)
+      }
+    )
+
+    const scans = scanEvents(events)
+    expect(scans.length).toBeGreaterThanOrEqual(2)
+    for (let index = 1; index < scans.length; index += 1) {
+      expect(scans[index].files).toBeGreaterThanOrEqual(scans[index - 1].files)
+      expect(scans[index].bytes).toBeGreaterThanOrEqual(scans[index - 1].bytes)
+    }
+    const last = scans[scans.length - 1]
+    expect(last.files).toBe(pair.leftStats.files + pair.rightStats.files)
+    expect(last.bytes).toBe(pair.leftStats.bytes + pair.rightStats.bytes)
+    // The real comparison is unaffected by observing it.
+    expect(comparison.fileCount).toBe(pair.leftStats.files)
+    expect(comparison.skipped).toBe(0)
+  })
+
+  it('reports one digest event per settled digest chunk', async () => {
+    const fs = createFakeFs(digestTree(3, 7))
+    const events: DirectoryProgress[] = []
+    const eventsAtCall: number[] = []
+    const digestFiles: DigestFiles = async (paths) => {
+      eventsAtCall.push(digestEvents(events).length)
+      return fs.digestFiles(paths)
+    }
+
+    await compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+      digestFiles,
+      digestBatchSize: 2,
+      onProgress: (event) => events.push(event)
+    })
+
+    // Six candidate paths in chunks of two: three real "settle" steps.
+    expect(digestEvents(events).map((event) => event.files)).toEqual([2, 4, 6])
+    expect(digestEvents(events).map((event) => event.bytes)).toEqual([14, 28, 42])
+    // A chunk is only requested after the previous one settled and reported.
+    expect(eventsAtCall).toEqual([0, 1, 2])
+  })
+
+  it('never fabricates digest progress while a chunk is still pending', async () => {
+    const fs = createFakeFs(digestTree(2, 5))
+    const events: DirectoryProgress[] = []
+    const calls: string[][] = []
+    const resolvers: Array<(digests: Awaited<ReturnType<DigestFiles>>) => void> = []
+    const digestFiles: DigestFiles = (paths) => {
+      calls.push([...paths])
+      return new Promise((resolve) => {
+        resolvers.push(resolve)
+      })
+    }
+    const settle = async (index: number): Promise<void> => {
+      resolvers[index](await fs.digestFiles(calls[index]))
+    }
+
+    const run = compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+      digestFiles,
+      digestBatchSize: 2,
+      onProgress: (event) => events.push(event)
+    })
+
+    await waitUntil(() => calls.length === 1)
+    await delay(20)
+    expect(digestEvents(events)).toHaveLength(0)
+
+    await settle(0)
+    await waitUntil(() => digestEvents(events).length === 1)
+    expect(digestEvents(events)[0]).toEqual({ phase: 'digest', files: 2, bytes: 10 })
+
+    await waitUntil(() => calls.length === 2)
+    await settle(1)
+    await run
+    expect(digestEvents(events)).toHaveLength(2)
+
+    // No timer keeps inventing progress after the comparison has finished.
+    await delay(20)
+    expect(digestEvents(events)).toHaveLength(2)
+  })
+
+  it('rejects a digest-phase cancellation with the dedicated error type', async () => {
+    const fs = createFakeFs(digestTree(2, 5))
+    let digestCalls = 0
+    const hanging: DigestFiles = () => {
+      digestCalls += 1
+      return new Promise(() => undefined)
+    }
+
+    const assertCancelled = (error: unknown): void => {
+      expect(error).toBeInstanceOf(OperationCancelledError)
+      expect((error as OperationCancelledError).name).toBe('OperationCancelledError')
+      expect((error as OperationCancelledError).code).toBe('ECANCELED')
+      expect((error as Error).message).toContain('已取消')
+    }
+
+    const controller = new AbortController()
+    const comparison = compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+      digestFiles: hanging,
+      digestBatchSize: 2,
+      signal: controller.signal
+    })
+    await waitUntil(() => digestCalls > 0)
+    controller.abort()
+    assertCancelled(await settleWithin(comparison, 1000))
+
+    let sideCalls = 0
+    const sideHanging: DigestFiles = () => {
+      sideCalls += 1
+      return new Promise(() => undefined)
+    }
+    const sideController = new AbortController()
+    const sides = compareDirectorySides(
+      { kind: 'directory', path: '/left' },
+      { kind: 'directory', path: '/right' },
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: sideHanging,
+        digestBatchSize: 2,
+        signal: sideController.signal
+      }
+    )
+    await waitUntil(() => sideCalls > 0)
+    sideController.abort()
+    assertCancelled(await settleWithin(sides, 1000))
+  })
+
+  it('stops a hung scan batch at once and issues no further listings', async () => {
+    const fs = createFakeFs(digestTree(1, 3))
+    const controller = new AbortController()
+    let calls = 0
+    const hanging: ListDirectories = () => {
+      calls += 1
+      return new Promise(() => undefined)
+    }
+
+    const run = scanDirectory('/left', fs.list, { listDirectories: hanging, signal: controller.signal })
+    await waitUntil(() => calls > 0)
+    controller.abort()
+    const error = await settleWithin(run, 1000)
+    expect(error).toBeInstanceOf(OperationCancelledError)
+
+    const callsAtAbort = calls
+    await delay(20)
+    expect(calls).toBe(callsAtAbort)
+  })
+
+  it('rejects a hung comparison scan without a partial tree', async () => {
+    const fs = createFakeFs(digestTree(1, 3))
+    const controller = new AbortController()
+    let calls = 0
+    const hanging: ListDirectories = () => {
+      calls += 1
+      return new Promise(() => undefined)
+    }
+
+    const run = compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+      listDirectories: hanging,
+      signal: controller.signal
+    })
+    await waitUntil(() => calls > 0)
+    controller.abort()
+    const error = await settleWithin(run, 1000)
+    expect(error).toBeInstanceOf(OperationCancelledError)
+
+    const callsAtAbort = calls
+    await delay(20)
+    expect(calls).toBe(callsAtAbort)
+  })
+
+  it('stops a hung digest chunk and sends no later chunk', async () => {
+    const fs = createFakeFs(digestTree(2, 5))
+    const controller = new AbortController()
+    let calls = 0
+    const hanging: DigestFiles = () => {
+      calls += 1
+      return new Promise(() => undefined)
+    }
+
+    const run = compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+      digestFiles: hanging,
+      digestBatchSize: 2,
+      signal: controller.signal
+    })
+    await waitUntil(() => calls > 0)
+    controller.abort()
+    const error = await settleWithin(run, 1000)
+    expect(error).toBeInstanceOf(OperationCancelledError)
+
+    const callsAtAbort = calls
+    await delay(20)
+    expect(calls).toBe(callsAtAbort)
+  })
+
+  it('keeps only settled digest chunks in the cache and recomputes cleanly', async () => {
+    const fs = createFakeFs(digestTree(2, 4))
+    const calls: string[][] = []
+    const resolvers: Array<(digests: Awaited<ReturnType<DigestFiles>>) => void> = []
+    const digestFiles: DigestFiles = (paths) => {
+      calls.push([...paths])
+      return new Promise((resolve) => {
+        resolvers.push(resolve)
+      })
+    }
+    const settle = async (index: number): Promise<void> => {
+      resolvers[index](await fs.digestFiles(calls[index]))
+    }
+
+    const cache = createComparisonCache()
+    const controller = new AbortController()
+    const run = compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache, undefined, {
+      digestFiles,
+      digestBatchSize: 2,
+      signal: controller.signal
+    })
+
+    await waitUntil(() => calls.length === 1)
+    await settle(0)
+    await waitUntil(() => calls.length === 2)
+    controller.abort()
+    expect(await settleWithin(run, 1000)).toBeInstanceOf(OperationCancelledError)
+
+    // Only the settled chunk wrote cache entries; the interrupted one wrote none.
+    const settledPaths = calls[0]
+    expect([...cache.hashes.keys()].sort()).toEqual([...settledPaths].sort())
+
+    const baseline = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { digestFiles: fs.digestFiles, digestBatchSize: 2 }
+    )
+    const retried = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      cache,
+      undefined,
+      { digestFiles: fs.digestFiles, digestBatchSize: 2 }
+    )
+    expect(retried.counts).toEqual(baseline.counts)
+    expect(retried.skipped).toBe(baseline.skipped)
+  })
+
+  it('emits no digest progress on a fully cached second comparison', async () => {
+    const fs = createFakeFs(digestTree(2, 5))
+    const cache = createComparisonCache()
+    await compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache, undefined, {
+      digestFiles: fs.digestFiles,
+      digestBatchSize: 2
+    })
+
+    let digestCalls = 0
+    const events: DirectoryProgress[] = []
+    await compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache, undefined, {
+      digestFiles: (paths) => {
+        digestCalls += 1
+        return fs.digestFiles(paths)
+      },
+      digestBatchSize: 2,
+      onProgress: (event) => events.push(event)
+    })
+
+    expect(digestCalls).toBe(0)
+    expect(digestEvents(events).filter((event) => event.files > 0)).toHaveLength(0)
+    expect(DEFAULT_DIGEST_BATCH_SIZE).toBeGreaterThanOrEqual(2)
   })
 })

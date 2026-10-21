@@ -57,6 +57,62 @@ export async function mapWithLimit<T, R>(
   return results
 }
 
+/**
+ * Raised when a caller cancels a long-running operation. Cancellation is a
+ * failure of its own (never a `skipped` entry): a cancelled scan or comparison
+ * rejects instead of returning a partial tree or a half-filled cache.
+ */
+export class OperationCancelledError extends Error {
+  readonly code = 'ECANCELED' as const
+
+  constructor(message = '操作已取消：本次目录对比已停止，未提交任何部分结果。') {
+    super(message)
+    this.name = 'OperationCancelledError'
+  }
+}
+
+/** True for a cancellation, whichever runtime raised it. */
+export function isOperationCancelled(error: unknown): boolean {
+  if (error instanceof OperationCancelledError) return true
+  const candidate = error as { name?: unknown; code?: unknown } | null
+  return candidate?.name === 'OperationCancelledError' && candidate.code === 'ECANCELED'
+}
+
+/** Throws {@link OperationCancelledError} once `signal` has fired. */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw new OperationCancelledError()
+}
+
+/**
+ * Races `operation` against `signal`, so a cancelled batch rejects at once even
+ * when the platform call never settles. The abandoned call keeps its own
+ * `catch`, so it can never surface as an unhandled rejection.
+ */
+export function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return operation
+  if (signal.aborted) {
+    operation.catch(() => undefined)
+    return Promise.reject(new OperationCancelledError())
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new OperationCancelledError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    operation.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
 export type FileHandleErrorCode = 'EMFILE' | 'ENFILE'
 
 /** Raised when the OS refuses an I/O call because the process ran out of descriptors. */

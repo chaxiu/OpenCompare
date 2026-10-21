@@ -14,7 +14,13 @@
  */
 import type { DiffStatus } from '@shared/fixtures'
 import type { DirectoryEntry, DirectoryListing, FileDigest } from '@shared/platform/types'
-import { mapWithLimit, toReadableIoError } from '../io'
+import {
+  OperationCancelledError,
+  abortable,
+  mapWithLimit,
+  throwIfAborted,
+  toReadableIoError
+} from '../io'
 import type { ConcurrencyOptions } from '../io'
 import { sha256Hex } from './hash'
 
@@ -65,11 +71,53 @@ export const DEFAULT_TRAVERSAL_CONCURRENCY = 16
 /** Directories one batch listing may carry by default. */
 export const DEFAULT_DIRECTORY_BATCH_SIZE = 8
 
+/** Files one digest batch may carry by default, i.e. one progress step. */
+export const DEFAULT_DIGEST_BATCH_SIZE = 64
+
+/**
+ * One settled batch of work. `files` / `bytes` are cumulative **within their
+ * phase** (the digest phase starts at zero); they are never interpolated by a
+ * timer, only advanced when a real batch settles.
+ */
+export interface DirectoryProgress {
+  readonly phase: 'scan' | 'digest'
+  readonly files: number
+  readonly bytes: number
+}
+
+export type ProgressReporter = (progress: DirectoryProgress) => void
+
 export interface ScanDirectoryOptions {
   /** Batch capability; when omitted each directory goes through {@link ListDirectory}. */
   readonly listDirectories?: ListDirectories
   /** Overrides {@link DEFAULT_TRAVERSAL_CONCURRENCY}; values below 1 fall back to it. */
   readonly concurrency?: number
+  /** Cancels the scan; a cancelled scan rejects instead of returning a partial tree. */
+  readonly signal?: AbortSignal
+  /** Called at most once per settled listing batch with the running totals. */
+  readonly onProgress?: ProgressReporter
+}
+
+/**
+ * Merges the two side scans' per-side counters into one monotonic total, so a
+ * comparison reports both sides as a single progress stream.
+ */
+export function createScanProgressMerger(
+  onProgress: ProgressReporter | undefined
+): () => ProgressReporter {
+  let files = 0
+  let bytes = 0
+  return () => {
+    let sideFiles = 0
+    let sideBytes = 0
+    return (event) => {
+      files += event.files - sideFiles
+      bytes += event.bytes - sideBytes
+      sideFiles = event.files
+      sideBytes = event.bytes
+      onProgress?.({ phase: 'scan', files, bytes })
+    }
+  }
 }
 
 /** Reads one UTF-8 text file. Backed by `PlatformPort.readTextFile` in the app. */
@@ -94,6 +142,8 @@ export interface ComparisonIoOptions extends ScanDirectoryOptions {
    * text-read path.
    */
   readonly digestible?: (path: string) => boolean
+  /** Overrides {@link DEFAULT_DIGEST_BATCH_SIZE}; values below 1 fall back to it. */
+  readonly digestBatchSize?: number
 }
 
 /** Content digest of one file, keyed by the metadata it was computed for. */
@@ -168,6 +218,13 @@ function perDirectoryBatches(list: ListDirectory): ListDirectories {
     })
 }
 
+/** Files one digest request carries; one settled request is one progress step. */
+function resolveDigestBatchSize(options: ComparisonIoOptions): number {
+  const requested = options.digestBatchSize
+  if (requested === undefined || !Number.isFinite(requested)) return DEFAULT_DIGEST_BATCH_SIZE
+  return Math.max(1, Math.floor(requested))
+}
+
 function resolveTraversalConcurrency(options: ScanDirectoryOptions): number {
   const requested = options.concurrency
   if (requested === undefined || !Number.isFinite(requested)) {
@@ -208,7 +265,11 @@ export async function scanDirectory(
 ): Promise<ScannedTree> {
   const listDirectories = options.listDirectories ?? perDirectoryBatches(list)
   const concurrency = resolveTraversalConcurrency(options)
+  const { signal, onProgress } = options
   let skipped = 0
+  // Files (and their bytes) discovered so far, advanced once per settled batch.
+  let discoveredFiles = 0
+  let discoveredBytes = 0
 
   const root: PendingNode = {
     name: basename(rootPath),
@@ -224,6 +285,7 @@ export async function scanDirectory(
   ]
 
   while (level.length > 0) {
+    throwIfAborted(signal)
     const batchSize = resolveBatchSize(level.length, concurrency)
     const batches: PendingDirectory[][] = []
     for (let index = 0; index < level.length; index += batchSize) {
@@ -234,10 +296,11 @@ export async function scanDirectory(
     // `mapWithLimit` keeps the call window bounded, stops issuing new batches
     // after the first failure and rejects once the in-flight calls settle.
     await mapWithLimit(batches, { concurrency }, async (batch) => {
+      throwIfAborted(signal)
       const paths = batch.map((directory) => directory.path)
       let listings: readonly DirectoryListing[]
       try {
-        listings = await listDirectories(paths)
+        listings = await abortable(listDirectories(paths), signal)
       } catch (error) {
         throw toReadableIoError(error)
       }
@@ -248,6 +311,8 @@ export async function scanDirectory(
         )
       }
 
+      let batchFiles = 0
+      let batchBytes = 0
       for (const [index, directory] of batch.entries()) {
         const listing = listings[index]
         if (listing.path !== directory.path) {
@@ -292,6 +357,8 @@ export async function scanDirectory(
               parent: directory.node
             })
           } else {
+            batchFiles += 1
+            batchBytes += entry.size
             directory.node.children.push({
               name: entry.name,
               path: entry.path,
@@ -303,6 +370,11 @@ export async function scanDirectory(
           }
         }
       }
+
+      // One report per settled batch: real numbers only, no timer interpolation.
+      discoveredFiles += batchFiles
+      discoveredBytes += batchBytes
+      onProgress?.({ phase: 'scan', files: discoveredFiles, bytes: discoveredBytes })
     })
 
     level = nextLevel
@@ -698,39 +770,56 @@ export async function digestContentCandidates(
   const textReads =
     digestFiles === undefined ? requested : requested.filter((path) => !digestible(path))
 
-  // One batch request covers every raw-byte digest: the digest capability owns
-  // its own bounded streaming reads, so the engine never pulls a body itself.
-  if (batch.length > 0 && digestFiles !== undefined) {
-    let digests: readonly FileDigest[]
-    try {
-      digests = await digestFiles(batch)
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code
-      if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
-      throw error
-    }
+  const { signal, onProgress } = options
+  const batchSize = resolveDigestBatchSize(options)
+  let settledFiles = 0
+  let settledBytes = 0
 
-    // The contract is one result per request, in input order; a missing slot or
-    // a failed item is just an unreadable body, never a batch-wide failure.
-    batch.forEach((path, index) => {
-      const digest = digests[index]
-      if (digest === undefined || !digest.ok) {
-        unreadable.add(path)
-        return
+  // Raw-byte digests go out in sequential chunks: the digest capability owns its
+  // own bounded streaming reads, and one settled chunk becomes one progress
+  // step (and one cache write, so a cancelled chunk never lands in the cache).
+  if (batch.length > 0 && digestFiles !== undefined) {
+    for (let start = 0; start < batch.length; start += batchSize) {
+      throwIfAborted(signal)
+      const chunk = batch.slice(start, start + batchSize)
+      let digests: readonly FileDigest[]
+      try {
+        digests = await abortable(digestFiles(chunk), signal)
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code
+        if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
+        throw error
       }
-      const node = nodes.get(path)
-      if (node === undefined) {
-        throw new Error(`No scanned file at ${path}; call planContentReads first.`)
-      }
-      cache.hashes.set(path, {
-        size: node.size,
-        modifiedMs: node.modifiedMs,
-        hash: digest.sha256
+
+      // The contract is one result per request, in input order; a missing slot
+      // or a failed item is just an unreadable body, never a batch-wide failure.
+      let chunkBytes = 0
+      chunk.forEach((path, index) => {
+        const digest = digests[index]
+        if (digest === undefined || !digest.ok) {
+          unreadable.add(path)
+          return
+        }
+        const node = nodes.get(path)
+        if (node === undefined) {
+          throw new Error(`No scanned file at ${path}; call planContentReads first.`)
+        }
+        chunkBytes += digest.bytes
+        cache.hashes.set(path, {
+          size: node.size,
+          modifiedMs: node.modifiedMs,
+          hash: digest.sha256
+        })
       })
-    })
+
+      settledFiles += chunk.length
+      settledBytes += chunkBytes
+      onProgress?.({ phase: 'digest', files: settledFiles, bytes: settledBytes })
+    }
   }
 
   await mapWithLimit(textReads, options, async (path) => {
+    throwIfAborted(signal)
     try {
       const node = nodes.get(path)
       if (node === undefined) {
@@ -739,9 +828,11 @@ export async function digestContentCandidates(
       cache.hashes.set(path, {
         size: node.size,
         modifiedMs: node.modifiedMs,
-        hash: hash(await read(path))
+        hash: hash(await abortable(read(path), signal))
       })
     } catch (error) {
+      // Cancellation is its own failure path, never a skipped entry.
+      if (error instanceof OperationCancelledError) throw error
       const code = (error as { code?: unknown } | null)?.code
       if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
       if (!tolerate(error)) throw error
@@ -769,9 +860,11 @@ export async function compareDirectories(
   options: ComparisonIoOptions = {}
 ): Promise<DirectoryComparison> {
   try {
+    // Both side scans feed one monotonic progress stream.
+    const sideReporter = createScanProgressMerger(options.onProgress)
     const [left, right] = await Promise.all([
-      scanDirectory(leftRoot, list, options),
-      scanDirectory(rightRoot, list, options)
+      scanDirectory(leftRoot, list, { ...options, onProgress: sideReporter() }),
+      scanDirectory(rightRoot, list, { ...options, onProgress: sideReporter() })
     ])
 
     // Digests go straight into the cache: only one body per in-flight read is

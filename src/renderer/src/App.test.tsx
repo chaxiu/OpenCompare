@@ -1631,3 +1631,201 @@ describe('launch request injection', () => {
     expect(port.calls).toEqual(['subscribe', 'ready'])
   })
 })
+
+describe('directory progress and cancel UI', () => {
+  /** Writes in-memory files, creating their directories on the web port. */
+  async function writeMemoryFiles(
+    platform: PlatformPort,
+    files: readonly (readonly [string, string])[]
+  ): Promise<void> {
+    for (const [path, text] of files) await platform.writeTextFile(path, text)
+  }
+
+  function progressBar(): HTMLElement | null {
+    return screen.queryByRole('status', { name: '目录对比进度' })
+  }
+
+  function scannedCount(text: string | null): number {
+    const match = /已扫描 (\d+) 个文件/.exec(text ?? '')
+    if (match === null) throw new Error(`no scanned count in: ${text}`)
+    return Number(match[1])
+  }
+
+  it('shows real scan and digest progress, then clears it once the comparison succeeds', async () => {
+    const base = createWebPlatformPort()
+    await writeMemoryFiles(base, [
+      ['/memory/live/left/a.txt', 'x'],
+      ['/memory/live/left/b.txt', 'x'],
+      ['/memory/live/right/a.txt', 'x'],
+      ['/memory/live/right/b.txt', 'x']
+    ])
+
+    const answers = ['/memory/live/left', '/memory/live/right']
+    let releaseScan!: () => void
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve
+    })
+    let scanCalls = 0
+    let releaseDigest!: () => void
+    const digestGate = new Promise<void>((resolve) => {
+      releaseDigest = resolve
+    })
+    let digestCalls = 0
+
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      listDirectories: async (paths) => {
+        scanCalls += 1
+        // The first side's root batch waits, so the other side's count lands first.
+        if (scanCalls === 1) await scanGate
+        return base.listDirectories(paths)
+      },
+      digestFiles: async (paths, options) => {
+        digestCalls += 1
+        await digestGate
+        return base.digestFiles(paths, options)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    expect(bar.textContent).toContain('已扫描')
+    expect(bar.textContent).toContain('已处理')
+    expect(within(bar).getByRole('button', { name: '取消' })).toBeDefined()
+
+    // One real batch settles while the other is still blocked: the number grows.
+    await waitFor(() => expect(scannedCount(bar.textContent)).toBe(2))
+    releaseScan()
+    await waitFor(() => expect(scannedCount(bar.textContent)).toBe(4))
+
+    await waitFor(() => expect(digestCalls).toBeGreaterThan(0))
+    expect(within(bar).getByRole('button', { name: '取消' })).toBeDefined()
+
+    releaseDigest()
+    await waitFor(() => expect(progressBar()).toBeNull())
+    expect(
+      await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+    ).toBeDefined()
+  })
+
+  it('cancels a running comparison and leaves sessions, view and status bar untouched', async () => {
+    const base = createWebPlatformPort()
+    await writeMemoryFiles(base, [
+      ['/memory/cancel/left/a.txt', 'x'],
+      ['/memory/cancel/left/b.txt', 'x'],
+      ['/memory/cancel/right/a.txt', 'x'],
+      ['/memory/cancel/right/b.txt', 'x']
+    ])
+
+    const answers = [
+      '/memory/cancel/left',
+      '/memory/cancel/right',
+      '/memory/cancel/left',
+      '/memory/cancel/right'
+    ]
+    const digestIds: string[] = []
+    const cancelIds: string[] = []
+    let released = false
+    let releaseDigest!: () => void
+    const digestGate = new Promise<void>((resolve) => {
+      releaseDigest = resolve
+    })
+
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      digestFiles: async (paths, options) => {
+        if (options?.operationId !== undefined) {
+          digestIds.push(options.operationId)
+          if (!released) await digestGate
+        }
+        return base.digestFiles(paths)
+      },
+      cancelOperation: async (operationId) => {
+        cancelIds.push(operationId)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+
+    const tabsBefore = within(screen.getByRole('tablist', { name: '会话' }))
+      .getAllByRole('tab')
+      .map((tab) => tab.textContent)
+    const statusBefore = screen.getByRole('contentinfo').textContent
+    const viewBefore = screen.getByRole('main').innerHTML
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    await waitFor(() => expect(digestIds.length).toBeGreaterThan(0))
+
+    fireEvent.click(within(bar).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(progressBar()).toBeNull())
+
+    // One operation id crosses the seam for both digesting and cancelling.
+    expect(cancelIds).toEqual([digestIds[0]])
+
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toContain('已取消')
+    expect(notice.className).toContain('text-diff-added')
+
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' }))
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent)
+    ).toEqual(tabsBefore)
+    expect(screen.getByRole('contentinfo').textContent).toBe(statusBefore)
+    expect(screen.getByRole('main').innerHTML).toBe(viewBefore)
+    const newCompare = screen.getAllByRole('button', { name: '新建对比' })[0] as HTMLButtonElement
+    expect(newCompare.disabled).toBe(false)
+
+    // The same pair can be started again right away and now completes.
+    released = true
+    releaseDigest()
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    expect(
+      await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+    ).toBeDefined()
+    await waitFor(() => expect(progressBar()).toBeNull())
+    expect(
+      screen.getByText('/memory/cancel/left ↔ /memory/cancel/right')
+    ).toBeDefined()
+  })
+
+  it('renders no progress bar while nothing is comparing', async () => {
+    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+
+    // Idle empty workbench.
+    expect(progressBar()).toBeNull()
+
+    // A file pair is not a directory comparison.
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    expect(progressBar()).toBeNull()
+
+    // Load the demo directory, then run sync / template flows.
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+    expect(progressBar()).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))
+    const syncDialog = await screen.findByRole('dialog', { name: /同步预览/ })
+    expect(progressBar()).toBeNull()
+    fireEvent.click(within(syncDialog).getByRole('button', { name: '取消' }))
+    expect(progressBar()).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    const templateDialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
+    expect(progressBar()).toBeNull()
+    fireEvent.click(within(templateDialog).getByRole('button', { name: '确认提取归位' }))
+    await screen.findByText(/模板归位完成/)
+    expect(progressBar()).toBeNull()
+  })
+})
