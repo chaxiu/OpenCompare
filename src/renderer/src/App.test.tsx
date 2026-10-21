@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
@@ -9,6 +9,31 @@ import { compareDirectories, createComparisonCache } from '@core/directory/compa
 import { App } from './App'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
+
+/**
+ * jsdom reports zero-sized elements, which would give the virtualised tree no
+ * viewport at all. A fixed 1200×640 client box stands in for the real panel.
+ */
+const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 1200
+  })
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get: () => 640
+  })
+})
+
+afterAll(() => {
+  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
+  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+})
 
 afterEach(cleanup)
 

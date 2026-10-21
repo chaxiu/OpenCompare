@@ -20,7 +20,7 @@ import type { CompareRequest, CompareRequestPayload } from '@shared/compareReque
 import type { PlatformPort } from '@shared/platform/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
-import { countTreeFiles, filterDirectoryTree } from '@core/directory/filter'
+import { visibleDirectoryCounts } from '@core/directory/rows'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
@@ -360,8 +360,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const directoryCounts = useMemo<SampleComposition | null>(() => {
     const comparison = active?.scene === 'directory' ? active.directory : undefined
     if (!comparison) return null
-    const filtered = filterDirectoryTree(comparison.root, directoryState.filter)
-    return { ...countTreeFiles(filtered), conflict: 0 }
+    // The status aggregate already carries every file's status, so the visible
+    // counts are a per-filter projection of it rather than a filtered tree walk.
+    return { ...visibleDirectoryCounts(comparison.root, directoryState.filter), conflict: 0 }
   }, [active, directoryState.filter])
 
   // The code session's conflict count and the CSV alignment counts are computed
@@ -940,7 +941,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             comparison={comparison}
             filter={treeState.filter}
             onFilterChange={(next) => patchDirectoryState(session.id, { filter: next })}
-            collapsedPaths={new Set(treeState.collapsed)}
+            collapsedPaths={treeState.collapsed}
             onTogglePath={(path) => toggleDirectoryPath(session.id, path)}
             selectedPath={treeState.selectedPath}
             onSelectPath={(path) => patchDirectoryState(session.id, { selectedPath: path })}

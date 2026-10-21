@@ -19,5 +19,5 @@ Component conventions (or pointers to the in-repo UI kit).
 | `StatusBar.tsx` | `StatusBar` / `StatusEntry` / `CompositionLegend` | 底部状态栏条目与差异语义计数图例 |
 | `DiffBadge.tsx` | `DiffDot` / `DiffBadge` | 差异语义点 / 标签 |
 | `diffSemantics.ts` | `DIFF_STATUSES` / `DIFF_LABELS` / 颜色类映射 | 差异语义词汇表 |
-| `TreeView.tsx` | `TreeView` | 只读目录树行（展开 / 折叠、差异标签） |
+| `TreeView.tsx` | `TreeView` | 只读目录树（展开 / 折叠、差异标签）：按 `DirectoryRowModel` + `@tanstack/react-virtual` 窗口化，只渲染视口行 + 常量 overscan，行高 `DIRECTORY_ROW_HEIGHT`(24px) 单一常量 |
 | `CodeBlock.tsx` | `CodeBlock` | 等宽代码块 + 行号槽 |

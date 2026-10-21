@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
@@ -25,6 +25,31 @@ beforeEach(() => {
   URL.createObjectURL = createObjectURL
   URL.revokeObjectURL = revokeObjectURL
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+})
+
+/**
+ * jsdom reports zero-sized elements, which would give the virtualised tree no
+ * viewport at all. A fixed 1200×640 client box stands in for the real panel.
+ */
+const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 1200
+  })
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get: () => 640
+  })
+})
+
+afterAll(() => {
+  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
+  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
 })
 
 afterEach(() => {

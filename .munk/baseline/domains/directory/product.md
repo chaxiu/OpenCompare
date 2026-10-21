@@ -7,6 +7,7 @@
 - **目录对比引擎（`src/core/directory/`，纯算法，零 Electron/DOM）**：经 `PlatformPort` 递归扫描左右两棵树，按**相对路径**配对（不做跨层级模板匹配）；每文件产出 `same` / `added`（右独有）/ `removed`（左独有）/ `modified` 四类状态，目录状态由后代聚合。
 - **高速 / 增量策略**：先比文件大小、再比修改时间；二者都不足以判定差异时才读取内容做 **SHA-256** 内容哈希确认（覆盖「大小相同但内容不同」）；已比对条目按（路径 / 大小 / 修改时间）缓存，重复比对不重复读内容与哈希。输出带状态的左右树 + 按状态文件计数。
 - **双栏目录对比视图**：左右双栏树、目录展开/折叠、逐行差异语义徽章（复用 `DiffBadge` / `--color-diff-*`）、目录行显示其后代差异聚合计数；一键过滤 `全部 / 仅差异 / 左独有 / 右独有 / 相同`，过滤后仅保留匹配条目及其祖先目录。
+- **目录树窗口化渲染（大目录不 OOM）**：`DirectoryView` 不再对整树做 `filterDirectoryTree` + 左右 `projectDirectoryTree` 克隆；改为由 `src/core/directory/rows.ts` 的纯行模型 `buildDirectoryRowModel(root, filter, side, collapsedPaths)` 按 `(root, filter, side, 折叠集合)` 一次前序遍历产出「可视行索引」（只持节点引用 + depth + 是否展开，不复制节点、不复制 children），`TreeView` 用 `@tanstack/react-virtual` 只渲染视口行 + 常量 overscan（`ROW_OVERSCAN = 10`），占位总高 = 行数 × `DIRECTORY_ROW_HEIGHT`（24px = `h-6`）。DOM 节点数与渲染行数有界、不随总条目数线性增长。工作台 `visibleCounts` 亦改为按过滤档从根节点 `counts` 直接派生（`visibleDirectoryCounts`），不再为统计克隆过滤树。五段过滤、左右投影、展开/折叠、选中、双击下钻、逐级返回的状态语义与四态统计、对比结果全部保持不变。
 - **取数与下钻**：本地真实目录选择（左/右各经 `PlatformPort.selectDirectory`，Electron 原生对话框、Web 模式降级提示）；内置样本目录一键加载（`pnpm dev` 与 `pnpm dev:web` 均可）；双击差异文件（`added`/`removed`/`modified`）按其类型把左右内容带入对应文件级视图并切换会话（代码/文本 → 代码双栏 Diff；CSV/TSV → CSV 视图；JSON/YAML → 结构化视图；左独有右侧空、右独有左侧空）。
 - **下钻来源绑定与返回上级目录视图**：目录树下钻生成的文件级会话记录**来源目录会话**（`parentDirectoryId`）与会话 id 前缀（`file:{parentId}::{relativePath}`），两个不同目录会话对同一相对路径的下钻互不覆盖；文件级视图顶部提供明确的「返回上级目录视图」导航（左箭头按钮 + 「来源目录对比：<目录会话标题>」说明），一步回到发起本次下钻的目录会话，可反复「下钻 → 返回」。不实现目录级下钻栈 / 面包屑 / 前进后退历史（树已展示完整层级，下钻止于文件级）。
 - **往返目录状态保持（按目录会话归口）**：过滤档位、目录树折叠/展开集合、左右面板滚动位置、树行选中项由工作台壳层按目录会话 id 保存并受控回填，不依赖组件挂载生命周期；目录视图因下钻卸载重建后，上述状态原样恢复，且不同目录会话之间互不串味。状态仅保持于当前运行期内存，不跨重启/跨窗口持久化。
@@ -60,6 +61,17 @@
 - **ac-template-perf**：匹配基于哈希/文件名索引，1,000+ 文件的合成散乱树仍在线性时间内完成且不对同一文件重复读取内容 / 计算哈希（vitest 用计数桩断言）。
 - **ac-existing-confirmations**：目录同步 / 模板归位等既有危险动作的预览与确认语义保持不变（`role="dialog"` 预览、确认前不写、取消不写、按预览写入后刷新）。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿，且新增 vitest 覆盖同步计划与模板匹配。
+- **ac-rows-filter-parity**：对同一 `DirectoryComparison` 在全部展开、5 档过滤 × 左右两侧下，行模型输出的 `(relativePath, name, kind, depth, status)` 序列与既有 `filterDirectoryTree` → `projectDirectoryTree` → 先序遍历（根节点为第 0 行）逐项完全相等（含顺序、含投影后遗留的空目录行）；该断言在 ≥5 万条目真实 fixture 上通过。
+- **ac-rows-collapse-parity**：对任意折叠集合（含父目录与子目录同时折叠），行模型等于「先序遍历但跳过折叠目录的子树」，折叠目录自身所在行仍保留且位置不变；折叠集合为空时行模型与全部展开一致。
+- **ac-row-model-no-clone**：行模型条目中的节点与 `comparison.root` 子树节点是同一对象引用（`===`），构造 5 档 × 2 侧行模型前后抽样节点身份不变；渲染/过滤/滚动过程中 `DirectoryView` 不再调用 `filterDirectoryTree` / `projectDirectoryTree`（mock 计数断言为 0）。
+- **ac-bounded-dom-50k**：1200×640 视口的 ≥5 万条目真实 fixture 上首屏渲染后每栏 `[role="treeitem"]` 数量 ≤ 80、双栏 `document` 内 DOM 元素总数 ≤ 5000；滚动到中部、底部并重复 20 次后仍满足且不单调增长。
+- **ac-dom-independent-of-total**：同一 1200×640 视口下渲染 5,000 行与 5 万+ 行对比，`[role="treeitem"]` 数量相同（±2）、DOM 元素总数差异 ≤ 10%；滚动到相同比例位置后同样成立。
+- **ac-expand-large-folder-bounded**：展开含 ≥2 万直接子项的目录后每栏渲染行数仍 ≤ 80，滚动到底部能取到该目录按名称排序的最后一行。
+- **ac-scroll-far-rows**：左栏 `scrollTop` 设为接近内容底部并触发 `scroll` 后，渲染行索引严格递增且无重复；索引集合同时覆盖 `floor(scrollTop/行高)` 与 `floor((scrollTop+视口高-1)/行高)`，每行 name/status/depth 与行模型对应索引逐项一致；滚动占位总高 = 行数 × 行高（±1px）。
+- **ac-five-filter-switch**：依次切换 5 档过滤，每档渲染出的 DOM 行都是该档行模型的前缀窗口（含首行根节点、无上一档残留行）；空结果档不渲染任何 `treeitem` 并显示既有文案「当前过滤下…目录没有条目。」；各档行数与行模型 `length` 一致（窗口外行不进入 DOM）。
+- **ac-visible-counts-parity**：5 档过滤下状态栏 `visibleCounts` 与既有 `countTreeFiles(filterDirectoryTree(root, filter))` 四态计数逐项相等（`conflict` 恒为 0）；根目录无匹配文件时四态全为 0。
+- **ac-drilldown-restore**：在过滤 + 折叠 + 选中 + 滚动到非零位置后卸载视图，再以 shell 保存的同一状态重挂载（等价下钻返回）：两栏 `scrollTop` 恢复为保存值（±1），选中行 `aria-selected="true"` 且位于渲染窗口内，折叠目录的子项不渲染，过滤档高亮与行集保持原档，根节点仍为第 0 行。
+- **ac-existing-suites-green**：`pnpm test` 既有 `src/core/directory/**`、样本与 renderer 套件零回归；`code_gates` 六条（install / lint / typecheck / build / build:web / test）全绿。
 - **ac-batch-multi-dir-per-call**：对含 ≥ 8 个目录的临时 fixture 扫描，记录到的批量列目录调用中至少有一次携带 ≥ 2 个目录路径，且总批量调用次数严格小于被扫描目录数（证明一个往返覆盖多个目录）。
 - **ac-default-concurrency-16**：对含 ≥ 32 个可列目录的 fixture，用默认参数扫描：实测在飞批量请求峰值 ≥ 16，且 ≤ 遍历并发上限常量；该默认常量在单一来源导出且数值 ≥ 16。
 - **ac-concurrency-cap**：显式传入并发上限（如 4）扫描同一 fixture：实测在飞峰值 ≤ 4，产出的树、`index` 键集合、四态计数与 `skipped` 与默认并发下逐项相等。
@@ -93,6 +105,9 @@
 - **不做跨进程进度推送与取消之外的调度**：不新增 `webContents.send` 类 main → renderer 进度事件（进度只由核心批次结算结果在 renderer 侧汇总）；不做暂停 / 恢复 / 断点续传、不做取消确认对话框、不做取消后自动重试（取消就是一次性终止）；不给快照导出 / 同步 / 模板 / 下钻加进度或取消。不新增持久化缓存、不改缓存键 `(path, size, modifiedMs)` 与失效语义。
 - **不新增默认忽略规则**：`.git` / `node_modules` / 隐藏文件一律照列；不把不可读条目、悬空链接、不可列子树改成整次失败，也不把 EMFILE/ENFILE 吞成 `skipped`。
 - 不改样本 answer key（`src/shared/fixtures/` 的 `status` 字段）；不改 `.munk/baseline/**`（由 Delivery 折入）。
+- **窗口化不改数据语义与取数契约**：不改四态语义、对比 / 合并算法、行级 diff、快照线格式与发布模型；不动 `src/main/**` 扫描与 IPC、`src/preload/**`、`src/shared/platform/**`（批量列目录扫描层已由 `wi_ws_deb41e1c6a5a2b8f` 落地，其契约与语义本期不改）；不新增默认忽略规则、不砍 unreadable / 悬空链接 / 不可读子树的容错。
+- **不把 `ScannedTree` / `DirectoryComparison` 搬去主进程或 worker**：本期只做 renderer 窗口化；若窗口化后真实 1.1M 仍 OOM，只写瓶颈归因与下一步建议，不自行扩线。
+- **不假装虚拟化**：不「先全量渲染再隐藏」；不靠缩减 fixture 条目数或收窄过滤档达标；不顺手修既有投影语义（如空目录行去噪）、不新增过滤档、不改空态 / 工具栏文案、不改 CSV / 代码视图的虚拟化实现；不新增依赖、不引入新的全局状态容器或新页面。
 
 ## 实现约束
 
@@ -111,6 +126,12 @@
 - **目录树状态不得依赖组件本地挂载生命周期**：`TreeView` 的展开态、选中行改为受控 props（`collapsedPaths` / `selectedPath` + 回调），滚动位置经 `Panel` 的 `bodyRef` / `onBodyScroll` 上报；工作台壳层按 `sessionId` 保存 `{ filter, collapsed, selectedPath }` 与 `{ left, right }` 滚动偏移，返回时经 `useLayoutEffect` 回填。不为此引入全局状态管理库。
 - 下钻会话身份带来源：`createDrilldownSession(parentId, …)` 产出 `file:{parentId}::{relativePath}` 并写 `parentDirectoryId`；返回落点由 `resolveDirectoryReturn(sessions, sourceId)` 纯函数决定（来源会话 → 其他可用目录会话 fallback → `null`），兜底提示复用 `report(message, tone)`。
 - 选中高亮与返回入口只引用 `main.css` 语义 token 与既有 `focus-ring` / `transition-fast` utility；点展开/折叠按钮 `stopPropagation`，避免误改选中。
+- **行模型是纯函数，放 `src/core/directory/rows.ts`**：零 Electron / DOM 依赖，按 `(root, filter, side, collapsed)` 产出 `length` / `at(index)`，另提供 `visibleDirectoryCounts(root, filter)`；过滤 / 投影基准只认现有 `filterDirectoryTree` → `projectDirectoryTree` 行为（测试以之为 oracle），不另立语义。
+- **单一行高常量**：`DIRECTORY_ROW_HEIGHT = 24`（`h-6`）同时供占位计算与测试推导，禁止出现第二个魔法行高。
+- **行模型只按内容变化重建**：折叠集合由 `ReadonlySet` 改为稳定 `readonly string[]`（Workbench 直接传 `treeState.collapsed`），不得因外层重渲染对百万级树反复重建。
+- **虚拟化锚定 `Panel` body**：滚动容器仍是 `Panel` 的 body（`getScrollElement`），`initialOffset` 取 shell 保存的 `scrollTop`，下钻返回挂载时虚拟窗口与恢复后的滚动位置一致（不先渲染首屏再跳）；renderer 用例用 `// @vitest-environment jsdom` 并桩 `clientHeight` / `clientWidth` 为 1200×640（参考 `CsvView.test.tsx`），滚动以赋值 `scrollTop` + `fireEvent.scroll` 驱动。
+- **真实大目录 fixture**：`mkdtemp` 建临时目录、用例结束递归清理；两侧各 ≥26,000 条目（合计 ≥5 万）、嵌套 ≥3 层、四态各 ≥1,000，`same` 对写入后用 `utimes` 固定 mtime 避免状态抖动；用例超时可放宽到 120s，但仍须包含在 `pnpm test` 内。
+- 不改 `.munk/code-gates.json` 的六条命令与顺序；不新增依赖（`@tanstack/react-virtual` 已在依赖中，CSV 视图已有同款用法）。
 - **遍历复用既有并发工具，不引新依赖**：批量取数经 `@core/io` 的 `mapWithLimit`（保序、首错停发、等在飞收敛、绝不返回部分结果）与 `toReadableIoError`；不引 `p-limit` / `p-queue`。**遍历并发（默认 16）与主进程 `stat` 预算（默认 16）是两个独立常量**，各自单一来源导出（`DEFAULT_TRAVERSAL_CONCURRENCY` / `DEFAULT_STAT_CONCURRENCY`）并可在测试中传入覆盖值；不得靠抬高 `DEFAULT_IO_CONCURRENCY`（摘要/内容读取默认 8）来达成遍历默认值，调用点不重复硬编码数字。
 - **批量能力按新增能力 + 可选参数接入**：`scanDirectory(rootPath, list, options?)` 与 `ComparisonIoOptions`（extends `ScanDirectoryOptions`）尾参可选，既有调用点不必改写；真实运行路径（`directoryOps` 的 `compareRoots` / `syncIo` 扫描、`snapshotOps` 的对比与快照导出、`loadSampleSessions`）与 `compareDirectorySides` 均透传 `listDirectories`。
 - **排序、`skipped` 计数位置与失败容错分支沿用 `compare.ts` 既有口径，不重排索引结构。**
@@ -141,3 +162,8 @@
 - 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 含新增批量扫描用例全绿）。
 - 覆盖摘要：`scanDirectory` 由逐层串行 walk 改为**队列 + 批量取数 + 有界并发**——`PendingDirectory` 层队列、`resolveBatchSize` 收缩批大小、`mapWithLimit(batches, { concurrency })` 限制在飞批量调用、`finalize` 递归排序组装（保留名称 `localeCompare` 排序与索引结构）；新增导出 `DEFAULT_TRAVERSAL_CONCURRENCY = 16`、`DEFAULT_DIRECTORY_BATCH_SIZE = 8`、`ScanDirectoryOptions`、`ListDirectories`，`ComparisonIoOptions` 改为 extends `ScanDirectoryOptions` 并把 `options` 透传到 `compareDirectories` 的两侧扫描与 `compareDirectorySides`（`snapshot.ts`）。容错口径原样保留：broken 条目计 `skipped`、不可列子树只计 `skipped` 1 次且不进树、根槽位失败 reject（「无法读取目录 <path>：…」）、EMFILE/ENFILE 经 `toReadableIoError` 致死、批量槽位数/顺序不符整次 reject 不返回部分树。`compare.test.ts` 新增「batched directory scan」8 条用例（一次往返覆盖多目录且调用次数少于目录数、默认在飞峰值 ≥ 16、显式 cap 4 后树/index/skipped 逐项相等、槽位失败时与串行树一致、缺槽位 reject、根失败 reject、批量路径下 EMFILE 致死而非计入 skipped、四态分类经批量能力一致）。
 - 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例，全局 tech / design 折叠跳过；平台能力缝（`PlatformPort.listDirectories`）折叠在 `domains/foundation`，遍历并发与主进程 `stat` 预算口径折叠在 `domains/io-concurrency`。
+- WI：`wi_intake_a115f1b8d92ea2fe`（目录对比树窗口化渲染，消除大目录 renderer OOM，`kind: feature`）
+- 日期：2026-10-21
+- 结果：code_gates passed（`needSelfTest=false`，UI 自测跳过；attempt 001 六条全绿；整合 main 后复跑 `pnpm test` 29 files / 478 passed / 1 skipped、`pnpm typecheck` 绿）。
+- 覆盖摘要：新增纯行模型 `src/core/directory/rows.ts`（`buildDirectoryRowModel` / `visibleDirectoryCounts` / `DIRECTORY_ROW_HEIGHT=24`，节点按引用不克隆）；`DirectoryView` 去掉 `filterDirectoryTree` + 左右 `projectDirectoryTree` 克隆，改为按 `(filter, side, collapsedPaths)` 建行模型，并经 element state 把 `Panel` body 交给虚拟化测量；`TreeView` 从全量递归 `TreeNode` 改为 `useVirtualizer`（`overscan=10`、`initialOffset` 恢复滚动、`aria-level` 补层级）；`Workbench` 状态栏 `visibleCounts` 改由根节点 `counts` 派生，折叠集合改传稳定数组。十一条验收由 `src/core/directory/rows.test.ts`（5 档 × 2 侧 filter/collapse parity、节点 `===` 身份、`visibleDirectoryCounts` parity）与 `src/renderer/src/views/DirectoryView.test.tsx`（`mkdtemp` 真实 50k 条目 fixture：双栏 ≤80 `treeitem` / ≤5000 元素、5,000 vs 50k 等量窗口、2 万子项目录展开、远端滚动索引与占位高度、五档过滤前缀与空档文案、下钻返回恢复、`filterDirectoryTree`/`projectDirectoryTree` mock 计数为 0）覆盖；`App.test.tsx` / `App.snapshot.test.tsx` 增 1200×640 client box 桩。与同日落地的批量扫描（`wi_ws_deb41e1c6a5a2b8f`）不冲突：本期只改 renderer 呈现层与行模型，扫描 / IPC 契约未动。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tech.md` / `ux/**`，也无 `tests/cases/**`），tech / design 与 qa 用例折叠跳过。真实 1.1M 目录复测不在本期自动化证据内：prd 实机记录显示崩溃时 DOM 仅 187 节点，死点在树构建 / 对比 / 行物化而非 DOM 数量，本期已移除该死点，但环境允许时仍需复测 1.1M 并如实记录剩余瓶颈（不扩范围）。
