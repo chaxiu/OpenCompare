@@ -49,6 +49,11 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # The default artifact name is "OpenCompare Setup 0.2.4.exe" (spaces). GitHub
+  # rewrites spaces to dots on upload while latest.yml keeps the template, which
+  # produced an update URL that 404s for every release since v0.2.2. Pin a
+  # space-free name so the on-disk installer and files[].url agree.
+  artifactName: '${productName}-Setup-${version}.${ext}'
 linux:
   icon: build/icon.png
   category: Development

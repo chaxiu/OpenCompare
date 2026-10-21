@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -42,9 +43,14 @@ const ghostNotesPath = `docs/release-notes/${ghostTag}.md`
 const ghostReleaseLink = `releases/tag/${ghostTag}`
 const ghostEvidencePath = `docs/release-evidence/${ghostTag}.md`
 
-// Published tags a document may still link to; the current tag is pending and
-// therefore allowed too, everything else would be a dead release link.
-const publishedTags = ['v0.2.0', 'v0.2.1', 'v0.2.2']
+// The former pending-status word is assembled at runtime so the negative
+// assertions below can never match their own source text.
+const pendingWord = ['待', '发布'].join('')
+
+// Published tags a document may still link to; the current tag shipped as
+// v0.2.4, so it belongs to this set as well, everything else would be a dead
+// release link.
+const publishedTags = ['v0.2.0', 'v0.2.1', 'v0.2.2', currentTag]
 const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
 
 const documentPaths = (): string[] => {
@@ -58,6 +64,7 @@ const documentPaths = (): string[] => {
 
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
   appId?: string
+  productName?: string
   protocols?: Array<{ name?: string; schemes?: string[] }>
   extraResources?: Array<{ from?: string; to?: string }>
   mac?: {
@@ -70,6 +77,7 @@ const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8
     target?: string[]
   }
   win?: { icon?: string; target?: string[] }
+  nsis?: { artifactName?: string }
   linux?: {
     icon?: string
     maintainer?: string
@@ -90,6 +98,7 @@ const releaseWorkflow = readFileSync(join(repoRoot, '.github/workflows/release.y
 
 interface WorkflowStep {
   name?: string
+  if?: string
   run?: string
   uses?: string
   with?: Record<string, string>
@@ -101,6 +110,14 @@ const workflow = parse(releaseWorkflow) as {
 const gatesSteps: WorkflowStep[] = workflow.jobs?.gates?.steps ?? []
 const gateStep = (name: string): WorkflowStep | undefined =>
   gatesSteps.find((step) => step.name === name)
+
+const packageSteps: WorkflowStep[] = workflow.jobs?.release?.steps ?? []
+const packageStep = (name: string): WorkflowStep | undefined =>
+  packageSteps.find((step) => step.name === name)
+
+const finalizeSteps: WorkflowStep[] = workflow.jobs?.finalize?.steps ?? []
+const finalizeStep = (name: string): WorkflowStep | undefined =>
+  finalizeSteps.find((step) => step.name === name)
 
 // The ancestry gate is inlined in the workflow on purpose: workflow_dispatch
 // runs the workflow from main, while gates check out refs/tags/<tag>, so a
@@ -227,6 +244,121 @@ describe('github release publishing', () => {
   })
 })
 
+describe('update metadata consistency', () => {
+  it('pins a space-free nsis artifact name that matches the latest.yml url template', () => {
+    const artifactName = builder.nsis?.artifactName ?? ''
+    expect(artifactName).toBe('${productName}-Setup-${version}.${ext}')
+    expect(artifactName).not.toContain(' ')
+    expect(builder.productName).toBe('OpenCompare')
+    const rendered = artifactName
+      .replace('${productName}', builder.productName ?? '')
+      .replace('${version}', currentVersion)
+      .replace('${ext}', 'exe')
+    // The on-disk installer name is exactly what latest.yml writes as files[].url.
+    expect(rendered).toBe(`OpenCompare-Setup-${currentVersion}.exe`)
+    expect(rendered).toMatch(/^[\w.-]+-Setup-\d+\.\d+\.\d+\.exe$/)
+    expect(rendered).not.toMatch(/\s/)
+    // No divergence with the dotted default (`OpenCompare.Setup.<ver>.exe`).
+    expect(rendered).not.toBe(`OpenCompare.Setup.${currentVersion}.exe`)
+  })
+
+  const metadataGateScript = finalizeStep('Assert latest*.yml urls match the release assets')?.run ?? ''
+
+  it('gates latest*.yml urls against the release asset names before the latest-release gate', () => {
+    const assetGate = releaseWorkflow.indexOf(
+      'name: Assert the public release has every platform asset'
+    )
+    const urlGate = releaseWorkflow.indexOf(
+      'name: Assert latest*.yml urls match the release assets'
+    )
+    const latestGate = releaseWorkflow.indexOf('name: Assert the tag is the latest published release')
+    expect(assetGate).toBeGreaterThan(-1)
+    expect(urlGate).toBeGreaterThan(assetGate)
+    expect(latestGate).toBeGreaterThan(urlGate)
+
+    expect(metadataGateScript).toContain('files[].url')
+    // Asset name set comes from the published release, not from the build.
+    expect(metadataGateScript).toContain('--json assets')
+    expect(metadataGateScript).toContain('.assets[].name')
+    expect(metadataGateScript).toContain('latest*.yml')
+    expect(metadataGateScript).toContain('exit 1')
+    // The finalize job has no checkout, so no repository modules / yaml package.
+    expect(metadataGateScript).not.toMatch(/require\(\s*["']yaml["']\s*\)/)
+  })
+
+  it('keeps the latest*.yml url gate read-only', () => {
+    expect(metadataGateScript).not.toMatch(/gh release (upload|edit|create|delete)/)
+    expect(metadataGateScript).not.toMatch(/--method\s+(POST|PATCH|PUT|DELETE)/)
+  })
+
+  const appImageGateStep = packageStep('Assert the AppImage embeds its declared blockmap')
+  const appImageGateScript = appImageGateStep?.run ?? ''
+
+  it('verifies the embedded AppImage blockmap inside the linux packaging job', () => {
+    expect(appImageGateStep).toBeDefined()
+    expect(appImageGateStep?.if).toBe("matrix.target == 'linux'")
+    expect(appImageGateScript).toContain('release/*.AppImage')
+    expect(appImageGateScript).toContain('latest-linux.yml')
+    expect(appImageGateScript).toContain('blockMapSize')
+    expect(appImageGateScript).toMatch(/readUInt32LE/)
+    expect(appImageGateScript).toContain('exit 1')
+    // No separate *.AppImage.blockmap artifact is required or expected.
+    expect(appImageGateScript).not.toContain('AppImage.blockmap')
+  })
+
+  // Tempdir fixtures are the only place this suite writes AppImage bytes.
+  const runAppImageGate = (declared: number, actual: number): { status: number; output: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-appimage-'))
+    try {
+      const releaseDir = join(dir, 'release')
+      mkdirSync(releaseDir, { recursive: true })
+      const image = join(releaseDir, 'OpenCompare-0.2.4.AppImage')
+      const bytes = Buffer.alloc(16)
+      bytes.writeUInt32LE(actual, bytes.length - 4)
+      writeFileSync(image, bytes)
+      writeFileSync(
+        join(releaseDir, 'latest-linux.yml'),
+        [
+          'version: 0.2.4',
+          'files:',
+          '  - url: OpenCompare-0.2.4.AppImage',
+          '    sha512: fixture',
+          '    size: 16',
+          `    blockMapSize: ${declared}`,
+          '  - url: opencompare_0.2.4_amd64.deb',
+          '    sha512: fixture',
+          '    size: 16',
+          'path: OpenCompare-0.2.4.AppImage',
+          'sha512: fixture'
+        ].join('\n')
+      )
+      const script = join(dir, 'appimage-gate.sh')
+      writeFileSync(script, appImageGateScript)
+      const result = spawnSync('bash', [script], { cwd: dir, encoding: 'utf8' })
+      return {
+        status: result.status ?? -1,
+        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('passes when the AppImage trailer matches blockMapSize', () => {
+    const { status, output } = runAppImageGate(126886, 126886)
+    expect(output).toContain('embedded blockMapSize=126886')
+    expect(status).toBe(0)
+  })
+
+  it('fails closed when the AppImage trailer disagrees with blockMapSize', () => {
+    const { status, output } = runAppImageGate(126886, 999)
+    expect(output).toContain('::error::')
+    expect(output).toContain('blockMapSize 999')
+    expect(output).toContain('declares 126886')
+    expect(status).not.toBe(0)
+  })
+})
+
 describe('macOS signing and notarization', () => {
   it('enables the hardened runtime with the shipped entitlements files', () => {
     expect(builder.mac?.hardenedRuntime).toBe(true)
@@ -317,7 +449,8 @@ describe('release version gate', () => {
     expect(changelog).toContain(`## ${currentTag}`)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readme).toContain(`https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 
@@ -774,13 +907,14 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as pending and links the latest public release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
-    // The latest public release stays on the previous tag until this one ships.
-    expect(readme).toContain('最新公开 Release 为 [v0.2.2]')
-    expect(readme).toContain('releases/tag/v0.2.2')
+  it('reports the current tag as published and links its release', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readme).toContain(`https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`)
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain(`${currentTag} 已发布`)
+    expect(readme).not.toContain(`${currentTag} ${pendingWord}`)
+    // The previous release is published history, no longer the latest one.
+    expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
+    expect(readme).toContain('releases/tag/v0.2.2')
     expect(readme).not.toContain('当前发布状态：v0.2.2')
     expect(readme).not.toContain('最新公开 Release 为 [v0.2.1]')
     expect(readme).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
@@ -789,9 +923,9 @@ describe('release signing credentials checklist', () => {
     expect(readme).not.toMatch(/发布状态：冻结/)
   })
 
-  it('reports the signing doc status as pending for the current tag', () => {
-    expect(signingDoc).toContain(`当前状态：${currentTag} 待发布`)
-    expect(signingDoc).not.toContain(`${currentTag} 已发布`)
+  it('reports the signing doc status as published for the current tag', () => {
+    expect(signingDoc).toContain(`当前状态：${currentTag} 已发布`)
+    expect(signingDoc).not.toContain(`${currentTag} ${pendingWord}`)
     expect(signingDoc).not.toContain('当前状态：v0.2.2')
   })
 
@@ -996,13 +1130,13 @@ describe('release document consistency', () => {
     expect(offenders).toEqual([])
   })
 
-  it('keeps the pending status and the signing copy on README line 5', () => {
+  it('keeps the published status and the signing copy on README line 5', () => {
     const statusLine = readme.split(/\r?\n/)[4] ?? ''
-    expect(statusLine).toContain(`当前发布状态：${currentTag} 待发布`)
-    expect(statusLine).toContain('最新公开 Release 为 [v0.2.2]')
-    expect(statusLine).toContain('https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2')
+    expect(statusLine).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(statusLine).toContain(`https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`)
     expect(statusLine).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(statusLine).not.toContain(`${currentTag} 已发布`)
+    expect(statusLine).not.toContain(pendingWord)
+    expect(statusLine).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(statusLine).not.toContain(ghostNotesPath)
     expect(statusLine).toContain('Developer ID 签名 + Apple 公证')
     expect(statusLine).toContain('fail-closed')
@@ -1012,7 +1146,7 @@ describe('release document consistency', () => {
     }
   })
 
-  it('lists the current, never-published and latest public version in the download table', () => {
+  it('lists the published, never-published and previous versions in the download table', () => {
     const start = readme.indexOf('## 版本与下载')
     const end = readme.indexOf('## 核心能力')
     expect(start).toBeGreaterThan(-1)
@@ -1025,7 +1159,8 @@ describe('release document consistency', () => {
     const ghostRow = rows.find((row) => row.startsWith(`| ${ghostTag}`))
     const releasedRow = rows.find((row) => row.startsWith('| [v0.2.2]'))
     expect(currentRow).toBeDefined()
-    expect(currentRow).toContain('待发布')
+    expect(currentRow).toContain('已发布')
+    expect(currentRow).toContain(`releases/tag/${currentTag}`)
     expect(currentRow).toContain(`docs/release-notes/${currentTag}.md`)
     expect(ghostRow).toBeDefined()
     expect(ghostRow).toContain('未发布')
@@ -1033,10 +1168,34 @@ describe('release document consistency', () => {
     expect(ghostRow).not.toContain(ghostReleaseLink)
     expect(releasedRow).toBeDefined()
     expect(releasedRow).toContain('已发布')
+    expect(releasedRow).not.toContain('最新公开 Release')
     expect(releasedRow).toContain('releases/tag/v0.2.2')
-    // The latest public release never moves to a pending version.
-    expect(readme).not.toContain(`最新公开 Release 为 [${currentTag}]`)
+    // The latest public release moved to the just-published tag.
+    expect(readme).toContain('已发布（最新公开 Release）')
+    expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(readme).not.toContain(`最新公开 Release 为 [${ghostTag}]`)
+  })
+
+  it('records the three unfixed known issues without claiming a fix', () => {
+    const issues = readme.slice(readme.indexOf('## 已知问题'))
+    expect(issues.match(/当前版本已修复/g)?.length).toBe(2)
+    const unfixed = issues
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('- ') && line.includes('已知未修'))
+    expect(unfixed).toHaveLength(3)
+    for (const phrase of [
+      '849',
+      '1,510 MB',
+      '未 OOM',
+      'ECANCELED',
+      '不影响取消结果',
+      '符号链接计数放大'
+    ]) {
+      expect(issues).toContain(phrase)
+    }
+    for (const line of unfixed) {
+      expect(line).not.toContain('已修复')
+    }
   })
 
   it('documents the unsolved known issues outside the fix list', () => {
