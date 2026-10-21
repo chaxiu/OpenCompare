@@ -2,9 +2,17 @@
 
 对标的 **Beyond Compare 5 Pro** 的现代跨平台桌面对比与三向合并工具。基于 Electron + React 19 + TypeScript，一套代码同时构建桌面应用与浏览器预览。
 
-> ⏳ **当前发布状态：v0.2.3 待发布；最新公开 Release 为 [v0.2.2](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2)。** v0.2.3 承接目录容错修复：真实工程目录含悬空符号链接或不可读项时不再让目录对比整体失败，改为跳过并计数、工作台就地提示，见 [`docs/release-notes/v0.2.3.md`](docs/release-notes/v0.2.3.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
+> ⏳ **当前发布状态：v0.2.4 待发布；最新公开 Release 为 [v0.2.2](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2)。** v0.2.4 承接 v0.2.3 已合入但未发布的改动（悬空链接容错、摘要缓存改进），并合入目录对比的批量扫描、进度与取消、窗口化目录树等修复，见 [`docs/release-notes/v0.2.4.md`](docs/release-notes/v0.2.4.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 对开发者与运维团队最常用的四类对比，OpenCompare 内置了可直接试跑的完整样本，并支持打开/保存本地真实文件：
+
+## 版本与下载
+
+| 版本 | 状态 | 说明 |
+| --- | --- | --- |
+| [v0.2.4](docs/release-notes/v0.2.4.md) | 待发布 | 承接 v0.2.3 未发布内容，并合入目录对比批量扫描、进度与取消、窗口化目录树等修复 |
+| v0.2.3 | 未发布，内容并入 v0.2.4 | 从未打 tag、从未公开 Release；用户可见改动全部见 v0.2.4 |
+| [v0.2.2](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2) | 已发布（最新公开 Release） | 大目录对比 EMFILE 修复 |
 
 ## 核心能力
 
@@ -56,7 +64,7 @@ pnpm dist:linux       # Linux：AppImage / deb
 
 ## 发布流程
 
-推送 `v*` 标签即触发 GitHub Actions（`.github/workflows/release.yml`）。若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`（默认 `v0.2.3`）；构建统一 checkout `refs/tags/<tag>`，不改 tag、不升版本。
+推送 `v*` 标签即触发 GitHub Actions（`.github/workflows/release.yml`）。若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`（默认 `v0.2.4`）；构建统一 checkout `refs/tags/<tag>`，不改 tag、不升版本。
 
 1. 先在 Ubuntu runner 上跑门禁（`install → lint → typecheck → test → build`），并在安装/测试前跑只读祖先门（`v0.1.2` 必须是 `HEAD` 严格祖先，或仅 tag 可达提交逐条补丁等价）与 `package.json#version` / tag 语义版本一致性校验，失败即中止发布；
 2. 门禁通过后，在 macOS / Windows / Linux 三个 runner 上分别构建平台产物；macOS 步骤要求上述 6 项签名 / 公证 Secrets 齐备，任一缺失即失败（fail-closed）；
