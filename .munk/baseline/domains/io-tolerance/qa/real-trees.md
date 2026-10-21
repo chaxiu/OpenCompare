@@ -9,5 +9,5 @@ covers: ac-real-trees
 
 - workItemId: wi_intake_1c49316bd5fe94ba
 - at: 2026-10-21
-- status: skip
+- status: na
 - note: `electron-platform.test.ts` `describe.skipIf(REAL_LEFT === undefined || REAL_RIGHT === undefined)('real project trees')`，本轮 code_gates 的 `pnpm test` 统计为 430 passed | 1 skipped，即该用例默认跳过——交付环境未设置 `OPENCOMPARE_REAL_LEFT` / `OPENCOMPARE_REAL_RIGHT`，未执行 DawnChat ↔ ZenMind 真机规模验收，需负责人本机复跑。用例超时放宽到 900s，路径只来自 env，无硬编码。
