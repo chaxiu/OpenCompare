@@ -1774,6 +1774,31 @@ describe('directory progress and cancel UI', () => {
     return Number(match[1])
   }
 
+  function verifiedCount(text: string | null): number {
+    const match = /已校验 (\d+) 个文件/.exec(text ?? '')
+    if (match === null) throw new Error(`no verified count in: ${text}`)
+    return Number(match[1])
+  }
+
+  function cumulativeCount(text: string | null): number {
+    const match = /累计 (\d+) 个文件/.exec(text ?? '')
+    if (match === null) throw new Error(`no cumulative count in: ${text}`)
+    return Number(match[1])
+  }
+
+  const BYTE_SCALE: Record<string, number> = {
+    B: 1,
+    KiB: 1024,
+    MiB: 1024 ** 2,
+    GiB: 1024 ** 3
+  }
+
+  function processedBytes(text: string | null): number {
+    const match = /已处理 (\d+(?:\.\d+)?) (B|KiB|MiB|GiB)/.exec(text ?? '')
+    if (match === null) throw new Error(`no processed bytes in: ${text}`)
+    return Number(match[1]) * BYTE_SCALE[match[2]]
+  }
+
   it('shows real scan and digest progress, then clears it once the comparison succeeds', async () => {
     const base = createWebPlatformPort()
     await writeMemoryFiles(base, [
@@ -1832,6 +1857,118 @@ describe('directory progress and cancel UI', () => {
     expect(
       await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
     ).toBeDefined()
+  })
+
+  it('switches to the digest phase without falling back behind the scan total', async () => {
+    const base = createWebPlatformPort()
+    // Enough pairs to need more than one digest chunk (64 paths each), so the
+    // bar can be observed between two real settled chunks.
+    const files: [string, string][] = []
+    for (let index = 0; index < 130; index += 1) {
+      files.push([`/memory/phase/left/f-${index}.txt`, 'x'])
+      files.push([`/memory/phase/right/f-${index}.txt`, 'x'])
+    }
+    await writeMemoryFiles(base, files)
+
+    const answers = ['/memory/phase/left', '/memory/phase/right']
+    let digestCalls = 0
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let releaseSecond!: () => void
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve
+    })
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      digestFiles: async (paths, options) => {
+        digestCalls += 1
+        if (digestCalls === 1) await firstGate
+        if (digestCalls === 2) await secondGate
+        return base.digestFiles(paths, options)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    // The scan settles on the real total of both sides before any digest chunk.
+    await waitFor(() => expect(scannedCount(bar.textContent)).toBe(260))
+    expect(bar.textContent).toContain('正在扫描目录')
+    const scannedFiles = scannedCount(bar.textContent)
+    const scannedBytes = processedBytes(bar.textContent)
+    expect(scannedBytes).toBe(260)
+
+    // The first digest chunk settles; the second one still pends, so the digest
+    // copy stays on screen with both its increment and the pipeline total.
+    releaseFirst()
+    await waitFor(() => expect(bar.textContent).toContain('正在校验内容'))
+    expect(bar.textContent).toContain('已校验 64 个文件')
+    const verifiedFiles = verifiedCount(bar.textContent)
+    expect(verifiedFiles).toBe(64)
+    expect(verifiedFiles).toBeLessThan(scannedFiles)
+    expect(cumulativeCount(bar.textContent)).toBe(260 + verifiedFiles)
+    expect(cumulativeCount(bar.textContent)).toBeGreaterThanOrEqual(scannedFiles)
+    expect(processedBytes(bar.textContent)).toBeGreaterThanOrEqual(scannedBytes)
+
+    releaseSecond()
+    await waitFor(() => expect(progressBar()).toBeNull())
+    expect(
+      await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+    ).toBeDefined()
+  })
+
+  it('cancels during the scan phase without touching sessions or the view', async () => {
+    const base = createWebPlatformPort()
+    await writeMemoryFiles(base, [
+      ['/memory/scan-cancel/left/a.txt', 'x'],
+      ['/memory/scan-cancel/right/a.txt', 'x']
+    ])
+
+    const answers = ['/memory/scan-cancel/left', '/memory/scan-cancel/right']
+    let releaseScan!: () => void
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve
+    })
+    const cancelIds: string[] = []
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      listDirectories: async (paths) => {
+        await scanGate
+        return base.listDirectories(paths)
+      },
+      cancelOperation: async (operationId) => {
+        cancelIds.push(operationId)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    const statusBefore = screen.getByRole('contentinfo').textContent
+    const viewBefore = screen.getByRole('main').innerHTML
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    expect(bar.textContent).toContain('正在扫描目录')
+
+    const cancel = within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement
+    fireEvent.click(cancel)
+    expect(cancel.disabled).toBe(true)
+
+    await waitFor(() => expect(progressBar()).toBeNull())
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toBe('已取消本次目录对比，工作台保持取消前的状态。')
+    expect(cancelIds).toHaveLength(1)
+
+    // The cancelled scan commits no session and leaves the shell exactly as it was.
+    expect(screen.queryByRole('tab', { name: /left ↔ right/ })).toBeNull()
+    expect(screen.getByRole('contentinfo').textContent).toBe(statusBefore)
+    expect(screen.getByRole('main').innerHTML).toBe(viewBefore)
+
+    releaseScan()
   })
 
   it('cancels a running comparison and leaves sessions, view and status bar untouched', async () => {

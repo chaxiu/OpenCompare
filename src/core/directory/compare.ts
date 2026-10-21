@@ -75,12 +75,26 @@ export const DEFAULT_DIRECTORY_BATCH_SIZE = 8
 export const DEFAULT_DIGEST_BATCH_SIZE = 64
 
 /**
- * One settled batch of work. `files` / `bytes` are cumulative **within their
- * phase** (the digest phase starts at zero); they are never interpolated by a
- * timer, only advanced when a real batch settles.
+ * One settled batch of work, never interpolated by a timer. `files` / `bytes`
+ * are cumulative over the whole pipeline: the digest phase continues from the
+ * scan phase's totals instead of restarting at zero. `phaseFiles` /
+ * `phaseBytes` are the increments settled inside the current phase (the scan
+ * phase therefore reports its pipeline total as its phase total).
  */
 export interface DirectoryProgress {
   readonly phase: 'scan' | 'digest'
+  /** Whole-pipeline cumulative files; monotonic across the phase switch. */
+  readonly files: number
+  /** Whole-pipeline cumulative bytes; monotonic across the phase switch. */
+  readonly bytes: number
+  /** Files settled inside the current phase. */
+  readonly phaseFiles: number
+  /** Bytes settled inside the current phase. */
+  readonly phaseBytes: number
+}
+
+/** Cumulative totals one phase continues from (the scan phase's closing totals for digest). */
+export interface ProgressBase {
   readonly files: number
   readonly bytes: number
 }
@@ -100,23 +114,34 @@ export interface ScanDirectoryOptions {
 
 /**
  * Merges the two side scans' per-side counters into one monotonic total, so a
- * comparison reports both sides as a single progress stream.
+ * comparison reports both sides as a single progress stream. {@link totals}
+ * exposes that closing total, which is the base the digest phase continues from.
  */
+export interface ScanProgressMerger {
+  /** One reporter per side scan; each side's deltas fold into the same total. */
+  reporter(): ProgressReporter
+  /** Files and bytes both sides have scanned so far. */
+  totals(): ProgressBase
+}
+
 export function createScanProgressMerger(
   onProgress: ProgressReporter | undefined
-): () => ProgressReporter {
+): ScanProgressMerger {
   let files = 0
   let bytes = 0
-  return () => {
-    let sideFiles = 0
-    let sideBytes = 0
-    return (event) => {
-      files += event.files - sideFiles
-      bytes += event.bytes - sideBytes
-      sideFiles = event.files
-      sideBytes = event.bytes
-      onProgress?.({ phase: 'scan', files, bytes })
-    }
+  return {
+    reporter() {
+      let sideFiles = 0
+      let sideBytes = 0
+      return (event) => {
+        files += event.files - sideFiles
+        bytes += event.bytes - sideBytes
+        sideFiles = event.files
+        sideBytes = event.bytes
+        onProgress?.({ phase: 'scan', files, bytes, phaseFiles: files, phaseBytes: bytes })
+      }
+    },
+    totals: () => ({ files, bytes })
   }
 }
 
@@ -144,6 +169,11 @@ export interface ComparisonIoOptions extends ScanDirectoryOptions {
   readonly digestible?: (path: string) => boolean
   /** Overrides {@link DEFAULT_DIGEST_BATCH_SIZE}; values below 1 fall back to it. */
   readonly digestBatchSize?: number
+  /**
+   * Pipeline totals the digest phase continues from. Both callers pass the
+   * merged scan totals so digest progress never restarts at zero.
+   */
+  readonly progressBase?: ProgressBase
 }
 
 /** Content digest of one file, keyed by the metadata it was computed for. */
@@ -374,7 +404,13 @@ export async function scanDirectory(
       // One report per settled batch: real numbers only, no timer interpolation.
       discoveredFiles += batchFiles
       discoveredBytes += batchBytes
-      onProgress?.({ phase: 'scan', files: discoveredFiles, bytes: discoveredBytes })
+      onProgress?.({
+        phase: 'scan',
+        files: discoveredFiles,
+        bytes: discoveredBytes,
+        phaseFiles: discoveredFiles,
+        phaseBytes: discoveredBytes
+      })
     })
 
     level = nextLevel
@@ -772,6 +808,9 @@ export async function digestContentCandidates(
 
   const { signal, onProgress } = options
   const batchSize = resolveDigestBatchSize(options)
+  // Digest progress continues the pipeline totals; `phaseFiles` / `phaseBytes`
+  // stay the increments settled inside this phase (starting at zero).
+  const base = options.progressBase ?? { files: 0, bytes: 0 }
   let settledFiles = 0
   let settledBytes = 0
 
@@ -814,7 +853,13 @@ export async function digestContentCandidates(
 
       settledFiles += chunk.length
       settledBytes += chunkBytes
-      onProgress?.({ phase: 'digest', files: settledFiles, bytes: settledBytes })
+      onProgress?.({
+        phase: 'digest',
+        files: base.files + settledFiles,
+        bytes: base.bytes + settledBytes,
+        phaseFiles: settledFiles,
+        phaseBytes: settledBytes
+      })
     }
   }
 
@@ -861,21 +906,22 @@ export async function compareDirectories(
 ): Promise<DirectoryComparison> {
   try {
     // Both side scans feed one monotonic progress stream.
-    const sideReporter = createScanProgressMerger(options.onProgress)
+    const sideProgress = createScanProgressMerger(options.onProgress)
     const [left, right] = await Promise.all([
-      scanDirectory(leftRoot, list, { ...options, onProgress: sideReporter() }),
-      scanDirectory(rightRoot, list, { ...options, onProgress: sideReporter() })
+      scanDirectory(leftRoot, list, { ...options, onProgress: sideProgress.reporter() }),
+      scanDirectory(rightRoot, list, { ...options, onProgress: sideProgress.reporter() })
     ])
 
     // Digests go straight into the cache: only one body per in-flight read is
     // held in memory, which is what lets two real project trees be compared.
+    // Their progress continues from the closing scan totals.
     const unreadable = await digestContentCandidates(
       left,
       right,
       cache,
       readTextFile,
       hash ?? sha256Hex,
-      options
+      { ...options, progressBase: sideProgress.totals() }
     )
 
     return compareScannedTrees(left, right, { contents: new Map(), cache, hash, unreadable })

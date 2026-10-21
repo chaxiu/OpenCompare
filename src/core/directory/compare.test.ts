@@ -1146,6 +1146,9 @@ describe('directory progress and cancellation', () => {
     const last = scans[scans.length - 1]
     expect(last.files).toBe(pair.leftStats.files + pair.rightStats.files)
     expect(last.bytes).toBe(pair.leftStats.bytes + pair.rightStats.bytes)
+    // The scan phase's increments are its pipeline totals: it is the first phase.
+    expect(last.phaseFiles).toBe(last.files)
+    expect(last.phaseBytes).toBe(last.bytes)
     // The real comparison is unaffected by observing it.
     expect(comparison.fileCount).toBe(pair.leftStats.files)
     expect(comparison.skipped).toBe(0)
@@ -1166,11 +1169,86 @@ describe('directory progress and cancellation', () => {
       onProgress: (event) => events.push(event)
     })
 
-    // Six candidate paths in chunks of two: three real "settle" steps.
-    expect(digestEvents(events).map((event) => event.files)).toEqual([2, 4, 6])
-    expect(digestEvents(events).map((event) => event.bytes)).toEqual([14, 28, 42])
+    // Six candidate paths in chunks of two: three real "settle" steps. The
+    // cumulative totals continue the six scanned files (42 bytes) and only the
+    // phase counters restart at zero.
+    expect(digestEvents(events).map((event) => event.files)).toEqual([8, 10, 12])
+    expect(digestEvents(events).map((event) => event.bytes)).toEqual([56, 70, 84])
+    expect(digestEvents(events).map((event) => event.phaseFiles)).toEqual([2, 4, 6])
+    expect(digestEvents(events).map((event) => event.phaseBytes)).toEqual([14, 28, 42])
     // A chunk is only requested after the previous one settled and reported.
     expect(eventsAtCall).toEqual([0, 1, 2])
+  })
+
+  it('keeps pipeline totals monotonic across multi-batch scan and digest phases', async () => {
+    const directories = 2
+    const perDirectory = 3
+    // Every pair agrees on size and mtime, so every file needs a real digest.
+    const side = (fill: number): FakeTree => {
+      const tree: Record<string, FakeTree> = {}
+      for (let directory = 0; directory < directories; directory += 1) {
+        const child: Record<string, FakeFile> = {}
+        for (let index = 0; index < perDirectory; index += 1) {
+          child[`f-${index}.txt`] = {
+            text: '',
+            size: 8,
+            modifiedMs: 0,
+            bytes: new Uint8Array(8).fill(fill + index)
+          }
+        }
+        tree[`d-${directory}`] = child
+      }
+      return tree
+    }
+    const fs = createTrees(side(65), side(97))
+    const events: DirectoryProgress[] = []
+
+    const comparison = await compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+      digestFiles: fs.digestFiles,
+      digestBatchSize: 2,
+      onProgress: (event) => events.push(event)
+    })
+
+    const totalFiles = directories * perDirectory * 2
+    const totalBytes = totalFiles * 8
+    const scans = scanEvents(events)
+    const digests = digestEvents(events)
+    // Several scan batches (root + child level per side) before several chunks.
+    expect(scans.length).toBeGreaterThanOrEqual(2)
+    expect(digests).toHaveLength(totalFiles / 2)
+
+    // Every event carries both counter sets and the pipeline total never retreats.
+    for (const event of events) {
+      expect(event.phaseFiles).toBeGreaterThanOrEqual(0)
+      expect(event.phaseBytes).toBeGreaterThanOrEqual(0)
+    }
+    for (let index = 1; index < events.length; index += 1) {
+      expect(events[index].files).toBeGreaterThanOrEqual(events[index - 1].files)
+      expect(events[index].bytes).toBeGreaterThanOrEqual(events[index - 1].bytes)
+    }
+
+    const lastScan = scans[scans.length - 1]
+    expect(lastScan.phase).toBe('scan')
+    expect(lastScan.files).toBe(totalFiles)
+    expect(lastScan.bytes).toBe(totalBytes)
+
+    // The hand-over never restarts: the digest phase starts from the scan total
+    // and only adds its own settled increments.
+    const [firstDigest] = digests
+    expect(firstDigest.files).toBeGreaterThanOrEqual(lastScan.files)
+    expect(firstDigest.bytes).toBeGreaterThanOrEqual(lastScan.bytes)
+    expect(firstDigest.files - firstDigest.phaseFiles).toBe(lastScan.files)
+    expect(firstDigest.bytes - firstDigest.phaseBytes).toBe(lastScan.bytes)
+
+    const lastDigest = digests[digests.length - 1]
+    expect(lastDigest.phaseFiles).toBe(totalFiles)
+    expect(lastDigest.phaseBytes).toBe(totalBytes)
+    expect(lastDigest.files).toBe(lastScan.files + lastDigest.phaseFiles)
+    expect(lastDigest.bytes).toBe(lastScan.bytes + lastDigest.phaseBytes)
+
+    // Observing progress never changes the comparison itself.
+    expect(comparison.fileCount).toBe(totalFiles / 2)
+    expect(comparison.counts.modified).toBe(totalFiles / 2)
   })
 
   it('never fabricates digest progress while a chunk is still pending', async () => {
@@ -1200,7 +1278,15 @@ describe('directory progress and cancellation', () => {
 
     await settle(0)
     await waitUntil(() => digestEvents(events).length === 1)
-    expect(digestEvents(events)[0]).toEqual({ phase: 'digest', files: 2, bytes: 10 })
+    // Two files scanned per side (four files, 20 bytes) are the base; the first
+    // settled chunk adds its two files (10 bytes) instead of resetting to zero.
+    expect(digestEvents(events)[0]).toEqual({
+      phase: 'digest',
+      files: 6,
+      bytes: 30,
+      phaseFiles: 2,
+      phaseBytes: 10
+    })
 
     await waitUntil(() => calls.length === 2)
     await settle(1)
@@ -1283,6 +1369,7 @@ describe('directory progress and cancellation', () => {
 
   it('rejects a hung comparison scan without a partial tree', async () => {
     const fs = createFakeFs(digestTree(1, 3))
+    const cache = createComparisonCache()
     const controller = new AbortController()
     let calls = 0
     const hanging: ListDirectories = () => {
@@ -1290,7 +1377,7 @@ describe('directory progress and cancellation', () => {
       return new Promise(() => undefined)
     }
 
-    const run = compareDirectories('/left', '/right', fs.list, fs.readTextFile, createComparisonCache(), undefined, {
+    const run = compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache, undefined, {
       listDirectories: hanging,
       signal: controller.signal
     })
@@ -1302,6 +1389,8 @@ describe('directory progress and cancellation', () => {
     const callsAtAbort = calls
     await delay(20)
     expect(calls).toBe(callsAtAbort)
+    // A scan-phase cancel commits neither a half tree nor any digest entry.
+    expect(cache.hashes.size).toBe(0)
   })
 
   it('stops a hung digest chunk and sends no later chunk', async () => {
@@ -1359,6 +1448,15 @@ describe('directory progress and cancellation', () => {
     // Only the settled chunk wrote cache entries; the interrupted one wrote none.
     const settledPaths = calls[0]
     expect([...cache.hashes.keys()].sort()).toEqual([...settledPaths].sort())
+    for (const path of settledPaths) {
+      expect(cache.hashes.get(path)).toEqual({
+        size: 4,
+        modifiedMs: 0,
+        hash: expect.any(String)
+      })
+    }
+    expect(calls[1].length).toBeGreaterThan(0)
+    for (const path of calls[1]) expect(cache.hashes.has(path)).toBe(false)
 
     const baseline = await compareDirectories(
       '/left',
