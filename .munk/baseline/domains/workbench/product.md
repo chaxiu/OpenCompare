@@ -13,6 +13,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **顶栏常驻「新建对比」与手工路径直传**：`Workbench` 顶栏在空态与已有会话时都渲染可点击的「新建对比」（仅 `directoryBusy` 期间 disabled），不因已有会话消失，也不替换 / 隐藏既有「打开文件」「打开文件夹」。点击或按 `Cmd/Ctrl+N`（非 macOS 为 `Ctrl+N`；对话框已打开时不重复叠层）打开 `role="dialog"` 的「新建对比」对话框：左右两个路径输入框（可直接键入或粘贴）+「打开文件」「打开文件夹」两个选择器动作 +「建立对比」；`Enter` 提交、`Esc` 关闭、焦点初始落在左侧输入框，输入框内 `Cmd/Ctrl+A` 等编辑快捷键不被拦截；提交进行中按钮 disabled 且重复 `Enter` 不发起第二个请求。提交时唯一校验入口是 `@shared/compareRequest` 的 `parseManualPaths` + `resolveCompareRequest`（`homeDir` / `baseDir` 由 `PlatformPort.homeDirectory()` / `workingDirectory()` 显式提供，probe 走 `statPath`），通过后只按 `kind` 路由到既有 `openFilePair` / `runSidesCompare(directorySides(left, right))`，不另造解析、校验或会话模型；成功则关闭对话框并按既有 `upsertSession` 语义新增或复用（同路径对不产生第二个 tab）一个会话。任何失败（校验 / 探测 / 会话构建）只在对话框内以一行 `role="alert"` 展示中文原因、对话框保持打开，`sessions` / `activeId` / `status` / 状态栏与当前视图都不变，绝不新建空白 tab。对话框内的「打开文件 / 打开文件夹」复用同一套选择器流程与失败就地提示。
 - **启动注入请求落地**：`Workbench` 挂载时经 `PlatformPort.onCompareRequest`（可选成员）订阅一次、卸载时退订，并在订阅注册之后调用 `compareRequestsReady()` 通知主进程投递队列；成功 payload（`kind: file` / `directory`）直接走既有 `openCompareRequest` 建会话 / 切到该会话，失败 payload 只走既有 notice，`sessions` / `activeId` / `status` 不变、不建空 tab；端口没有这两项能力时等价于「无注入」且不报错。该链路的 AC 定义归 `launch` 域，本域只承载「注入请求复用既有会话入口」这一层。
 - **对比跳过提示（容错契约归 `io-tolerance` 域，本域承载渲染）**：目录对比成功且 `skipped > 0` 时，工作台复用既有 `notice`（单行 `role="alert"`）通道、`noticeTone: 'info'`（`text-diff-added`，非 `text-danger`）显示「已跳过 N 个不可读项/悬空链接」；目录视图在过滤栏下方同步展示同一计数。`skipped === 0` 时不出现该提示。此类跳过是成功对比的一部分，不建空会话、不改会话状态；快照导出成功提示在 `skipped > 0` 时追加「，跳过 N 个不可读项」。
+- **目录状态栏计数的运行时派生（语义归 `directory` 域）**：活动目录会话的状态栏四态计数由 `visibleDirectoryCounts(comparison.root, filter)` 按过滤档直接从根节点聚合派生，不再为统计克隆过滤树（`filterDirectoryTree` + `countTreeFiles`）；`conflict` 恒为 0，与折叠用例 `directory` 域 `ac-visible-counts-parity` 同一口径。切换过滤档 / 会话时计数随运行时结果更新。
 - **回归保留**：新建对比链路不介入既有路径——拖拽双路径仍按 `handleDroppedFiles` 建会话，标签切换仍保留工作副本与脏标记，目录下钻与「返回上级目录视图」的过滤 / 折叠 / 选中状态保持。
 - **真实路径拖入窗口**：空首屏与有会话时均可拖入真实路径——恰好 2 个同类路径（两文件 / 两目录）直接建同一会话模型；1 个路径作为左侧基准填入 + info 提示；>2 个或文件目录混合则明确提示、不建会话、不改既有会话。拖入阻断浏览器/窗口默认导航，应用停留原状态；真实绝对路径解析经平台缝（preload / `webUtils.getPathForFile` 或 main IPC 白名单），renderer 不猜测路径。
 - **样本入口降级为演示辅助**：样本按钮 / 下拉保留但显式标注演示用途，文案不再暗示「必须先加载样本」，可被完全跳过。
@@ -75,7 +76,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 
 ## 非目标
 
-- **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域。各视图只读呈现样本原始内容，不做差异高亮与统计；状态栏计数与目录树标签来自样本自带 answer key（编辑期标注），非运行时计算。
+- **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域。各视图只读呈现内容，不做差异高亮与统计；除目录会话（其四态计数由运行时对比结果按过滤档派生，语义归 `directory` 域）外，其余视图的状态栏计数与标签取自样本自带 answer key（编辑期标注），非运行时计算。
 - **不做各视图内的对比 / 合并 / 保存业务**：合并结果保存、原位写回、快照导出属 `code-diff-merge` / `snapshot` 域；本域只提供会话模型 `dirty` 字段与壳层编排（`Workbench.handleExportSnapshot` 负责调 `PlatformPort.saveFile` 与提示）。
 - **不做 Electron 侧把样本落盘真实临时目录**（后续文件对比项自行决定取数方式）。
 - 不做增量同步、跨层级模板归位提取器、远端 FTP / SFTP、Hex 二进制对比、`.xlsx` 解析。
