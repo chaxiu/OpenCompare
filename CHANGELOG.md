@@ -2,6 +2,20 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## v0.2.2
+
+本版承接 EMFILE 修复：大目录对比与快照读取不再一次性打开全部文件句柄，句柄耗尽时给出可读提示而不是崩溃。不新增、不改动任何功能。
+
+### 修复
+
+- **大目录对比不再崩溃**：目录对比内容读取、快照内容读取与目录条目遍历改为默认 **8 路有界并发**，含数千个文件的真实文件夹对比不再一次性打开全部文件。
+- **文件句柄耗尽给可读提示**：系统返回 `EMFILE` / `ENFILE` 时，工作台就地展示「文件句柄耗尽（EMFILE / ENFILE）」的可读提示，不再崩溃窗口。
+- 对应问题：[GitHub Issue #2](https://github.com/chaxiu/OpenCompare/issues/2)。
+
+### 升级方式
+
+下载 v0.2.2 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `Setup.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+
 ## v0.2.1
 
 本版是 v0.2.0 的首发替代：`v0.2.0` tag 从未公开发布，其 tag 树内的发布门测试为旧版（依赖本机 git 状态），无法通过 tag 触发的 gates；因此以修正后的发布门测试首发 v0.2.1。用户可见变化与 v0.2.0 完全相同，不新增、不改动任何功能。

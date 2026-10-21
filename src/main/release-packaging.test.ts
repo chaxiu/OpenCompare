@@ -91,6 +91,13 @@ const previousReleaseNotes = existsSync(previousReleaseNotesPath)
   ? readFileSync(previousReleaseNotesPath, 'utf8')
   : ''
 
+// The last publicly released notes stay on v0.2.1 while the current version is
+// still pending; the current notes only carry the EMFILE fix.
+const lastReleasedNotesPath = join(repoRoot, 'docs/release-notes/v0.2.1.md')
+const lastReleasedNotes = existsSync(lastReleasedNotesPath)
+  ? readFileSync(lastReleasedNotesPath, 'utf8')
+  : ''
+
 const firstHeading = (markdown: string): string =>
   markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
 
@@ -272,10 +279,15 @@ describe('release signing secrets wiring', () => {
 })
 
 describe('release version gate', () => {
-  it('pins package.json to the v0.2.1 release version', () => {
-    expect(pkg.version).toBe('0.2.1')
+  it('derives the release tag from package.json and cross-checks the release documents', () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(currentTag).toBe(`v${pkg.version}`)
+    // Every version-bearing document and workflow default is keyed off this tag.
+    expect(changelog).toContain(`## ${currentTag}`)
+    expect(existsSync(releaseNotesPath)).toBe(true)
+    expect(firstHeading(releaseNotes)).toContain(currentTag)
+    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
+    expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 
   it('asserts package.json version matches the tag before packaging', () => {
@@ -731,17 +743,26 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as published with its release link', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
+  it('reports the current tag as pending and links the latest public release', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
     expect(readme).toContain(
-      `https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`
+      '最新公开 Release 为 [v0.2.1](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.1)'
     )
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain('待发布')
+    expect(readme).not.toContain(`${currentTag} 已发布`)
     expect(readme).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
     expect(readme).not.toMatch(/正式版 v0\.2\.0/)
     expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
     expect(readme).not.toMatch(/发布状态：冻结/)
+  })
+
+  it('attributes the file-handle bug to v0.2.1 and earlier in the README', () => {
+    const issues = readme.slice(readme.indexOf('## 已知问题'))
+    expect(issues).toContain('v0.2.1 及更早')
+    expect(issues).toContain('当前版本已修复')
+    expect(issues).toContain('8 路')
+    expect(issues).toContain('有界并发')
+    expect(issues).toContain('文件句柄耗尽')
   })
 
   it('keeps the README workflow_dispatch default in sync with the workflow', () => {
@@ -770,11 +791,24 @@ describe('release notes changelog', () => {
     expect(previous).toBeGreaterThan(superseded)
   })
 
+  it('documents the file-handle fix in the current changelog entry', () => {
+    const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf('## v0.2.1')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const section = changelog.slice(start, end)
+    for (const phrase of ['8 路', '有界并发', 'EMFILE', 'ENFILE']) {
+      expect(section).toContain(phrase)
+    }
+    expect(section).toContain('https://github.com/chaxiu/OpenCompare/issues/2')
+  })
+
   it('explains why v0.2.1 ships and keeps the v0.2.0 user-visible changes', () => {
-    const section = changelog.slice(
-      changelog.indexOf(`## ${currentTag}`),
-      changelog.indexOf('## v0.2.0')
-    )
+    const start = changelog.indexOf('## v0.2.1')
+    const end = changelog.indexOf('## v0.2.0')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const section = changelog.slice(start, end)
     for (const phrase of [
       '从未公开发布',
       '用户可见变化与 v0.2.0 相同',
@@ -816,7 +850,8 @@ describe('release notes changelog', () => {
     expect(firstHeading(releaseNotes)).toContain(currentTag)
   })
 
-  it('covers the v0.2.0 user-visible changes in the current release notes', () => {
+  it('covers the v0.2.1 user-visible changes in the still-public release notes', () => {
+    expect(existsSync(lastReleasedNotesPath)).toBe(true)
     for (const keyword of [
       '新建对比',
       '路径',
@@ -825,8 +860,16 @@ describe('release notes changelog', () => {
       '图标',
       '原位写回'
     ]) {
-      expect(releaseNotes).toContain(keyword)
+      expect(lastReleasedNotes).toContain(keyword)
     }
+  })
+
+  it('records the file-handle fix in the current release notes', () => {
+    for (const phrase of ['EMFILE', 'ENFILE', '8 路', '有界并发', '文件句柄耗尽']) {
+      expect(releaseNotes).toContain(phrase)
+    }
+    expect(releaseNotes).toMatch(/v0\.2\.1 及更早/)
+    expect(releaseNotes).toContain('升级')
   })
 
   it('keeps the v0.2.0 release notes as history', () => {
