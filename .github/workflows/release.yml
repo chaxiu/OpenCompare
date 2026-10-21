@@ -14,7 +14,7 @@ on:
       tag:
         description: 'Existing release tag to build (vMAJOR.MINOR.PATCH)'
         required: true
-        default: 'v0.2.3'
+        default: 'v0.2.4'
         type: string
 
 permissions:
@@ -655,3 +655,23 @@ jobs:
             esac
           done <<< "${assets}"
           exit ${status}
+      # Read-only: a complete release for this tag can still leave the public
+      # "latest" pointer on an older version (for example when a dispatch
+      # re-runs an older tag). The public surface must agree with the tag this
+      # run just published, so the newest release has to be this very tag.
+      # Nothing here writes to the remote.
+      - name: Assert the tag is the latest published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest="$(gh release list --limit 1 --json tagName | jq -r '.[0].tagName // empty')"
+          if [ -z "${latest}" ]; then
+            echo "::error::Could not read the latest published release while publishing ${RELEASE_TAG}; refusing to publish without the latest-release check." >&2
+            exit 1
+          fi
+          echo "latest published release: ${latest} (this tag: ${RELEASE_TAG})"
+          if [ "${latest}" != "${RELEASE_TAG}" ]; then
+            echo "::error::The latest published release is ${latest}, not ${RELEASE_TAG}; this tag is not the latest release." >&2
+            exit 1
+          fi
