@@ -55,6 +55,31 @@ describe('web PlatformPort', () => {
     )
   })
 
+  it('lists several directories in one input-ordered batch, sample mount included', async () => {
+    const platform = createWebPlatformPort()
+    const directory = '/samples/directory/baseline'
+    const missing = '/samples/missing-directory'
+
+    const listings = await platform.listDirectories([directory, missing, '/samples/csv'])
+
+    expect(listings.map((listing) => listing.path)).toEqual([
+      directory,
+      missing,
+      '/samples/csv'
+    ])
+    expect(listings.map((listing) => listing.ok)).toEqual([true, false, true])
+
+    const [sampleSlot, missingSlot] = listings
+    if (!sampleSlot.ok) throw new Error('expected the sample directory to list')
+    expect(sampleSlot.entries).toEqual(await platform.listDirectory(directory))
+
+    expect(missingSlot.ok).toBe(false)
+    if (!missingSlot.ok) {
+      expect(missingSlot.reason).toContain('无法读取目录')
+      expect(missingSlot.reason).toContain(missing)
+    }
+  })
+
   it('keeps user writes inside the memory sandbox', async () => {
     const platform = createWebPlatformPort()
 

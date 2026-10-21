@@ -430,7 +430,20 @@ describe('real file workbench', () => {
       listDirectory: async (path) => [
         ...(await base.listDirectory(path)),
         ...(path === DIRECTORY_SAMPLE_PATHS.left ? [dangling] : [])
-      ]
+      ],
+      // The real scan goes through the batch channel, so the injected broken
+      // entry has to be visible there too.
+      listDirectories: async (paths) =>
+        Promise.all(
+          paths.map(async (path) => {
+            const entries = await base.listDirectory(path)
+            return {
+              path,
+              ok: true as const,
+              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, dangling] : entries
+            }
+          })
+        )
     }
 
     render(<Workbench platform={platform} />)

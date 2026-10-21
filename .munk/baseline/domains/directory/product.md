@@ -17,6 +17,7 @@
 - **Dry-run 预览确认弹窗**：执行前弹出弹窗，分组列出待新增拷贝、待覆盖修改（镜像模式另列待删除项），显示字节汇总与目标根路径；**取消不写任何文件**；确认后才执行；执行完成后自动重跑 `compareDirectories`，目录树、徽章与状态栏统计随之刷新。
 - **模板归位匹配器（`src/core/directory/`，纯函数）**：以模板树 A（当前目录会话左/源侧，或用户选定目录）的**相对路径槽位**为骨架，用「**文件名 + SHA-256 内容哈希**」从层级被打乱的树 B（内置 `/samples/directory/incoming` 或用户选定目录）中匹配文件，产出 `matched`（A 槽位 ← B 文件，文件名一致且内容哈希一致）、`missing`（A 槽位在 B 中无同名候选）、`conflict`（同名候选内容不同 `content-mismatch`，或同名候选多于一个 `ambiguous`）、以及 B 中未被消费的 `unused` 文件。匹配经哈希索引 + 文件名索引完成，线性复杂度，不做两两内容比对。
 - **模板预览与提取归位**：视图展示归位映射预览（已匹配相对路径映射、缺失槽位、冲突项、B 未使用文件；确认前不写任何文件）；确认后按模板 A 的相对路径结构写出所有 `matched` 文件（自动创建缺失父目录）到目标根，完成后用同一匹配器复核归位结果。
+- **批量取数与有界遍历（`src/core/directory/compare.ts`）**：`scanDirectory` 从「逐层串行、一个目录一次 `list`」改为**队列 + 批量取数 + 有界并发**——按层收集待列目录，一次 `listDirectories` 往返携带多个目录（默认批大小 `DEFAULT_DIRECTORY_BATCH_SIZE = 8`，队列不足时按 `ceil(待列数 / 并发)` 收缩但不少于 2），由 `mapWithLimit` 限制在飞批量调用（默认 `DEFAULT_TRAVERSAL_CONCURRENCY = 16`，可经 `ScanDirectoryOptions.concurrency` 覆盖）。批量/并发只改「怎么取数」：树结构、按名称 `localeCompare` 排序、`index` 相对路径键、四态配对、`skipped` 计数口径与不可列子树容错与串行基线逐项一致；批量槽位缺失或槽位顺序与请求不符即整次 reject，绝不返回部分 `ScannedTree`。既有 `scanDirectory(rootPath, list)` 调用形态保留，缺批量能力时由 `perDirectoryBatches` 适配为批形态。
 - **内容读取的有界并发与句柄错误（横切契约，归 `io-concurrency` 域）**：`compareDirectories` 的候选正文读取经 `@core/io` 的 `mapWithLimit` 走默认 `DEFAULT_IO_CONCURRENCY`（8）窗口，`scanDirectory` 单层 `list` 失败转成可读句柄错误；`compareDirectories` / `compareDirectorySides` 新增可选 `ConcurrencyOptions` 尾参供测试收窄窗口。`EMFILE` / `ENFILE` 统一转成「文件句柄」可读错误向上抛，不返回部分结果。
 - **内容确认的字节摘要（横切契约，归 `content-digest` 域）**：目录对比的内容确认改为先按 size/mtime 快路径 + `(path, size, modifiedMs)` 缓存算出待确认路径，再经 `PlatformPort.digestFiles` 对**原始字节**批量取 SHA-256（不读 UTF-8 正文），摘要写回同一 `ComparisonCache.hashes`；未提供摘要能力时回退既有文本读取路径。`compareDirectories` 尾参类型为 `ComparisonIoOptions`（`ConcurrencyOptions` + 可选 `digestFiles` / `digestible`）。非法 UTF-8 的二进制内容因此能被判 `modified` 而不被解码抹平；四态语义、缓存键与失效钩子不变。
 - **不可读项 / 悬空链接容错（横切契约，归 `io-tolerance` 域）**：`scanDirectory` 跳过平台标注的 `broken` 条目与不可列举子树并累计 `ScannedTree.skipped`（根目录失败仍 reject）；`compareDirectories` / `compareDirectorySides` 把两侧 `skipped` 与正文不可读对汇总到 `DirectoryComparison.skipped`，正文读取失败的文件对判 `modified` 而不中止整次对比；`fileCount` 仍等于 `same + added + removed + modified`。坏项不进任何状态计数。
@@ -56,6 +57,15 @@
 - **ac-template-perf**：匹配基于哈希/文件名索引，1,000+ 文件的合成散乱树仍在线性时间内完成且不对同一文件重复读取内容 / 计算哈希（vitest 用计数桩断言）。
 - **ac-existing-confirmations**：目录同步 / 模板归位等既有危险动作的预览与确认语义保持不变（`role="dialog"` 预览、确认前不写、取消不写、按预览写入后刷新）。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿，且新增 vitest 覆盖同步计划与模板匹配。
+- **ac-batch-multi-dir-per-call**：对含 ≥ 8 个目录的临时 fixture 扫描，记录到的批量列目录调用中至少有一次携带 ≥ 2 个目录路径，且总批量调用次数严格小于被扫描目录数（证明一个往返覆盖多个目录）。
+- **ac-default-concurrency-16**：对含 ≥ 32 个可列目录的 fixture，用默认参数扫描：实测在飞批量请求峰值 ≥ 16，且 ≤ 遍历并发上限常量；该默认常量在单一来源导出且数值 ≥ 16。
+- **ac-concurrency-cap**：显式传入并发上限（如 4）扫描同一 fixture：实测在飞峰值 ≤ 4，产出的树、`index` 键集合、四态计数与 `skipped` 与默认并发下逐项相等。
+- **ac-parity-temp-fixture**：真实临时目录 fixture（多级嵌套、空目录、同名不同层文件、仅 mtime 不同、同 size 同 mtime 不同内容、悬空符号链接、不可读条目）上，批量/并发扫描得到的树（名称、层级、顺序、`size`、`modifiedMs`）、`index` 键集合、`skipped` 与同 fixture 的串行基线扫描逐项相等；`compareDirectories` 的四态计数与串行基线相等。
+- **ac-parity-samples**：内置样本 `/samples/directory/**` 目录对比经批量扫描后，树、四态计数与 `skipped` 与既有串行基线和现有测试断言一致（样本路径在批量通道可用）。
+- **ac-skipped-semantics**：fixture 中悬空符号链接与不可读条目仍出现在返回条目里并各计 `skipped` 1 次；一个不可列子树只计 `skipped` 1 次且不出现在树中，扫描仍整体成功；fixture 中的 `.git`、`node_modules` 目录被正常列出并参与对比，不被静默跳过。
+- **ac-root-unreadable-rejects**：根目录自身不可列时 `scanDirectory` / `compareDirectories` 以错误 reject（消息含「无法读取目录」与路径），不返回空树。
+- **ac-compat-existing-scan**：现有 `scanDirectory(rootPath, list)` 调用形态（`snapshot.ts` / `directoryOps.ts` / `loadSampleSessions.ts` 与既有测试）继续可用；未提供批量能力时扫描结果与批量路径一致。
+- **ac-no-regression**：`pnpm test` 全绿，既有 `compare` / `snapshot` / `sync` / `template` / `electron-platform` / `preload` / renderer 套件零回归；`readTextFile`、`writeTextFile`、`statPath` 等既有能力行为不变；`.ocsnap.json` 快照线格式不变。
 
 ## 非目标
 
@@ -69,6 +79,8 @@
 - **不做往返状态跨重启持久化**：过滤/折叠/滚动/选中只保持于当前运行期内存（按目录会话 id），不落盘、不做跨窗口同步，也不为此引入全局状态管理库或持久化层。
 - 不做会话关闭与未保存提示（`session-tabs-lifecycle` 子项）、不做原位保存与结果导出（`save-in-place-and-export` 子项）。
 - 不做三向或超过两个目录的对比；不做快捷键绑定、命令面板、主题切换与浅色皮肤；不做打包分发、签名、公证、自动更新、CI 发布。
+- **不做扫描进度与取消**：不引入进度事件 / 进度条 / 状态栏进度、不引入取消信号 / 操作标识 / 在途流销毁；不新增持久化缓存、不改缓存键 `(path, size, modifiedMs)` 与失效语义。
+- **不新增默认忽略规则**：`.git` / `node_modules` / 隐藏文件一律照列；不把不可读条目、悬空链接、不可列子树改成整次失败，也不把 EMFILE/ENFILE 吞成 `skipped`。
 - 不改样本 answer key（`src/shared/fixtures/` 的 `status` 字段）；不改 `.munk/baseline/**`（由 Delivery 折入）。
 
 ## 实现约束
@@ -88,6 +100,9 @@
 - **目录树状态不得依赖组件本地挂载生命周期**：`TreeView` 的展开态、选中行改为受控 props（`collapsedPaths` / `selectedPath` + 回调），滚动位置经 `Panel` 的 `bodyRef` / `onBodyScroll` 上报；工作台壳层按 `sessionId` 保存 `{ filter, collapsed, selectedPath }` 与 `{ left, right }` 滚动偏移，返回时经 `useLayoutEffect` 回填。不为此引入全局状态管理库。
 - 下钻会话身份带来源：`createDrilldownSession(parentId, …)` 产出 `file:{parentId}::{relativePath}` 并写 `parentDirectoryId`；返回落点由 `resolveDirectoryReturn(sessions, sourceId)` 纯函数决定（来源会话 → 其他可用目录会话 fallback → `null`），兜底提示复用 `report(message, tone)`。
 - 选中高亮与返回入口只引用 `main.css` 语义 token 与既有 `focus-ring` / `transition-fast` utility；点展开/折叠按钮 `stopPropagation`，避免误改选中。
+- **遍历复用既有并发工具，不引新依赖**：批量取数经 `@core/io` 的 `mapWithLimit`（保序、首错停发、等在飞收敛、绝不返回部分结果）与 `toReadableIoError`；不引 `p-limit` / `p-queue`。**遍历并发（默认 16）与主进程 `stat` 预算（默认 16）是两个独立常量**，各自单一来源导出（`DEFAULT_TRAVERSAL_CONCURRENCY` / `DEFAULT_STAT_CONCURRENCY`）并可在测试中传入覆盖值；不得靠抬高 `DEFAULT_IO_CONCURRENCY`（摘要/内容读取默认 8）来达成遍历默认值，调用点不重复硬编码数字。
+- **批量能力按新增能力 + 可选参数接入**：`scanDirectory(rootPath, list, options?)` 与 `ComparisonIoOptions`（extends `ScanDirectoryOptions`）尾参可选，既有调用点不必改写；真实运行路径（`directoryOps` 的 `compareRoots` / `syncIo` 扫描、`snapshotOps` 的对比与快照导出、`loadSampleSessions`）与 `compareDirectorySides` 均透传 `listDirectories`。
+- 排序、`skipped` 计数位置与失败容错分支沿用 `compare.ts` 既有口径，不重排索引结构。
 
 ## 最近交付证明
 
@@ -101,3 +116,8 @@
 - 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm typecheck` / `pnpm lint` / `pnpm test` 全绿，含随动与新用例）。
 - 覆盖摘要：`session.ts` `WorkbenchSession` 新增 `parentDirectoryId`；`directoryCompare.ts` `createDrilldownSession(parentId, …)` 以 `file:{parentId}::{relativePath}` 生成会话 id 并记录来源，新增纯函数 `resolveDirectoryReturn(sessions, sourceId)`（来源会话 → 其他目录会话 fallback → `null`）；`TreeView` 去掉每个 `TreeNode` 的 `useState(true)`，改为受控 `collapsedPaths` / `selectedPath` + `onTogglePath` / `onSelectPath`，行单击单选并 `aria-selected` + `bg-accent-soft` 高亮（展开按钮 `stopPropagation`）；`Panel` 新增 `bodyRef` / `onBodyScroll` 暴露滚动容器；`DirectoryView` 接收 `sessionId` 与受控树/滚动状态，`useLayoutEffect` 回填左右 `scrollTop`；`Workbench` 以 `directoryStates`（filter/collapsed/selectedPath）与 `directoryScroll`（left/right）按目录会话 id 保存，下钻文件视图顶部新增「返回上级目录视图」按钮 + 「来源目录对比：<标题>」条，`backToDirectory` 按 `resolveDirectoryReturn` 落点并对不可用来源给出 `report` 提示。十条验收均有对应折叠用例（qa/）。`App.test.tsx` 覆盖返回落点、往返过滤/展开/滚动/选中保持、同相对路径下钻隔离与来源不可用兜底，`directoryCompare.test.ts` 覆盖返回落点解析。
 - 注：本轮 WI change pack 未提供 `tech.md` / `ux/**`，全局 tech / design 折叠跳过。真实目录往返的 Electron 窗口人工复核口径由 `qa/back-to-parent-directory.md` 等用例描述承载；自动用例使用脚本化内存 PlatformPort。
+- WI：`wi_ws_deb41e1c6a5a2b8f`（目录条目批量 IPC 与 ≥16 路有界遍历，`kind: feature`）
+- 日期：2026-10-21
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 含新增批量扫描用例全绿）。
+- 覆盖摘要：`scanDirectory` 由逐层串行 walk 改为**队列 + 批量取数 + 有界并发**——`PendingDirectory` 层队列、`resolveBatchSize` 收缩批大小、`mapWithLimit(batches, { concurrency })` 限制在飞批量调用、`finalize` 递归排序组装（保留名称 `localeCompare` 排序与索引结构）；新增导出 `DEFAULT_TRAVERSAL_CONCURRENCY = 16`、`DEFAULT_DIRECTORY_BATCH_SIZE = 8`、`ScanDirectoryOptions`、`ListDirectories`，`ComparisonIoOptions` 改为 extends `ScanDirectoryOptions` 并把 `options` 透传到 `compareDirectories` 的两侧扫描与 `compareDirectorySides`（`snapshot.ts`）。容错口径原样保留：broken 条目计 `skipped`、不可列子树只计 `skipped` 1 次且不进树、根槽位失败 reject（「无法读取目录 <path>：…」）、EMFILE/ENFILE 经 `toReadableIoError` 致死、批量槽位数/顺序不符整次 reject 不返回部分树。`compare.test.ts` 新增「batched directory scan」8 条用例（一次往返覆盖多目录且调用次数少于目录数、默认在飞峰值 ≥ 16、显式 cap 4 后树/index/skipped 逐项相等、槽位失败时与串行树一致、缺槽位 reject、根失败 reject、批量路径下 EMFILE 致死而非计入 skipped、四态分类经批量能力一致）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例，全局 tech / design 折叠跳过；平台能力缝（`PlatformPort.listDirectories`）折叠在 `domains/foundation`，遍历并发与主进程 `stat` 预算口径折叠在 `domains/io-concurrency`。

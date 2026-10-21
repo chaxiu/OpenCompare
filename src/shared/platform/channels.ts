@@ -9,6 +9,7 @@ export const PLATFORM_CHANNELS = {
   selectFile: 'platform:select-file',
   saveFile: 'platform:save-file',
   listDirectory: 'platform:list-directory',
+  listDirectories: 'platform:list-directories',
   readTextFile: 'platform:read-text-file',
   digestFiles: 'platform:digest-files',
   writeTextFile: 'platform:write-text-file',
