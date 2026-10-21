@@ -412,6 +412,61 @@ describe('real file workbench', () => {
     expect(screen.getByRole('contentinfo').textContent).toContain('差异')
   })
 
+  it('reports skipped dangling entries as an info notice and a view count', async () => {
+    const base = scriptedPort({
+      dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    })
+    const dangling = {
+      name: 'dangling',
+      path: `${DIRECTORY_SAMPLE_PATHS.left}/dangling`,
+      isDirectory: false,
+      size: 0,
+      modifiedMs: 0,
+      broken: true,
+      skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+    }
+    const platform: PlatformPort = {
+      ...base,
+      listDirectory: async (path) => [
+        ...(await base.listDirectory(path)),
+        ...(path === DIRECTORY_SAMPLE_PATHS.left ? [dangling] : [])
+      ]
+    }
+
+    render(<Workbench platform={platform} />)
+    dropPaths(screen.getByRole('main'), [
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right
+    ])
+
+    // A successful comparison reports the skips at info level, not as an error.
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toContain('已跳过 1 个不可读项/悬空链接')
+    expect(notice.className).toContain('text-diff-added')
+    // The directory view keeps the count visible as well.
+    expect(screen.getAllByText('已跳过 1 个不可读项/悬空链接')).toHaveLength(2)
+  })
+
+  it('shows no skip notice when every entry was readable', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+        })}
+      />
+    )
+
+    dropPaths(screen.getByRole('main'), [
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right
+    ])
+
+    expect(
+      await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(screen.queryByText(/已跳过/)).toBeNull()
+  })
+
   it('reports file-handle exhaustion as a readable notice and opens no session', async () => {
     const platform: PlatformPort = {
       ...scriptedPort({

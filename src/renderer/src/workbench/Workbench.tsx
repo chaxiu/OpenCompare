@@ -497,6 +497,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const comparison = await compareSides(platform, next, cache.current)
       upsertSession(createDirectorySession(comparison, next))
       setStatus('ready')
+      // A comparison that succeeded with unreadable entries is still a success:
+      // report what was left out instead of turning it into an error.
+      if (comparison.skipped > 0) {
+        report(`已跳过 ${comparison.skipped} 个不可读项/悬空链接`, 'info')
+      }
       return true
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -712,7 +717,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         content: exported.text
       })
       if (path === null) return
-      report(`已导出到 ${path}（${exported.entryCount} 个文件）。`, 'info')
+      report(
+        `已导出到 ${path}（${exported.entryCount} 个文件${exported.skipped > 0 ? `，跳过 ${exported.skipped} 个不可读项` : ''}）。`,
+        'info'
+      )
     } catch (cause) {
       report(cause instanceof Error ? cause.message : String(cause))
     } finally {

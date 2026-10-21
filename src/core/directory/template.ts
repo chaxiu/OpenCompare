@@ -205,7 +205,7 @@ export function matchTemplateSlots(
       ([relativePath, node]) => node.kind === 'file' && wanted.has(relativePath)
     )
   )
-  return matchTemplate({ root: template.root, index }, output, io)
+  return matchTemplate({ root: template.root, index, skipped: template.skipped }, output, io)
 }
 
 /**

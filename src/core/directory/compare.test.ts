@@ -332,6 +332,129 @@ describe('directory comparison engine', () => {
     expect((outcome as Error).message).toContain('文件句柄')
     expect((outcome as Error).message).toContain('EMFILE')
   })
+
+  it('keeps a dangling entry in the listing but out of the scan, counted as skipped', async () => {
+    const fs = createTrees(
+      { 'same.txt': { text: 'alpha' }, docs: { 'kept.txt': { text: 'deep' } } },
+      { 'same.txt': { text: 'alpha' } }
+    )
+    const list: ListDirectory = async (path) =>
+      path === '/left'
+        ? [
+            ...(await fs.list(path)),
+            {
+              name: 'dangling',
+              path: '/left/dangling',
+              isDirectory: false,
+              size: 0,
+              modifiedMs: 0,
+              broken: true,
+              skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+            }
+          ]
+        : fs.list(path)
+
+    const left = await scanDirectory('/left', list)
+
+    expect(left.skipped).toBe(1)
+    expect(left.index.has('dangling')).toBe(false)
+    expect(left.index.has('same.txt')).toBe(true)
+    expect(left.index.has('docs/kept.txt')).toBe(true)
+  })
+
+  it('skips an unlistable subtree and keeps the rest of the tree', async () => {
+    const fs = createTrees(
+      {
+        'kept.txt': { text: 'kept' },
+        readable: { 'deep.txt': { text: 'deep' } },
+        locked: { 'hidden.txt': { text: 'hidden' } }
+      },
+      {}
+    )
+    const list: ListDirectory = async (path) => {
+      if (path === '/left/locked') throw new Error('EACCES: permission denied')
+      return fs.list(path)
+    }
+
+    const scanned = await scanDirectory('/left', list)
+
+    expect(scanned.skipped).toBe(1)
+    expect(scanned.index.has('locked')).toBe(false)
+    expect(scanned.index.has('readable/deep.txt')).toBe(true)
+    expect(scanned.index.has('kept.txt')).toBe(true)
+  })
+
+  it('still rejects when the root itself cannot be listed', async () => {
+    const list: ListDirectory = async () => {
+      throw new Error('无法读取目录 /left：没有访问权限（EACCES）。')
+    }
+
+    await expect(scanDirectory('/left', list)).rejects.toThrow(/无法读取目录 \/left/)
+  })
+
+  it('aggregates each side skipped count into the comparison', async () => {
+    const fs = createTrees(
+      { 'same.txt': { text: 'alpha' } },
+      { 'same.txt': { text: 'alpha' }, 'right-only.txt': { text: 'new' } }
+    )
+    const brokenEntry = (root: string) => ({
+      name: 'dangling',
+      path: `${root}/dangling`,
+      isDirectory: false,
+      size: 0,
+      modifiedMs: 0,
+      broken: true,
+      skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+    })
+    const list: ListDirectory = async (path) => {
+      const entries = await fs.list(path)
+      return path === '/left' || path === '/right'
+        ? [...entries, brokenEntry(path)]
+        : entries
+    }
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      list,
+      fs.readTextFile,
+      createComparisonCache()
+    )
+
+    expect(comparison.skipped).toBe(2)
+    expect(comparison.counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
+    expect(comparison.fileCount).toBe(
+      comparison.counts.same +
+        comparison.counts.added +
+        comparison.counts.removed +
+        comparison.counts.modified
+    )
+  })
+
+  it('reports an unreadable body as modified and counts it instead of rejecting', async () => {
+    const fs = createTrees(
+      { 'unreadable.txt': { text: 'alpha' }, 'ok.txt': { text: 'beta' } },
+      { 'unreadable.txt': { text: 'alpha' }, 'ok.txt': { text: 'beta' } }
+    )
+    const readTextFile = async (path: string): Promise<string> => {
+      if (path === '/right/unreadable.txt') throw new Error('EACCES: permission denied')
+      return fs.readTextFile(path)
+    }
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      readTextFile,
+      createComparisonCache()
+    )
+
+    expect(comparison.skipped).toBe(1)
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 0, modified: 1 })
+    expect(
+      comparison.root.children.find((child) => child.name === 'unreadable.txt')?.status
+    ).toBe('modified')
+  })
 })
 
 describe('directory filters', () => {

@@ -17,6 +17,14 @@ export interface DirectoryEntry {
   readonly isDirectory: boolean
   readonly size: number
   readonly modifiedMs: number
+  /**
+   * True when the entry could not be fully inspected (a dangling symbolic link,
+   * an unreadable entry, …). Such an entry is still returned so a caller can
+   * count it instead of failing the whole listing; absent on healthy entries.
+   */
+  readonly broken?: boolean
+  /** Readable reason an entry is marked {@link broken}. */
+  readonly skippedReason?: string
 }
 
 /** One entry of an open / save dialog filter; extensions carry no leading dot. */
