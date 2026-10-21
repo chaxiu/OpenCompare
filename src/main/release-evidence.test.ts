@@ -27,11 +27,11 @@ const sha256Values = (doc: string): string[] => [
   ...new Set(doc.match(/[0-9a-f]{64}/g) ?? [])
 ]
 
-const inspectReleaseEvidence = (doc: string): EvidenceReport => {
+const inspectReleaseEvidence = (doc: string, version = 'v0.2.1'): EvidenceReport => {
   const problems: string[] = []
   const text = doc.trim()
   if (!text) return { status: null, problems: ['证据文件缺失或为空'] }
-  if (!text.includes('v0.2.1')) problems.push('证据文件未声明 v0.2.1')
+  if (!text.includes(version)) problems.push(`证据文件未声明 ${version}`)
 
   const statusMatch = text.match(/^\s*(?:-\s*)?status:\s*(\S+)\s*$/m)
   const status = statusMatch?.[1]
@@ -72,8 +72,8 @@ const inspectReleaseEvidence = (doc: string): EvidenceReport => {
   return { status, problems }
 }
 
-const readEvidence = (): string =>
-  existsSync(evidencePath) ? readFileSync(evidencePath, 'utf8') : ''
+const readEvidence = (path = evidencePath): string =>
+  existsSync(path) ? readFileSync(path, 'utf8') : ''
 
 const verifiedFixture = (): string =>
   [
@@ -193,6 +193,67 @@ describe('inspectReleaseEvidence', () => {
     const doc = `${blockedFixture()}\ndmg sha256: ${'c'.repeat(64)}\n`
     expect(inspectReleaseEvidence(doc).problems).toContain(
       'blocked 分支不得记录产物 SHA-256'
+    )
+  })
+})
+
+// Same read-only parser, different evidence record. The v0.2.2 file is the
+// published-release counterpart of the v0.2.1 blocked record above.
+const evidenceV022Path = join(repoRoot, 'docs/release-evidence/v0.2.2.md')
+
+describe('v0.2.2 release evidence document', () => {
+  it('exists, is non-empty, declares the version once and passes the verified branch', () => {
+    expect(existsSync(evidenceV022Path)).toBe(true)
+    const doc = readEvidence(evidenceV022Path)
+    expect(doc.trim().length).toBeGreaterThan(0)
+    expect(doc).toContain('v0.2.2')
+    expect(doc.match(/^status:\s*verified$/gm)?.length).toBe(1)
+
+    const { status, problems } = inspectReleaseEvidence(doc, 'v0.2.2')
+    expect(problems).toEqual([])
+    expect(status).toBe('verified')
+  })
+
+  it('records the public dmg and zip SHA-256 values', () => {
+    const doc = readEvidence(evidenceV022Path)
+    expect(doc).toContain('7c7232b9c02431c36d98a6b367436697ab379e9ef8c97e30c59b29e57eaa6ae8')
+    expect(doc).toContain('2f0a2e0fb00cacaa442ffa4796c47afc3e438555a8641dc8234aa3f608b12f34')
+  })
+
+  it('records the read-only forensic commands and the host facts', () => {
+    const doc = readEvidence(evidenceV022Path)
+    for (const command of [
+      'gh release view v0.2.2 --repo chaxiu/OpenCompare',
+      'shasum -a 256',
+      'ditto -x -k',
+      'hdiutil attach -nobrowse -readonly',
+      'hdiutil detach',
+      'codesign -dv --verbose=4',
+      'sw_vers',
+      'uname -m'
+    ]) {
+      expect(doc).toContain(command)
+    }
+    expect(doc).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}/)
+  })
+
+  it('records both bundle identities and the packaged brand icon digest', () => {
+    const doc = readEvidence(evidenceV022Path)
+    expect(doc).toContain('CFBundleShortVersionString')
+    expect(doc).toContain('CFBundleIconFile')
+    for (const marker of [
+      /Authority=Developer ID Application: Tao Zhu \(3X4J53U6RY\)/g,
+      /TeamIdentifier=3X4J53U6RY/g,
+      /flags=0x10000\(runtime\)/g
+    ]) {
+      expect(doc.match(marker)?.length ?? 0).toBeGreaterThanOrEqual(2)
+    }
+    expect(doc).toContain('a099851e7c8888e244410a5490800e837920d337c2588fb9e70ce577c2fc0f8f')
+  })
+
+  it('flags a document that does not declare the expected version', () => {
+    expect(inspectReleaseEvidence(readEvidence(), 'v0.2.2').problems).toContain(
+      '证据文件未声明 v0.2.2'
     )
   })
 })
