@@ -17,6 +17,7 @@
 - **Dry-run 预览确认弹窗**：执行前弹出弹窗，分组列出待新增拷贝、待覆盖修改（镜像模式另列待删除项），显示字节汇总与目标根路径；**取消不写任何文件**；确认后才执行；执行完成后自动重跑 `compareDirectories`，目录树、徽章与状态栏统计随之刷新。
 - **模板归位匹配器（`src/core/directory/`，纯函数）**：以模板树 A（当前目录会话左/源侧，或用户选定目录）的**相对路径槽位**为骨架，用「**文件名 + SHA-256 内容哈希**」从层级被打乱的树 B（内置 `/samples/directory/incoming` 或用户选定目录）中匹配文件，产出 `matched`（A 槽位 ← B 文件，文件名一致且内容哈希一致）、`missing`（A 槽位在 B 中无同名候选）、`conflict`（同名候选内容不同 `content-mismatch`，或同名候选多于一个 `ambiguous`）、以及 B 中未被消费的 `unused` 文件。匹配经哈希索引 + 文件名索引完成，线性复杂度，不做两两内容比对。
 - **模板预览与提取归位**：视图展示归位映射预览（已匹配相对路径映射、缺失槽位、冲突项、B 未使用文件；确认前不写任何文件）；确认后按模板 A 的相对路径结构写出所有 `matched` 文件（自动创建缺失父目录）到目标根，完成后用同一匹配器复核归位结果。
+- **内容读取的有界并发与句柄错误（横切契约，归 `io-concurrency` 域）**：`compareDirectories` 的候选正文读取经 `@core/io` 的 `mapWithLimit` 走默认 `DEFAULT_IO_CONCURRENCY`（8）窗口，`scanDirectory` 单层 `list` 失败转成可读句柄错误；`compareDirectories` / `compareDirectorySides` 新增可选 `ConcurrencyOptions` 尾参供测试收窄窗口。`EMFILE` / `ENFILE` 统一转成「文件句柄」可读错误向上抛，不返回部分结果。
 
 ## 验收
 

@@ -15,6 +15,8 @@
  */
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
 import type { SnapshotDocument, SnapshotEntry } from '@shared/snapshot'
+import { mapWithLimit, toReadableIoError } from '../io'
+import type { ConcurrencyOptions } from '../io'
 import type {
   ComparisonCache,
   DirectoryComparison,
@@ -407,7 +409,8 @@ async function resolveSide(
  * Compares a real directory or a snapshot against either kind of counterpart,
  * reusing the regular comparison semantics, cache and content-read planning.
  * Only bodies that are actually needed are read; snapshot bodies come from the
- * document, directory bodies from `readTextFile`.
+ * document, directory bodies from `readTextFile` through a bounded window so a
+ * multi-thousand-file tree cannot exhaust the process file descriptors.
  */
 export async function compareDirectorySides(
   left: ComparisonSide,
@@ -415,29 +418,35 @@ export async function compareDirectorySides(
   list: ListDirectory,
   readTextFile: ReadTextFile,
   cache: ComparisonCache,
-  hash?: (text: string) => string
+  hash?: (text: string) => string,
+  /** In-flight body-read window; defaults to {@link DEFAULT_IO_CONCURRENCY}. */
+  options: ConcurrencyOptions = {}
 ): Promise<DirectoryComparison> {
-  const [leftSide, rightSide] = await Promise.all([
-    resolveSide(left, 'left', list),
-    resolveSide(right, 'right', list)
-  ])
+  try {
+    const [leftSide, rightSide] = await Promise.all([
+      resolveSide(left, 'left', list),
+      resolveSide(right, 'right', list)
+    ])
 
-  const mounts = [leftSide.mount, rightSide.mount].filter(
-    (mount): mount is SnapshotMount => mount !== undefined
-  )
+    const mounts = [leftSide.mount, rightSide.mount].filter(
+      (mount): mount is SnapshotMount => mount !== undefined
+    )
 
-  const read = async (path: string): Promise<string> => {
-    const mount = mounts.find((candidate) => path.startsWith(`${candidate.mountPath}/`))
-    if (mount !== undefined) {
-      return readSnapshotContent(mount.snapshot, path.slice(mount.mountPath.length + 1))
+    const read = async (path: string): Promise<string> => {
+      const mount = mounts.find((candidate) => path.startsWith(`${candidate.mountPath}/`))
+      if (mount !== undefined) {
+        return readSnapshotContent(mount.snapshot, path.slice(mount.mountPath.length + 1))
+      }
+      return readTextFile(path)
     }
-    return readTextFile(path)
+
+    const requested = planContentReads(leftSide.tree, rightSide.tree, cache)
+    const contents = new Map(
+      await mapWithLimit(requested, options, async (path) => [path, await read(path)] as const)
+    )
+
+    return compareScannedTrees(leftSide.tree, rightSide.tree, { contents, cache, hash })
+  } catch (error) {
+    throw toReadableIoError(error)
   }
-
-  const requested = planContentReads(leftSide.tree, rightSide.tree, cache)
-  const contents = new Map(
-    await Promise.all(requested.map(async (path) => [path, await read(path)] as const))
-  )
-
-  return compareScannedTrees(leftSide.tree, rightSide.tree, { contents, cache, hash })
 }

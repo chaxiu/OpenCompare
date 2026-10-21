@@ -412,6 +412,25 @@ describe('real file workbench', () => {
     expect(screen.getByRole('contentinfo').textContent).toContain('差异')
   })
 
+  it('reports file-handle exhaustion as a readable notice and opens no session', async () => {
+    const platform: PlatformPort = {
+      ...scriptedPort({
+        dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+      }),
+      readTextFile: async () => {
+        throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' })
+      }
+    }
+
+    render(<Workbench platform={platform} />)
+    dropPaths(screen.getByRole('main'), [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('文件句柄')
+    expect(alert.textContent).toContain('EMFILE')
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+  })
+
   it('keeps a single dropped path as the left baseline and asks for its counterpart', async () => {
     render(
       <Workbench platform={scriptedPort({ dropped: [LEFT_ENGINE], files: [RIGHT_ENGINE] })} />

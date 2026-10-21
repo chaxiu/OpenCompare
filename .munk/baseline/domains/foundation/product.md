@@ -8,6 +8,7 @@
 - 安装本栈官方/主流 Skill 到 worktree `.agents/skills/`，并写薄 `AGENTS.md` 路由。
 - 打通双模运行架构：`PlatformPort` 抽象 + Electron IPC 实现 + Web/内存实现，renderer 仅依赖 `PlatformPort`。
 - **平台文件 IO 能力（`PlatformPort.selectFile` / `saveFile`）**：原生打开文件对话框返回所选绝对路径（取消 `null`）；保存对话框 + `node:fs/promises` 写盘返回目标路径（取消 `null`）；options 支持 `title` / 扩展名 `filters` / `defaultPath`。三处实现齐备且行为一致：Electron（`dialog.showOpenDialog`/`showSaveDialog`）、preload channel 白名单（`src/shared/platform/channels.ts`）、Web 内存实现（隐藏 file input 物化到内存 FS；保存写内存 FS 并尽力触发下载）。
+- **目录列表能力（`PlatformPort.listDirectory`）**：Electron 实现 `readdir({ withFileTypes: true })` 后逐条 `stat` 取 `name` / `path` / `isDirectory` / `size` / `modifiedMs`；逐条 `stat` 的 fan-out 自 v0.2.1 之后的版本起经 `@core/io` 的 `mapWithLimit` 走有界窗口（默认 8），返回顺序与字段与逐条串行结果一致。限流与句柄错误文案归 `io-concurrency` 域，本域不重复实现。
 - 预装核心运行时依赖（diff / node-diff3 / papaparse / @tanstack/react-virtual / yaml / jsonc-parser / lucide-react）与开发测试依赖（vitest / @testing-library/react / eslint / typescript）。
 - 配齐单命令质量门禁：`install` / `lint` / `typecheck` / `build` / `test`（各自单条 argv）。
 
