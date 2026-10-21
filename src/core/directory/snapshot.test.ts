@@ -419,6 +419,44 @@ describe('snapshot comparison', () => {
     expect(projected?.children.map((child) => child.name)).not.toContain('left-only.txt')
   })
 
+  it('digests only the real directory side, keeping snapshot text hashing', async () => {
+    const snapshot = await buildSide('/right', 'remote')
+    const requested: string[] = []
+
+    const comparison = await compareDirectorySides(
+      { kind: 'directory', path: '/left' },
+      { kind: 'snapshot', snapshot },
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: async (paths) => {
+          requested.push(...paths)
+          return Promise.all(
+            paths.map(async (path) => {
+              // Snapshot mounts are virtual: they have no file to stream.
+              if (path.startsWith('/snapshots/')) {
+                throw new Error(`snapshot path must not be digested: ${path}`)
+              }
+              const text = await fs.readTextFile(path)
+              return {
+                path,
+                ok: true as const,
+                sha256: sha256Hex(text),
+                bytes: new TextEncoder().encode(text).length
+              }
+            })
+          )
+        }
+      }
+    )
+
+    expect(comparison.counts).toEqual({ same: 2, added: 1, removed: 1, modified: 1 })
+    expect(requested.length).toBeGreaterThan(0)
+    expect(requested.every((path) => path.startsWith('/left/'))).toBe(true)
+  })
+
   it('classifies a snapshot against a real directory in the other direction', async () => {
     const snapshot = await buildSide('/left', 'left-remote')
     const comparison = await compareDirectorySides(

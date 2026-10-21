@@ -15,14 +15,22 @@ import {
   utimes,
   writeFile
 } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 import type { Dirent } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
 import { mapWithLimit, toReadableIoError } from '@core/io'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import type { DirectoryEntry, PathProbeKind } from '@shared/platform/types'
+import type {
+  DigestFilesOptions,
+  DirectoryEntry,
+  FileDigest,
+  FileDigestSuccess,
+  PathProbeKind
+} from '@shared/platform/types'
 
 const SAMPLE_ROOT = '/samples'
 
@@ -102,6 +110,19 @@ function parseFilters(value: unknown): FileFilter[] | undefined {
 
 function parseText(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function parseDigestPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new TypeError('Expected an array of file paths.')
+  return value.map((path) => assertPath(path))
+}
+
+function parseDigestOptions(value: unknown): DigestFilesOptions {
+  const record = (typeof value === 'object' && value !== null ? value : {}) as Record<
+    string,
+    unknown
+  >
+  return typeof record.concurrency === 'number' ? { concurrency: record.concurrency } : {}
 }
 
 function parseDialogRequest(value: unknown): DialogRequest {
@@ -249,6 +270,60 @@ async function readLocalTextFile(path: string): Promise<string> {
   }
 }
 
+/**
+ * Streams one file's raw bytes through SHA-256. The bytes are never decoded as
+ * text, so invalid UTF-8 stays distinguishable; one handle is held per file and
+ * the caller bounds how many files stream at once.
+ */
+async function digestLocalFile(path: string): Promise<FileDigestSuccess> {
+  const hash = createHash('sha256')
+  const stream = createReadStream(path)
+  let bytes = 0
+  try {
+    for await (const chunk of stream) {
+      const buffer = chunk as Buffer
+      bytes += buffer.length
+      hash.update(buffer)
+    }
+  } finally {
+    stream.destroy()
+  }
+  return { path, ok: true, sha256: hash.digest('hex'), bytes }
+}
+
+/** Digests the UTF-8 bytes of a built-in sample, which is text by definition. */
+function digestSampleFile(path: string): FileDigestSuccess {
+  const text = SAMPLE_FILES.get(path)
+  if (text === undefined) throw new Error(`No such sample file: ${path}`)
+  const bytes = Buffer.from(text, 'utf8')
+  return {
+    path,
+    ok: true,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    bytes: bytes.length
+  }
+}
+
+/**
+ * Digests a batch of files' raw bytes in input order. A readable failure only
+ * fails that one item — one unreadable file must not cost the whole comparison —
+ * while descriptor exhaustion still rejects, since it would fail every read.
+ */
+export async function digestFiles(
+  paths: readonly string[],
+  options: DigestFilesOptions = {}
+): Promise<readonly FileDigest[]> {
+  return mapWithLimit(paths, options, async (path): Promise<FileDigest> => {
+    try {
+      return isSamplePath(path) ? digestSampleFile(path) : await digestLocalFile(path)
+    } catch (error) {
+      const code = errorCode(error)
+      if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
+      return { path, ok: false, reason: readableFailure('文件', error, path).message }
+    }
+  })
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path)
@@ -330,6 +405,11 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     const target = assertPath(path)
     return isSamplePath(target) ? listSampleDirectory(target) : listDirectory(target)
   })
+  ipcMain.handle(
+    PLATFORM_CHANNELS.digestFiles,
+    (_event, paths: unknown, options: unknown) =>
+      digestFiles(parseDigestPaths(paths), parseDigestOptions(options))
+  )
   ipcMain.handle(PLATFORM_CHANNELS.readTextFile, (_event, path: unknown) => {
     const target = assertPath(path)
     if (!isSamplePath(target)) return readLocalTextFile(target)

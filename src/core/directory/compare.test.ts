@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import type { ListDirectory } from './compare'
+import type { DigestFiles, ListDirectory } from './compare'
 import {
   compareDirectories,
   compareScannedTrees,
@@ -15,11 +15,13 @@ import {
   matchesFilter,
   projectDirectoryTree
 } from './filter'
-import { sha256Hex } from './hash'
+import { sha256Bytes, sha256Hex } from './hash'
 import { DEFAULT_IO_CONCURRENCY, FileHandleExhaustedError } from '../io'
 
 interface FakeFile {
   readonly text: string
+  /** Raw bytes the digest capability hashes; defaults to the text's UTF-8 bytes. */
+  readonly bytes?: Uint8Array
   /** Overrides the byte size the fast path sees. */
   readonly size?: number
   readonly modifiedMs?: number
@@ -34,6 +36,7 @@ function isFile(value: FakeFile | FakeTree): value is FakeFile {
 interface FakeFs {
   readonly list: ListDirectory
   readonly readTextFile: (path: string) => Promise<string>
+  readonly digestFiles: DigestFiles
 }
 
 /** In-memory file system mirroring the PlatformPort capability for the engine. */
@@ -66,7 +69,17 @@ function createFakeFs(tree: FakeTree): FakeFs {
       const node = lookup(path)
       if (node === null || !isFile(node)) throw new Error(`not a file: ${path}`)
       return node.text
-    }
+    },
+    // Mirrors `PlatformPort.digestFiles`: raw bytes, input order, per-file failure.
+    digestFiles: async (paths) =>
+      paths.map((path) => {
+        const node = lookup(path)
+        if (node === null || !isFile(node)) {
+          return { path, ok: false, reason: `无法读取文件 ${path}：路径不存在` }
+        }
+        const bytes = node.bytes ?? new TextEncoder().encode(node.text)
+        return { path, ok: true, sha256: sha256Bytes(bytes), bytes: bytes.length }
+      })
   }
 }
 
@@ -141,6 +154,49 @@ describe('sha256Hex', () => {
     }
     expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
     expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+  })
+})
+
+describe('sha256Bytes', () => {
+  /** Deterministic pseudo-random bytes, so the large case crosses block edges. */
+  function pseudoRandomBytes(length: number): Uint8Array {
+    const bytes = new Uint8Array(length)
+    let seed = 0x9e3779b9
+    for (let index = 0; index < length; index += 1) {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      bytes[index] = seed & 0xff
+    }
+    return bytes
+  }
+
+  it('matches node:crypto for ASCII, multibyte UTF-8 and BOM bytes', () => {
+    const encoder = new TextEncoder()
+    for (const text of ['', 'abc', '中文🙂', '\ufeffbom.txt', 'line\r\nline']) {
+      const bytes = encoder.encode(text)
+      expect(sha256Bytes(bytes)).toBe(createHash('sha256').update(bytes).digest('hex'))
+    }
+    expect(sha256Bytes(encoder.encode('abc'))).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+    )
+    expect(sha256Bytes(new Uint8Array())).toBe(
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    )
+  })
+
+  it('hashes invalid UTF-8 bytes as-is instead of decoding them first', () => {
+    const bytes = Uint8Array.from([0x61, 0xff, 0xfe, 0x00, 0x62])
+    const decoded = new TextDecoder().decode(bytes)
+
+    expect(sha256Bytes(bytes)).toBe(createHash('sha256').update(bytes).digest('hex'))
+    // A text round-trip replaces the invalid sequences with U+FFFD, so the
+    // digests must differ — proof the hash never went through a string.
+    expect(sha256Bytes(bytes)).not.toBe(sha256Hex(decoded))
+  })
+
+  it('digests a buffer larger than the streaming chunk with an offset boundary', () => {
+    const bytes = pseudoRandomBytes(1024 * 1024 + 7)
+
+    expect(sha256Bytes(bytes)).toBe(createHash('sha256').update(bytes).digest('hex'))
   })
 })
 
@@ -429,6 +485,136 @@ describe('directory comparison engine', () => {
         comparison.counts.removed +
         comparison.counts.modified
     )
+  })
+
+  it('hashes planned files through one digest batch instead of reading their text', async () => {
+    const fs = createTrees({ 'a.txt': { text: 'same' } }, { 'a.txt': { text: 'same' } })
+    const readTextFile = async (): Promise<string> => {
+      throw new Error('the digest capability must replace text reads')
+    }
+    const requests: string[][] = []
+    const digestFiles: DigestFiles = async (paths) => {
+      requests.push([...paths])
+      return fs.digestFiles(paths)
+    }
+    const cache = createComparisonCache()
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      readTextFile,
+      cache,
+      undefined,
+      { digestFiles }
+    )
+
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 0, modified: 0 })
+    expect(requests).toEqual([['/left/a.txt', '/right/a.txt']])
+
+    // Cache hit: unchanged (path, size, modifiedMs) pairs ask for no digest.
+    const second = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      readTextFile,
+      cache,
+      undefined,
+      { digestFiles }
+    )
+    expect(requests).toHaveLength(1)
+    expect(second.counts).toEqual(comparison.counts)
+  })
+
+  it('classifies a binary pair modified when only its raw bytes differ', async () => {
+    const fs = createTrees(
+      {
+        'blob.bin': {
+          text: 'aaaaa',
+          size: 5,
+          bytes: Uint8Array.from([0x61, 0xff, 0xfe, 0x00, 0x62])
+        }
+      },
+      {
+        'blob.bin': {
+          text: 'aaaaa',
+          size: 5,
+          bytes: Uint8Array.from([0x61, 0xef, 0xbf, 0xbd, 0x62])
+        }
+      }
+    )
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { digestFiles: fs.digestFiles }
+    )
+
+    // Identical size and mtime, text decodes to the same string: only the byte
+    // digest can tell these apart.
+    expect(comparison.counts).toEqual({ same: 0, added: 0, removed: 0, modified: 1 })
+  })
+
+  it('keeps a per-file digest failure as one skipped modified pair', async () => {
+    const fs = createTrees(
+      { 'bad.bin': { text: 'aa' }, 'ok.txt': { text: 'beta' } },
+      { 'bad.bin': { text: 'aa' }, 'ok.txt': { text: 'beta' } }
+    )
+    const digestFiles: DigestFiles = async (paths) =>
+      Promise.all(
+        paths.map(async (path) => {
+          if (path === '/right/bad.bin') {
+            return {
+              path,
+              ok: false as const,
+              reason: `无法读取文件 ${path}：没有访问权限（EACCES）。`
+            }
+          }
+          const [digest] = await fs.digestFiles([path])
+          return digest
+        })
+      )
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { digestFiles }
+    )
+
+    expect(comparison.skipped).toBe(1)
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 0, modified: 1 })
+  })
+
+  it('treats descriptor exhaustion during the digest batch as fatal', async () => {
+    const fs = createTrees(largeTree(3, 'same'), largeTree(3, 'same'))
+    const digestFiles: DigestFiles = async () => {
+      throw codedError('EMFILE')
+    }
+
+    const outcome = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { digestFiles }
+    ).then(
+      () => new Error('expected the comparison to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(FileHandleExhaustedError)
+    expect((outcome as FileHandleExhaustedError).code).toBe('EMFILE')
+    expect((outcome as Error).message).toContain('EMFILE')
   })
 
   it('reports an unreadable body as modified and counts it instead of rejecting', async () => {

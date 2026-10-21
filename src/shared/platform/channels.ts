@@ -10,6 +10,7 @@ export const PLATFORM_CHANNELS = {
   saveFile: 'platform:save-file',
   listDirectory: 'platform:list-directory',
   readTextFile: 'platform:read-text-file',
+  digestFiles: 'platform:digest-files',
   writeTextFile: 'platform:write-text-file',
   exists: 'platform:exists',
   statPath: 'platform:stat-path',

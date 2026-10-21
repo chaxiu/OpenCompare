@@ -472,7 +472,9 @@ describe('real file workbench', () => {
       ...scriptedPort({
         dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
       }),
-      readTextFile: async () => {
+      // The comparison hashes raw bytes through the digest seam; descriptor
+      // exhaustion there is fatal, never a per-file skip.
+      digestFiles: async () => {
         throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' })
       }
     }

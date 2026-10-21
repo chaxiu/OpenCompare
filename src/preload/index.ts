@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
+import type { DirectoryEntry, FileDigest, PlatformPort } from '@shared/platform/types'
 
 const platform: PlatformPort = {
   kind: 'electron',
@@ -23,6 +23,10 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
   readTextFile: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
+  digestFiles: (paths, options) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<
+      readonly FileDigest[]
+    >,
   writeTextFile: (path, content, modifiedMs) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,

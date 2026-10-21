@@ -13,7 +13,7 @@
  * bodies nor recomputes digests.
  */
 import type { DiffStatus } from '@shared/fixtures'
-import type { DirectoryEntry } from '@shared/platform/types'
+import type { DirectoryEntry, FileDigest } from '@shared/platform/types'
 import { mapWithLimit, toReadableIoError } from '../io'
 import type { ConcurrencyOptions } from '../io'
 import { sha256Hex } from './hash'
@@ -54,6 +54,27 @@ export type ListDirectory = (path: string) => Promise<readonly DirectoryEntry[]>
 
 /** Reads one UTF-8 text file. Backed by `PlatformPort.readTextFile` in the app. */
 export type ReadTextFile = (path: string) => Promise<string>
+
+/**
+ * Digests a batch of files' raw bytes. Backed by `PlatformPort.digestFiles` in
+ * the app; one request carries the whole batch and answers in input order.
+ */
+export type DigestFiles = (paths: readonly string[]) => Promise<readonly FileDigest[]>
+
+/** I/O capabilities and limits one comparison runs with. */
+export interface ComparisonIoOptions extends ConcurrencyOptions {
+  /**
+   * Byte-level batch digest. When supplied, planned files are hashed from their
+   * raw bytes instead of being read as UTF-8 text (the pre-digest fallback).
+   */
+  readonly digestFiles?: DigestFiles
+  /**
+   * Narrows which planned paths the digest capability can address; paths it
+   * rejects (e.g. snapshot mounts, which have no file behind them) keep the
+   * text-read path.
+   */
+  readonly digestible?: (path: string) => boolean
+}
 
 /** Content digest of one file, keyed by the metadata it was computed for. */
 export interface ContentHashEntry {
@@ -476,8 +497,10 @@ export async function readContentCandidates(
 /**
  * Digests every body a comparison needs straight into the cache, so large real
  * trees never have to keep every file's text in memory at once (two 40 GB
- * projects would not fit). Returns the paths that could not be read; their pair
- * is classified `modified` and counted as skipped.
+ * projects would not fit). Files go through the batch byte digest when the
+ * caller supplies one, so the engine never pulls a body over IPC for hashing;
+ * the rest keep the text-read fallback. Returns the paths that could not be
+ * read; their pair is classified `modified` and counted as skipped.
  */
 export async function digestContentCandidates(
   left: ScannedTree,
@@ -485,7 +508,7 @@ export async function digestContentCandidates(
   cache: ComparisonCache,
   read: ReadTextFile,
   hash: (text: string) => string,
-  options: ConcurrencyOptions,
+  options: ComparisonIoOptions,
   tolerate: (error: unknown) => boolean = () => true
 ): Promise<ReadonlySet<string>> {
   const requested = planContentReads(left, right, cache)
@@ -497,8 +520,45 @@ export async function digestContentCandidates(
   }
 
   const unreadable = new Set<string>()
+  const { digestFiles } = options
+  const digestible = options.digestible ?? ((): boolean => true)
+  const batch = digestFiles === undefined ? [] : requested.filter((path) => digestible(path))
+  const textReads =
+    digestFiles === undefined ? requested : requested.filter((path) => !digestible(path))
 
-  await mapWithLimit(requested, options, async (path) => {
+  // One batch request covers every raw-byte digest: the digest capability owns
+  // its own bounded streaming reads, so the engine never pulls a body itself.
+  if (batch.length > 0 && digestFiles !== undefined) {
+    let digests: readonly FileDigest[]
+    try {
+      digests = await digestFiles(batch)
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code
+      if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
+      throw error
+    }
+
+    // The contract is one result per request, in input order; a missing slot or
+    // a failed item is just an unreadable body, never a batch-wide failure.
+    batch.forEach((path, index) => {
+      const digest = digests[index]
+      if (digest === undefined || !digest.ok) {
+        unreadable.add(path)
+        return
+      }
+      const node = nodes.get(path)
+      if (node === undefined) {
+        throw new Error(`No scanned file at ${path}; call planContentReads first.`)
+      }
+      cache.hashes.set(path, {
+        size: node.size,
+        modifiedMs: node.modifiedMs,
+        hash: digest.sha256
+      })
+    })
+  }
+
+  await mapWithLimit(textReads, options, async (path) => {
     try {
       const node = nodes.get(path)
       if (node === undefined) {
@@ -533,8 +593,8 @@ export async function compareDirectories(
   cache: ComparisonCache,
   /** Digest implementation; defaults to the built-in synchronous SHA-256. */
   hash?: (text: string) => string,
-  /** In-flight body-read window; defaults to {@link DEFAULT_IO_CONCURRENCY}. */
-  options: ConcurrencyOptions = {}
+  /** In-flight body-read window and optional digest capability. */
+  options: ComparisonIoOptions = {}
 ): Promise<DirectoryComparison> {
   try {
     const [left, right] = await Promise.all([
