@@ -14,6 +14,8 @@
  */
 import type { DiffStatus } from '@shared/fixtures'
 import type { DirectoryEntry } from '@shared/platform/types'
+import { mapWithLimit, toReadableIoError } from '../io'
+import type { ConcurrencyOptions } from '../io'
 import { sha256Hex } from './hash'
 
 /** The four directory-comparison semantics, reusing the sample vocabulary. */
@@ -78,7 +80,14 @@ export async function scanDirectory(
   const index = new Map<string, ScannedNode>()
 
   async function walk(path: string, relativePath: string): Promise<ScannedNode> {
-    const entries = await list(path)
+    // One level at a time: the walk is serial, so no amount of nesting can
+    // stack up in-flight listings behind the caller's back.
+    let entries: readonly DirectoryEntry[]
+    try {
+      entries = await list(path)
+    } catch (error) {
+      throw toReadableIoError(error)
+    }
     const children: ScannedNode[] = []
 
     for (const entry of entries) {
@@ -379,7 +388,8 @@ export function compareScannedTrees(
 
 /**
  * Scans both roots and compares them, reading file bodies only where the size /
- * mtime fast path is inconclusive.
+ * mtime fast path is inconclusive. Bodies are read through a bounded window so a
+ * multi-thousand-file tree cannot exhaust the process file descriptors.
  */
 export async function compareDirectories(
   leftRoot: string,
@@ -388,17 +398,25 @@ export async function compareDirectories(
   readTextFile: ReadTextFile,
   cache: ComparisonCache,
   /** Digest implementation; defaults to the built-in synchronous SHA-256. */
-  hash?: (text: string) => string
+  hash?: (text: string) => string,
+  /** In-flight body-read window; defaults to {@link DEFAULT_IO_CONCURRENCY}. */
+  options: ConcurrencyOptions = {}
 ): Promise<DirectoryComparison> {
-  const [left, right] = await Promise.all([
-    scanDirectory(leftRoot, list),
-    scanDirectory(rightRoot, list)
-  ])
+  try {
+    const [left, right] = await Promise.all([
+      scanDirectory(leftRoot, list),
+      scanDirectory(rightRoot, list)
+    ])
 
-  const requested = planContentReads(left, right, cache)
-  const entries = await Promise.all(
-    requested.map(async (path) => [path, await readTextFile(path)] as const)
-  )
+    const requested = planContentReads(left, right, cache)
+    const entries = await mapWithLimit(
+      requested,
+      options,
+      async (path) => [path, await readTextFile(path)] as const
+    )
 
-  return compareScannedTrees(left, right, { contents: new Map(entries), cache, hash })
+    return compareScannedTrees(left, right, { contents: new Map(entries), cache, hash })
+  } catch (error) {
+    throw toReadableIoError(error)
+  }
 }

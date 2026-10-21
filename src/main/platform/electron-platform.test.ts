@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -128,6 +128,42 @@ describe('electron real-directory sync', () => {
 
     const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
     expect(second.totalCount).toBe(0)
+  })
+})
+
+describe('directory listing', () => {
+  it('returns the same entries as a serial stat under the bounded window', async () => {
+    const root = await scratchRoot()
+    const wide = join(root, 'wide')
+    await mkdir(join(wide, 'nested'), { recursive: true })
+
+    const names = ['nested']
+    for (let index = 0; index < 300; index += 1) {
+      const name = `file-${String(index).padStart(3, '0')}.txt`
+      await writeFile(join(wide, name), 'x'.repeat((index % 7) + 1))
+      names.push(name)
+    }
+
+    // Serial reference: readdir order, one stat at a time.
+    const serial: DirectoryEntry[] = []
+    for (const name of await readdir(wide)) {
+      const path = join(wide, name)
+      const info = await stat(path)
+      serial.push({
+        name,
+        path,
+        isDirectory: info.isDirectory(),
+        size: info.size,
+        modifiedMs: info.mtimeMs
+      })
+    }
+
+    const listed = (await platform.listDirectory(wide)) as DirectoryEntry[]
+
+    expect(listed).toHaveLength(names.length)
+    const byName = (entries: readonly DirectoryEntry[]): DirectoryEntry[] =>
+      [...entries].sort((left, right) => left.name.localeCompare(right.name))
+    expect(byName(listed)).toEqual(byName(serial))
   })
 })
 

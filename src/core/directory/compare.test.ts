@@ -16,6 +16,7 @@ import {
   projectDirectoryTree
 } from './filter'
 import { sha256Hex } from './hash'
+import { DEFAULT_IO_CONCURRENCY, FileHandleExhaustedError } from '../io'
 
 interface FakeFile {
   readonly text: string
@@ -72,6 +73,48 @@ function createFakeFs(tree: FakeTree): FakeFs {
 /** Both trees, addressed as `/left` and `/right`. */
 function createTrees(left: FakeTree, right: FakeTree): FakeFs {
   return createFakeFs({ left, right })
+}
+
+/** One flat directory of `count` identical files; every pair needs a body read. */
+function largeTree(count: number, text: string): FakeTree {
+  const tree: Record<string, FakeFile> = {}
+  for (let index = 0; index < count; index += 1) {
+    tree[`file-${String(index).padStart(4, '0')}.txt`] = { text }
+  }
+  return tree
+}
+
+interface ReadProbe {
+  readonly readTextFile: (path: string) => Promise<string>
+  readonly reads: () => number
+  readonly peak: () => number
+}
+
+/** Wraps a read capability so a test can observe the in-flight peak. */
+function probeReads(fs: FakeFs): ReadProbe {
+  let inFlight = 0
+  let peak = 0
+  let reads = 0
+  return {
+    readTextFile: async (path) => {
+      reads += 1
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      // Yield so concurrent reads overlap instead of resolving synchronously.
+      await Promise.resolve()
+      try {
+        return await fs.readTextFile(path)
+      } finally {
+        inFlight -= 1
+      }
+    },
+    reads: () => reads,
+    peak: () => peak
+  }
+}
+
+function codedError(code: string): Error {
+  return Object.assign(new Error(`${code}: too many open files`), { code })
 }
 
 function collectNames(
@@ -215,6 +258,79 @@ describe('directory comparison engine', () => {
 
     await compareDirectories('/left', '/right', fs.list, readTextFile, cache)
     expect(reads).toEqual(['/left/a.txt', '/right/a.txt'])
+  })
+
+  it('bounds content reads for 3000 files at the default window', async () => {
+    const fs = createTrees(largeTree(3000, 'shared'), largeTree(3000, 'shared'))
+    const probe = probeReads(fs)
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      probe.readTextFile,
+      createComparisonCache()
+    )
+
+    expect(comparison.counts).toEqual({ same: 3000, added: 0, removed: 0, modified: 0 })
+    expect(probe.reads()).toBe(6000)
+    expect(probe.peak()).toBeLessThanOrEqual(DEFAULT_IO_CONCURRENCY)
+    expect(probe.peak()).toBeGreaterThan(1)
+  })
+
+  it('honours an explicit lower window without changing the classification', async () => {
+    async function run(concurrency?: number) {
+      const fs = createTrees(largeTree(400, 'alpha'), largeTree(400, 'bravo'))
+      const probe = probeReads(fs)
+      const comparison = await compareDirectories(
+        '/left',
+        '/right',
+        fs.list,
+        probe.readTextFile,
+        createComparisonCache(),
+        undefined,
+        concurrency === undefined ? {} : { concurrency }
+      )
+      return { comparison, peak: probe.peak() }
+    }
+
+    const byDefault = await run()
+    const limited = await run(2)
+
+    expect(byDefault.peak).toBeLessThanOrEqual(DEFAULT_IO_CONCURRENCY)
+    expect(limited.peak).toBeLessThanOrEqual(2)
+    expect(limited.peak).toBeGreaterThan(1)
+    expect(limited.comparison.counts).toEqual(byDefault.comparison.counts)
+    expect(limited.comparison.counts).toEqual({
+      same: 0,
+      added: 0,
+      removed: 0,
+      modified: 400
+    })
+    expect(limited.comparison.root).toEqual(byDefault.comparison.root)
+  })
+
+  it('rejects file-handle exhaustion with a readable error instead of a partial result', async () => {
+    const fs = createTrees(largeTree(4, 'same'), largeTree(4, 'same'))
+    const readTextFile = async (): Promise<string> => {
+      throw codedError('EMFILE')
+    }
+
+    const outcome = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      readTextFile,
+      createComparisonCache()
+    ).then(
+      () => new Error('expected the comparison to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(FileHandleExhaustedError)
+    expect((outcome as FileHandleExhaustedError).code).toBe('EMFILE')
+    expect((outcome as Error).message).toContain('文件句柄')
+    expect((outcome as Error).message).toContain('EMFILE')
   })
 })
 

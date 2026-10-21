@@ -8,6 +8,7 @@ import { access, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'n
 import { join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
+import { mapWithLimit } from '@core/io'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type { DirectoryEntry, PathProbeKind } from '@shared/platform/types'
@@ -125,21 +126,19 @@ async function saveFile(options: DialogRequest, content: string): Promise<string
 
 async function listDirectory(path: string): Promise<DirectoryEntry[]> {
   const entries = await readdir(path, { withFileTypes: true })
-  // One directory's width is small; stat its entries in parallel so a real
-  // recursive scan is not serialised on metadata reads.
-  return Promise.all(
-    entries.map(async (entry) => {
-      const entryPath = join(path, entry.name)
-      const info = await stat(entryPath)
-      return {
-        name: entry.name,
-        path: entryPath,
-        isDirectory: info.isDirectory(),
-        size: info.size,
-        modifiedMs: info.mtimeMs
-      }
-    })
-  )
+  // A wide directory still needs one `stat` per entry; the bounded window keeps
+  // that fan-out from exhausting descriptors on very large directories.
+  return mapWithLimit(entries, {}, async (entry) => {
+    const entryPath = join(path, entry.name)
+    const info = await stat(entryPath)
+    return {
+      name: entry.name,
+      path: entryPath,
+      isDirectory: info.isDirectory(),
+      size: info.size,
+      modifiedMs: info.mtimeMs
+    }
+  })
 }
 
 async function exists(path: string): Promise<boolean> {

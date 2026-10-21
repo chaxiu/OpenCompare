@@ -5,6 +5,7 @@ import type { DirectoryDiffNode, ListDirectory } from './compare'
 import { createComparisonCache, scanDirectory } from './compare'
 import { countTreeFiles, filterDirectoryTree, projectDirectoryTree } from './filter'
 import { sha256Hex } from './hash'
+import { DEFAULT_IO_CONCURRENCY, FileHandleExhaustedError } from '../io'
 import {
   SnapshotContentError,
   SnapshotFormatError,
@@ -138,6 +139,31 @@ function findNode(node: DirectoryDiffNode, relativePath: string): DirectoryDiffN
     if (hit !== undefined) return hit
   }
   return undefined
+}
+
+/** One flat directory of `count` identical files. */
+function largeTree(count: number, text: string): FakeTree {
+  const tree: Record<string, FakeFile> = {}
+  for (let index = 0; index < count; index += 1) {
+    tree[`file-${String(index).padStart(4, '0')}.txt`] = { text }
+  }
+  return tree
+}
+
+/** The same file set captured as a snapshot with inline bodies. */
+function largeSnapshot(count: number, text: string): SnapshotDocument {
+  return {
+    schema: SNAPSHOT_SCHEMA,
+    name: 'remote',
+    exportedAt: EXPORTED_AT,
+    entries: Array.from({ length: count }, (_, index) =>
+      entry(`file-${String(index).padStart(4, '0')}.txt`, text)
+    )
+  }
+}
+
+function codedError(code: string): Error {
+  return Object.assign(new Error(`${code}: too many open files`), { code })
 }
 
 /* ------------------------------------------------------------------ */
@@ -429,6 +455,69 @@ describe('snapshot comparison', () => {
         createComparisonCache()
       )
     ).rejects.toMatchObject({ name: 'SnapshotContentError', code: 'content-not-inlined' })
+  })
+
+  it('bounds content reads for 3000 files against a mounted snapshot', async () => {
+    const fs = createFakeFs({ left: largeTree(3000, 'shared\n') })
+    const snapshot = largeSnapshot(3000, 'shared\n')
+    let inFlight = 0
+    let peak = 0
+    let reads = 0
+    const readTextFile = async (path: string): Promise<string> => {
+      reads += 1
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await Promise.resolve()
+      try {
+        return await fs.readTextFile(path)
+      } finally {
+        inFlight -= 1
+      }
+    }
+
+    const comparison = await compareDirectorySides(
+      { kind: 'directory', path: '/left' },
+      { kind: 'snapshot', snapshot },
+      fs.list,
+      readTextFile,
+      createComparisonCache()
+    )
+
+    // Snapshot bodies come from the document, so only the directory side hits IO.
+    expect(reads).toBe(3000)
+    expect(peak).toBeLessThanOrEqual(DEFAULT_IO_CONCURRENCY)
+    expect(peak).toBeGreaterThan(1)
+    expect(comparison.counts).toEqual({ same: 3000, added: 0, removed: 0, modified: 0 })
+    expect(comparison.fileCount).toBe(3000)
+  })
+
+  it('rejects file-handle exhaustion with a readable error for directory sides', async () => {
+    const fs = createFakeFs({ left: { 'a.txt': { text: 'same' } } })
+    const snapshot: SnapshotDocument = {
+      schema: SNAPSHOT_SCHEMA,
+      name: 'remote',
+      exportedAt: EXPORTED_AT,
+      entries: [entry('a.txt', 'same')]
+    }
+    const readTextFile = async (): Promise<string> => {
+      throw codedError('EMFILE')
+    }
+
+    const outcome = await compareDirectorySides(
+      { kind: 'directory', path: '/left' },
+      { kind: 'snapshot', snapshot },
+      fs.list,
+      readTextFile,
+      createComparisonCache()
+    ).then(
+      () => new Error('expected the comparison to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(FileHandleExhaustedError)
+    expect((outcome as FileHandleExhaustedError).code).toBe('EMFILE')
+    expect((outcome as Error).message).toContain('文件句柄')
+    expect((outcome as Error).message).toContain('EMFILE')
   })
 })
 
