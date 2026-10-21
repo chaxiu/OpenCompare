@@ -1292,7 +1292,8 @@ describe('new compare dialog', () => {
   it('names the missing right path and opens no tab', async () => {
     const base = createWebPlatformPort()
     await writeFiles(base, [['/memory/left.txt', 'left\n']])
-    render(<Workbench platform={base} />)
+    const listDirectories = vi.fn(base.listDirectories)
+    render(<Workbench platform={{ ...base, listDirectories }} />)
 
     openDialog()
     fillPaths('/memory/left.txt', '/memory/right-missing.txt')
@@ -1303,6 +1304,8 @@ describe('new compare dialog', () => {
     expect(alert.textContent).toContain('/memory/right-missing.txt')
     expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
     expect(dialog()).toBeDefined()
+    // A rejected path never starts a scan.
+    expect(listDirectories).not.toHaveBeenCalled()
   })
 
   it('rejects an empty side without probing either path', async () => {
@@ -1422,6 +1425,126 @@ describe('new compare dialog', () => {
     fireEvent.click(within(sessionTabs()).getByRole('tab', { name: /l1\.txt/ }))
     expect(screen.getByText('未保存：右')).toBeDefined()
     expect(screen.getByText('已修改（未保存）')).toBeDefined()
+  })
+
+  /**
+   * A long directory comparison must not keep the modal overlay on screen: the
+   * shell progress bar and its cancel button have to stay reachable for the
+   * whole scan, whichever entry point started it.
+   */
+  it('closes the dialog before a typed directory pair starts scanning', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/dialog-scan/left/a.txt', 'x'],
+      ['/memory/dialog-scan/right/a.txt', 'y']
+    ])
+    let releaseScan!: () => void
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve
+    })
+    const port: PlatformPort = {
+      ...base,
+      listDirectories: async (paths) => {
+        await scanGate
+        return base.listDirectories(paths)
+      }
+    }
+    render(<Workbench platform={port} />)
+
+    openDialog()
+    fillPaths('/memory/dialog-scan/left', '/memory/dialog-scan/right')
+    submitDialog()
+
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull()
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(0)
+    expect(bar.textContent).toContain('正在扫描目录')
+    expect(bar.textContent).toMatch(/已扫描 \d+ 个文件/)
+    expect(bar.closest('[aria-modal="true"]')).toBeNull()
+    expect(
+      (within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled
+    ).toBe(false)
+
+    releaseScan()
+    expect(
+      await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+    ).toBeDefined()
+    expect(screen.queryByRole('status', { name: '目录对比进度' })).toBeNull()
+  })
+
+  it('closes the dialog before a picker-started directory pair starts scanning', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/dialog-pick/left/a.txt', 'x'],
+      ['/memory/dialog-pick/right/a.txt', 'y']
+    ])
+    const answers = ['/memory/dialog-pick/left', '/memory/dialog-pick/right']
+    let releaseScan!: () => void
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve
+    })
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      listDirectories: async (paths) => {
+        await scanGate
+        return base.listDirectories(paths)
+      }
+    }
+    render(<Workbench platform={port} />)
+
+    fireEvent.click(within(openDialog()).getByRole('button', { name: '打开文件夹' }))
+
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull()
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(0)
+    expect(within(bar).getByRole('button', { name: '取消' })).toBeDefined()
+    expect(
+      (within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled
+    ).toBe(false)
+
+    releaseScan()
+    expect(
+      await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+    ).toBeDefined()
+  })
+
+  it('keeps the dialog open when the folder picker is cancelled', async () => {
+    const base = createWebPlatformPort()
+    const answers: (string | null)[] = [null, '/memory/dialog-pick-cancel/left', null]
+    const listDirectories = vi.fn(base.listDirectories)
+    render(
+      <Workbench
+        platform={{
+          ...base,
+          selectDirectory: async () => answers.shift() ?? null,
+          listDirectories
+        }}
+      />
+    )
+
+    const panel = openDialog()
+
+    // Cancelling the very first picker leaves the dialog waiting for a pair.
+    fireEvent.click(within(panel).getByRole('button', { name: '打开文件夹' }))
+    await waitFor(() =>
+      expect(
+        (within(dialog()).getByRole('button', { name: '建立对比' }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    )
+    expect(dialog()).toBeDefined()
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+
+    // Cancelling the right side is the same story.
+    fireEvent.click(within(dialog()).getByRole('button', { name: '打开文件夹' }))
+    await waitFor(() =>
+      expect(
+        (within(dialog()).getByRole('button', { name: '建立对比' }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    )
+    expect(dialog()).toBeDefined()
+    expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
+    expect(listDirectories).not.toHaveBeenCalled()
   })
 })
 
@@ -1796,6 +1919,95 @@ describe('directory progress and cancel UI', () => {
     expect(
       screen.getByText('/memory/cancel/left ↔ /memory/cancel/right')
     ).toBeDefined()
+  })
+
+  /**
+   * Cancelling a comparison started from 「新建对比」 has to work while the
+   * dialog is already gone: no modal overlay, the same operation id on both
+   * seams, and the workbench exactly as it was before.
+   */
+  it('cancels a dialog-started comparison with no modal overlay left behind', async () => {
+    const base = createWebPlatformPort()
+    await writeMemoryFiles(base, [
+      ['/memory/dialog-cancel/left/a.txt', 'x'],
+      ['/memory/dialog-cancel/left/b.txt', 'x'],
+      ['/memory/dialog-cancel/right/a.txt', 'x'],
+      ['/memory/dialog-cancel/right/b.txt', 'x']
+    ])
+
+    const digestIds: string[] = []
+    const cancelIds: string[] = []
+    let releaseDigest!: () => void
+    const digestGate = new Promise<void>((resolve) => {
+      releaseDigest = resolve
+    })
+    const port: PlatformPort = {
+      ...base,
+      digestFiles: async (paths, options) => {
+        if (options?.operationId !== undefined) {
+          digestIds.push(options.operationId)
+          await digestGate
+        }
+        return base.digestFiles(paths)
+      },
+      cancelOperation: async (operationId) => {
+        cancelIds.push(operationId)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+
+    const tabsBefore = within(screen.getByRole('tablist', { name: '会话' }))
+      .getAllByRole('tab')
+      .map((tab) => tab.textContent)
+    const statusBefore = screen.getByRole('contentinfo').textContent
+    const viewBefore = screen.getByRole('main').innerHTML
+
+    fireEvent.click(screen.getAllByRole('button', { name: '新建对比' })[0])
+    const panel = screen.getByRole('dialog', { name: '新建对比' })
+    fireEvent.change(within(panel).getByLabelText('左侧路径'), {
+      target: { value: '/memory/dialog-cancel/left' }
+    })
+    fireEvent.change(within(panel).getByLabelText('右侧路径'), {
+      target: { value: '/memory/dialog-cancel/right' }
+    })
+    fireEvent.click(within(panel).getByRole('button', { name: '建立对比' }))
+
+    const bar = await screen.findByRole('status', { name: '目录对比进度' })
+    await waitFor(() => expect(digestIds.length).toBeGreaterThan(0))
+
+    expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull()
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(0)
+    expect(bar.textContent).toMatch(/正在(扫描目录|校验内容)/)
+    expect(bar.textContent).toMatch(/已扫描 \d+ 个文件/)
+    expect(bar.closest('[aria-modal="true"]')).toBeNull()
+
+    const cancel = within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(false)
+    fireEvent.click(cancel)
+
+    // The very same operation id reaches digesting and cancelling, and the
+    // button locks until the abort settles.
+    expect(cancelIds).toEqual([digestIds[0]])
+    expect(cancel.disabled).toBe(true)
+
+    await waitFor(() => expect(progressBar()).toBeNull())
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toBe('已取消本次目录对比，工作台保持取消前的状态。')
+
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' }))
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent)
+    ).toEqual(tabsBefore)
+    expect(screen.queryByRole('tab', { name: /left ↔ right/ })).toBeNull()
+    expect(screen.getByRole('contentinfo').textContent).toBe(statusBefore)
+    expect(screen.getByRole('main').innerHTML).toBe(viewBefore)
+
+    releaseDigest()
   })
 
   it('renders no progress bar while nothing is comparing', async () => {

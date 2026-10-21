@@ -505,12 +505,19 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
    * snapshot) and refreshes the directory session. Only a successful run
    * commits the new sides, so a failed import leaves the previous view intact.
    * A caller-provided `onError` keeps the message local (the new-compare
-   * dialog); otherwise it lands in the workbench notice.
+   * dialog); otherwise it lands in the workbench notice. A comparison started
+   * from that dialog dismisses it first, so its build failures use the notice.
    */
   async function runSidesCompare(
     next: ComparisonSides,
     onError?: (message: string) => void
   ): Promise<boolean> {
+    // Dismiss 「新建对比」 before the scan starts: its modal overlay would
+    // otherwise sit on top of the shell progress bar and its cancel button for
+    // the whole run. Path validation already happened, so only a build failure
+    // can still surface, and that one goes to the workbench notice.
+    const fromDialog = compareDialogOpen
+    setCompareDialogOpen(false)
     opSequence.current += 1
     const operation: ActiveDirectoryOperation = {
       id: `directory-${opSequence.current}-${Math.random().toString(36).slice(2, 8)}`,
@@ -547,7 +554,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         return false
       }
       const message = cause instanceof Error ? cause.message : String(cause)
-      if (onError) onError(message)
+      if (onError && !fromDialog) onError(message)
       else report(message)
       return false
     } finally {
