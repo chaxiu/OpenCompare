@@ -69,7 +69,10 @@ export async function loadSampleSessions(
               (path) => platform.readTextFile(path),
               cache,
               undefined,
-              { digestFiles: (paths) => platform.digestFiles(paths) }
+              {
+                digestFiles: (paths) => platform.digestFiles(paths),
+                listDirectories: (paths) => platform.listDirectories(paths)
+              }
             )
             return createDirectorySession(
               comparison,

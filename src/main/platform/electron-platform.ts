@@ -27,12 +27,41 @@ import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DigestFilesOptions,
   DirectoryEntry,
+  DirectoryListing,
   FileDigest,
   FileDigestSuccess,
+  ListDirectoriesOptions,
   PathProbeKind
 } from '@shared/platform/types'
 
 const SAMPLE_ROOT = '/samples'
+
+/**
+ * In-flight `stat` calls one batch listing may use, shared by every directory
+ * in the batch. A per-directory window would multiply the fan-out by the
+ * number of batched directories, which is exactly the descriptor blow-up this
+ * budget prevents.
+ */
+export const DEFAULT_STAT_CONCURRENCY = 16
+
+/** The subset of `fs.Stats` a listing reads; injectable so tests can observe it. */
+export interface ListableStat {
+  isDirectory(): boolean
+  readonly size: number
+  readonly mtimeMs: number
+}
+
+export interface LocalListDirectoriesOptions extends ListDirectoriesOptions {
+  /** Overrides {@link DEFAULT_STAT_CONCURRENCY}. */
+  readonly statConcurrency?: number
+  /** Test seam replacing the `stat` syscall; defaults to `node:fs/promises`. */
+  readonly statFile?: (path: string) => Promise<ListableStat>
+}
+
+function resolveStatBudget(requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested)) return DEFAULT_STAT_CONCURRENCY
+  return Math.max(1, Math.floor(requested))
+}
 
 const SAMPLE_FILES = new Map(SAMPLE_FIXTURE_FILES.map((file) => [file.path, file.text]))
 
@@ -112,12 +141,12 @@ function parseText(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
-function parseDigestPaths(value: unknown): string[] {
-  if (!Array.isArray(value)) throw new TypeError('Expected an array of file paths.')
+function parsePathArray(value: unknown, subject: 'file' | 'directory'): string[] {
+  if (!Array.isArray(value)) throw new TypeError(`Expected an array of ${subject} paths.`)
   return value.map((path) => assertPath(path))
 }
 
-function parseDigestOptions(value: unknown): DigestFilesOptions {
+function parseConcurrencyOptions(value: unknown): DigestFilesOptions & ListDirectoriesOptions {
   const record = (typeof value === 'object' && value !== null ? value : {}) as Record<
     string,
     unknown
@@ -203,63 +232,130 @@ function brokenReason(error: unknown, entry: Dirent): string {
   return `${kind}：${describeFileSystemCode(code)}${code ? `（${code}）` : ''}`
 }
 
-async function listDirectory(path: string): Promise<DirectoryEntry[]> {
-  let entries: Dirent[]
+/** Inspects one directory entry, flagging (never failing on) a broken one. */
+async function inspectEntry(
+  entryPath: string,
+  entry: Dirent,
+  statFile: (path: string) => Promise<ListableStat>
+): Promise<DirectoryEntry> {
+  let statFailure: unknown
   try {
-    entries = await readdir(path, { withFileTypes: true })
+    const info = await statFile(entryPath)
+    return {
+      name: entry.name,
+      path: entryPath,
+      isDirectory: info.isDirectory(),
+      size: info.size,
+      modifiedMs: info.mtimeMs
+    }
   } catch (error) {
-    // The root directory itself being unreadable is a real failure, not a
-    // skippable entry, so it still rejects — with a readable message.
-    throw readableFailure('目录', error, path)
+    // Descriptor exhaustion would fail every remaining entry: stay fatal.
+    const fatal = toReadableIoError(error)
+    if (fatal !== error) throw fatal
+    statFailure = error
+    if (!ENTRY_FALLBACK_CODES.has(errorCode(error) ?? '')) throw error
   }
 
-  // A wide directory still needs one `stat` per entry; the bounded window keeps
-  // that fan-out from exhausting descriptors on very large directories.
-  return mapWithLimit(entries, {}, async (entry) => {
-    const entryPath = join(path, entry.name)
-    let statFailure: unknown
-    try {
-      const info = await stat(entryPath)
-      return {
-        name: entry.name,
-        path: entryPath,
-        isDirectory: info.isDirectory(),
-        size: info.size,
-        modifiedMs: info.mtimeMs
-      }
-    } catch (error) {
-      statFailure = error
-      // Anything else (e.g. EMFILE) stays a failure of the whole listing.
-      if (!ENTRY_FALLBACK_CODES.has(errorCode(error) ?? '')) throw error
+  // A dangling symbolic link or unreadable child is listed but cannot be
+  // inspected; keep it in the result with its own link metadata so one bad
+  // entry never fails the comparison. The scan counts these as skipped.
+  try {
+    const info = await lstat(entryPath)
+    return {
+      name: entry.name,
+      path: entryPath,
+      isDirectory: info.isDirectory(),
+      size: info.size,
+      modifiedMs: info.mtimeMs,
+      broken: true,
+      skippedReason: brokenReason(statFailure, entry)
     }
+  } catch (error) {
+    const fatal = toReadableIoError(error)
+    if (fatal !== error) throw fatal
+    return {
+      name: entry.name,
+      path: entryPath,
+      // `readdir` still knows the type; no size/mtime is available.
+      isDirectory: entry.isDirectory(),
+      size: 0,
+      modifiedMs: 0,
+      broken: true,
+      skippedReason: brokenReason(error, entry)
+    }
+  }
+}
 
-    // A dangling symbolic link or unreadable child is listed but cannot be
-    // inspected; keep it in the result with its own link metadata so one bad
-    // entry never fails the comparison. The scan counts these as skipped.
-    try {
-      const info = await lstat(entryPath)
-      return {
-        name: entry.name,
-        path: entryPath,
-        isDirectory: info.isDirectory(),
-        size: info.size,
-        modifiedMs: info.mtimeMs,
-        broken: true,
-        skippedReason: brokenReason(statFailure, entry)
+type ReadSlot =
+  | { readonly path: string; readonly kind: 'sample'; readonly entries: DirectoryEntry[] }
+  | { readonly path: string; readonly kind: 'dirents'; readonly entries: Dirent[] }
+  | { readonly path: string; readonly kind: 'failure'; readonly reason: string }
+
+/**
+ * Lists several directories in one call. Every successful directory is read
+ * with `readdir`, then **all** their entries share one bounded `stat` window —
+ * batch size never multiplies the descriptor window.
+ *
+ * A directory that cannot be read only fails its own slot (the scan counts it
+ * as skipped); descriptor exhaustion rejects the whole batch with the readable
+ * file-handle error, because every queued read would fail too.
+ */
+export async function listDirectories(
+  paths: readonly string[],
+  options: LocalListDirectoriesOptions = {}
+): Promise<readonly DirectoryListing[]> {
+  const statFile = options.statFile ?? ((path: string) => stat(path))
+  const statConcurrency = resolveStatBudget(options.statConcurrency)
+
+  const readSlots = await mapWithLimit(
+    paths,
+    { concurrency: options.concurrency },
+    async (path): Promise<ReadSlot> => {
+      if (isSamplePath(path)) {
+        return { path, kind: 'sample', entries: listSampleDirectory(path) }
       }
-    } catch (error) {
-      return {
-        name: entry.name,
-        path: entryPath,
-        // `readdir` still knows the type; no size/mtime is available.
-        isDirectory: entry.isDirectory(),
-        size: 0,
-        modifiedMs: 0,
-        broken: true,
-        skippedReason: brokenReason(error, entry)
+      try {
+        return { path, kind: 'dirents', entries: await readdir(path, { withFileTypes: true }) }
+      } catch (error) {
+        const fatal = toReadableIoError(error)
+        if (fatal !== error) throw fatal
+        return { path, kind: 'failure', reason: readableFailure('目录', error, path).message }
       }
     }
+  )
+
+  interface StatTask {
+    readonly slot: number
+    readonly entry: Dirent
+  }
+  const tasks: StatTask[] = []
+  readSlots.forEach((slot, index) => {
+    if (slot.kind !== 'dirents') return
+    for (const entry of slot.entries) tasks.push({ slot: index, entry })
   })
+
+  const inspected = await mapWithLimit(tasks, { concurrency: statConcurrency }, async (task) => {
+    const slot = readSlots[task.slot]
+    if (slot.kind !== 'dirents') throw new Error('Unreachable: stat task without a listing.')
+    return inspectEntry(join(slot.path, task.entry.name), task.entry, statFile)
+  })
+
+  const entriesBySlot = readSlots.map(() => [] as DirectoryEntry[])
+  tasks.forEach((task, index) => {
+    entriesBySlot[task.slot].push(inspected[index])
+  })
+
+  return readSlots.map((slot, index): DirectoryListing => {
+    if (slot.kind === 'failure') return { path: slot.path, ok: false, reason: slot.reason }
+    const entries = slot.kind === 'sample' ? slot.entries : entriesBySlot[index]
+    return { path: slot.path, ok: true, entries }
+  })
+}
+
+async function listDirectory(path: string): Promise<DirectoryEntry[]> {
+  const [listing] = await listDirectories([path])
+  if (!listing.ok) throw new Error(listing.reason)
+  return [...listing.entries]
 }
 
 async function readLocalTextFile(path: string): Promise<string> {
@@ -406,9 +502,14 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     return isSamplePath(target) ? listSampleDirectory(target) : listDirectory(target)
   })
   ipcMain.handle(
+    PLATFORM_CHANNELS.listDirectories,
+    (_event, paths: unknown, options: unknown) =>
+      listDirectories(parsePathArray(paths, 'directory'), parseConcurrencyOptions(options))
+  )
+  ipcMain.handle(
     PLATFORM_CHANNELS.digestFiles,
     (_event, paths: unknown, options: unknown) =>
-      digestFiles(parseDigestPaths(paths), parseDigestOptions(options))
+      digestFiles(parsePathArray(paths, 'file'), parseConcurrencyOptions(options))
   )
   ipcMain.handle(PLATFORM_CHANNELS.readTextFile, (_event, path: unknown) => {
     const target = assertPath(path)

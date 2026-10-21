@@ -177,7 +177,10 @@ export function compareSides(
     (path) => platform.readTextFile(path),
     cache,
     undefined,
-    { digestFiles: (paths) => platform.digestFiles(paths) }
+    {
+      digestFiles: (paths) => platform.digestFiles(paths),
+      listDirectories: (paths) => platform.listDirectories(paths)
+    }
   )
 }
 
@@ -216,7 +219,9 @@ export async function exportSideSnapshot(
     }
   }
 
-  const tree = await scanDirectory(side.path, (path) => platform.listDirectory(path))
+  const tree = await scanDirectory(side.path, (path) => platform.listDirectory(path), {
+    listDirectories: (paths) => platform.listDirectories(paths)
+  })
   const { snapshot, skipped } = await buildSnapshot(tree, {
     name: basename(side.path),
     exportedAt: new Date().toISOString(),

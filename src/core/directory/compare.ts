@@ -13,7 +13,7 @@
  * bodies nor recomputes digests.
  */
 import type { DiffStatus } from '@shared/fixtures'
-import type { DirectoryEntry, FileDigest } from '@shared/platform/types'
+import type { DirectoryEntry, DirectoryListing, FileDigest } from '@shared/platform/types'
 import { mapWithLimit, toReadableIoError } from '../io'
 import type { ConcurrencyOptions } from '../io'
 import { sha256Hex } from './hash'
@@ -52,6 +52,26 @@ export interface ScannedTree {
 /** Lists one directory level. Backed by `PlatformPort.listDirectory` in the app. */
 export type ListDirectory = (path: string) => Promise<readonly DirectoryEntry[]>
 
+/**
+ * Lists several directories in one round trip, in input order. Backed by
+ * `PlatformPort.listDirectories`; a directory that cannot be read fails its own
+ * slot instead of the batch.
+ */
+export type ListDirectories = (paths: readonly string[]) => Promise<readonly DirectoryListing[]>
+
+/** In-flight batch listings a scan may use by default (one IPC round trip each). */
+export const DEFAULT_TRAVERSAL_CONCURRENCY = 16
+
+/** Directories one batch listing may carry by default. */
+export const DEFAULT_DIRECTORY_BATCH_SIZE = 8
+
+export interface ScanDirectoryOptions {
+  /** Batch capability; when omitted each directory goes through {@link ListDirectory}. */
+  readonly listDirectories?: ListDirectories
+  /** Overrides {@link DEFAULT_TRAVERSAL_CONCURRENCY}; values below 1 fall back to it. */
+  readonly concurrency?: number
+}
+
 /** Reads one UTF-8 text file. Backed by `PlatformPort.readTextFile` in the app. */
 export type ReadTextFile = (path: string) => Promise<string>
 
@@ -62,7 +82,7 @@ export type ReadTextFile = (path: string) => Promise<string>
 export type DigestFiles = (paths: readonly string[]) => Promise<readonly FileDigest[]>
 
 /** I/O capabilities and limits one comparison runs with. */
-export interface ComparisonIoOptions extends ConcurrencyOptions {
+export interface ComparisonIoOptions extends ScanDirectoryOptions {
   /**
    * Byte-level batch digest. When supplied, planned files are hashed from their
    * raw bytes instead of being read as UTF-8 text (the pre-digest fallback).
@@ -98,77 +118,229 @@ function basename(path: string): string {
   return separator === -1 ? normalized : normalized.slice(separator + 1)
 }
 
+/** Mutable node while a scan is still listing directories; finalised afterwards. */
+interface PendingNode {
+  readonly name: string
+  readonly path: string
+  readonly kind: 'file' | 'directory'
+  readonly size: number
+  readonly modifiedMs: number
+  readonly children: PendingNode[]
+}
+
+interface PendingDirectory {
+  readonly path: string
+  /** Root-relative POSIX path; `''` for the root itself. */
+  readonly relativePath: string
+  readonly node: PendingNode
+  /** Parent directory node, attached once this directory lists successfully. */
+  readonly parent: PendingNode | null
+}
+
+/** Readable failure of a batch slot; keeps the existing `无法读取目录` wording. */
+function directoryReadFailure(path: string, reason: string): Error {
+  return new Error(
+    reason.includes(`无法读取目录 ${path}`) ? reason : `无法读取目录 ${path}：${reason}`
+  )
+}
+
+function slotReason(path: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes(`无法读取目录 ${path}`) ? message : `无法读取目录 ${path}：${message}`
+}
+
 /**
- * Recursively scans `rootPath`, returning the tree plus a relative-path index.
+ * Turns a single-directory capability into the batch shape, so the scan's
+ * queue/batching path works even when the host has no batch capability. A
+ * directory failure stays local to its slot; descriptor exhaustion rejects the
+ * whole listing, since every queued read would fail too.
+ */
+function perDirectoryBatches(list: ListDirectory): ListDirectories {
+  return (paths) =>
+    mapWithLimit(paths, {}, async (path): Promise<DirectoryListing> => {
+      try {
+        return { path, ok: true, entries: await list(path) }
+      } catch (error) {
+        const fatal = toReadableIoError(error)
+        if (fatal !== error) throw fatal
+        return { path, ok: false, reason: slotReason(path, error) }
+      }
+    })
+}
+
+function resolveTraversalConcurrency(options: ScanDirectoryOptions): number {
+  const requested = options.concurrency
+  if (requested === undefined || !Number.isFinite(requested)) {
+    return DEFAULT_TRAVERSAL_CONCURRENCY
+  }
+  return Math.max(1, Math.floor(requested))
+}
+
+/**
+ * Directories one listing call carries. Large levels keep the full batch size;
+ * a small level is split so the traversal still fills its in-flight window
+ * (never going below two, so a call covers several directories whenever the
+ * queue allows it).
+ */
+function resolveBatchSize(pendingCount: number, concurrency: number): number {
+  if (pendingCount <= 1) return 1
+  const target = Math.ceil(pendingCount / concurrency)
+  return Math.max(2, Math.min(DEFAULT_DIRECTORY_BATCH_SIZE, target))
+}
+
+/**
+ * Scans `rootPath` level by level through a queue of pending directories. Each
+ * round trip lists up to {@link DEFAULT_DIRECTORY_BATCH_SIZE} directories (or
+ * fewer, enough to fill the window), with at most
+ * {@link DEFAULT_TRAVERSAL_CONCURRENCY} calls in flight. Batching and
+ * concurrency only change how directories are fetched: the tree, its sorted
+ * children, the relative-path index and the `skipped` count stay identical to
+ * a serial walk.
+ *
  * A broken entry or an unlistable subtree is counted in `skipped` and left out
- * instead of failing the scan; only the root itself being unreadable rejects.
+ * instead of failing the scan; only the root itself being unreadable (or a
+ * descriptor-exhaustion failure) rejects, and no partial tree is returned.
  */
 export async function scanDirectory(
   rootPath: string,
-  list: ListDirectory
+  list: ListDirectory,
+  options: ScanDirectoryOptions = {}
 ): Promise<ScannedTree> {
-  const index = new Map<string, ScannedNode>()
+  const listDirectories = options.listDirectories ?? perDirectoryBatches(list)
+  const concurrency = resolveTraversalConcurrency(options)
   let skipped = 0
 
-  async function walkEntries(
-    path: string,
-    relativePath: string,
-    entries: readonly DirectoryEntry[]
-  ): Promise<ScannedNode> {
-    const children: ScannedNode[] = []
+  const root: PendingNode = {
+    name: basename(rootPath),
+    path: rootPath,
+    kind: 'directory',
+    size: 0,
+    modifiedMs: 0,
+    children: []
+  }
 
-    for (const entry of entries) {
-      // A dangling / unreadable entry is still listed by the platform so the
-      // caller can count it, but it has no trustworthy metadata to compare.
-      if (entry.broken) {
-        skipped += 1
-        continue
+  let level: PendingDirectory[] = [
+    { path: rootPath, relativePath: '', node: root, parent: null }
+  ]
+
+  while (level.length > 0) {
+    const batchSize = resolveBatchSize(level.length, concurrency)
+    const batches: PendingDirectory[][] = []
+    for (let index = 0; index < level.length; index += batchSize) {
+      batches.push(level.slice(index, index + batchSize))
+    }
+    const nextLevel: PendingDirectory[] = []
+
+    // `mapWithLimit` keeps the call window bounded, stops issuing new batches
+    // after the first failure and rejects once the in-flight calls settle.
+    await mapWithLimit(batches, { concurrency }, async (batch) => {
+      const paths = batch.map((directory) => directory.path)
+      let listings: readonly DirectoryListing[]
+      try {
+        listings = await listDirectories(paths)
+      } catch (error) {
+        throw toReadableIoError(error)
       }
-      const childRelative = relativePath === '' ? entry.name : `${relativePath}/${entry.name}`
-      const child: ScannedNode | null = entry.isDirectory
-        ? await walk(entry.path, childRelative)
-        : {
-            name: entry.name,
-            path: entry.path,
-            kind: 'file' as const,
-            size: entry.size,
-            modifiedMs: entry.modifiedMs,
-            children: [] as readonly ScannedNode[]
+
+      if (listings.length !== paths.length) {
+        throw new Error(
+          `批量列目录返回了 ${listings.length} 个槽位，与请求的 ${paths.length} 个目录不一致，本次扫描已停止。`
+        )
+      }
+
+      for (const [index, directory] of batch.entries()) {
+        const listing = listings[index]
+        if (listing.path !== directory.path) {
+          throw new Error(
+            `批量列目录返回的槽位顺序与请求不一致：期望 ${directory.path}，实际 ${listing.path}。`
+          )
+        }
+        if (!listing.ok) {
+          if (directory.parent === null) {
+            // The root is the comparison itself: a failure there is not skippable.
+            throw directoryReadFailure(directory.path, listing.reason)
           }
-      // A subtree that could not be listed is skipped, never fatal.
-      if (child === null) continue
-      index.set(childRelative, child)
-      children.push(child)
+          skipped += 1
+          continue
+        }
+
+        // A subtree is attached only once it lists, so a failed directory never
+        // leaves an empty placeholder behind in the tree.
+        directory.parent?.children.push(directory.node)
+
+        for (const entry of listing.entries) {
+          // A dangling / unreadable entry is still listed by the platform so the
+          // caller can count it, but it has no trustworthy metadata to compare.
+          if (entry.broken) {
+            skipped += 1
+            continue
+          }
+          if (entry.isDirectory) {
+            const relativePath =
+              directory.relativePath === '' ? entry.name : `${directory.relativePath}/${entry.name}`
+            nextLevel.push({
+              path: entry.path,
+              relativePath,
+              node: {
+                name: entry.name,
+                path: entry.path,
+                kind: 'directory',
+                size: 0,
+                modifiedMs: 0,
+                children: []
+              },
+              parent: directory.node
+            })
+          } else {
+            directory.node.children.push({
+              name: entry.name,
+              path: entry.path,
+              kind: 'file',
+              size: entry.size,
+              modifiedMs: entry.modifiedMs,
+              children: []
+            })
+          }
+        }
+      }
+    })
+
+    level = nextLevel
+  }
+
+  function finalize(node: PendingNode): ScannedNode {
+    const children = node.children
+      .map((child) => finalize(child))
+      .sort((left, right) => left.name.localeCompare(right.name))
+    return {
+      name: node.name,
+      path: node.path,
+      kind: node.kind,
+      size: node.size,
+      modifiedMs: node.modifiedMs,
+      children
     }
-
-    children.sort((left, right) => left.name.localeCompare(right.name))
-    return { name: basename(path), path, kind: 'directory', size: 0, modifiedMs: 0, children }
   }
 
-  async function walk(path: string, relativePath: string): Promise<ScannedNode | null> {
-    // One level at a time: the walk is serial, so no amount of nesting can
-    // stack up in-flight listings behind the caller's back.
-    let entries: readonly DirectoryEntry[]
-    try {
-      entries = await list(path)
-    } catch {
-      skipped += 1
-      return null
+  const scannedRoot = finalize(root)
+  const index = new Map<string, ScannedNode>()
+  const stack: Array<{ readonly relativePath: string; readonly node: ScannedNode }> = [
+    { relativePath: '', node: scannedRoot }
+  ]
+  while (stack.length > 0) {
+    const current = stack.pop() as { readonly relativePath: string; readonly node: ScannedNode }
+    index.set(current.relativePath, current.node)
+    for (let position = current.node.children.length - 1; position >= 0; position -= 1) {
+      const child = current.node.children[position]
+      stack.push({
+        relativePath:
+          current.relativePath === '' ? child.name : `${current.relativePath}/${child.name}`,
+        node: child
+      })
     }
-    return walkEntries(path, relativePath, entries)
   }
 
-  let rootEntries: readonly DirectoryEntry[]
-  try {
-    rootEntries = await list(rootPath)
-  } catch (error) {
-    // The root is the comparison itself: a failure there is not skippable.
-    throw toReadableIoError(error)
-  }
-
-  const root = await walkEntries(rootPath, '', rootEntries)
-  index.set('', root)
-  return { root, index, skipped }
+  return { root: scannedRoot, index, skipped }
 }
 
 interface CompareContext {
@@ -598,8 +770,8 @@ export async function compareDirectories(
 ): Promise<DirectoryComparison> {
   try {
     const [left, right] = await Promise.all([
-      scanDirectory(leftRoot, list),
-      scanDirectory(rightRoot, list)
+      scanDirectory(leftRoot, list, options),
+      scanDirectory(rightRoot, list, options)
     ])
 
     // Digests go straight into the cache: only one body per in-flight read is

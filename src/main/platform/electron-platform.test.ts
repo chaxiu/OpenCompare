@@ -14,19 +14,30 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { compareDirectories, createComparisonCache } from '@core/directory/compare'
+import {
+  compareDirectories,
+  createComparisonCache,
+  scanDirectory
+} from '@core/directory/compare'
+import type { ListDirectory } from '@core/directory/compare'
 import { sha256Bytes, sha256Hex } from '@core/directory/hash'
 import { buildSyncPlan } from '@core/directory/sync'
 import { DIRECTORY_SCENE, DIRECTORY_SAMPLE_PATHS, SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DirectoryEntry,
+  DirectoryListing,
   FileDigest,
   PathProbeKind,
   PlatformPort
 } from '@shared/platform/types'
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
-import { registerPlatformIpc } from './electron-platform'
+import {
+  DEFAULT_STAT_CONCURRENCY,
+  listDirectories,
+  registerPlatformIpc
+} from './electron-platform'
+import type { ListableStat } from './electron-platform'
 
 const { handlers, dialogs } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -65,6 +76,10 @@ const platform: PlatformPort = {
   resolveDroppedPath: async () => '',
   saveFile: (options) => invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
   listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
+  listDirectories: (paths, options) =>
+    invoke(PLATFORM_CHANNELS.listDirectories, paths, options) as Promise<
+      readonly DirectoryListing[]
+    >,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   digestFiles: (paths, options) =>
     invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<readonly FileDigest[]>,
@@ -202,6 +217,15 @@ describe('directory listing', () => {
     expect(dangling?.skippedReason).toBeTruthy()
     expect(dangling?.isDirectory).toBe(false)
 
+    // The batch channel keeps the same broken entry and its readable reason.
+    const [batchSlot] = (await platform.listDirectories([tree])) as DirectoryListing[]
+    if (!batchSlot.ok) throw new Error('expected the batch slot to resolve')
+    const batchedDangling = batchSlot.entries.find((entry) => entry.name === 'dangling')
+    expect(batchedDangling).toMatchObject({
+      broken: true,
+      skippedReason: dangling?.skippedReason
+    })
+
     // Every healthy entry keeps exactly the pre-fix `stat` shape.
     const serial: DirectoryEntry[] = []
     for (const name of ['kept.txt', 'nested']) {
@@ -290,6 +314,249 @@ describe('directory listing', () => {
     expect((outcome as Error).message).toContain('无法读取文件')
     expect((outcome as Error).message).toContain(dangling)
     expect((outcome as Error).message).not.toContain('Error invoking remote method')
+  })
+})
+
+describe('batch directory listing', () => {
+  function codedError(code: string): Error {
+    return Object.assign(new Error(`${code}: too many open files`), { code })
+  }
+
+  it('returns one input-ordered slot per directory and keeps failures local', async () => {
+    const root = await scratchRoot()
+    const first = join(root, 'first')
+    const second = join(root, 'second')
+    const missing = join(root, 'missing')
+    await mkdir(join(first, 'nested'), { recursive: true })
+    await mkdir(second, { recursive: true })
+    await writeFile(join(first, 'a.txt'), 'alpha')
+    await writeFile(join(second, 'b.txt'), 'bravo')
+
+    const listings = (await platform.listDirectories([
+      first,
+      missing,
+      second
+    ])) as DirectoryListing[]
+
+    expect(listings.map((listing) => listing.path)).toEqual([first, missing, second])
+    expect(listings.map((listing) => listing.ok)).toEqual([true, false, true])
+
+    const byName = (entries: readonly DirectoryEntry[]): DirectoryEntry[] =>
+      [...entries].sort((left, right) => left.name.localeCompare(right.name))
+    const [firstSlot, missingSlot, secondSlot] = listings
+    if (!firstSlot.ok || !secondSlot.ok) {
+      throw new Error('expected the readable slots to resolve')
+    }
+    expect(byName(firstSlot.entries)).toEqual(byName(await platform.listDirectory(first)))
+    expect(byName(secondSlot.entries)).toEqual(byName(await platform.listDirectory(second)))
+    expect(missingSlot.ok).toBe(false)
+    if (!missingSlot.ok) {
+      expect(missingSlot.reason).toContain('无法读取目录')
+      expect(missingSlot.reason).toContain(missing)
+    }
+  })
+
+  it('shares one bounded stat budget across every directory in the batch', async () => {
+    const root = await scratchRoot()
+    const directories: string[] = []
+    const directoryCount = 6
+    const entriesPerDirectory = 10
+    for (let directory = 0; directory < directoryCount; directory += 1) {
+      const path = join(root, `dir-${directory}`)
+      await mkdir(path, { recursive: true })
+      for (let entry = 0; entry < entriesPerDirectory; entry += 1) {
+        await writeFile(join(path, `file-${entry}.txt`), 'x')
+      }
+      directories.push(path)
+    }
+
+    let inFlight = 0
+    let peak = 0
+    const statFile = async (): Promise<ListableStat> => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight -= 1
+      return { isDirectory: () => false, size: 1, mtimeMs: 1 }
+    }
+
+    const listings = await listDirectories(directories, { statFile })
+
+    expect(listings).toHaveLength(directoryCount)
+    expect(listings.every((listing) => listing.ok)).toBe(true)
+    // One window for the whole batch, not one per directory.
+    expect(DEFAULT_STAT_CONCURRENCY).toBeLessThan(directoryCount * entriesPerDirectory)
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(DEFAULT_STAT_CONCURRENCY)
+
+    // The budget is a per-call override, so a test can shrink it.
+    let narrowInFlight = 0
+    let narrowPeak = 0
+    const narrowStat = async (): Promise<ListableStat> => {
+      narrowInFlight += 1
+      narrowPeak = Math.max(narrowPeak, narrowInFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      narrowInFlight -= 1
+      return { isDirectory: () => false, size: 1, mtimeMs: 1 }
+    }
+    const narrowed = await listDirectories(directories, {
+      statFile: narrowStat,
+      statConcurrency: 3
+    })
+    expect(narrowed.every((listing) => listing.ok)).toBe(true)
+    expect(narrowPeak).toBeGreaterThan(1)
+    expect(narrowPeak).toBeLessThanOrEqual(3)
+  })
+
+  it('rejects the whole batch when a stat runs out of descriptors', async () => {
+    const root = await scratchRoot()
+    const directory = join(root, 'dir')
+    await mkdir(directory)
+    await writeFile(join(directory, 'file.txt'), 'x')
+
+    const outcome = await listDirectories([directory], {
+      statFile: async () => {
+        throw codedError('EMFILE')
+      }
+    }).then(
+      () => new Error('expected the batch to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(Error)
+    expect((outcome as Error).message).toContain('文件句柄')
+    expect((outcome as Error).message).toContain('EMFILE')
+  })
+
+  it('keeps the tree, index, skipped and four-state counts of the unbatched scan', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    for (const base of [left, right]) {
+      await mkdir(join(base, 'nested', 'deeper'), { recursive: true })
+      await mkdir(join(base, 'empty'), { recursive: true })
+      await mkdir(join(base, 'a'), { recursive: true })
+      await mkdir(join(base, 'b'), { recursive: true })
+      await mkdir(join(base, '.git'), { recursive: true })
+      await mkdir(join(base, 'node_modules', 'pkg'), { recursive: true })
+      await writeFile(join(base, 'same.txt'), 'same')
+      await writeFile(join(base, 'nested', 'deeper', 'only-mtime.txt'), 'stable')
+      await writeFile(join(base, 'nested', 'deeper', 'only-content.txt'), 'aaaa')
+      await writeFile(join(base, 'a', 'shared.txt'), 'a')
+      await writeFile(join(base, 'b', 'shared.txt'), 'b')
+      await writeFile(join(base, '.git', 'config'), '[core]')
+      await writeFile(join(base, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1')
+    }
+    // Same size and mtime, different bytes: only the content confirms modified.
+    await writeFile(join(right, 'nested', 'deeper', 'only-content.txt'), 'bbbb')
+    await stamp(join(left, 'same.txt'), 1_000_000)
+    await stamp(join(right, 'same.txt'), 1_000_000)
+    await stamp(join(left, 'nested', 'deeper', 'only-mtime.txt'), 1_000_000)
+    await stamp(join(right, 'nested', 'deeper', 'only-mtime.txt'), 2_000_000)
+    await stamp(join(left, 'nested', 'deeper', 'only-content.txt'), 1_000_000)
+    await stamp(join(right, 'nested', 'deeper', 'only-content.txt'), 1_000_000)
+
+    await mkdir(join(left, 'locked'), { recursive: true })
+    await writeFile(join(left, 'locked', 'target.txt'), 'target')
+    await symlink('/nonexistent-opencompare-target', join(left, 'dangling'))
+    await symlink(join(left, 'locked', 'target.txt'), join(left, 'blocked'))
+
+    const list: ListDirectory = (path) => platform.listDirectory(path)
+    const batched = (paths: readonly string[]) => platform.listDirectories(paths)
+    const digestFiles = (paths: readonly string[]) => platform.digestFiles(paths)
+
+    try {
+      await chmod(join(left, 'locked'), 0o000)
+      const baselineLeft = await scanDirectory(left, list)
+      const batchedLeft = await scanDirectory(left, list, { listDirectories: batched })
+
+      expect(batchedLeft.root).toEqual(baselineLeft.root)
+      expect([...batchedLeft.index.keys()].sort()).toEqual([...baselineLeft.index.keys()].sort())
+      expect(batchedLeft.skipped).toBe(baselineLeft.skipped)
+      // both broken links plus the unlistable subtree
+      expect(batchedLeft.skipped).toBe(3)
+      expect(batchedLeft.index.has('dangling')).toBe(false)
+      expect(batchedLeft.index.has('blocked')).toBe(false)
+      expect(batchedLeft.index.has('locked')).toBe(false)
+      // .git / node_modules are listed and compared, never silently ignored
+      expect(batchedLeft.index.has('.git/config')).toBe(true)
+      expect(batchedLeft.index.has('node_modules/pkg/index.js')).toBe(true)
+      expect(batchedLeft.index.get('empty')?.children).toEqual([])
+      expect(batchedLeft.index.has('a/shared.txt')).toBe(true)
+      expect(batchedLeft.index.has('b/shared.txt')).toBe(true)
+
+      const baseline = await compareDirectories(
+        left,
+        right,
+        list,
+        (path) => platform.readTextFile(path),
+        createComparisonCache(),
+        undefined,
+        { digestFiles }
+      )
+      const comparison = await compareDirectories(
+        left,
+        right,
+        list,
+        (path) => platform.readTextFile(path),
+        createComparisonCache(),
+        undefined,
+        { digestFiles, listDirectories: batched }
+      )
+
+      expect(comparison.counts).toEqual(baseline.counts)
+      expect(comparison.root).toEqual(baseline.root)
+      expect(comparison.skipped).toBe(baseline.skipped)
+      // only-mtime differs by mtime, only-content by bytes: both are modified.
+      expect(comparison.counts.modified).toBeGreaterThanOrEqual(2)
+    } finally {
+      await chmod(join(left, 'locked'), 0o755)
+    }
+  })
+
+  it('serves the bundled sample directory through the batch channel', async () => {
+    const list: ListDirectory = (path) => platform.listDirectory(path)
+    const batched = (paths: readonly string[]) => platform.listDirectories(paths)
+
+    const baseline = await scanDirectory(DIRECTORY_SAMPLE_PATHS.left, list)
+    const scanned = await scanDirectory(DIRECTORY_SAMPLE_PATHS.left, list, {
+      listDirectories: batched
+    })
+
+    expect(scanned.root).toEqual(baseline.root)
+    expect([...scanned.index.keys()].sort()).toEqual([...baseline.index.keys()].sort())
+    expect(scanned.skipped).toBe(baseline.skipped)
+
+    const comparison = await compareDirectories(
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right,
+      list,
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: (paths) => platform.digestFiles(paths),
+        listDirectories: batched
+      }
+    )
+
+    expect(comparison.counts).toEqual({
+      same: DIRECTORY_SCENE.composition.same,
+      added: DIRECTORY_SCENE.composition.added,
+      removed: DIRECTORY_SCENE.composition.removed,
+      modified: DIRECTORY_SCENE.composition.modified
+    })
+  })
+
+  it('rejects when the root cannot be listed in batch mode', async () => {
+    const root = await scratchRoot()
+    const missing = join(root, 'missing')
+
+    await expect(
+      scanDirectory(missing, (path) => platform.listDirectory(path), {
+        listDirectories: (paths) => platform.listDirectories(paths)
+      })
+    ).rejects.toThrow(/无法读取目录/)
   })
 })
 

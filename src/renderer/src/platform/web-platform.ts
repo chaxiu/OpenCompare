@@ -1,6 +1,7 @@
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import type {
   DirectoryEntry,
+  DirectoryListing,
   FileDigest,
   FileDialogFilter,
   PlatformPort,
@@ -113,6 +114,32 @@ export function createWebPlatformPort(): PlatformPort {
     )
   }
 
+  function entriesOf(path: string): DirectoryEntry[] {
+    const node = requireNode(path)
+    if (!node.isDirectory) throw new Error(`Not a directory: ${path}`)
+    return childrenOf(path).map<DirectoryEntry>((child) => ({
+      name: child.path.slice(child.path.lastIndexOf('/') + 1),
+      path: child.path,
+      isDirectory: child.isDirectory,
+      // Writes replace `content`; the size follows it, and `modifiedMs` can be
+      // carried over from a source so a copy stays metadata-faithful.
+      size: child.content.length,
+      modifiedMs: child.modifiedMs
+    }))
+  }
+
+  /** One batch slot: the memory tree lists a directory or fails just that slot. */
+  function listingOf(path: string): DirectoryListing {
+    const node = nodes.get(path)
+    if (node === undefined) {
+      return { path, ok: false, reason: `无法读取目录 ${path}：路径不存在。` }
+    }
+    if (!node.isDirectory) {
+      return { path, ok: false, reason: `无法读取目录 ${path}：路径不是目录。` }
+    }
+    return { path, ok: true, entries: entriesOf(path) }
+  }
+
   function assertWritable(path: string): string {
     if (isSamplePath(path)) {
       throw new Error(`内置样本库 ${SAMPLE_ROOT} 为只读挂载，不能写入：${path}`)
@@ -220,19 +247,10 @@ export function createWebPlatformPort(): PlatformPort {
     selectFile,
     resolveDroppedPath,
     saveFile,
-    listDirectory: async (path) => {
-      const node = requireNode(path)
-      if (!node.isDirectory) throw new Error(`Not a directory: ${path}`)
-      return childrenOf(path).map<DirectoryEntry>((child) => ({
-        name: child.path.slice(child.path.lastIndexOf('/') + 1),
-        path: child.path,
-        isDirectory: child.isDirectory,
-        // Writes replace `content`; the size follows it, and `modifiedMs` can be
-        // carried over from a source so a copy stays metadata-faithful.
-        size: child.content.length,
-        modifiedMs: child.modifiedMs
-      }))
-    },
+    listDirectory: async (path) => entriesOf(path),
+    // Same batch contract as the Electron runtime: one slot per path, in input
+    // order, with the sample mount served through the same channel.
+    listDirectories: async (paths) => paths.map((path) => listingOf(path)),
     readTextFile: async (path) => {
       const node = requireNode(path)
       if (node.isDirectory) throw new Error(`Cannot read a directory as text: ${path}`)

@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import type { DigestFiles, ListDirectory } from './compare'
+import type { DigestFiles, ListDirectories, ListDirectory } from './compare'
+import type { DirectoryListing } from '@shared/platform/types'
 import {
+  DEFAULT_DIRECTORY_BATCH_SIZE,
+  DEFAULT_TRAVERSAL_CONCURRENCY,
   compareDirectories,
   compareScannedTrees,
   createComparisonCache,
@@ -719,5 +722,256 @@ describe('directory filters', () => {
       removed: 1,
       modified: 0
     })
+  })
+})
+
+
+describe('batched directory scan', () => {
+  interface BatchProbe {
+    readonly listDirectories: ListDirectories
+    readonly calls: string[][]
+    readonly peak: () => number
+  }
+
+  /** Wraps a single-directory capability as a batch probe that records each call. */
+  function probeBatch(fs: FakeFs): BatchProbe {
+    const calls: string[][] = []
+    let inFlight = 0
+    let peak = 0
+    return {
+      listDirectories: async (paths) => {
+        calls.push([...paths])
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        // Yield so concurrent batch requests actually overlap.
+        await Promise.resolve()
+        try {
+          return await Promise.all(
+            paths.map(async (path): Promise<DirectoryListing> => {
+              try {
+                return { path, ok: true, entries: await fs.list(path) }
+              } catch (error) {
+                return { path, ok: false, reason: (error as Error).message }
+              }
+            })
+          )
+        } finally {
+          inFlight -= 1
+        }
+      },
+      calls,
+      peak: () => peak
+    }
+  }
+
+  /** One flat directory of `count` child directories, each holding one file. */
+  function wideTree(count: number): FakeTree {
+    const tree: Record<string, FakeFile | FakeTree> = {}
+    for (let index = 0; index < count; index += 1) {
+      tree[`dir-${String(index).padStart(3, '0')}`] = { 'file.txt': { text: 'shared' } }
+    }
+    return tree
+  }
+
+  it('covers several directories per round trip and needs fewer calls than directories', async () => {
+    const fs = createFakeFs(wideTree(8))
+    const probe = probeBatch(fs)
+    const tree = await scanDirectory('/', fs.list, { listDirectories: probe.listDirectories })
+
+    const directoryCount = 1 + 8
+    expect(tree.index.size).toBe(directoryCount + 8)
+    expect(probe.calls.some((paths) => paths.length >= 2)).toBe(true)
+    // The batch size is a single exported constant, not a number repeated here.
+    expect(DEFAULT_DIRECTORY_BATCH_SIZE).toBeGreaterThanOrEqual(2)
+    expect(probe.calls.every((paths) => paths.length <= DEFAULT_DIRECTORY_BATCH_SIZE)).toBe(true)
+    expect(probe.calls.length).toBeLessThan(directoryCount)
+  })
+
+  it('reaches the default traversal window of at least 16 in-flight batches', async () => {
+    // 32 listable child directories: batches of two fill the 16-way window.
+    const fs = createFakeFs(wideTree(32))
+    const probe = probeBatch(fs)
+    const tree = await scanDirectory('/', fs.list, { listDirectories: probe.listDirectories })
+
+    expect(DEFAULT_TRAVERSAL_CONCURRENCY).toBeGreaterThanOrEqual(16)
+    expect(probe.peak()).toBeGreaterThanOrEqual(16)
+    expect(probe.peak()).toBeLessThanOrEqual(DEFAULT_TRAVERSAL_CONCURRENCY)
+    expect(tree.skipped).toBe(0)
+  })
+
+  it('honours an explicit traversal cap without changing the scanned tree', async () => {
+    const fs = createTrees(wideTree(160), wideTree(160))
+    const byDefault = probeBatch(fs)
+    const defaultRun = await scanDirectory('/left', fs.list, {
+      listDirectories: byDefault.listDirectories
+    })
+    const defaultComparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { listDirectories: byDefault.listDirectories }
+    )
+
+    const limited = probeBatch(fs)
+    const limitedRun = await scanDirectory('/left', fs.list, {
+      listDirectories: limited.listDirectories,
+      concurrency: 4
+    })
+    // Captured before the comparison below, whose two side scans each get their
+    // own window (they run concurrently).
+    const limitedPeak = limited.peak()
+    const limitedComparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { listDirectories: limited.listDirectories, concurrency: 4 }
+    )
+
+    expect(limitedPeak).toBeLessThanOrEqual(4)
+    expect(limitedPeak).toBeGreaterThan(1)
+    expect(limitedRun.root).toEqual(defaultRun.root)
+    expect([...limitedRun.index.keys()].sort()).toEqual([...defaultRun.index.keys()].sort())
+    expect(limitedRun.skipped).toBe(defaultRun.skipped)
+    expect(limitedComparison.counts).toEqual(defaultComparison.counts)
+    expect(limitedComparison.root).toEqual(defaultComparison.root)
+    expect(limitedComparison.skipped).toBe(defaultComparison.skipped)
+  })
+
+  it('keeps the serial tree, index and skipped count when slots fail', async () => {
+    const fs = createTrees(
+      {
+        'kept.txt': { text: 'kept' },
+        docs: { 'deep.txt': { text: 'deep' }, 'notes.md': { text: 'note' } },
+        locked: { 'hidden.txt': { text: 'hidden' } }
+      },
+      {}
+    )
+    const dangling = {
+      name: 'dangling',
+      path: '/left/dangling',
+      isDirectory: false,
+      size: 0,
+      modifiedMs: 0,
+      broken: true,
+      skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+    }
+    const list: ListDirectory = async (path) => {
+      if (path === '/left/locked') throw new Error('EACCES: permission denied')
+      const entries = await fs.list(path)
+      return path === '/left' ? [...entries, dangling] : entries
+    }
+
+    const probe = probeBatch({ ...fs, list })
+    const baseline = await scanDirectory('/left', list)
+    const batched = await scanDirectory('/left', list, {
+      listDirectories: probe.listDirectories
+    })
+
+    expect(baseline.skipped).toBe(2)
+    expect(batched.skipped).toBe(baseline.skipped)
+    expect(batched.root).toEqual(baseline.root)
+    expect([...batched.index.keys()].sort()).toEqual([...baseline.index.keys()].sort())
+    expect(batched.index.has('locked')).toBe(false)
+    expect(batched.index.has('dangling')).toBe(false)
+    expect(batched.index.get('docs')?.children.map((child) => child.name)).toEqual([
+      'deep.txt',
+      'notes.md'
+    ])
+  })
+
+  it('rejects instead of returning a partial tree when a requested slot is missing', async () => {
+    const fs = createFakeFs(wideTree(4))
+    const listDirectories: ListDirectories = async (paths) => {
+      const listings = await Promise.all(
+        paths.map(async (path): Promise<DirectoryListing> => ({
+          path,
+          ok: true,
+          entries: await fs.list(path)
+        }))
+      )
+      return listings.slice(1)
+    }
+
+    const outcome = await scanDirectory('/', fs.list, { listDirectories }).then(
+      () => new Error('expected the scan to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(Error)
+    expect((outcome as Error).message).toContain('槽位')
+  })
+
+  it('rejects when the root slot reports a readable failure', async () => {
+    const listDirectories: ListDirectories = async (paths) =>
+      paths.map((path) => ({
+        path,
+        ok: false as const,
+        reason: `无法读取目录 ${path}：没有访问权限（EACCES）。`
+      }))
+
+    await expect(scanDirectory('/left', async () => [], { listDirectories })).rejects.toThrow(
+      /无法读取目录 \/left/
+    )
+  })
+
+  it('treats descriptor exhaustion in a batch listing as fatal, not as skipped', async () => {
+    const listDirectories: ListDirectories = async () => {
+      throw codedError('EMFILE')
+    }
+
+    const outcome = await scanDirectory('/left', async () => [], { listDirectories }).then(
+      () => new Error('expected the scan to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(FileHandleExhaustedError)
+    expect((outcome as Error).message).toContain('文件句柄')
+    expect((outcome as Error).message).toContain('EMFILE')
+  })
+
+  it('classifies the same four states through the batch capability', async () => {
+    const fs = createTrees(
+      {
+        'same.txt': { text: 'alpha' },
+        'changed.txt': { text: 'aaaa' },
+        'left-only.txt': { text: 'gone' },
+        docs: { 'deep.txt': { text: 'deep' } }
+      },
+      {
+        'same.txt': { text: 'alpha' },
+        'changed.txt': { text: 'bbbb' },
+        'right-only.txt': { text: 'new' },
+        docs: { 'deep.txt': { text: 'deep' } }
+      }
+    )
+    const probe = probeBatch(fs)
+
+    const baseline = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache()
+    )
+    const batched = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache(),
+      undefined,
+      { listDirectories: probe.listDirectories }
+    )
+
+    expect(batched.counts).toEqual({ same: 2, added: 1, removed: 1, modified: 1 })
+    expect(batched.counts).toEqual(baseline.counts)
+    expect(batched.root).toEqual(baseline.root)
+    expect(batched.skipped).toBe(baseline.skipped)
   })
 })
