@@ -1,10 +1,16 @@
 import type { JSX } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronRight, FileCode2, FileText, Folder, FolderOpen } from 'lucide-react'
 import type { DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
+import type { DirectoryRowModel } from '@core/directory/rows'
+import { DIRECTORY_ROW_HEIGHT } from '@core/directory/rows'
 import { DiffBadge } from './DiffBadge'
 import { cx } from './utils'
 
 const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|md|css|html|py|go|rs|java|json|ya?ml)$/i
+
+/** Extra rows above and below the viewport so fast scrolling never shows gaps. */
+const ROW_OVERSCAN = 10
 
 function CountSummary({
   counts
@@ -65,17 +71,21 @@ function TreeRow({
   return (
     <div
       role="treeitem"
+      aria-level={depth + 1}
       aria-selected={selected}
       aria-expanded={isDirectory ? open : undefined}
       title={node.relativePath === '' ? node.name : node.relativePath}
       onClick={onSelect}
       onDoubleClick={isDirectory ? undefined : () => onOpenFile?.(node)}
       className={cx(
-        'flex h-6 items-center gap-1.5 pr-2',
+        'flex items-center gap-1.5 pr-2',
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover',
         !isDirectory && onOpenFile ? 'cursor-pointer' : undefined
       )}
-      style={{ paddingInlineStart: `calc(var(--spacing) * ${depth * 3 + 1})` }}
+      style={{
+        height: DIRECTORY_ROW_HEIGHT,
+        paddingInlineStart: `calc(var(--spacing) * ${depth * 3 + 1})`
+      }}
     >
       {isDirectory ? (
         <button
@@ -108,89 +118,74 @@ function TreeRow({
   )
 }
 
-function TreeNode({
-  node,
-  depth,
-  collapsed,
-  selectedPath,
-  onTogglePath,
-  onSelectPath,
-  onOpenFile
-}: {
-  readonly node: DirectoryDiffNode
-  readonly depth: number
-  readonly collapsed: ReadonlySet<string>
-  readonly selectedPath: string | null
-  readonly onTogglePath: (path: string) => void
-  readonly onSelectPath: (path: string) => void
-  readonly onOpenFile?: (node: DirectoryDiffNode) => void
-}): JSX.Element {
-  const open = !collapsed.has(node.relativePath)
-
-  return (
-    <div role="none">
-      <TreeRow
-        node={node}
-        depth={depth}
-        open={open}
-        selected={selectedPath === node.relativePath}
-        onToggle={() => onTogglePath(node.relativePath)}
-        onSelect={() => onSelectPath(node.relativePath)}
-        onOpenFile={onOpenFile}
-      />
-      {node.kind === 'directory' && open ? (
-        <div role="group">
-          {node.children.map((child) => (
-            <TreeNode
-              key={child.relativePath}
-              node={child}
-              depth={depth + 1}
-              collapsed={collapsed}
-              selectedPath={selectedPath}
-              onTogglePath={onTogglePath}
-              onSelectPath={onSelectPath}
-              onOpenFile={onOpenFile}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 /**
- * Read-only comparison tree: every row carries its diff-semantic badge,
- * directories show their aggregate diff counts, and double-clicking a file row
- * drills into the matching file view. Expansion and the selected row are
- * controlled by the caller, so a remount (drilldown roundtrip) cannot reset them.
+ * Read-only comparison tree over a virtual row window: only the rows inside
+ * the panel viewport (plus a small overscan) reach the DOM, so a five-figure
+ * directory stays as cheap to render as a small one. Expansion, the selected
+ * row and the scroll offset are controlled by the caller, so a remount
+ * (drilldown roundtrip) restores the same window instead of jumping to the top.
  */
 export function TreeView({
-  root,
-  collapsedPaths,
-  onTogglePath,
+  label,
+  rows,
+  scrollElement,
+  initialScrollTop,
   selectedPath,
+  onTogglePath,
   onSelectPath,
   onOpenFile
 }: {
-  readonly root: DirectoryDiffNode
-  /** Relative paths of collapsed directories; everything else renders open. */
-  readonly collapsedPaths: ReadonlySet<string>
-  readonly onTogglePath: (path: string) => void
+  /** Accessible name of the tree, normally the compared root's name. */
+  readonly label: string
+  readonly rows: DirectoryRowModel
+  /** The panel body is the scroll container the virtualiser measures. */
+  readonly scrollElement: HTMLDivElement | null
+  /** Scroll offset to start from on mount (drilldown return). */
+  readonly initialScrollTop: number
   readonly selectedPath: string | null
+  readonly onTogglePath: (path: string) => void
   readonly onSelectPath: (path: string) => void
   readonly onOpenFile?: (node: DirectoryDiffNode) => void
 }): JSX.Element {
+  // TanStack Virtual's returned functions are intentionally not memoizable.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollElement,
+    estimateSize: () => DIRECTORY_ROW_HEIGHT,
+    overscan: ROW_OVERSCAN,
+    initialOffset: initialScrollTop
+  })
+
   return (
-    <div role="tree" aria-label={root.name} className="min-w-max py-1">
-      <TreeNode
-        node={root}
-        depth={0}
-        collapsed={collapsedPaths}
-        selectedPath={selectedPath}
-        onTogglePath={onTogglePath}
-        onSelectPath={onSelectPath}
-        onOpenFile={onOpenFile}
-      />
+    <div
+      role="tree"
+      aria-label={label}
+      className="relative min-w-max"
+      style={{ height: rows.length * DIRECTORY_ROW_HEIGHT }}
+    >
+      {virtualizer.getVirtualItems().map((item) => {
+        const row = rows.at(item.index)
+        if (!row) return null
+        return (
+          <div
+            key={row.node.relativePath}
+            role="none"
+            className="absolute top-0 left-0 min-w-full"
+            style={{ height: DIRECTORY_ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
+          >
+            <TreeRow
+              node={row.node}
+              depth={row.depth}
+              open={row.open}
+              selected={selectedPath === row.node.relativePath}
+              onToggle={() => onTogglePath(row.node.relativePath)}
+              onSelect={() => onSelectPath(row.node.relativePath)}
+              onOpenFile={onOpenFile}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }

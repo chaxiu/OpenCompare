@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import {
   Cloud,
@@ -12,12 +12,9 @@ import {
 } from 'lucide-react'
 import type { SampleComposition } from '@shared/fixtures'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
-import {
-  DIRECTORY_FILTERS,
-  filterDirectoryTree,
-  projectDirectoryTree
-} from '@core/directory/filter'
+import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
+import { buildDirectoryRowModel } from '@core/directory/rows'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Panel } from '@renderer/components/Panel'
@@ -61,7 +58,7 @@ export interface DirectoryViewProps {
   readonly filter: DirectoryFilter
   readonly onFilterChange: (filter: DirectoryFilter) => void
   /** Relative paths of collapsed directories; the rest render expanded. */
-  readonly collapsedPaths: ReadonlySet<string>
+  readonly collapsedPaths: readonly string[]
   readonly onTogglePath: (path: string) => void
   /** Relative path of the selected row across both panes; `null` for none. */
   readonly selectedPath: string | null
@@ -135,29 +132,40 @@ export function DirectoryView({
   const rightInputRef = useRef<HTMLInputElement>(null)
   const leftBodyRef = useRef<HTMLDivElement>(null)
   const rightBodyRef = useRef<HTMLDivElement>(null)
+  /**
+   * Panel bodies are handed to the virtualised trees as elements, not refs:
+   * on the first commit a ref is attached only after this view's layout
+   * effects, so the initial mount would otherwise see no scroll container.
+   */
+  const [leftBody, setLeftBody] = useState<HTMLDivElement | null>(null)
+  const [rightBody, setRightBody] = useState<HTMLDivElement | null>(null)
+  const attachLeftBody = useCallback((element: HTMLDivElement | null) => {
+    leftBodyRef.current = element
+    setLeftBody(element)
+  }, [])
+  const attachRightBody = useCallback((element: HTMLDivElement | null) => {
+    rightBodyRef.current = element
+    setRightBody(element)
+  }, [])
 
   // The panel scroll containers are rebuilt whenever this view remounts (e.g.
   // returning from a drilldown), so the shell's saved offsets are re-applied.
   useLayoutEffect(() => {
     if (leftBodyRef.current) leftBodyRef.current.scrollTop = scrollTops.left
     if (rightBodyRef.current) rightBodyRef.current.scrollTop = scrollTops.right
-  }, [sessionId, scrollTops])
+  }, [leftBody, rightBody, sessionId, scrollTops])
 
   function selectedFile(side: SidePosition, files: FileList | null): void {
     const file = files?.[0]
     if (file) onImportSnapshot(side, file)
   }
-  const filtered = useMemo(
-    () => filterDirectoryTree(comparison.root, filter),
-    [comparison, filter]
+  const leftRows = useMemo(
+    () => buildDirectoryRowModel(comparison.root, filter, 'left', collapsedPaths),
+    [comparison, filter, collapsedPaths]
   )
-  const leftTree = useMemo(
-    () => (filtered ? projectDirectoryTree(filtered, 'left') : null),
-    [filtered]
-  )
-  const rightTree = useMemo(
-    () => (filtered ? projectDirectoryTree(filtered, 'right') : null),
-    [filtered]
+  const rightRows = useMemo(
+    () => buildDirectoryRowModel(comparison.root, filter, 'right', collapsedPaths),
+    [comparison, filter, collapsedPaths]
   )
 
   return (
@@ -320,15 +328,17 @@ export function DirectoryView({
             title={comparison.leftName}
             subtitle={comparison.leftRoot}
             meta={<span className="text-2xs text-content-muted">{leftIsSnapshot ? '快照' : '源目录'}</span>}
-            bodyRef={leftBodyRef}
+            bodyRef={attachLeftBody}
             onBodyScroll={(scrollTop) => onScrollTopChange('left', scrollTop)}
           >
-            {leftTree ? (
+            {leftRows.length > 0 ? (
               <TreeView
-                root={leftTree}
-                collapsedPaths={collapsedPaths}
-                onTogglePath={onTogglePath}
+                label={comparison.leftName}
+                rows={leftRows}
+                scrollElement={leftBody}
+                initialScrollTop={scrollTops.left}
                 selectedPath={selectedPath}
+                onTogglePath={onTogglePath}
                 onSelectPath={onSelectPath}
                 onOpenFile={onOpenFile}
               />
@@ -341,15 +351,17 @@ export function DirectoryView({
             title={comparison.rightName}
             subtitle={comparison.rightRoot}
             meta={<span className="text-2xs text-content-muted">{rightIsSnapshot ? '快照' : '目标目录'}</span>}
-            bodyRef={rightBodyRef}
+            bodyRef={attachRightBody}
             onBodyScroll={(scrollTop) => onScrollTopChange('right', scrollTop)}
           >
-            {rightTree ? (
+            {rightRows.length > 0 ? (
               <TreeView
-                root={rightTree}
-                collapsedPaths={collapsedPaths}
-                onTogglePath={onTogglePath}
+                label={comparison.rightName}
+                rows={rightRows}
+                scrollElement={rightBody}
+                initialScrollTop={scrollTops.right}
                 selectedPath={selectedPath}
+                onTogglePath={onTogglePath}
                 onSelectPath={onSelectPath}
                 onOpenFile={onOpenFile}
               />
