@@ -1,4 +1,15 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -165,6 +176,111 @@ describe('directory listing', () => {
       [...entries].sort((left, right) => left.name.localeCompare(right.name))
     expect(byName(listed)).toEqual(byName(serial))
   })
+
+  it('keeps a dangling symbolic link in the listing and flags it broken', async () => {
+    const root = await scratchRoot()
+    const tree = join(root, 'tree')
+    await mkdir(join(tree, 'nested'), { recursive: true })
+    await writeFile(join(tree, 'kept.txt'), 'kept')
+    await symlink('/nonexistent-opencompare-target', join(tree, 'dangling'))
+
+    const listed = (await platform.listDirectory(tree)) as DirectoryEntry[]
+    expect(listed).toHaveLength(3)
+
+    const dangling = listed.find((entry) => entry.name === 'dangling')
+    expect(dangling?.broken).toBe(true)
+    expect(dangling?.skippedReason).toBeTruthy()
+    expect(dangling?.isDirectory).toBe(false)
+
+    // Every healthy entry keeps exactly the pre-fix `stat` shape.
+    const serial: DirectoryEntry[] = []
+    for (const name of ['kept.txt', 'nested']) {
+      const info = await stat(join(tree, name))
+      serial.push({
+        name,
+        path: join(tree, name),
+        isDirectory: info.isDirectory(),
+        size: info.size,
+        modifiedMs: info.mtimeMs
+      })
+    }
+    expect(listed.filter((entry) => !entry.broken)).toEqual(
+      expect.arrayContaining(serial)
+    )
+    expect(listed.filter((entry) => !entry.broken)).toHaveLength(2)
+  })
+
+  it('does not fail the listing when broken entries and an unreadable target mix', async () => {
+    const root = await scratchRoot()
+    const tree = join(root, 'mixed')
+    const locked = join(tree, 'locked')
+    await mkdir(locked, { recursive: true })
+    await writeFile(join(tree, 'readable.txt'), 'readable')
+    await writeFile(join(locked, 'target.txt'), 'target')
+    await symlink('/nonexistent-opencompare-target', join(tree, 'dangling'))
+    // Resolution traverses the unsearchable directory, so `stat` fails while
+    // `lstat` on the link itself still succeeds.
+    await symlink(join(locked, 'target.txt'), join(tree, 'blocked'))
+
+    try {
+      await chmod(locked, 0o000)
+      const listed = (await platform.listDirectory(tree)) as DirectoryEntry[]
+
+      expect(listed.map((entry) => entry.name).sort()).toEqual([
+        'blocked',
+        'dangling',
+        'locked',
+        'readable.txt'
+      ])
+      const readable = listed.find((entry) => entry.name === 'readable.txt')
+      expect(readable?.broken).toBeUndefined()
+      for (const name of ['blocked', 'dangling']) {
+        const broken = listed.find((entry) => entry.name === name)
+        expect(broken?.broken).toBe(true)
+        expect(broken?.skippedReason).toBeTruthy()
+      }
+    } finally {
+      await chmod(locked, 0o755)
+    }
+  })
+
+  it('rejects a missing or non-directory root with a readable message', async () => {
+    const root = await scratchRoot()
+    const missing = join(root, 'missing')
+    const file = join(root, 'note.txt')
+    await writeFile(file, 'hello')
+
+    const missingOutcome = await platform.listDirectory(missing).then(
+      () => new Error('expected the listing to reject'),
+      (error: unknown) => error
+    )
+    expect(missingOutcome).toBeInstanceOf(Error)
+    expect((missingOutcome as Error).message).toContain('无法读取目录')
+    expect((missingOutcome as Error).message).toContain(missing)
+
+    const fileOutcome = await platform.listDirectory(file).then(
+      () => new Error('expected the listing to reject'),
+      (error: unknown) => error
+    )
+    expect((fileOutcome as Error).message).toContain('无法读取目录')
+    expect((fileOutcome as Error).message).toContain(file)
+  })
+
+  it('rejects reading a dangling symbolic link with a readable message over IPC', async () => {
+    const root = await scratchRoot()
+    const dangling = join(root, 'dangling.txt')
+    await symlink('/nonexistent-opencompare-target', dangling)
+
+    const outcome = await platform.readTextFile(dangling).then(
+      () => new Error('expected the read to reject'),
+      (error: unknown) => error
+    )
+
+    expect(outcome).toBeInstanceOf(Error)
+    expect((outcome as Error).message).toContain('无法读取文件')
+    expect((outcome as Error).message).toContain(dangling)
+    expect((outcome as Error).message).not.toContain('Error invoking remote method')
+  })
 })
 
 describe('path probe', () => {
@@ -238,4 +354,32 @@ describe('native file dialogs', () => {
 
     await expect(platform.saveFile({ content: 'never written' })).resolves.toBeNull()
   })
+})
+
+/**
+ * Real-project acceptance, env-gated so the suite never depends on a machine's
+ * absolute paths. Set both variables to compare two real trees:
+ *   OPENCOMPARE_REAL_LEFT=… OPENCOMPARE_REAL_RIGHT=… pnpm test
+ */
+const REAL_LEFT = process.env.OPENCOMPARE_REAL_LEFT
+const REAL_RIGHT = process.env.OPENCOMPARE_REAL_RIGHT
+
+describe.skipIf(REAL_LEFT === undefined || REAL_RIGHT === undefined)('real project trees', () => {
+  it('compares two real trees, counts dangling links and never throws', async () => {
+    const comparison = await compareDirectories(
+      REAL_LEFT as string,
+      REAL_RIGHT as string,
+      (path) => platform.listDirectory(path),
+      (path) => platform.readTextFile(path),
+      createComparisonCache()
+    )
+
+    const { same, added, removed, modified } = comparison.counts
+    console.log(
+      `[real-trees] ${comparison.leftName} ↔ ${comparison.rightName}: fileCount=${comparison.fileCount} same=${same} added=${added} removed=${removed} modified=${modified} skipped=${comparison.skipped}`
+    )
+
+    expect(comparison.fileCount).toBe(same + added + removed + modified)
+    expect(comparison.skipped).toBeGreaterThanOrEqual(1)
+  }, 900_000)
 })

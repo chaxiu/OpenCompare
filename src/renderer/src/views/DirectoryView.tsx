@@ -360,6 +360,12 @@ export function DirectoryView({
         ]}
       />
 
+      {comparison.skipped > 0 ? (
+        <p className="shrink-0 text-2xs text-diff-added">
+          已跳过 {comparison.skipped} 个不可读项/悬空链接
+        </p>
+      ) : null}
+
       <p className="shrink-0 text-2xs text-content-muted">
         双击文件可下钻到对应文件对比视图（代码 / 文本 · CSV / TSV · JSON / YAML）；左独有文件右侧为空、右独有文件左侧为空。
       </p>

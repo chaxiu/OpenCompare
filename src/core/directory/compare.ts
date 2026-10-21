@@ -42,6 +42,11 @@ export interface ScannedTree {
   readonly root: ScannedNode
   /** Relative path (`''` for the root) to scanned node. */
   readonly index: ReadonlyMap<string, ScannedNode>
+  /**
+   * Entries left out of the tree because they could not be read: dangling
+   * symbolic links, unreadable entries and subtrees whose listing failed.
+   */
+  readonly skipped: number
 }
 
 /** Lists one directory level. Backed by `PlatformPort.listDirectory` in the app. */
@@ -72,27 +77,34 @@ function basename(path: string): string {
   return separator === -1 ? normalized : normalized.slice(separator + 1)
 }
 
-/** Recursively scans `rootPath`, returning the tree plus a relative-path index. */
+/**
+ * Recursively scans `rootPath`, returning the tree plus a relative-path index.
+ * A broken entry or an unlistable subtree is counted in `skipped` and left out
+ * instead of failing the scan; only the root itself being unreadable rejects.
+ */
 export async function scanDirectory(
   rootPath: string,
   list: ListDirectory
 ): Promise<ScannedTree> {
   const index = new Map<string, ScannedNode>()
+  let skipped = 0
 
-  async function walk(path: string, relativePath: string): Promise<ScannedNode> {
-    // One level at a time: the walk is serial, so no amount of nesting can
-    // stack up in-flight listings behind the caller's back.
-    let entries: readonly DirectoryEntry[]
-    try {
-      entries = await list(path)
-    } catch (error) {
-      throw toReadableIoError(error)
-    }
+  async function walkEntries(
+    path: string,
+    relativePath: string,
+    entries: readonly DirectoryEntry[]
+  ): Promise<ScannedNode> {
     const children: ScannedNode[] = []
 
     for (const entry of entries) {
+      // A dangling / unreadable entry is still listed by the platform so the
+      // caller can count it, but it has no trustworthy metadata to compare.
+      if (entry.broken) {
+        skipped += 1
+        continue
+      }
       const childRelative = relativePath === '' ? entry.name : `${relativePath}/${entry.name}`
-      const child = entry.isDirectory
+      const child: ScannedNode | null = entry.isDirectory
         ? await walk(entry.path, childRelative)
         : {
             name: entry.name,
@@ -102,6 +114,8 @@ export async function scanDirectory(
             modifiedMs: entry.modifiedMs,
             children: [] as readonly ScannedNode[]
           }
+      // A subtree that could not be listed is skipped, never fatal.
+      if (child === null) continue
       index.set(childRelative, child)
       children.push(child)
     }
@@ -110,15 +124,40 @@ export async function scanDirectory(
     return { name: basename(path), path, kind: 'directory', size: 0, modifiedMs: 0, children }
   }
 
-  const root = await walk(rootPath, '')
+  async function walk(path: string, relativePath: string): Promise<ScannedNode | null> {
+    // One level at a time: the walk is serial, so no amount of nesting can
+    // stack up in-flight listings behind the caller's back.
+    let entries: readonly DirectoryEntry[]
+    try {
+      entries = await list(path)
+    } catch {
+      skipped += 1
+      return null
+    }
+    return walkEntries(path, relativePath, entries)
+  }
+
+  let rootEntries: readonly DirectoryEntry[]
+  try {
+    rootEntries = await list(rootPath)
+  } catch (error) {
+    // The root is the comparison itself: a failure there is not skippable.
+    throw toReadableIoError(error)
+  }
+
+  const root = await walkEntries(rootPath, '', rootEntries)
   index.set('', root)
-  return { root, index }
+  return { root, index, skipped }
 }
 
 interface CompareContext {
   readonly contents: ReadonlyMap<string, string>
   readonly cache: ComparisonCache
   readonly hash: (text: string) => string
+  /** Paths whose body could not be read; their pair is reported as `modified`. */
+  readonly unreadable: ReadonlySet<string>
+  /** Pairs settled as `modified` because a body could not be read. */
+  readonly unreadablePairs: { count: number }
 }
 
 export interface ComparisonInputs {
@@ -127,6 +166,8 @@ export interface ComparisonInputs {
   readonly cache: ComparisonCache
   /** Digest implementation; defaults to the built-in synchronous SHA-256. */
   readonly hash?: (text: string) => string
+  /** Bodies that could not be read; such a pair is `modified` and counted as skipped. */
+  readonly unreadable?: ReadonlySet<string>
 }
 
 export interface DirectoryDiffNode {
@@ -157,6 +198,8 @@ export interface DirectoryComparison {
   readonly root: DirectoryDiffNode
   readonly counts: Readonly<Record<FileDiffStatus, number>>
   readonly fileCount: number
+  /** Entries and file bodies left out of both sides because they were unreadable. */
+  readonly skipped: number
 }
 
 function countEntry(status: FileDiffStatus): Record<FileDiffStatus, number> {
@@ -237,6 +280,12 @@ function hashFile(node: ScannedNode, context: CompareContext): string {
 }
 
 function classifyPair(left: ScannedNode, right: ScannedNode, context: CompareContext): FileDiffStatus {
+  // A body the platform could not read is unknowable, so the pair is reported
+  // as modified (it needs attention) and counted as skipped instead of aborting.
+  if (context.unreadable.has(left.path) || context.unreadable.has(right.path)) {
+    context.unreadablePairs.count += 1
+    return 'modified'
+  }
   if (left.size !== right.size) return 'modified'
   if (left.modifiedMs !== right.modifiedMs) return 'modified'
   return hashFile(left, context) === hashFile(right, context) ? 'same' : 'modified'
@@ -372,7 +421,9 @@ export function compareScannedTrees(
   const context: CompareContext = {
     contents: inputs.contents,
     cache: inputs.cache,
-    hash: inputs.hash ?? sha256Hex
+    hash: inputs.hash ?? sha256Hex,
+    unreadable: inputs.unreadable ?? new Set(),
+    unreadablePairs: { count: 0 }
   }
   const root = buildNode('', left.root, right.root, context)
   return {
@@ -382,8 +433,91 @@ export function compareScannedTrees(
     rightName: right.root.name,
     root,
     counts: root.counts,
-    fileCount: FILE_DIFF_STATUSES.reduce((total, status) => total + root.counts[status], 0)
+    fileCount: FILE_DIFF_STATUSES.reduce((total, status) => total + root.counts[status], 0),
+    skipped: left.skipped + right.skipped + context.unreadablePairs.count
   }
+}
+
+/** Bodies read for a comparison, plus the ones that could not be read. */
+export interface ContentCandidates {
+  readonly contents: ReadonlyMap<string, string>
+  readonly unreadable: ReadonlySet<string>
+}
+
+/**
+ * Reads every planned body, recording an unreadable file instead of rejecting
+ * the comparison. Descriptor exhaustion still aborts: it would fail every
+ * remaining read too, and the run needs the readable EMFILE error. `tolerate`
+ * lets a caller keep its own fatal errors (e.g. snapshot format failures).
+ */
+export async function readContentCandidates(
+  requested: readonly string[],
+  read: ReadTextFile,
+  options: ConcurrencyOptions,
+  tolerate: (error: unknown) => boolean = () => true
+): Promise<ContentCandidates> {
+  const contents = new Map<string, string>()
+  const unreadable = new Set<string>()
+
+  await mapWithLimit(requested, options, async (path) => {
+    try {
+      contents.set(path, await read(path))
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code
+      if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
+      if (!tolerate(error)) throw error
+      unreadable.add(path)
+    }
+  })
+
+  return { contents, unreadable }
+}
+
+/**
+ * Digests every body a comparison needs straight into the cache, so large real
+ * trees never have to keep every file's text in memory at once (two 40 GB
+ * projects would not fit). Returns the paths that could not be read; their pair
+ * is classified `modified` and counted as skipped.
+ */
+export async function digestContentCandidates(
+  left: ScannedTree,
+  right: ScannedTree,
+  cache: ComparisonCache,
+  read: ReadTextFile,
+  hash: (text: string) => string,
+  options: ConcurrencyOptions,
+  tolerate: (error: unknown) => boolean = () => true
+): Promise<ReadonlySet<string>> {
+  const requested = planContentReads(left, right, cache)
+  const nodes = new Map<string, ScannedNode>()
+  for (const tree of [left, right]) {
+    for (const node of tree.index.values()) {
+      if (node.kind === 'file') nodes.set(node.path, node)
+    }
+  }
+
+  const unreadable = new Set<string>()
+
+  await mapWithLimit(requested, options, async (path) => {
+    try {
+      const node = nodes.get(path)
+      if (node === undefined) {
+        throw new Error(`No scanned file at ${path}; call planContentReads first.`)
+      }
+      cache.hashes.set(path, {
+        size: node.size,
+        modifiedMs: node.modifiedMs,
+        hash: hash(await read(path))
+      })
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code
+      if (code === 'EMFILE' || code === 'ENFILE') throw toReadableIoError(error)
+      if (!tolerate(error)) throw error
+      unreadable.add(path)
+    }
+  })
+
+  return unreadable
 }
 
 /**
@@ -408,14 +542,18 @@ export async function compareDirectories(
       scanDirectory(rightRoot, list)
     ])
 
-    const requested = planContentReads(left, right, cache)
-    const entries = await mapWithLimit(
-      requested,
-      options,
-      async (path) => [path, await readTextFile(path)] as const
+    // Digests go straight into the cache: only one body per in-flight read is
+    // held in memory, which is what lets two real project trees be compared.
+    const unreadable = await digestContentCandidates(
+      left,
+      right,
+      cache,
+      readTextFile,
+      hash ?? sha256Hex,
+      options
     )
 
-    return compareScannedTrees(left, right, { contents: new Map(entries), cache, hash })
+    return compareScannedTrees(left, right, { contents: new Map(), cache, hash, unreadable })
   } catch (error) {
     throw toReadableIoError(error)
   }

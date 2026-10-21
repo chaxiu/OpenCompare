@@ -21,6 +21,7 @@
 - **Workbench 持有挂载状态**：左右两侧是目录还是快照、快照文档、名称、挂载点由 `Workbench` 持有并传到 `DirectoryView`；导入成功后立即 `compareSides` 重算并复用既有 `ComparisonCache`；导入失败回滚到导入前状态，不出现空树或会话丢失。左右两栏入口可访问名可区分（「导出左侧快照」/「导入右侧快照」/「远端快照样本」）。
 - **下钻与过滤闭环**：快照侧差异文件双击按扩展名下钻到代码 / CSV / JSON / YAML 视图，内容来自快照内联文本，会话标题 / 副标题指向该快照路径；未内联内容的文件给出明确提示而不渲染空白；左独有 / 右独有仍按现有语义渲染空侧。现有五态过滤（全部 / 仅差异 / 左独有 / 右独有 / 相同）与状态栏计数、图例对快照参与的对比同样生效。
 - **内容读取的有界并发与句柄错误（横切契约，归 `io-concurrency` 域）**：`compareDirectorySides` 的内容读取（目录侧 `readTextFile`，快照侧内联 `readSnapshotContent`）经 `@core/io` 的 `mapWithLimit` 走默认 8 窗口，并透传可选 `ConcurrencyOptions`；`EMFILE` / `ENFILE` 统一转成「文件句柄」可读错误向上抛，不返回部分结果。快照内联内容本身不额外占用文件句柄。
+- **不可读项 / 悬空链接容错（横切契约，归 `io-tolerance` 域）**：`buildSnapshot` 遇单个文件正文不可读时跳过该文件并返回 `{ snapshot, skipped }`，其余条目照常导出、`.ocsnap.json` 线格式不变；`exportSideSnapshot` 透传 `skipped`，导出成功提示在 `skipped > 0` 时追加「，跳过 N 个不可读项」。扫描侧被平台标注 `broken` 的条目不计入快照条目。
 
 ## 验收
 

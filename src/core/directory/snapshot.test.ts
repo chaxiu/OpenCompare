@@ -285,7 +285,7 @@ describe('snapshot building', () => {
 
   it('hashes every file, skips directories and keeps scan metadata', async () => {
     const tree = await scanDirectory('/tree', fs.list)
-    const snapshot = await buildSnapshot(tree, {
+    const { snapshot } = await buildSnapshot(tree, {
       name: 'tree',
       exportedAt: EXPORTED_AT,
       readTextFile: fs.readTextFile
@@ -313,7 +313,7 @@ describe('snapshot building', () => {
 
   it('omits bodies the caller does not inline', async () => {
     const tree = await scanDirectory('/tree', fs.list)
-    const snapshot = await buildSnapshot(tree, {
+    const { snapshot } = await buildSnapshot(tree, {
       name: 'tree',
       exportedAt: EXPORTED_AT,
       readTextFile: fs.readTextFile,
@@ -326,9 +326,29 @@ describe('snapshot building', () => {
     expect(byPath.get('src/app.ts')?.sha256).toBe(sha256Hex('export const app = 1\n'))
   })
 
+  it('skips one unreadable file, counts it and exports the rest', async () => {
+    const tree = await scanDirectory('/tree', fs.list)
+    const { snapshot, skipped } = await buildSnapshot(tree, {
+      name: 'tree',
+      exportedAt: EXPORTED_AT,
+      readTextFile: async (path) => {
+        if (path === '/tree/src/app.ts') throw new Error('EACCES: unreadable')
+        return fs.readTextFile(path)
+      }
+    })
+
+    expect(skipped).toBe(1)
+    expect(snapshot.entries.map((item) => item.path)).toEqual([
+      'README.md',
+      'src/deep/notes.md'
+    ])
+    // The wire format is untouched: the remaining entries serialize and parse back.
+    expect(parseSnapshot(serializeSnapshot(snapshot))).toEqual(snapshot)
+  })
+
   it('produces text that parses back to the same document', async () => {
     const tree = await scanDirectory('/tree', fs.list)
-    const snapshot = await buildSnapshot(tree, {
+    const { snapshot } = await buildSnapshot(tree, {
       name: 'tree',
       exportedAt: EXPORTED_AT,
       readTextFile: fs.readTextFile
@@ -347,11 +367,12 @@ describe('snapshot comparison', () => {
 
   async function buildSide(path: string, name: string): Promise<SnapshotDocument> {
     const tree = await scanDirectory(path, fs.list)
-    return buildSnapshot(tree, {
+    const { snapshot } = await buildSnapshot(tree, {
       name,
       exportedAt: EXPORTED_AT,
       readTextFile: fs.readTextFile
     })
+    return snapshot
   }
 
   it('maps a snapshot onto a scanned tree at its mount path', async () => {
@@ -439,7 +460,7 @@ describe('snapshot comparison', () => {
 
   it('throws a distinguishable error when a needed body was not inlined', async () => {
     const tree = await scanDirectory('/right', fs.list)
-    const metadataOnly = await buildSnapshot(tree, {
+    const { snapshot: metadataOnly } = await buildSnapshot(tree, {
       name: 'remote',
       exportedAt: EXPORTED_AT,
       readTextFile: fs.readTextFile,

@@ -60,6 +60,8 @@ export interface SnapshotExport {
   readonly snapshot: SnapshotDocument
   readonly text: string
   readonly entryCount: number
+  /** Files left out of the export because their body could not be read. */
+  readonly skipped: number
 }
 
 function basename(path: string): string {
@@ -207,18 +209,24 @@ export async function exportSideSnapshot(
     return {
       snapshot: side.snapshot,
       text: serializeSnapshot(side.snapshot),
-      entryCount: side.snapshot.entries.length
+      entryCount: side.snapshot.entries.length,
+      skipped: 0
     }
   }
 
   const tree = await scanDirectory(side.path, (path) => platform.listDirectory(path))
-  const snapshot = await buildSnapshot(tree, {
+  const { snapshot, skipped } = await buildSnapshot(tree, {
     name: basename(side.path),
     exportedAt: new Date().toISOString(),
     readTextFile: (path) => platform.readTextFile(path),
     inlineContent: (relativePath) => inlinesDrilldownText(relativePath)
   })
-  return { snapshot, text: serializeSnapshot(snapshot), entryCount: snapshot.entries.length }
+  return {
+    snapshot,
+    text: serializeSnapshot(snapshot),
+    entryCount: snapshot.entries.length,
+    skipped
+  }
 }
 
 /* ------------------------------------------------------------------ */

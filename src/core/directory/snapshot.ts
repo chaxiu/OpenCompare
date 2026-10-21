@@ -15,7 +15,7 @@
  */
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
 import type { SnapshotDocument, SnapshotEntry } from '@shared/snapshot'
-import { mapWithLimit, toReadableIoError } from '../io'
+import { toReadableIoError } from '../io'
 import type { ConcurrencyOptions } from '../io'
 import type {
   ComparisonCache,
@@ -25,7 +25,12 @@ import type {
   ScannedNode,
   ScannedTree
 } from './compare'
-import { compareScannedTrees, planContentReads, scanDirectory } from './compare'
+import {
+  compareScannedTrees,
+  digestContentCandidates,
+  readContentCandidates,
+  scanDirectory
+} from './compare'
 import { sha256Hex } from './hash'
 
 /* ------------------------------------------------------------------ */
@@ -194,21 +199,39 @@ export interface BuildSnapshotOptions {
   readonly inlineContent?: (relativePath: string, node: ScannedNode) => boolean
 }
 
+export interface SnapshotBuildResult {
+  readonly snapshot: SnapshotDocument
+  /** Files left out because their body could not be read. */
+  readonly skipped: number
+}
+
 /**
  * Captures every file of `tree` as a snapshot entry. Directories are implied by
  * paths and never become entries themselves; bodies are read once to compute
  * the digest, and retained only where `inlineContent` accepts the file.
+ * A file whose body cannot be read is skipped and counted, so one unreadable
+ * file does not cost the whole export.
  */
 export async function buildSnapshot(
   tree: ScannedTree,
   options: BuildSnapshotOptions
-): Promise<SnapshotDocument> {
+): Promise<SnapshotBuildResult> {
   const inlineContent = options.inlineContent ?? ((): boolean => true)
   const files = [...tree.index.entries()].filter(([, node]) => node.kind === 'file')
 
-  const entries = await Promise.all(
-    files.map(async ([relativePath, node]): Promise<SnapshotEntry> => {
-      const text = await options.readTextFile(node.path)
+  const { contents, unreadable } = await readContentCandidates(
+    files.map(([, node]) => node.path),
+    options.readTextFile,
+    {}
+  )
+
+  const entries = files
+    .filter(([, node]) => !unreadable.has(node.path))
+    .map(([relativePath, node]): SnapshotEntry => {
+      const text = contents.get(node.path)
+      if (text === undefined) {
+        throw new Error(`Missing body for ${node.path}; the read should have failed instead.`)
+      }
       return {
         path: relativePath,
         size: node.size,
@@ -217,15 +240,17 @@ export async function buildSnapshot(
         ...(inlineContent(relativePath, node) ? { content: text } : {})
       }
     })
-  )
 
   entries.sort((left, right) => left.path.localeCompare(right.path))
-  return validateSnapshot({
-    schema: SNAPSHOT_SCHEMA,
-    name: options.name,
-    exportedAt: options.exportedAt,
-    entries
-  })
+  return {
+    snapshot: validateSnapshot({
+      schema: SNAPSHOT_SCHEMA,
+      name: options.name,
+      exportedAt: options.exportedAt,
+      entries
+    }),
+    skipped: unreadable.size
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -316,7 +341,7 @@ export function snapshotToScannedTree(
     return finalized
   }
 
-  return { root: finalize(root, ''), index }
+  return { root: finalize(root, ''), index, skipped: 0 }
 }
 
 /* ------------------------------------------------------------------ */
@@ -440,12 +465,24 @@ export async function compareDirectorySides(
       return readTextFile(path)
     }
 
-    const requested = planContentReads(leftSide.tree, rightSide.tree, cache)
-    const contents = new Map(
-      await mapWithLimit(requested, options, async (path) => [path, await read(path)] as const)
+    // A real directory file that cannot be read is skipped; a snapshot body the
+    // document never inlined stays a fatal format error, as before.
+    const unreadable = await digestContentCandidates(
+      leftSide.tree,
+      rightSide.tree,
+      cache,
+      read,
+      hash ?? sha256Hex,
+      options,
+      (error) => !(error instanceof SnapshotContentError)
     )
 
-    return compareScannedTrees(leftSide.tree, rightSide.tree, { contents, cache, hash })
+    return compareScannedTrees(leftSide.tree, rightSide.tree, {
+      contents: new Map(),
+      cache,
+      hash,
+      unreadable
+    })
   } catch (error) {
     throw toReadableIoError(error)
   }

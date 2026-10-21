@@ -4,11 +4,22 @@
  * `/samples`, mirroring the in-memory mount the web runtime uses, so loading the
  * sample directory works identically in `pnpm dev` and `pnpm dev:web`.
  */
-import { access, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import {
+  access,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  utimes,
+  writeFile
+} from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
-import { mapWithLimit } from '@core/io'
+import { mapWithLimit, toReadableIoError } from '@core/io'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type { DirectoryEntry, PathProbeKind } from '@shared/platform/types'
@@ -124,21 +135,118 @@ async function saveFile(options: DialogRequest, content: string): Promise<string
   return target
 }
 
+/** `stat` failures that mean "one entry is broken", not "the directory is". */
+const ENTRY_FALLBACK_CODES: ReadonlySet<string> = new Set([
+  'ENOENT',
+  'ELOOP',
+  'EACCES',
+  'ENOTDIR'
+])
+
+function errorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : undefined
+}
+
+/** Chinese gloss of the OS codes the platform layer can surface. */
+function describeFileSystemCode(code: string | undefined): string {
+  switch (code) {
+    case 'ENOENT':
+      return '路径不存在或已被移动'
+    case 'ENOTDIR':
+      return '路径不是目录'
+    case 'EACCES':
+    case 'EPERM':
+      return '没有访问权限'
+    case 'ELOOP':
+      return '符号链接层级过深或形成循环'
+    default:
+      return '文件系统读取失败'
+  }
+}
+
+function readableFailure(subject: '目录' | '文件', error: unknown, path: string): Error {
+  // Descriptor exhaustion already has a dedicated readable error; keep it.
+  const converted = toReadableIoError(error)
+  if (converted instanceof Error && converted !== error) return converted
+  const code = errorCode(error)
+  return new Error(
+    `无法读取${subject} ${path}：${describeFileSystemCode(code)}${code ? `（${code}）` : ''}。`
+  )
+}
+
+/** Readable reason one entry is flagged `broken`; never empty. */
+function brokenReason(error: unknown, entry: Dirent): string {
+  const code = errorCode(error)
+  const kind = entry.isSymbolicLink() ? '悬空符号链接' : '不可读条目'
+  return `${kind}：${describeFileSystemCode(code)}${code ? `（${code}）` : ''}`
+}
+
 async function listDirectory(path: string): Promise<DirectoryEntry[]> {
-  const entries = await readdir(path, { withFileTypes: true })
+  let entries: Dirent[]
+  try {
+    entries = await readdir(path, { withFileTypes: true })
+  } catch (error) {
+    // The root directory itself being unreadable is a real failure, not a
+    // skippable entry, so it still rejects — with a readable message.
+    throw readableFailure('目录', error, path)
+  }
+
   // A wide directory still needs one `stat` per entry; the bounded window keeps
   // that fan-out from exhausting descriptors on very large directories.
   return mapWithLimit(entries, {}, async (entry) => {
     const entryPath = join(path, entry.name)
-    const info = await stat(entryPath)
-    return {
-      name: entry.name,
-      path: entryPath,
-      isDirectory: info.isDirectory(),
-      size: info.size,
-      modifiedMs: info.mtimeMs
+    let statFailure: unknown
+    try {
+      const info = await stat(entryPath)
+      return {
+        name: entry.name,
+        path: entryPath,
+        isDirectory: info.isDirectory(),
+        size: info.size,
+        modifiedMs: info.mtimeMs
+      }
+    } catch (error) {
+      statFailure = error
+      // Anything else (e.g. EMFILE) stays a failure of the whole listing.
+      if (!ENTRY_FALLBACK_CODES.has(errorCode(error) ?? '')) throw error
+    }
+
+    // A dangling symbolic link or unreadable child is listed but cannot be
+    // inspected; keep it in the result with its own link metadata so one bad
+    // entry never fails the comparison. The scan counts these as skipped.
+    try {
+      const info = await lstat(entryPath)
+      return {
+        name: entry.name,
+        path: entryPath,
+        isDirectory: info.isDirectory(),
+        size: info.size,
+        modifiedMs: info.mtimeMs,
+        broken: true,
+        skippedReason: brokenReason(statFailure, entry)
+      }
+    } catch (error) {
+      return {
+        name: entry.name,
+        path: entryPath,
+        // `readdir` still knows the type; no size/mtime is available.
+        isDirectory: entry.isDirectory(),
+        size: 0,
+        modifiedMs: 0,
+        broken: true,
+        skippedReason: brokenReason(error, entry)
+      }
     }
   })
+}
+
+async function readLocalTextFile(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (error) {
+    throw readableFailure('文件', error, path)
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -224,7 +332,7 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   })
   ipcMain.handle(PLATFORM_CHANNELS.readTextFile, (_event, path: unknown) => {
     const target = assertPath(path)
-    if (!isSamplePath(target)) return readFile(target, 'utf8')
+    if (!isSamplePath(target)) return readLocalTextFile(target)
     const text = SAMPLE_FILES.get(target)
     if (text === undefined) throw new Error(`No such sample file: ${target}`)
     return text
