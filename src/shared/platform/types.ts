@@ -28,6 +28,28 @@ export interface DirectoryEntry {
 }
 
 /** One entry of an open / save dialog filter; extensions carry no leading dot. */
+/** One directory of a batch listing that was read successfully. */
+export interface DirectoryListingSuccess {
+  readonly path: string
+  readonly ok: true
+  readonly entries: readonly DirectoryEntry[]
+}
+
+/** One directory of a batch listing that could not be read; the batch still resolves. */
+export interface DirectoryListingFailure {
+  readonly path: string
+  readonly ok: false
+  /** Readable reason this directory could not be listed. */
+  readonly reason: string
+}
+
+export type DirectoryListing = DirectoryListingSuccess | DirectoryListingFailure
+
+export interface ListDirectoriesOptions {
+  /** In-flight `readdir` calls; the `stat` budget is fixed per batch. */
+  readonly concurrency?: number
+}
+
 export interface FileDialogFilter {
   readonly name: string
   readonly extensions: readonly string[]
@@ -100,6 +122,15 @@ export interface PlatformPort {
    */
   saveFile(options: SaveFileOptions): Promise<string | null>
   listDirectory(path: string): Promise<DirectoryEntry[]>
+  /**
+   * Lists several directories in one round trip, in input order. A directory
+   * that cannot be read only fails its own slot; the batch still resolves.
+   * Descriptor exhaustion rejects the whole batch, since every read would fail.
+   */
+  listDirectories(
+    paths: readonly string[],
+    options?: ListDirectoriesOptions
+  ): Promise<readonly DirectoryListing[]>
   readTextFile(path: string): Promise<string>
   /**
    * Digests each file's **raw bytes** with SHA-256, in input order. Nothing is

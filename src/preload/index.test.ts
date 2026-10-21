@@ -47,6 +47,7 @@ describe('preload bridge', () => {
         'resolveDroppedPath',
         'saveFile',
         'listDirectory',
+        'listDirectories',
         'readTextFile',
         'digestFiles',
         'writeTextFile',

@@ -43,7 +43,9 @@ function syncIo(platform: PlatformPort) {
 }
 
 async function scan(platform: PlatformPort, root: string): Promise<ScannedTree> {
-  return scanDirectory(root, (path) => platform.listDirectory(path))
+  return scanDirectory(root, (path) => platform.listDirectory(path), {
+    listDirectories: (paths) => platform.listDirectories(paths)
+  })
 }
 
 /** A previewed sync: the plan plus where its writes will actually land. */
@@ -99,7 +101,10 @@ function compareRoots(
     (path) => platform.readTextFile(path),
     cache,
     undefined,
-    { digestFiles: (paths) => platform.digestFiles(paths) }
+    {
+      digestFiles: (paths) => platform.digestFiles(paths),
+      listDirectories: (paths) => platform.listDirectories(paths)
+    }
   )
 }
 

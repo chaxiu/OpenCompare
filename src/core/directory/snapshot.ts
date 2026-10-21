@@ -418,10 +418,11 @@ function defaultMountPath(side: 'left' | 'right', snapshot: SnapshotDocument): s
 async function resolveSide(
   side: ComparisonSide,
   position: 'left' | 'right',
-  list: ListDirectory
+  list: ListDirectory,
+  options: ComparisonIoOptions
 ): Promise<ResolvedSide> {
   if (side.kind === 'directory') {
-    return { tree: await scanDirectory(side.path, list) }
+    return { tree: await scanDirectory(side.path, list, options) }
   }
   const mountPath = side.mountPath ?? defaultMountPath(position, side.snapshot)
   return {
@@ -449,8 +450,8 @@ export async function compareDirectorySides(
 ): Promise<DirectoryComparison> {
   try {
     const [leftSide, rightSide] = await Promise.all([
-      resolveSide(left, 'left', list),
-      resolveSide(right, 'right', list)
+      resolveSide(left, 'left', list, options),
+      resolveSide(right, 'right', list, options)
     ])
 
     const mounts = [leftSide.mount, rightSide.mount].filter(
