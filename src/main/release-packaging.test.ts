@@ -1,8 +1,16 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
@@ -24,6 +32,29 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as 
 // declared in package.json, so a future bump only needs to touch package.json.
 const currentVersion = pkg.version ?? ''
 const currentTag = `v${currentVersion}`
+
+// The never-published version was merged into main but never tagged or
+// released, so its notes were folded into the current version. That ghost
+// version is assembled at runtime so the negative assertions below can never
+// match their own source text.
+const ghostTag = ['v0.2', '3'].join('.')
+const ghostNotesPath = `docs/release-notes/${ghostTag}.md`
+const ghostReleaseLink = `releases/tag/${ghostTag}`
+const ghostEvidencePath = `docs/release-evidence/${ghostTag}.md`
+
+// Published tags a document may still link to; the current tag is pending and
+// therefore allowed too, everything else would be a dead release link.
+const publishedTags = ['v0.2.0', 'v0.2.1', 'v0.2.2']
+const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
+
+const documentPaths = (): string[] => {
+  const docsRoot = join(repoRoot, 'docs')
+  const docs = readdirSync(docsRoot, { recursive: true })
+    .map((entry) => String(entry))
+    .filter((entry) => entry.endsWith('.md'))
+    .map((entry) => join(docsRoot, entry))
+  return [join(repoRoot, 'README.md'), join(repoRoot, 'CHANGELOG.md'), ...docs]
+}
 
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
   appId?: string
@@ -816,9 +847,29 @@ describe('release notes changelog', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const section = changelog.slice(start, end)
-    for (const phrase of ['悬空符号链接', '不可读项', '已跳过', '摘要直写缓存']) {
+    for (const phrase of [
+      '悬空符号链接',
+      '不可读项',
+      '已跳过',
+      '摘要直写缓存',
+      `${ghostTag} 已合入但未发布`,
+      '悬空链接容错',
+      '摘要缓存改进'
+    ]) {
       expect(section).toContain(phrase)
     }
+  })
+
+  it('drops the never-published entry and adds no fake version heading', () => {
+    expect(changelog).not.toMatch(new RegExp(`^## ${ghostTag}`, 'm'))
+    const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf('## v0.2.2')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
+      (match) => match[1]
+    )
+    expect(headings).toEqual([currentTag])
   })
 
   it('keeps the v0.2.2 changelog entry as history', () => {
@@ -914,6 +965,101 @@ describe('release notes changelog', () => {
   it('keeps the release notes version in sync with package.json', () => {
     const headingVersion = /v(\d+\.\d+\.\d+)/.exec(firstHeading(releaseNotes))?.[1] ?? ''
     expect(headingVersion).toBe(pkg.version)
+  })
+})
+
+describe('release document consistency', () => {
+  it('removes the never-published notes and every link to them', () => {
+    expect(existsSync(join(repoRoot, ghostNotesPath))).toBe(false)
+    const offenders = documentPaths().filter((path) => {
+      const text = readFileSync(path, 'utf8')
+      return text.includes(ghostNotesPath) || text.includes(ghostReleaseLink)
+    })
+    expect(offenders.map((path) => relative(repoRoot, path))).toEqual([])
+  })
+
+  it('keeps a fake evidence file for the never-published version out of the repository', () => {
+    expect(existsSync(join(repoRoot, ghostEvidencePath))).toBe(false)
+  })
+
+  it('links only published tags or the current pending tag', () => {
+    const allowed = new Set([...publishedTags, currentTag])
+    const offenders: string[] = []
+    for (const path of documentPaths()) {
+      const text = readFileSync(path, 'utf8')
+      for (const match of text.matchAll(releaseTagLink)) {
+        if (!allowed.has(match[1])) {
+          offenders.push(`${relative(repoRoot, path)}: ${match[1]}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('keeps the pending status and the signing copy on README line 5', () => {
+    const statusLine = readme.split(/\r?\n/)[4] ?? ''
+    expect(statusLine).toContain(`当前发布状态：${currentTag} 待发布`)
+    expect(statusLine).toContain('最新公开 Release 为 [v0.2.2]')
+    expect(statusLine).toContain('https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2')
+    expect(statusLine).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(statusLine).not.toContain(`${currentTag} 已发布`)
+    expect(statusLine).not.toContain(ghostNotesPath)
+    expect(statusLine).toContain('Developer ID 签名 + Apple 公证')
+    expect(statusLine).toContain('fail-closed')
+    expect(statusLine).toContain('App Store Connect API Key')
+    for (const secret of signingSecrets) {
+      expect(statusLine).toContain(secret)
+    }
+  })
+
+  it('lists the current, never-published and latest public version in the download table', () => {
+    const start = readme.indexOf('## 版本与下载')
+    const end = readme.indexOf('## 核心能力')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const rows = readme
+      .slice(start, end)
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('|'))
+    const currentRow = rows.find((row) => row.startsWith(`| [${currentTag}]`))
+    const ghostRow = rows.find((row) => row.startsWith(`| ${ghostTag}`))
+    const releasedRow = rows.find((row) => row.startsWith('| [v0.2.2]'))
+    expect(currentRow).toBeDefined()
+    expect(currentRow).toContain('待发布')
+    expect(currentRow).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(ghostRow).toBeDefined()
+    expect(ghostRow).toContain('未发布')
+    expect(ghostRow).toContain(`内容并入 ${currentTag}`)
+    expect(ghostRow).not.toContain(ghostReleaseLink)
+    expect(releasedRow).toBeDefined()
+    expect(releasedRow).toContain('已发布')
+    expect(releasedRow).toContain('releases/tag/v0.2.2')
+    // The latest public release never moves to a pending version.
+    expect(readme).not.toContain(`最新公开 Release 为 [${currentTag}]`)
+    expect(readme).not.toContain(`最新公开 Release 为 [${ghostTag}]`)
+  })
+
+  it('documents the unsolved known issues outside the fix list', () => {
+    expect(existsSync(releaseNotesPath)).toBe(true)
+    expect(releaseNotes).toContain('已知问题')
+    const fixesStart = releaseNotes.indexOf('## 本次修复')
+    const knownStart = releaseNotes.indexOf('## 已知问题')
+    expect(fixesStart).toBeGreaterThan(-1)
+    expect(knownStart).toBeGreaterThan(fixesStart)
+    const fixes = releaseNotes.slice(fixesStart, knownStart)
+    expect(fixes).not.toContain('已知未修')
+    const known = releaseNotes.slice(knownStart)
+    expect(known.split('已知未修').length - 1).toBeGreaterThanOrEqual(3)
+    for (const phrase of [
+      '849',
+      '1,510 MB',
+      '未 OOM',
+      'ECANCELED',
+      '不影响取消结果',
+      '符号链接计数放大'
+    ]) {
+      expect(known).toContain(phrase)
+    }
   })
 })
 
@@ -1408,5 +1554,31 @@ describe('release hardening documentation', () => {
     expect(flow).toContain('codesign --verify --deep --strict')
     expect(flow).toContain('xcrun stapler validate')
     expect(flow).toContain('spctl -a -vv')
+  })
+})
+
+describe('latest published release gate', () => {
+  const stepName = 'Assert the tag is the latest published release'
+  const step = releaseStepBody(stepName)
+
+  it('runs after the platform asset assertion as the last step of finalize', () => {
+    const assets = releaseWorkflow.indexOf(
+      '- name: Assert the public release has every platform asset'
+    )
+    const gate = releaseWorkflow.indexOf(`- name: ${stepName}`)
+    expect(assets).toBeGreaterThan(-1)
+    expect(gate).toBeGreaterThan(assets)
+    expect(releaseWorkflow.slice(gate + stepName.length)).not.toMatch(/\n {6}- name:/)
+  })
+
+  it('compares the newest published tag with the release tag through a read-only call', () => {
+    expect(step).toContain('gh release list --limit 1 --json tagName')
+    expect(step).toContain("jq -r '.[0].tagName // empty'")
+    expect(step).toContain('${RELEASE_TAG}')
+    expect(step).toContain('[ -z "${latest}" ]')
+    expect(step).toContain('::error::')
+    expect(step).toContain('exit 1')
+    expect(step).not.toMatch(/gh release (?:create|edit|delete|upload)/)
+    expect(step).not.toMatch(/--method\s+(?:POST|PATCH|PUT|DELETE)/)
   })
 })
