@@ -286,7 +286,7 @@ describe('release version gate', () => {
     expect(changelog).toContain(`## ${currentTag}`)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 
@@ -743,17 +743,21 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as pending and links the latest public release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 待发布`)
-    expect(readme).toContain(
-      '最新公开 Release 为 [v0.2.1](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.1)'
-    )
+  it('reports the current tag as published and links its public release', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readme).toContain(`releases/tag/${currentTag}`)
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain(`${currentTag} 已发布`)
+    expect(readme).not.toContain(`${currentTag} 待发布`)
+    expect(readme).not.toContain('最新公开 Release 为 [v0.2.1]')
     expect(readme).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
     expect(readme).not.toMatch(/正式版 v0\.2\.0/)
     expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
     expect(readme).not.toMatch(/发布状态：冻结/)
+  })
+
+  it('reports the signing doc status as published for the current tag', () => {
+    expect(signingDoc).toContain(`当前状态：${currentTag} 已发布`)
+    expect(signingDoc).not.toContain(`${currentTag} 待发布`)
   })
 
   it('attributes the file-handle bug to v0.2.1 and earlier in the README', () => {

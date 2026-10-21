@@ -243,6 +243,23 @@
 - **ac-no-release-side-effects**：本项不创建 tag、不 push、不 publish、不创建 Release；仓内不出现新的发布执行脚本或凭据。
 - **ac-gates-green**：`.munk/code-gates.json` 的 `lint` / `typecheck` / `build` / `build-web` / `test` 全部通过。
 
+### v0.2.2 已发布：状态口径翻转 + 公开产物取证
+
+- **ac-readme-published**：`README.md` 第 5 行同时满足：含 `当前发布状态：v0.2.2 已发布`、含 `https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2`、含 `docs/release-notes/v0.2.2.md`，且不含 `v0.2.2 待发布`、不含 `最新公开 Release 为 [v0.2.1]`。
+- **ac-readme-signing-text-kept**：`README.md` 第 5 行仍含 `Developer ID 签名 + Apple 公证`、`fail-closed`、`App Store Connect API Key` 与全部 6 个 Secret 名（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）。
+- **ac-signing-doc-status**：`docs/release-signing.md` 含 `当前状态：v0.2.2 已发布` 且不含 `v0.2.2 待发布`；含 `正式版发布姿态（v0.2.2）`；除该状态行外第一～六节文本内容不发生变化（6 项 Secret 表、v0.1.2 漂移记录、补发用法、打包后硬校验段落逐字保留）。
+- **ac-packaging-test-inverted**：`src/main/release-packaging.test.ts` 中 README 姿态用例改为断言 `readme` 含 `` `当前发布状态：${currentTag} 已发布` `` 与 `` `releases/tag/${currentTag}` ``，并断言 `readme` 不含 `` `${currentTag} 待发布` ``；「最新公开 Release 为 [v0.2.1]」断言反转为 `not.toContain`。
+- **ac-packaging-test-signing-line**：同一测试文件新增/同步断言 `signingDoc` 含 `` `当前状态：${currentTag} 已发布` `` 且不含 `` `${currentTag} 待发布` ``。
+- **ac-packaging-test-no-version-literal**：`src/main/release-packaging.test.ts` 源码不含 `0.2.2` / `v0.2.2` 字面量，`currentTag` 仍由 `package.json#version` 派生（`expect(currentTag).toBe(`v${pkg.version}`)` 保留）。
+- **ac-evidence-v022-status**：`docs/release-evidence/v0.2.2.md` 存在、非空、正文含 `v0.2.2`，且恰有一行 `status: verified`（若产物或凭据在本机不可得，则写 `status: blocked` 并上报，不得写任何通过标记或伪造 SHA-256）。
+- **ac-evidence-v022-signature-markers**：证据文件对 **dmg 内** 与 **zip 内** 两个 `OpenCompare.app` 分别记录 `codesign --verify --deep --strict --verbose=2`、`xcrun stapler validate`、`spctl -a -vv --type execute` 的原始输出，全文包含 `valid on disk`、`satisfies its Designated Requirement`、`The validate action worked!`、`accepted`、`source=Notarized Developer ID` 各不少于 2 处。
+- **ac-evidence-v022-digests**：证据文件记录 dmg 与 zip 两个不同产物的 64 位小写 SHA-256（`shasum -a 256` 输出），其中 dmg 的值等于 `7c7232b9c02431c36d98a6b367436697ab379e9ef8c97e30c59b29e57eaa6ae8`（与 GitHub asset digest 对账一致），zip 的值等于 `2f0a2e0fb00cacaa442ffa4796c47afc3e438555a8641dc8234aa3f608b12f34`。
+- **ac-evidence-v022-commands**：证据文件含 `gh release view v0.2.2 --repo chaxiu/OpenCompare`、`shasum -a 256`、`ditto -x -k`、`hdiutil attach -nobrowse -readonly`、`hdiutil detach`、`codesign -dv --verbose=4` 的命令文本，并记录取证机器（`sw_vers` / `uname -m`）、带时区的取证时间、仓库外临时目录路径。
+- **ac-evidence-v022-bundle-identity**：证据文件记录两个 `.app` 的 `CFBundleShortVersionString=0.2.2`、`CFBundleIconFile` 值、`Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY`、hardened runtime 标志（`flags=...runtime`），以及包内 `<CFBundleIconFile>.icns` 的 64 位 SHA-256，并据此判定包内图标为自制品牌图标而非 Electron 默认图标（**物证更正**：包内 icns 与仓库 `build/icon.icns` 逐字节相同——`electron-builder` 直接拷贝该文件，故「两者不同」的原始措辞不成立，据实记录为相同，不改产物、不改证据）。
+- **ac-evidence-test-covered**：`src/main/release-evidence.test.ts` 对 `docs/release-evidence/v0.2.2.md` 走与 v0.2.1 相同的只读解析路径：文件存在且非空、含版本号、`status` 为 `verified`/`blocked` 之一、verified 分支通过标记计数与「至少两个不同 sha256」校验；v0.2.1 的既有用例与断言文本不修改，且测试仍不联网、不下载、不挂载任何产物。
+- **ac-no-source-or-release-change**：`git diff --stat` 只涉及 `README.md`、`docs/release-signing.md`、`docs/release-evidence/v0.2.2.md`、`src/main/release-packaging.test.ts`、`src/main/release-evidence.test.ts`；`src/` 业务代码、`.github/workflows/`、`electron-builder.yml`、`package.json` 依赖与 `docs/release-evidence/v0.2.1.md` 无改动，未创建/移动/删除任何 tag 或 Release 资产。
+- **ac-gates-green**：`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm build:web`、`pnpm test` 全部退出码 0。
+
 ## 非目标
 
 - 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
@@ -270,6 +287,7 @@
 - 测试套件环境自包含项**只改测试与必要的可测性**（主要 `src/main/release-packaging.test.ts`；`src/main/release-evidence.test.ts` 只断言文档文本、不执行 git，保持不动）：不改 `release.yml` 的任何发布语义（checkout ref、祖先门语义、单点预建唯一 Release、矩阵 `--publish never`、finalize 公开）、不改 `electron-builder.yml` / `package.json` 依赖或脚本、不新增依赖、不改产品代码或 UI；不把 gate 脚本抽成仓库脚本；不打 tag / 不移动 tag / 不 push / 不 publish / 不创建 Release；不试图让已冻结的 `v0.2.0` tag 树里的旧测试变绿（不移动 tag 就无法改变该树），本项只保证以 HEAD 为基础打出的后续 tag / 派发在干净环境可复现通过；不凭猜测放宽断言（先复现再改）。
 - 发布后自检 `gh api` 组合修复项**只改发布后自检命令与其静态断言**：不改打包目标、electron-builder 配置、签名 / 公证配置、Secrets 清单或发布模型（tag → Release）；不重指、删除或新建任何 tag；不 push、不 dispatch、不建 / 改 Release；不跑实机验收或 UI 自测；不重构 CI 其他 job（gates / build / upload）与无关测试，不顺手加 lint 规则或抽脚本模块；不改 v0.1.2 漂移记录与历史发布说明。
 - v0.2.2 收敛项只做**版本收敛与发布文档对齐**（承接已合入 `main` 的 EMFILE 修复，merge `4c028f5` / 修复提交 `a24cdd2`）：不改 `src/core/`、`src/main/`（除 `release-packaging.test.ts` 的版本断言）、`src/renderer/`、`src/preload/`、`src/shared/` 的业务逻辑；不改 `src/main/release-evidence.test.ts` 与 `docs/release-evidence/v0.2.1.md`；不新建 `docs/release-evidence/v0.2.2.md`、不补写 v0.2.2 取证；不清理 `0.2.0` / `0.2.1` 历史发布文档；不改既有功能测试与门禁行为断言口径（除上述三处版本耦合重定标外不放宽、不删除）；不改 `release.yml` 步骤顺序 / 发布模型 / fail-closed 配置 / 祖先门与单 Release 断言；不做新功能、不调并发默认值（保持 8）、不做顺手重构；不建 tag / 不 push / 不 publish / 不建 Release。
+- v0.2.2 发布状态翻转项只改**状态口径与只读取证**：不改任何 `src/` 业务代码 / UI / 算法 / 平台能力；不改 `release.yml` / 任何 workflow、发布模型、`electron-builder.yml`、版本号、依赖；不创建 / 移动 / 删除 / 重打任何 tag，不改写任何历史 Release 与资产（含 v0.2.1 / v0.1.2）；不在本机重新打包、重跑签名或公证（证据只来自公开 Release 的既有产物）；不改 v0.2.1 证据文件的 `status: blocked` 历史结论；不做功能改动与 UI 自测；不在仓库内保留任何下载产物（下载必须落到仓库外临时目录）。
 
 ## 实现约束
 
@@ -301,13 +319,17 @@
 - **显式 fail-closed 而非依赖 shell 比较退出码**：Actions 默认 `bash -e` 下断言失败必须落到显式 `exit 1`；空值 / 非整数计数的 `[ "" -ne 1 ]` 返回 status 2，若只写在 `if` 条件里会被当作 false 从而静默通过，故计数先做 `^[0-9]+$` 校验再比较。
 - **测试只做静态文本 / 结构断言**：不引入网络调用或对真实 GitHub API 的依赖；全文件扫描断言需先把 `\` 续行折叠成单行，再逐行过滤 `gh api` 命令（跳过注释行）后检查 `--slurp` 与 `--jq` / `--template` 不同时出现。
 - **改动范围收敛（本项）**：只改 `.github/workflows/release.yml`、`src/main/release-packaging.test.ts`、必要时 `README.md` 第 5 行；其余文件不动。
+- **发布状态口径唯一落点是 README 第 5 行单段 blockquote**（`> ✅ **当前发布状态：…**`）：只替换状态口径与 Release 链接，签名 / 公证 / 凭据 / fail-closed 说明文字逐字保留；签名文档只改第 5 行状态行，标题、6 项 Secret 表、v0.1.2 漂移记录、补发用法、打包后硬校验段落不得改动。
+- **测试源码版本一律走模板**：本项新增 / 反转的 README 与签名文档断言必须用 `` `${currentTag}` `` 派生，不新增 `0.2.2` / `v0.2.2` 字面量（`v0.2.1` 作为上一发布版本可留在既有断言里）。
+- **取证命令一律只读**：`gh release view` / `gh release download`、`shasum -a 256`、`ditto -x -k`、`hdiutil attach -nobrowse -readonly`、`codesign --verify` / `-dv`、`xcrun stapler validate`、`spctl -a -vv --type execute`、`PlistBuddy`；结束时 `hdiutil detach`，临时目录 `mktemp -d` 于仓库外。证据文件写原始输出而不是结论摘要；任一产物或凭据不可得则落 `status: blocked` 并 `munk_report_owner` 上报，绝不臆造通过标记。
+- **证据测试复用同一解析函数**：`release-evidence.test.ts` 把证据路径 / 版本号参数化（`inspectReleaseEvidence(doc, version)` / `readEvidence(path)`），不为 v0.2.2 复制一套逻辑；v0.2.1 的 describe 与断言文本原样保留，测试不联网 / 不下载 / 不挂载。
 
 ## 最近交付证明
 
-- WI：`wi_intake_b7a851eeb41ce4d4`（v0.2.2 版本收敛与发布说明，承接已合入 main 的 EMFILE 修复；`kind: chore/release`）
+- WI：`wi_intake_99e9b8628e56f3b5`（v0.2.2 已发布：状态口径翻转 + 公开产物取证；`kind: chore/release`）
 - 日期：2026-10-21
-- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；门禁 attempt 001 的 install / lint / typecheck / build / build:web / test 全绿）。
-- 覆盖摘要：`package.json#version` `0.2.1` → `0.2.2`；`CHANGELOG.md` 顶部新增 `## v0.2.2`（8 路有界并发、EMFILE / ENFILE 可读提示、回指 Issue #2）；新增 `docs/release-notes/v0.2.2.md`；`README.md` 状态行翻为「v0.2.2 待发布 + 最新公开 Release 为 v0.2.1」并指向新发布说明，「已知问题」改为故障版本「v0.2.1 及更早」+ 当前版本已修复；`docs/release-signing.md` 姿态行 / 姿态标题 / 补发默认 tag / 「tag 之后的修复由 v0.2.2 承接」同步；`release.yml` 仅改 `workflow_dispatch.inputs.tag.default` 一行（`v0.2.2`）；`release-packaging.test.ts` 删除 `toBe('0.2.1')` 钉死与全部 `'0.2.2'` / `'v0.2.2'` 字面量，改由 `currentTag` 派生并互校 CHANGELOG 标题 / 发布说明首标题 / README 状态行 / workflow 默认值，同时新增 v0.2.2 CHANGELOG 与发布说明关键词用例、README 已知问题归属用例，并把「上一版用户可见变化」断言改锚 `docs/release-notes/v0.2.1.md`、把 v0.2.1 替代说明切片边界固定为 `## v0.2.1`..`## v0.2.0`。
-- 证据：`git diff --stat` 6 文件（`release.yml` 1 行、`package.json` 1 行、`CHANGELOG.md` +14、`README.md` 4 行、`docs/release-signing.md` 10 行、`release-packaging.test.ts` +67/−…），另有新增 `docs/release-notes/v0.2.2.md`；未新增依赖、未改发布模型与签名 / 公证配置。
-- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 fold、无 tech/ux 手合；本轮验收按 AC 逐条落档为 `qa/v022-version-convergence.md`。
-- 后续注意：① 版本一改即触发「机械耦合面」连锁（测试断言 + 签名文档姿态 + workflow dispatch 默认值 + README 状态行 / 发布流程），下个版本收敛项应直接复用 `currentTag` 派生路线，别再引入版本字面量；② workflow dispatch 默认值已指向 `v0.2.2`，而 tag 尚未创建，此刻手动 dispatch 会在「Assert the release tag exists in the checkout」显式失败（预期 fail-closed，不加旁路）；③ v0.2.2 发布说明与 CHANGELOG 是用户可见文案的唯一来源，真实发布后需把 README 状态行从「待发布」翻回「已发布 + releases/tag/v0.2.2」，并同步 `release-packaging.test.ts` 的对应断言。
+- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过）。
+- 覆盖摘要：`README.md` 第 5 行状态 blockquote 由「v0.2.2 待发布 + 最新公开 Release 为 v0.2.1」翻为「✅ v0.2.2 已发布，公开 Release 见 [v0.2.2](…/releases/tag/v0.2.2)」，签名 / 公证 / 6 项 Secret / fail-closed 说明文字逐字保留；`docs/release-signing.md` 第 5 行状态行翻为「当前状态：v0.2.2 已发布」（姿态标题与其余章节不动）；新增 `docs/release-evidence/v0.2.2.md`（470 行，`status: verified`），记录对公开 Release 的 dmg / zip 两个产物的只读取证原始输出；`release-packaging.test.ts` 反转 README 待发布断言（`已发布` + `releases/tag/${currentTag}` + `not.toContain('待发布')` + `not.toContain('待发布')` + `not.toContain('最新公开 Release 为 [v0.2.1]')`）并新增签名文档状态行用例；`release-evidence.test.ts` 把解析函数参数化（`inspectReleaseEvidence(doc, version)` / `readEvidence(path)`）并为 v0.2.2 新增 describe，v0.2.1 断言原样保留。
+- 证据：`git diff --stat` 4 改 1 新增（`README.md` +1/−1、`docs/release-signing.md` +1/−1、`release-packaging.test.ts` +11/−7、`release-evidence.test.ts` +65/−4，新增 `docs/release-evidence/v0.2.2.md` 470 行）；`release.yml` / `electron-builder.yml` / `package.json` / `src` 业务代码 / `docs/release-evidence/v0.2.1.md` 均未改动；未创建 / 移动 / 删除任何 tag 或 Release 资产。
+- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 fold、无 tech/ux 手合；本轮验收按 AC 逐条落档为 `qa/v022-published-status-evidence.md`。
+- 后续注意：① **`ac-evidence-v022-bundle-identity` 的原始措辞已被物证推翻**——包内 `Contents/Resources/icon.icns` 与仓库 `build/icon.icns` 的 SHA-256 完全相同（`electron-builder` 直接拷贝该文件），故「两者不同」永远不可能成立；证据文件据实记录为「相同」并在文内标注该口径更正，「非 Electron 默认图标」的判定实际由 CI 打包后硬校验（比对 `electron.icns` 不相等）承担。下个取证类 AC 应先核对工具链的真实拷贝语义再写断言，别把「换个位置就该不同」当默认假设。② 本机 `node_modules` 无 electron，无法在取证机上直接对比 Electron 默认 `electron.icns`；需要该对比时只能依赖 CI 或先装依赖，别在证据里写「已验证默认图标无关」。③ README / 签名文档的状态口径现在是「已发布」，下一次版本收敛必须同步翻回「待发布」并改锚新的 `releases/tag/vX.Y.Z`，两处（README 第 5 行 + 签名文档第 5 行）加 `release-packaging.test.ts` 三处是一组机械耦合，漏一处即红灯。④ 公开 Release 的 dmg / zip digest 已与 GitHub asset digest 对账一致（`7c7232b9…` / `2f0a2e0f…`），可作为后续版本「证据 ↔ 资产」对账的样板路径。
