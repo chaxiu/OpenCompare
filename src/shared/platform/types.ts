@@ -48,6 +48,31 @@ export interface SaveFileOptions extends SelectFileOptions {
 /** What lives at a path, as reported by {@link PlatformPort.statPath}. */
 export type PathProbeKind = 'file' | 'directory' | 'missing'
 
+/** One successfully digested file: the raw bytes' SHA-256, never a text decode. */
+export interface FileDigestSuccess {
+  readonly path: string
+  readonly ok: true
+  /** 64-character lowercase hex SHA-256 of the file's raw bytes. */
+  readonly sha256: string
+  /** Number of bytes the digest actually consumed. */
+  readonly bytes: number
+}
+
+/** One file the digest capability could not read; the rest of the batch still resolves. */
+export interface FileDigestFailure {
+  readonly path: string
+  readonly ok: false
+  /** Readable reason this single file could not be digested. */
+  readonly reason: string
+}
+
+export type FileDigest = FileDigestSuccess | FileDigestFailure
+
+export interface DigestFilesOptions {
+  /** In-flight streaming reads; defaults to the platform's bounded window. */
+  readonly concurrency?: number
+}
+
 export interface PlatformPort {
   readonly kind: PlatformKind
   /**
@@ -76,6 +101,16 @@ export interface PlatformPort {
   saveFile(options: SaveFileOptions): Promise<string | null>
   listDirectory(path: string): Promise<DirectoryEntry[]>
   readTextFile(path: string): Promise<string>
+  /**
+   * Digests each file's **raw bytes** with SHA-256, in input order. Nothing is
+   * decoded as text, so binary content (including invalid UTF-8) is compared
+   * byte for byte. A file that cannot be read only marks that item failed; the
+   * batch still resolves. Descriptor exhaustion rejects the whole call.
+   */
+  digestFiles(
+    paths: readonly string[],
+    options?: DigestFilesOptions
+  ): Promise<readonly FileDigest[]>
   /**
    * Writes UTF-8 text. When `modifiedMs` is given the file's modification time
    * is set to it afterwards, which lets a copy keep the source's metadata so the

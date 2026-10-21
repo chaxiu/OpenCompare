@@ -1,11 +1,13 @@
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import type {
   DirectoryEntry,
+  FileDigest,
   FileDialogFilter,
   PlatformPort,
   SaveFileOptions,
   SelectFileOptions
 } from '@shared/platform/types'
+import { sha256Bytes } from '@core/directory/hash'
 
 declare global {
   interface Window {
@@ -235,6 +237,22 @@ export function createWebPlatformPort(): PlatformPort {
       const node = requireNode(path)
       if (node.isDirectory) throw new Error(`Cannot read a directory as text: ${path}`)
       return node.content
+    },
+    // Same raw-byte SHA-256 as the main process (`node:crypto`), computed with
+    // the pure JS core so the web runtime stays free of Node and WebCrypto.
+    digestFiles: async (paths) => {
+      const encoder = new TextEncoder()
+      return paths.map<FileDigest>((path) => {
+        const node = nodes.get(path)
+        if (node === undefined) {
+          return { path, ok: false, reason: `无法读取文件 ${path}：路径不存在或已被移动（ENOENT）。` }
+        }
+        if (node.isDirectory) {
+          return { path, ok: false, reason: `无法读取文件 ${path}：路径不是文件（EISDIR）。` }
+        }
+        const bytes = encoder.encode(node.content)
+        return { path, ok: true, sha256: sha256Bytes(bytes), bytes: bytes.length }
+      })
     },
     writeTextFile: async (path, content, modifiedMs) => {
       writeNode(path, content, modifiedMs)

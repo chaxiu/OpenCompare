@@ -9,6 +9,7 @@ IO 并发治理域：跨 `directory` / `snapshot` / `foundation`（Electron 主�
 - **接入点二：快照内容读取（`src/core/directory/snapshot.ts`）**：`compareDirectorySides` 的内容读取（目录侧走 `readTextFile`、快照侧走内联 `readSnapshotContent`）同样经 `mapWithLimit`，并透传 `options`；快照内联内容分支不额外产生文件句柄。
 - **接入点三：目录条目元数据（`src/main/platform/electron-platform.ts`）**：`listDirectory` 对 `readdir` 结果的逐条 `stat` 由无上界 `Promise.all` 改为 `mapWithLimit(entries, {}, …)`，返回顺序与字段（`name` / `path` / `isDirectory` / `size` / `modifiedMs`）与逐条串行结果一致。
 - **接入点四：递进式目录遍历（`scanDirectory`）**：保持「一次只列一层」的串行 walk，单层内部不叠加无上界在飞 IO；`list` 调用失败经 `toReadableIoError` 转换后抛出。
+- **接入点五：批量字节摘要（`PlatformPort.digestFiles`，语义归 `content-digest` 域）**：主进程 `digestFiles` 按批经 `mapWithLimit(paths, options, …)` 流式读取文件原始字节算 sha256，一条流一个句柄，默认窗口沿用 `DEFAULT_IO_CONCURRENCY`；单文件读取失败只标记该项失败，`EMFILE` / `ENFILE` 经 `toReadableIoError` 整批 reject（由 `compare.ts` 的 `digestContentCandidates` 转成可读错误），不被逐文件失败吞掉。本域只拥有窗口与句柄错误口径，摘要算法与平台缝归 `content-digest`。
 - **可读句柄错误（`FileHandleExhaustedError` / `toReadableIoError`）**：识别 `EMFILE` / `ENFILE`，在核心层边界转换为中文错误，消息包含「文件句柄」并保留原始错误码线索（EMFILE / ENFILE）；其他错误原样透传，不改平台层既有抛错结构。UI 侧复用工作台既有 `notice` / `report` 就地提示，不静默吞、不崩窗口、不生成空目录会话。
 - **README「已知问题」段**：明确写出 v0.2.1 及更早版本拖入大目录可能触发 `EMFILE`，且当前版本已修复（有界并发读取 + 可读错误提示）。
 
@@ -28,7 +29,7 @@ IO 并发治理域：跨 `directory` / `snapshot` / `foundation`（Electron 主�
 - 不改打包 / 发布 workflow，不动 GitHub Actions、不发版、不重指 tag。
 - 不动内置样本库（`src/shared/fixtures/`、`/samples` 挂载）与示例数据。
 - 不做实机验收、不做 self_test、不做桌面点选验收。
-- 不改 `PlatformPort` 契约签名、不改 IPC channel 与 preload 白名单。
+- 本域不改 `PlatformPort` 契约语义与既有 channel / preload 白名单形态；新增平台能力（如批量字节摘要）归 `content-digest` / `foundation` 域，本域只规定其并发窗口与句柄错误口径。
 - 不改目录对比语义、过滤、下钻、同步 / 模板逻辑与 UI 布局；不顺带做「体验优化」类改动。
 - 不引入新的第三方并发库或运行时依赖（不引 p-limit / p-queue 之类）。
 

@@ -16,9 +16,9 @@
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
 import type { SnapshotDocument, SnapshotEntry } from '@shared/snapshot'
 import { toReadableIoError } from '../io'
-import type { ConcurrencyOptions } from '../io'
 import type {
   ComparisonCache,
+  ComparisonIoOptions,
   DirectoryComparison,
   ListDirectory,
   ReadTextFile,
@@ -444,8 +444,8 @@ export async function compareDirectorySides(
   readTextFile: ReadTextFile,
   cache: ComparisonCache,
   hash?: (text: string) => string,
-  /** In-flight body-read window; defaults to {@link DEFAULT_IO_CONCURRENCY}. */
-  options: ConcurrencyOptions = {}
+  /** In-flight body-read window and optional raw-byte digest capability. */
+  options: ComparisonIoOptions = {}
 ): Promise<DirectoryComparison> {
   try {
     const [leftSide, rightSide] = await Promise.all([
@@ -465,6 +465,18 @@ export async function compareDirectorySides(
       return readTextFile(path)
     }
 
+    // Snapshot-mounted paths have no file behind them, so only real directory
+    // files may go through the byte digest; the snapshot side keeps hashing its
+    // inline text with {@link sha256Hex}, exactly as the wire format captured it.
+    const digestOptions: ComparisonIoOptions =
+      options.digestFiles === undefined || options.digestible !== undefined
+        ? options
+        : {
+            ...options,
+            digestible: (path) =>
+              !mounts.some((mount) => path.startsWith(`${mount.mountPath}/`))
+          }
+
     // A real directory file that cannot be read is skipped; a snapshot body the
     // document never inlined stays a fatal format error, as before.
     const unreadable = await digestContentCandidates(
@@ -473,7 +485,7 @@ export async function compareDirectorySides(
       cache,
       read,
       hash ?? sha256Hex,
-      options,
+      digestOptions,
       (error) => !(error instanceof SnapshotContentError)
     )
 

@@ -67,7 +67,9 @@ export async function loadSampleSessions(
               DIRECTORY_SAMPLE_PATHS.right,
               (path) => platform.listDirectory(path),
               (path) => platform.readTextFile(path),
-              cache
+              cache,
+              undefined,
+              { digestFiles: (paths) => platform.digestFiles(paths) }
             )
             return createDirectorySession(
               comparison,

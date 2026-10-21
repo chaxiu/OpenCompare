@@ -48,6 +48,7 @@ describe('preload bridge', () => {
         'saveFile',
         'listDirectory',
         'readTextFile',
+        'digestFiles',
         'writeTextFile',
         'exists',
         'statPath',

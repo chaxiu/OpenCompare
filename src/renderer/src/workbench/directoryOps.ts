@@ -97,7 +97,9 @@ function compareRoots(
     rightRoot,
     (path) => platform.listDirectory(path),
     (path) => platform.readTextFile(path),
-    cache
+    cache,
+    undefined,
+    { digestFiles: (paths) => platform.digestFiles(paths) }
   )
 }
 

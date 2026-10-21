@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { fireEvent } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { CSV_SCENE } from '@shared/fixtures'
+import { sha256Hex } from '@core/directory/hash'
 import { createWebPlatformPort } from './web-platform'
 
 /** The hidden `<input type="file">` the web picker appends while it is open. */
@@ -59,6 +61,53 @@ describe('web PlatformPort', () => {
     await platform.writeTextFile('/memory/note.txt', 'hello')
 
     expect(await platform.readTextFile('/memory/note.txt')).toBe('hello')
+  })
+})
+
+describe('web byte digest', () => {
+  it('digests sample text with the same sha256 the main process produces', async () => {
+    const platform = createWebPlatformPort()
+    const sample = CSV_SCENE.left
+    const encoder = new TextEncoder()
+
+    const digests = await platform.digestFiles([
+      sample.path,
+      '/samples/missing.txt',
+      '/samples/csv'
+    ])
+
+    // One result per path, in input order.
+    expect(digests).toHaveLength(3)
+    expect(digests[0]).toMatchObject({
+      path: sample.path,
+      ok: true,
+      sha256: sha256Hex(sample.text),
+      bytes: encoder.encode(sample.text).length
+    })
+    expect(digests[0].ok && digests[0].sha256).toBe(
+      createHash('sha256').update(sample.text, 'utf8').digest('hex')
+    )
+    for (const digest of digests.slice(1)) {
+      expect(digest.ok).toBe(false)
+      if (!digest.ok) expect(digest.reason).toContain('无法读取文件')
+    }
+  })
+
+  it('hashes BOM and multibyte text by its UTF-8 bytes', async () => {
+    const platform = createWebPlatformPort()
+    const encoder = new TextEncoder()
+    const samples = ['中文🙂', '\ufeffbom', 'abc', '']
+
+    for (const [index, text] of samples.entries()) {
+      const path = `/memory/digest-${index}.txt`
+      await platform.writeTextFile(path, text)
+      const [digest] = await platform.digestFiles([path])
+      expect(digest).toMatchObject({
+        ok: true,
+        sha256: sha256Hex(text),
+        bytes: encoder.encode(text).length
+      })
+    }
   })
 })
 

@@ -1,10 +1,12 @@
 /**
- * Synchronous SHA-256 over UTF-8 text.
+ * Synchronous SHA-256 over raw bytes and UTF-8 text.
  *
  * The comparison engine hashes file contents, so the implementation must run
  * unchanged in Node, the browser and the Electron renderer: no `node:crypto`,
  * no async Web Crypto — a plain synchronous primitive that is directly unit
- * testable in a pure Node environment.
+ * testable in a pure Node environment. {@link sha256Bytes} digests the bytes
+ * themselves, which is what keeps binary files (including invalid UTF-8) from
+ * being flattened by a text decode; {@link sha256Hex} stays its UTF-8 wrapper.
  */
 
 const K = new Uint32Array([
@@ -22,9 +24,8 @@ function rotateRight(value: number, bits: number): number {
   return ((value >>> bits) | (value << (32 - bits))) >>> 0
 }
 
-/** Hex digest of the SHA-256 hash of `text` (UTF-8 encoded). */
-export function sha256Hex(text: string): string {
-  const bytes = new TextEncoder().encode(text)
+/** Hex digest of the SHA-256 hash of `bytes`, byte for byte. */
+export function sha256Bytes(bytes: Uint8Array): string {
   const bitLength = bytes.length * 8
 
   const padded = new Uint8Array(((bytes.length + 8) >> 6) * 64 + 64)
@@ -103,4 +104,9 @@ export function sha256Hex(text: string): string {
   }
 
   return [...state].map((word) => word.toString(16).padStart(8, '0')).join('')
+}
+
+/** Hex digest of the SHA-256 hash of `text` (UTF-8 encoded). */
+export function sha256Hex(text: string): string {
+  return sha256Bytes(new TextEncoder().encode(text))
 }
