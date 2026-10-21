@@ -257,3 +257,126 @@ describe('v0.2.2 release evidence document', () => {
     )
   })
 })
+
+// v0.2.4 shipped. Its evidence file is a read-only record of the tag-triggered
+// CI run plus the host-side recheck; the table below mirrors the run's
+// evidence/assets-sha256.txt and must stay byte-identical.
+const evidenceV024Path = join(repoRoot, 'docs/release-evidence/v0.2.4.md')
+
+const v024Assets: Array<[name: string, sha256: string]> = [
+  ['latest-linux.yml', 'f1a51b5d107b942b49258773f9cf52bf3a47c7dfd72aa86f8d2772d899285e72'],
+  ['latest-mac.yml', '1b47bfa931f32ee1398dcef13f937bbff02c1ec6d8d3e874dff34c2f4d5bf0ba'],
+  ['latest.yml', '8e5c05e69dd9334009089a44e1962538413c5ecbd995b018b0f3624792e6eaca'],
+  ['opencompare_0.2.4_amd64.deb', '4ddd85c57444746eded750d87b25583de82166d3dc5dc3f663b8db257671c972'],
+  ['OpenCompare-0.2.4-arm64-mac.zip', '8f8ff17af1e8439fa8a2c4a3ee1819c4a8e4e2ec6c1235e390fbc047674ddca4'],
+  ['OpenCompare-0.2.4-arm64-mac.zip.blockmap', '855090700f75c0a2577f8ed3631f650c5dad0a498531af48ddba4e2a516df716'],
+  ['OpenCompare-0.2.4-arm64.dmg', 'ae0dc1081db73e0b2f9148fee8cdee8110cc1a12189246a2a5f60f22e566d6f3'],
+  ['OpenCompare-0.2.4-arm64.dmg.blockmap', '2bc656ab743cc90b1c260622a9af4962ead1f6ef05a301fda20805ae90d63d73'],
+  ['OpenCompare-0.2.4.AppImage', 'fcb6c2c95cac7db51747d5238cdcdc4d8fef0c2bfe62c6f1f111f6ec66a4f896'],
+  ['OpenCompare.Setup.0.2.4.exe', 'd7e39acb8dead8a2adca9e7a016f7b5ff0f3c99445333fcae7b45916a7195ede'],
+  ['OpenCompare.Setup.0.2.4.exe.blockmap', 'fa26cbb8915371acc2626f90afdd0e793e84e663326e892e80678533fc9843d9']
+]
+
+const v024Jobs = [
+  'Quality gates',
+  'Package mac',
+  'Package win',
+  'Package linux',
+  'Publish the GitHub Release'
+]
+
+describe('v0.2.4 release evidence document', () => {
+  const doc = (): string => readEvidence(evidenceV024Path)
+
+  it('exists, is non-empty and declares the verified run identity', () => {
+    expect(existsSync(evidenceV024Path)).toBe(true)
+    const text = doc()
+    expect(text.trim().length).toBeGreaterThan(0)
+    expect(text.match(/^status:\s*verified$/gm)?.length).toBe(1)
+    for (const marker of [
+      'v0.2.4',
+      '39692988051',
+      '55d3af2db1632d05f94b3eca88020240714b21f6'
+    ]) {
+      expect(text).toContain(marker)
+    }
+  })
+
+  it('records every job with the CI success conclusion', () => {
+    const rows = doc()
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('| '))
+    for (const job of v024Jobs) {
+      const row = rows.find((line) => line.startsWith(`| ${job} |`))
+      expect(row, `missing job row ${job}`).toBeDefined()
+      expect(row).toContain('success')
+    }
+    expect(rows.filter((line) => line.startsWith('| Package ')).length).toBe(3)
+  })
+
+  it('lists exactly the 11 published assets and their sha256 values', () => {
+    const text = doc()
+    const rows = text
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('| `'))
+    const listed = rows
+      .map((row) => /^\| `([^`]+)` \|[^|]*\| `([0-9a-f]{64})` \|$/.exec(row))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map((match) => [match[1], match[2]] as const)
+    expect(listed.map(([name]) => name).sort()).toEqual(v024Assets.map(([name]) => name).sort())
+    for (const [name, sha] of v024Assets) {
+      expect(listed.find(([listedName]) => listedName === name)?.[1]).toBe(sha)
+    }
+    // No sha256 outside the published asset list.
+    const digests = new Set(text.match(/[0-9a-f]{64}/g) ?? [])
+    expect([...digests].sort()).toEqual(v024Assets.map(([, sha]) => sha).sort())
+  })
+
+  it('records the mac signing markers with their source', () => {
+    const text = doc()
+    for (const marker of [
+      'notarization successful',
+      'valid on disk',
+      'satisfies its Designated Requirement',
+      'The validate action worked!',
+      'accepted',
+      'source=Notarized Developer ID',
+      'Authority=Developer ID Application: Tao Zhu (3X4J53U6RY)',
+      'TeamIdentifier=3X4J53U6RY',
+      'flags=0x10000(runtime)'
+    ]) {
+      expect(text).toContain(marker)
+    }
+    expect(text).toContain('CI 日志')
+    expect(text).toContain('本机复核')
+  })
+
+  it('records the release uniqueness and latest gates', () => {
+    const text = doc()
+    expect(text).toContain('releases for v0.2.4: 1 (drafts: 0, prereleases: 0)')
+    expect(text).toContain('latest published release: v0.2.4 (this tag: v0.2.4)')
+    expect(text).toContain('11/11')
+  })
+
+  it('records the Windows update url defect as an unfixed P2 leftover', () => {
+    const text = doc()
+    for (const marker of [
+      'OpenCompare-Setup-0.2.4.exe',
+      'OpenCompare.Setup.0.2.4.exe',
+      'P2',
+      'v0.2.2 起既有',
+      '无运行时消费者',
+      '不重发',
+      '不改写'
+    ]) {
+      expect(text).toContain(marker)
+    }
+  })
+
+  it('records the embedded AppImage blockmap conclusion', () => {
+    const text = doc()
+    expect(text).toContain('blockMapSize')
+    expect(text).toContain('*.AppImage.blockmap')
+    expect(text).toContain('内嵌')
+  })
+})

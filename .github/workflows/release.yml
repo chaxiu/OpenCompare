@@ -554,6 +554,75 @@ jobs:
             fi
           done
           exit ${status}
+      # electron-builder embeds the blockmap payload in the AppImage trailer and
+      # ships no separate Linux blockmap artifact; latest-linux.yml records its
+      # length as blockMapSize. Reject metadata whose declared length does not
+      # match the archive's last 4 bytes (little-endian uint32), so an update
+      # client can never be handed a blockmap the file does not carry.
+      - name: Assert the AppImage embeds its declared blockmap
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          images=(release/*.AppImage)
+          if [ "${#images[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one .AppImage under release/, found ${#images[@]}." >&2
+            exit 1
+          fi
+          image="${images[0]}"
+          metadata="release/latest-linux.yml"
+          if [ ! -f "${metadata}" ]; then
+            echo "::error::Missing ${metadata}; cannot verify the embedded AppImage blockmap." >&2
+            exit 1
+          fi
+          declared="$(METADATA="${metadata}" IMAGE_NAME="$(basename "${image}")" node -e '
+            const fs = require("fs")
+            const wanted = process.env.IMAGE_NAME || ""
+            const lines = fs.readFileSync(process.env.METADATA, "utf8").split(/\r?\n/)
+            let current = ""
+            let declared = ""
+            for (const line of lines) {
+              const entry = /^\s*-\s*url:\s*(.+?)\s*$/.exec(line)
+              if (entry) {
+                current = entry[1].replace(/^"|"$/g, "").replace(/^\.\//, "")
+                continue
+              }
+              if (/^\S/.test(line)) {
+                current = ""
+                continue
+              }
+              const blockMap = /^\s*blockMapSize:\s*(\d+)\s*$/.exec(line)
+              if (blockMap && current === wanted) {
+                declared = blockMap[1]
+                break
+              }
+            }
+            if (!declared) {
+              console.error("::error::latest-linux.yml has no blockMapSize for " + wanted + ".")
+              process.exit(1)
+            }
+            process.stdout.write(declared)
+          ')"
+          actual="$(IMAGE="${image}" node -e '
+            const fs = require("fs")
+            const image = process.env.IMAGE || ""
+            const size = fs.statSync(image).size
+            if (size < 4) {
+              console.error("::error::" + image + " is smaller than 4 bytes.")
+              process.exit(1)
+            }
+            const fd = fs.openSync(image, "r")
+            const tail = Buffer.alloc(4)
+            fs.readSync(fd, tail, 0, 4, size - 4)
+            fs.closeSync(fd)
+            process.stdout.write(String(tail.readUInt32LE(0)))
+          ')"
+          if [ "${declared}" != "${actual}" ]; then
+            echo "::error::${image} ends with blockMapSize ${actual} but latest-linux.yml declares ${declared}." >&2
+            exit 1
+          fi
+          echo "Verified ${image}: embedded blockMapSize=${declared} matches latest-linux.yml."
       # Upload this platform's artifacts into the single pre-created release.
       # `shell: bash` guarantees globbing works on the windows runner too.
       - name: Upload installers to the tag's release
@@ -654,6 +723,87 @@ jobs:
                 ;;
             esac
           done <<< "${assets}"
+          exit ${status}
+      # Update metadata must describe assets this release really carries: a
+      # mismatched files[].url is a dead download URL for update clients. GitHub
+      # normalises spaces in uploaded asset names while electron-builder keeps the
+      # template, so compare against the published asset name set instead of
+      # trusting the build. Read-only and fail-closed: a dispatch re-run of a tag
+      # whose metadata is stale is refused rather than published.
+      - name: Assert latest*.yml urls match the release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          workdir="${RUNNER_TEMP}/release-metadata"
+          rm -rf "${workdir}"
+          mkdir -p "${workdir}"
+          assets="${workdir}/assets.txt"
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' > "${assets}"
+          if [ ! -s "${assets}" ]; then
+            echo "::error::Release ${RELEASE_TAG} exposes no asset names; refusing to publish update metadata." >&2
+            exit 1
+          fi
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'latest*.yml' --dir "${workdir}"
+          shopt -s nullglob
+          files=("${workdir}"/latest*.yml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No latest*.yml asset found on release ${RELEASE_TAG}." >&2
+            exit 1
+          fi
+          status=0
+          for file in "${files[@]}"; do
+            if ! ASSETS="${assets}" METADATA="${file}" node -e '
+              const fs = require("fs")
+              const names = new Set(
+                fs.readFileSync(process.env.ASSETS, "utf8").split(/\r?\n/).map((name) => name.trim()).filter(Boolean)
+              )
+              const lines = fs.readFileSync(process.env.METADATA, "utf8").split(/\r?\n/)
+              const refs = []
+              let inFiles = false
+              let inEntry = false
+              for (const line of lines) {
+                if (/^files:\s*$/.test(line)) {
+                  inFiles = true
+                  inEntry = false
+                  continue
+                }
+                if (!inFiles) continue
+                if (/^\S/.test(line)) {
+                  inFiles = false
+                  inEntry = false
+                  continue
+                }
+                const entry = /^\s*-\s*url:\s*(.+?)\s*$/.exec(line)
+                if (entry) {
+                  inEntry = true
+                  refs.push(entry[1])
+                  continue
+                }
+                if (!inEntry) continue
+                const key = /^\s+(url|path):\s*(.+?)\s*$/.exec(line)
+                if (key) refs.push(key[2])
+              }
+              const missing = refs
+                .map((ref) => ref.replace(/^"|"$/g, "").replace(/^\.\//, ""))
+                .filter((name) => !names.has(name))
+              if (refs.length === 0) {
+                console.error("::error::" + process.env.METADATA + " declares no files[].url entries.")
+                process.exit(1)
+              }
+              if (missing.length > 0) {
+                for (const name of missing) {
+                  console.error("::error::" + process.env.METADATA + " files[].url " + name + " is not a release asset.")
+                }
+                process.exit(1)
+              }
+              console.log(process.env.METADATA + " files[].url entries all match the release assets")
+            '; then
+              echo "::error::${file} update metadata points at files this release does not carry." >&2
+              status=1
+            fi
+          done
           exit ${status}
       # Read-only: a complete release for this tag can still leave the public
       # "latest" pointer on an older version (for example when a dispatch
