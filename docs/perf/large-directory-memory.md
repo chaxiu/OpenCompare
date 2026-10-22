@@ -49,8 +49,8 @@ pnpm perf:gate
 pnpm test:memory
 ```
 
-- 在系统临时目录生成真实落盘数据集（每侧 1,250 个文件、共 2,500 个文件、约 24.4 MiB
-  内容、`d0/d1/bucket-*/` 两层嵌套、每 25 个文件一处同大小不同内容、左右各一个单侧文件），
+- 在系统临时目录生成真实落盘数据集（每侧 2,000 个文件、共 4,002 个文件、约 39.1 MiB
+  内容、`d0/d1/bucket-*/` 三层嵌套、每 25 个文件一处同大小不同内容、左右各一个单侧文件），
   用 `fs` 真实列目录、真实流式 SHA-256 跑 3 轮，结束后删除数据集；不使用
   `src/shared/fixtures/` 或 `/samples`。
 - 断言每轮 `stats.entries <= maxEntries`、`stats.estimatedBytes <= maxBytes`；第 2 与第 3 轮
@@ -58,7 +58,7 @@ pnpm test:memory
   关闭会话后该根下条目归零；四态 `counts` 三轮回合逐项相等。
 - 判定函数 `src/memory-gate.ts` 是纯函数，超上限 / 轮次递增 / 会话泄漏 / 轮数不足都返回
   `ok=false` 与非零退出码，并由 `src/memory-gate.test.ts` 的红路径用例覆盖。
-- 单次运行在本机 < 5 秒，远低于 180 秒上限；`.munk/code-gates.json` 的 `memory-gate`
+- 单次运行在本机约 1.5 秒，远低于 180 秒上限；`.munk/code-gates.json` 的 `memory-gate`
   一项就是 `pnpm test:memory`（单 argv）。
 
 ## 3. 阈值与判定
@@ -202,3 +202,52 @@ pnpm perf:dir \
 
 仅跑 2 轮的原因：第 2 轮 post-round 已超过 renderer 峰值上限，而 `Δ3` 规则需要第 3 轮。
 上述数字全部来自归档证据文件，未做任何估算。
+
+### 6.2 2026-10-22 真实两目录 3 轮取证（修复后）
+
+命令（实际执行，干净工作区）：
+
+```bash
+pnpm perf:dir \
+  --left /Users/zhutao/Cursor/DawnChat \
+  --right /Users/zhutao/Cursor/ZenMind \
+  --rounds 3 \
+  --interval 1000 \
+  --out docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json
+```
+
+环境与规模（证据原文）：
+
+- OS `24.6.0` / arm64 / Apple M3 Max / 16 核 / 137438953472 B 物理内存；
+  Node `22.21.1`（Electron 内置）/ Electron `37.10.3`。
+- `commit.sha = 0d48c817dc81752428a2a4bf52f4e47ec589bea3`，工作区 `dirty=false`；证据文件
+  在本次运行后写入，运行开始时的 HEAD 即上述提交。
+- 对比树：752,479 个文件、97,565 个目录（不跟随符号链接口径）。第 1 轮实际哈希
+  76,604 个文件 / 11,105,870,346 B；第 2、3 轮命中已有缓存，实际哈希 0 个文件 / 0 B。
+- 同一应用实例 `appPid = 66492`，三轮 `rendererPid = 66513`；采样 54 条
+  （startup 1、pre-round 3、post-round 3、boundary 6、periodic 41）。
+- 墙钟：第 1 轮 22,717 ms，第 2 轮 9,361 ms，第 3 轮 9,547 ms，总 41,630 ms。
+
+RSS（每轮 post-round，字节）：
+
+| 轮次 | renderer | app 总 |
+| --- | --- | --- |
+| 1 | 737,427,456 | 1,244,807,168 |
+| 2 | 1,186,463,744 | 1,702,215,680 |
+| 3 | 1,257,750,528 | 1,791,934,464 |
+
+- 峰值：renderer `1,257,750,528` B（1.17 GiB，真实档上限 1,610,612,736 B）、main
+  `409,272,320` B、app 总 `1,791,934,464` B（1.67 GiB，上限 2,684,354,560 B）。
+- 轮次增量（renderer）：`Δ1 = 633,274,368` B、`Δ2 = 449,036,288` B、
+  `Δ3 = 71,286,784` B；实际生效增量阈值 `min(100 MiB, max(30% × Δ1, 25 MiB)) =
+  104,857,600` B，`Δ3` 未超限。
+- 判定：`verdict.ok = true`，`violations = []`；证据文件
+  `docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json`。
+
+对照 6.1 的改动前基线：renderer 峰值由 `1,960,394,752` B 降到 `1,257,750,528` B（−702,644,224 B），
+app 总峰值由 `2,505,654,272` B 降到 `1,791,934,464` B（−713,719,808 B）。第 2、3 轮的
+renderer RSS 仍高于第 1 轮，但两轮之差 `Δ3` 已降到 68 MiB，进入阈值内且不再是线性抬升：
+第 2 轮增量 `449,036,288` B 与「首次全量扫描 / 哈希后的进程驻留内存（V8 未立即回收的临时
+对象与堆扩容）」的形态一致（本轮未对该增量做单独归因测量），而第 3 轮仅 `71,286,784` B，
+说明增量已收敛而不是逐轮等比增长。上述数字全部来自归档证据文件，未做任何估算；若后续重跑，保留本
+文件并按时间命名新文件，不覆盖历史证据。

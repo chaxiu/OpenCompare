@@ -25,7 +25,7 @@ import {
 } from '@renderer/workbench/directoryCompare'
 import type { ComparisonSides } from '@renderer/workbench/snapshotOps'
 
-const FILES_PER_SIDE = 1250
+const FILES_PER_SIDE = 2000
 const FILE_BYTES = 10 * 1024
 const MIN_FILES = 2000
 const MIN_BYTES = 20 * 1024 * 1024
@@ -280,6 +280,8 @@ describe('memory gate on a real dataset', () => {
     }
 
     // Real hashing happened, and the dataset really needed the digest path.
+    const treeFiles = Object.values(rounds[0].counts).reduce((total, count) => total + count, 0)
+    expect(treeFiles).toBeGreaterThanOrEqual(MIN_FILES)
     expect(rounds[0].hashedFiles).toBeGreaterThan(0)
     expect(rounds[0].counts.modified).toBeGreaterThan(0)
     expect(rounds[0].counts.added).toBe(1)
