@@ -25,6 +25,13 @@ export default tseslint.config(
     }
   },
   {
+    // Harness launchers are plain Node scripts (`node scripts/perf-*.mjs`).
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node }
+    }
+  },
+  {
     files: ['src/renderer/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,

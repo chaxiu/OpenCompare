@@ -7,6 +7,7 @@
  *  - Web: an in-memory virtual file system for browser / `--rendererOnly` runs.
  */
 import type { CompareRequestPayload } from '../compareRequest'
+import type { PerfBridge } from '../perf/types'
 
 export type PlatformKind = 'electron' | 'web'
 
@@ -183,4 +184,11 @@ export interface PlatformPort {
    * requests it queued while the renderer was starting up.
    */
   compareRequestsReady?(): Promise<void>
+  /**
+   * Measurement-only seam. Present on the Electron bridge so a harness window
+   * can fetch its config and report round boundaries; absent in the web runtime
+   * and inert during a normal launch (the main process only answers it in
+   * harness mode).
+   */
+  readonly perf?: PerfBridge
 }

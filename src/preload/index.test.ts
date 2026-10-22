@@ -58,7 +58,8 @@ describe('preload bridge', () => {
         'deleteFile',
         'temporaryDirectory',
         'onCompareRequest',
-        'compareRequestsReady'
+        'compareRequestsReady',
+        'perf'
       ].sort()
     )
   })
@@ -72,6 +73,14 @@ describe('preload bridge', () => {
     await platform.cancelOperation('directory-1')
     expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.cancelOperation, 'directory-1')
     expect(PLATFORM_CHANNELS.cancelOperation).toBe('platform:cancel-operation')
+  })
+
+  it('forwards the measurement config and round events over their channels', async () => {
+    await platform.perf?.config()
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.perfConfig)
+
+    await platform.perf?.event({ type: 'ready' })
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.perfEvent, { type: 'ready' })
   })
 
   it('keeps the renderer on PlatformPort instead of Electron or Node I/O', () => {

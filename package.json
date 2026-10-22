@@ -24,6 +24,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "perf:dir": "electron-vite build && node scripts/perf-dir.mjs",
+    "perf:gate": "electron-vite build && node scripts/perf-gate.mjs",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",

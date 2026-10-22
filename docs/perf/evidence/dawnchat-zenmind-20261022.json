@@ -1,0 +1,792 @@
+{
+  "schema": "opencompare.perf.directory/v1",
+  "generatedAt": "2026-10-22T00:14:50.172Z",
+  "appPid": 13971,
+  "commit": {
+    "sha": "abd32e514d4ad95ad83252422b0142f1e564b3c5",
+    "dirty": true
+  },
+  "roots": {
+    "left": "/Users/zhutao/Cursor/DawnChat",
+    "right": "/Users/zhutao/Cursor/ZenMind"
+  },
+  "profile": "real",
+  "sampling": {
+    "intervalMs": 1000
+  },
+  "memoryDefinition": "renderer = workingSetSize of the Tab (renderer) process with the largest RSS; main = workingSetSize of the Browser (main) process; appTotal = sum of workingSetSize over every process reported by app.getAppMetrics(); all values converted from KB to bytes.",
+  "counts": {
+    "files": 1338294,
+    "dirs": 185460,
+    "hashedFiles": 77950,
+    "bytesToHash": 11454904514
+  },
+  "rounds": [
+    {
+      "index": 1,
+      "startedAt": "2026-10-22T00:14:12.209Z",
+      "endedAt": "2026-10-22T00:14:37.520Z",
+      "wallMs": 25310,
+      "sessionId": "directory:/Users/zhutao/Cursor/DawnChat ↔ /Users/zhutao/Cursor/ZenMind#round-1",
+      "counts": {
+        "files": 1338294,
+        "dirs": 185460,
+        "hashedFiles": 77950,
+        "bytesToHash": 11454904514
+      },
+      "rendererRss": 1092435968,
+      "appTotalRss": 1625604096,
+      "rendererPid": 13992
+    },
+    {
+      "index": 2,
+      "startedAt": "2026-10-22T00:14:37.522Z",
+      "endedAt": "2026-10-22T00:14:50.170Z",
+      "wallMs": 12648,
+      "sessionId": "directory:/Users/zhutao/Cursor/DawnChat ↔ /Users/zhutao/Cursor/ZenMind#round-2",
+      "counts": {
+        "files": 1338294,
+        "dirs": 185460,
+        "hashedFiles": 0,
+        "bytesToHash": 0
+      },
+      "rendererRss": 1960394752,
+      "appTotalRss": 2505654272,
+      "rendererPid": 13992
+    }
+  ],
+  "totalWallMs": 37961,
+  "env": {
+    "os": "24.6.0",
+    "arch": "arm64",
+    "cpuModel": "Apple M3 Max",
+    "cpuCount": 16,
+    "totalMemBytes": 137438953472,
+    "node": "22.21.1",
+    "electron": "37.10.3"
+  },
+  "samples": [
+    {
+      "label": "startup-baseline",
+      "phase": "startup",
+      "round": 0,
+      "at": "2026-10-22T00:14:12.209Z",
+      "rss": {
+        "renderer": 103776256,
+        "main": 157073408,
+        "appTotal": 366313472
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-1-start",
+      "phase": "boundary",
+      "round": 1,
+      "at": "2026-10-22T00:14:12.210Z",
+      "rss": {
+        "renderer": 104153088,
+        "main": 157138944,
+        "appTotal": 368263168
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-1-pre",
+      "phase": "pre-round",
+      "round": 1,
+      "at": "2026-10-22T00:14:12.210Z",
+      "rss": {
+        "renderer": 104153088,
+        "main": 157138944,
+        "appTotal": 368852992
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-3",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:13.210Z",
+      "rss": {
+        "renderer": 163512320,
+        "main": 188252160,
+        "appTotal": 476184576
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-4",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:14.222Z",
+      "rss": {
+        "renderer": 234553344,
+        "main": 227393536,
+        "appTotal": 586416128
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-5",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:15.221Z",
+      "rss": {
+        "renderer": 307216384,
+        "main": 262242304,
+        "appTotal": 694157312
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-6",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:16.221Z",
+      "rss": {
+        "renderer": 349650944,
+        "main": 269959168,
+        "appTotal": 744325120
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-7",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:17.221Z",
+      "rss": {
+        "renderer": 390692864,
+        "main": 313131008,
+        "appTotal": 828538880
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-8",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:18.221Z",
+      "rss": {
+        "renderer": 441925632,
+        "main": 314327040,
+        "appTotal": 880852992
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-9",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:19.222Z",
+      "rss": {
+        "renderer": 481951744,
+        "main": 315113472,
+        "appTotal": 921714688
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-10",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:20.221Z",
+      "rss": {
+        "renderer": 524075008,
+        "main": 315408384,
+        "appTotal": 964132864
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-11",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:21.222Z",
+      "rss": {
+        "renderer": 569409536,
+        "main": 315637760,
+        "appTotal": 1009696768
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-12",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:22.222Z",
+      "rss": {
+        "renderer": 633470976,
+        "main": 316162048,
+        "appTotal": 1074282496
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-13",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:23.222Z",
+      "rss": {
+        "renderer": 695959552,
+        "main": 317767680,
+        "appTotal": 1138376704
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-14",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:24.231Z",
+      "rss": {
+        "renderer": 869564416,
+        "main": 318291968,
+        "appTotal": 1312555008
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-15",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:25.231Z",
+      "rss": {
+        "renderer": 1035714560,
+        "main": 393560064,
+        "appTotal": 1554022400
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-16",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:26.231Z",
+      "rss": {
+        "renderer": 1036271616,
+        "main": 396296192,
+        "appTotal": 1557348352
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-17",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:27.231Z",
+      "rss": {
+        "renderer": 1036845056,
+        "main": 403243008,
+        "appTotal": 1564835840
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-18",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:28.231Z",
+      "rss": {
+        "renderer": 1036845056,
+        "main": 406110208,
+        "appTotal": 1567703040
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-19",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:29.231Z",
+      "rss": {
+        "renderer": 1037942784,
+        "main": 406716416,
+        "appTotal": 1569390592
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-20",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:30.231Z",
+      "rss": {
+        "renderer": 986628096,
+        "main": 407207936,
+        "appTotal": 1518518272
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-21",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:31.231Z",
+      "rss": {
+        "renderer": 986644480,
+        "main": 407470080,
+        "appTotal": 1518796800
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-22",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:32.231Z",
+      "rss": {
+        "renderer": 986660864,
+        "main": 407420928,
+        "appTotal": 1518747648
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-23",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:33.231Z",
+      "rss": {
+        "renderer": 986677248,
+        "main": 407928832,
+        "appTotal": 1519288320
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-24",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:34.231Z",
+      "rss": {
+        "renderer": 988528640,
+        "main": 407912448,
+        "appTotal": 1521123328
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-25",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:35.232Z",
+      "rss": {
+        "renderer": 988528640,
+        "main": 407879680,
+        "appTotal": 1521106944
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-26",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:36.232Z",
+      "rss": {
+        "renderer": 988528640,
+        "main": 407879680,
+        "appTotal": 1521106944
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r1-27",
+      "phase": "periodic",
+      "round": 1,
+      "at": "2026-10-22T00:14:37.242Z",
+      "rss": {
+        "renderer": 990642176,
+        "main": 408502272,
+        "appTotal": 1523810304
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-1-post",
+      "phase": "post-round",
+      "round": 1,
+      "at": "2026-10-22T00:14:37.520Z",
+      "rss": {
+        "renderer": 1092435968,
+        "main": 408502272,
+        "appTotal": 1625604096
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-1-end",
+      "phase": "boundary",
+      "round": 1,
+      "at": "2026-10-22T00:14:37.520Z",
+      "rss": {
+        "renderer": 1092435968,
+        "main": 408502272,
+        "appTotal": 1625620480
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-2-start",
+      "phase": "boundary",
+      "round": 2,
+      "at": "2026-10-22T00:14:37.522Z",
+      "rss": {
+        "renderer": 1092894720,
+        "main": 408502272,
+        "appTotal": 1626079232
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-2-pre",
+      "phase": "pre-round",
+      "round": 2,
+      "at": "2026-10-22T00:14:37.522Z",
+      "rss": {
+        "renderer": 1092894720,
+        "main": 408502272,
+        "appTotal": 1626079232
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-32",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:38.242Z",
+      "rss": {
+        "renderer": 1109573632,
+        "main": 408879104,
+        "appTotal": 1643315200
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-33",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:39.242Z",
+      "rss": {
+        "renderer": 1143373824,
+        "main": 410320896,
+        "appTotal": 1678524416
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-34",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:40.242Z",
+      "rss": {
+        "renderer": 1160249344,
+        "main": 410779648,
+        "appTotal": 1695891456
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-35",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:41.242Z",
+      "rss": {
+        "renderer": 1160642560,
+        "main": 410812416,
+        "appTotal": 1696333824
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-36",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:42.242Z",
+      "rss": {
+        "renderer": 1164312576,
+        "main": 411222016,
+        "appTotal": 1700446208
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-37",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:43.242Z",
+      "rss": {
+        "renderer": 1164460032,
+        "main": 411254784,
+        "appTotal": 1700544512
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-38",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:44.242Z",
+      "rss": {
+        "renderer": 1165869056,
+        "main": 411303936,
+        "appTotal": 1702002688
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-39",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:45.242Z",
+      "rss": {
+        "renderer": 1205387264,
+        "main": 411435008,
+        "appTotal": 1741651968
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-40",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:46.242Z",
+      "rss": {
+        "renderer": 1246019584,
+        "main": 411484160,
+        "appTotal": 1782317056
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-41",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:47.242Z",
+      "rss": {
+        "renderer": 1306853376,
+        "main": 411631616,
+        "appTotal": 1843298304
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-42",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:48.242Z",
+      "rss": {
+        "renderer": 1368211456,
+        "main": 413106176,
+        "appTotal": 1906098176
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "periodic-r2-43",
+      "phase": "periodic",
+      "round": 2,
+      "at": "2026-10-22T00:14:49.253Z",
+      "rss": {
+        "renderer": 1573011456,
+        "main": 420462592,
+        "appTotal": 2118238208
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-2-post",
+      "phase": "post-round",
+      "round": 2,
+      "at": "2026-10-22T00:14:50.171Z",
+      "rss": {
+        "renderer": 1960394752,
+        "main": 420462592,
+        "appTotal": 2505654272
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    },
+    {
+      "label": "round-2-end",
+      "phase": "boundary",
+      "round": 2,
+      "at": "2026-10-22T00:14:50.171Z",
+      "rss": {
+        "renderer": 1960394752,
+        "main": 420462592,
+        "appTotal": 2505654272
+      },
+      "pids": {
+        "renderer": 13992,
+        "main": 13971
+      }
+    }
+  ],
+  "peaks": {
+    "renderer": 1960394752,
+    "main": 420462592,
+    "appTotal": 2505654272
+  },
+  "roundDeltas": [
+    {
+      "round": 1,
+      "rendererDelta": 988659712,
+      "appTotalDelta": 1259290624
+    },
+    {
+      "round": 2,
+      "rendererDelta": 867958784,
+      "appTotalDelta": 880050176
+    }
+  ],
+  "verdict": {
+    "ok": false,
+    "violations": [
+      "renderer-peak"
+    ],
+    "appliedThresholds": {
+      "profile": "real",
+      "rendererPeakBytes": 1610612736,
+      "appTotalPeakBytes": 2684354560,
+      "roundDeltaMaxBytes": 104857600,
+      "roundDeltaRatio": 0.3,
+      "roundDeltaFloorBytes": 26214400,
+      "appliedRoundDeltaBytes": 104857600
+    }
+  }
+}

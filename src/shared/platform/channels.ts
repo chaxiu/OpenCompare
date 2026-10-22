@@ -22,5 +22,9 @@ export const PLATFORM_CHANNELS = {
   /** main → renderer: one compare request collected from the launch source. */
   compareRequest: 'platform:compare-request',
   /** renderer → main: the subscriber is listening, deliver queued requests. */
-  compareRequestsReady: 'platform:compare-requests-ready'
+  compareRequestsReady: 'platform:compare-requests-ready',
+  /** renderer → main: fetch the measurement config (harness mode only). */
+  perfConfig: 'platform:perf-config',
+  /** renderer → main: round boundary / completion events of a measurement run. */
+  perfEvent: 'platform:perf-event'
 } as const
