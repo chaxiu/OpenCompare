@@ -14,7 +14,7 @@
 - **取消能力 `PlatformPort.cancelOperation(operationId)`（平台缝）**：按 `operationId` 取消该次目录对比在平台层的在途工作（主进程销毁该摘要操作的全部在途读取流并阻止未启动文件开流，使对应 `digestFiles` **resolve 为 `{ cancelled: true }`**），未知 id 与重复调用 resolve 不抛。`DigestFilesOptions` 仅新增可选 `operationId`；通道 `platform:cancel-operation` 只登记在 `PLATFORM_CHANNELS` 单一来源，preload 仅白名单转发；`PlatformPort` 表面新增且仅新增 `cancelOperation`。Web 内存实现提供同签名能力：记录已取消 id（幂等），`digestFiles` 在操作已取消时返回与主进程同形态的 `{ cancelled: true }`，未取消时返回值不变。**取消错误不穿越 IPC**：`platform:digest-files` handler 内再兜一层，任何漏出的 `OperationCancelledError` 都转成结构化结果，取消绝不以 reject 穿过 `ipcMain.handle`；renderer 适配层（`src/renderer/src/platform/index.ts` 的 `unwrapDigestResult` / `digestFilesForComparison`）在**渲染进程内**抛回 `OperationCancelledError`，让核心既有 catch 分支照常工作。取消语义与流生命周期口径归 `directory` / `io-concurrency` / `content-digest` 域，本域只承载平台表面与两套实现一致性。
 - **列举与读文件的不可读项容错（`listDirectory` / `readTextFile`，横切契约归 `io-tolerance` 域）**：`stat` 因 ENOENT / ELOOP / EACCES / ENOTDIR 失败时退回 `lstat`，条目保留并标注 `broken` + 非空 `skippedReason`（`DirectoryEntry` 仅增可选字段）；`lstat` 也失败仍按 broken 返回；根目录 `readdir` 失败仍 reject 但给出「无法读取目录 <path>：…」中文可读错误。`read-text-file` 对真实路径（含悬空链接 / 不可读文件）返回「无法读取文件 <path>：…」，经 IPC 不含 `Error invoking remote method` 前缀。该容错改造未新增 `PlatformPort` 方法、未改既有 channel。
 - 预装核心运行时依赖（diff / node-diff3 / papaparse / @tanstack/react-virtual / yaml / jsonc-parser / lucide-react）与开发测试依赖（vitest / @testing-library/react / eslint / typescript）。
-- 配齐单命令质量门禁：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate`（各自单条 argv；`cancel-gate` 对应 `pnpm test:cancel`）。
+- 配齐单命令质量门禁：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate`（各自单条 argv；`cancel-gate` 对应 `pnpm test:cancel`，`perf-gate` 对应 `pnpm perf:gate`）。
 
 ## 验收
 
@@ -24,7 +24,7 @@
 - **ac-platformport**：定义 `PlatformPort` 抽象并给出 Electron 与 Web 两套实现，renderer 不直接依赖 Electron API。
 - **ac-select-file**：`PlatformPort.selectFile` 在两套实现中可用 —— Electron 走原生打开文件对话框返回所选绝对路径，Web 兼容实现用隐藏 file input 把所选内容物化到内存 FS 并返回可选路径；取消时返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。
 - **ac-save-file**：`PlatformPort.saveFile` 在两套实现中可用 —— Electron 保存对话框 + `node:fs/promises` 写盘并返回目标路径，Web 兼容实现把内容写入内存 FS（并尽力触发下载）；取消返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。
-- **ac-gates**：`.munk/code-gates.json` 存在，含相互独立的 `install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` 门禁，且每条命令为单条 argv。
+- **ac-gates**：`.munk/code-gates.json` 存在，含相互独立的 `install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate` 门禁，且每条命令为单条 argv。
 - **ac-desktop-build**：`build` 门禁成功产出 Electron 桌面端产物；主进程 + renderer 均可构建，能拉起基础壳窗口。
 - **ac-web-render**：renderer 可在 Web/内存模式下构建并拉起基础壳（不依赖 Electron 原生能力）。
 - **ac-gates-green**：全部门禁（lint / typecheck / build / test）在干净安装后全绿通过。

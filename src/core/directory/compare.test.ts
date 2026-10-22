@@ -534,6 +534,29 @@ describe('directory comparison engine', () => {
     expect(second.counts).toEqual(comparison.counts)
   })
 
+  it('reports real digest totals through the optional accounting hook', async () => {
+    const fs = createTrees(
+      { 'a.txt': { text: 'same' }, 'b.txt': { text: 'also' } },
+      { 'a.txt': { text: 'same' }, 'b.txt': { text: 'also' } }
+    )
+    const chunks: Array<{ files: number; bytes: number }> = []
+    const cache = createComparisonCache()
+    const options = {
+      digestFiles: fs.digestFiles,
+      onDigestStats: (stats: { files: number; bytes: number }) => chunks.push(stats)
+    }
+
+    await compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache, undefined, options)
+
+    expect(chunks).toEqual([{ files: 4, bytes: 16 }])
+
+    // A cache hit requests no digests, so the hook stays silent: accounting is
+    // the real work, never the planned tree.
+    chunks.length = 0
+    await compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache, undefined, options)
+    expect(chunks).toEqual([])
+  })
+
   it('classifies a binary pair modified when only its raw bytes differ', async () => {
     const fs = createTrees(
       {
