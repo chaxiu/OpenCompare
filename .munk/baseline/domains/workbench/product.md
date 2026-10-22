@@ -86,6 +86,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-invalid-path-stays-inline**：提交不存在的右路径时不关闭弹窗——`role="alert"` 出现在「新建对比」弹窗内部且包含该路径文本，弹窗仍在，`queryByRole('tablist', { name: '会话' })` 为 `null`（不建 tab）；未进入扫描（`listDirectories` 未被调用）。
 - **ac-picker-entry-also-unobstructed**：经弹窗内「打开文件夹」选择两个真实目录后，在扫描批次被 gate 挂住期间同样满足「无 `aria-modal` 元素 + 进度条存在 + 进度条内「取消」可点击」，即修复覆盖弹窗内的选择器发起路径，而非只修键入路径。
 - **ac-picker-cancel-keeps-dialog**：弹窗内「打开文件夹」的用户在系统选择器取消（返回 `null`）时，「新建对比」弹窗仍然打开、不建会话、不进入扫描（关闭时机改动不得让弹窗在「还没确定一对路径」时消失）。
+- **ac-renderer-cancel-notice**：扫描阶段与哈希阶段各取消一次，进度条消失、`directoryBusy` 解除、取消按钮恢复可点，notice 文本为「已取消本次目录对比，工作台保持取消前的状态。」，会话 tab、main 区域与状态栏与取消前一致。该行为在平台改为结构化取消（`{ cancelled: true }`）后仍必须成立——壳层不改布局与文案结构，取消提示由核心取消 catch 分支经既有 `noticeTone: 'info'` 通道发出。
 
 ## 非目标
 
@@ -115,6 +116,12 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **关闭时机只提前、不抬层级**：把「关闭新建对比弹窗」提前到目录对比真正开始的那一刻——在 `Workbench.tsx` 的 `runSidesCompare()` 进入扫描前清掉 `compareDialogOpen`（一处状态调用即同时覆盖键入路径与弹窗内选择器路径，且天然保留「选择器被取消时弹窗不关」）；`NewCompareDialog.submit()` 中 `await openRequest(...)` 之后的 `onClose()` 保留为幂等兜底。关闭时机必须晚于路径校验与 `resolveCompareRequest` 探测；**不要**把 `Dialog` 遮罩抬到进度条之上、也不要改成非模态（AC 要求扫描期 `aria-modal` 计数为 0）。测试落点在 `src/renderer/src/App.test.tsx`（jsdom）的 `new compare dialog` 与 `directory progress and cancel UI` 两处 describe，用 DOM 层级（`[aria-modal="true"]` 计数、`closest()`、按钮 `disabled`、click 后 `cancelOperation` 调用）表达「无覆盖层」，不要求 jsdom 做真实坐标 hit-test。
 
 ## 最近交付证明
+
+- WI：`wi_ws_601ef56ae8fd93a4`（取消结构化返回、零日志噪声与零残留，`kind: fix`）
+- 日期：2026-10-22
+- 结果：code_gates passed（含新增 `cancel-gate`；本轮 `needSelfTest=false`，UI 自测跳过）。
+- 覆盖摘要：本轮**壳层 UI 零改动**——`Workbench.tsx` 的进度条 / 取消按钮 / `notice` 文案未调整，取消提示仍由核心取消 catch 分支经既有 `noticeTone: 'info'` 发出。唯一相关变化在 renderer 适配层：`snapshotOps` / `directoryOps` / `loadSampleSessions` 的摘要 seam 改经 `digestFilesForComparison`，平台返回 `{ cancelled: true }` 时在渲染进程抛回 `OperationCancelledError`，故「取消后进度条消失、`directoryBusy` 复位、会话/状态栏/main 与取消前全等」的既有断言（`App.test.tsx` 的 `directory progress and cancel UI`）继续成立；`cancel-gate.test.ts` 另在扫描相位验证零 stderr 与不再发起 `listDirectories`。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例，全局 tech / design 折叠跳过；结构化契约归 `domains/foundation`，残留计数/零噪声门禁归 `domains/io-concurrency`，摘要块与缓存完整性归 `domains/content-digest`，核心取消控制流与半树/重试归 `domains/directory`。**本域无真实桌面点选证据**：取消提示为既有行为回归，未做 Electron 窗口人工复核。
 
 - WI：`wi_intake_f1695c0476174245`（目录对比跨相位进度归零修复 · 壳层进度条相位分段文案，`kind: fix`）
 - 日期：2026-10-22

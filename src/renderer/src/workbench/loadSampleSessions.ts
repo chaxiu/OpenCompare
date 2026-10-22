@@ -13,6 +13,7 @@ import { createDirectorySession } from './directoryCompare'
 import type { WorkbenchSession } from './session'
 import { parseCsvTable } from './session'
 import { directorySides } from './snapshotOps'
+import { digestFilesForComparison } from '../platform'
 
 export interface LoadSampleOptions {
   /** Restrict the load to a single scene; omitted loads all four. */
@@ -70,7 +71,7 @@ export async function loadSampleSessions(
               cache,
               undefined,
               {
-                digestFiles: (paths) => platform.digestFiles(paths),
+                digestFiles: (paths) => digestFilesForComparison(platform, paths),
                 listDirectories: (paths) => platform.listDirectories(paths)
               }
             )

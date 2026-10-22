@@ -26,6 +26,7 @@ import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DigestFilesOptions,
+  DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
   FileDigest,
@@ -405,6 +406,15 @@ export function activeDigestStreamCount(): number {
   return activeDigestStreams
 }
 
+/**
+ * Live entries of the digest operation registry. A settled call — completed,
+ * failed or cancelled — releases its entry, so a leaked cancellation is visible
+ * here rather than only as a later `EMFILE`.
+ */
+export function digestOperationCount(): number {
+  return digestOperations.size
+}
+
 /** Reads the live cancellation flag; never narrowed away by the compiler. */
 function isOperationCancelled(operation: DigestOperation | undefined): boolean {
   return operation !== undefined && operation.cancelled
@@ -420,8 +430,8 @@ function registerDigestOperation(operationId: string): DigestOperation {
 
 /**
  * Cancels every in-flight stream registered under `operationId`. Unknown and
- * repeated ids resolve harmlessly; the owning `digestFiles` call rejects with
- * {@link OperationCancelledError} instead of returning partial slots.
+ * repeated ids resolve harmlessly; the owning `digestFiles` call settles as a
+ * structured cancellation instead of returning partial slots.
  */
 export async function cancelOperation(operationId: string): Promise<void> {
   const operation = digestOperations.get(operationId)
@@ -501,16 +511,17 @@ export interface LocalDigestFilesOptions extends DigestFilesOptions {
  * while descriptor exhaustion still rejects, since it would fail every read.
  *
  * With an `operationId` the call registers its in-flight streams, so
- * `cancelOperation` can destroy them and make the whole batch reject instead of
- * returning partial slots; the registry entry is always released afterwards.
+ * `cancelOperation` can destroy them and make the whole batch settle as
+ * `{ cancelled: true }` instead of returning partial slots; the registry entry
+ * is always released afterwards.
  */
 export async function digestFiles(
   paths: readonly string[],
   options: LocalDigestFilesOptions = {}
-): Promise<readonly FileDigest[]> {
+): Promise<DigestFilesResult> {
   const operationId = options.operationId
   const operation = operationId === undefined ? undefined : registerDigestOperation(operationId)
-  if (isOperationCancelled(operation)) throw new OperationCancelledError()
+  if (isOperationCancelled(operation)) return { cancelled: true }
 
   const streamFactory = options.streamFactory ?? ((path: string) => createReadStream(path))
   try {
@@ -529,6 +540,10 @@ export async function digestFiles(
         return { path, ok: false, reason: readableFailure('文件', error, path).message }
       }
     })
+  } catch (error) {
+    // Cancellation never rejects across the platform / IPC boundary.
+    if (error instanceof OperationCancelledError) return { cancelled: true }
+    throw error
   } finally {
     if (operationId !== undefined) digestOperations.delete(operationId)
   }
@@ -588,10 +603,16 @@ async function temporaryDirectory(): Promise<string> {
 export interface PlatformIpcOptions {
   /** Called when the renderer announces its launch-request subscription. */
   readonly onCompareRequestsReady?: () => void
+  /**
+   * Test seam: replaces the digest read streams, so a gate can hold a real read
+   * in flight and cancel it deterministically.
+   */
+  readonly digestStreamFactory?: DigestStreamFactory
 }
 
 /** Registers the native PlatformPort handlers backed by the local file system. */
 export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
+  const digestStreamFactory = options.digestStreamFactory
   ipcMain.handle(PLATFORM_CHANNELS.compareRequestsReady, () => {
     options.onCompareRequestsReady?.()
   })
@@ -622,8 +643,21 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   )
   ipcMain.handle(
     PLATFORM_CHANNELS.digestFiles,
-    (_event, paths: unknown, options: unknown) =>
-      digestFiles(parsePathArray(paths, 'file'), parseDigestOptions(options))
+    async (_event, paths: unknown, rawOptions: unknown) => {
+      const request = parseDigestOptions(rawOptions)
+      const local: LocalDigestFilesOptions =
+        digestStreamFactory === undefined
+          ? request
+          : { ...request, streamFactory: digestStreamFactory }
+      try {
+        return await digestFiles(parsePathArray(paths, 'file'), local)
+      } catch (error) {
+        // Defensive second layer: a cancellation leaked from the core still must
+        // not reject across `ipcMain.handle` and land in the main-process stderr.
+        if (error instanceof OperationCancelledError) return { cancelled: true }
+        throw error
+      }
+    }
   )
   ipcMain.handle(PLATFORM_CHANNELS.cancelOperation, (_event, operationId: unknown) => {
     if (typeof operationId !== 'string' || operationId.length === 0) return

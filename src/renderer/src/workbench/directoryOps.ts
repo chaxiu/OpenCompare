@@ -18,6 +18,7 @@ import {
 import type { SyncDirection, SyncMode, SyncPlan } from '@core/directory/sync'
 import { extractTemplateMatches, matchTemplate, matchTemplateSlots } from '@core/directory/template'
 import type { TemplateMatchResult } from '@core/directory/template'
+import { digestFilesForComparison } from '../platform'
 
 const SAMPLE_ROOT = '/samples'
 
@@ -102,7 +103,7 @@ function compareRoots(
     cache,
     undefined,
     {
-      digestFiles: (paths) => platform.digestFiles(paths),
+      digestFiles: (paths) => digestFilesForComparison(platform, paths),
       listDirectories: (paths) => platform.listDirectories(paths)
     }
   )
