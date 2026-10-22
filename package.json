@@ -1,6 +1,6 @@
 {
   "name": "opencompare",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "OpenCompare — 现代跨平台桌面对比与三向合并工具",
   "author": {
@@ -27,6 +27,7 @@
     "measure:symlink": "vitest run --config vitest.evidence.config.mts",
     "perf:dir": "electron-vite build && node scripts/perf-dir.mjs",
     "perf:gate": "electron-vite build && node scripts/perf-gate.mjs",
+    "release:metadata": "node scripts/release-metadata.mjs",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",

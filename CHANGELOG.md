@@ -2,6 +2,20 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## v0.2.5
+
+本版收口大目录反复对比的三处退化：同进程多轮内存收敛、取消不再产生日志噪声、符号链接计数口径写死为「不跟随」。不新增功能。
+
+### 修复
+
+- **同进程连续多轮大目录对比内存收敛**：摘要缓存改为有上限的 LRU（按条目数与估算字节双重限流），关闭或替换目录会话时显式淘汰该会话根下的条目；真实 DawnChat ↔ ZenMind（约 75 万文件）同进程连续 3 轮实测，renderer 峰值由修复前基线 `1,960,394,752` B 降到 `1,257,750,528` B，第 3 轮相对第 2 轮的增量降到 `71,286,784` B，进入增量阈值内。证据见 `docs/perf/large-directory-memory.md` 与 `docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json`。
+- **取消改为结构化结果，stderr 零日志噪声**：取消不再以 rejected Promise 穿越 IPC handler 边界，改为结构化返回值并保留取消前会话；一次取消的主进程 stderr 实测零 `Error occurred in handler`、零 `OperationCancelledError`、零 `ECANCELED`，不提交半棵树、不写半份缓存。`pnpm test:cancel`（`cancel-gate`）持续断言该口径。
+- **符号链接计数口径：不跟随符号链接**：目录扫描不进入链接指向的目录，链接自身各计 1 条并参与 `same / added / removed / modified`，链接目标子树不产生条目。真实两目录 footer 条目总数由跟随口径的 1,338,294 降到 752,479；跳过项只统计真正不可读的条目并按「已跳过：左 X / 右 Y」分列展示（实测左 0 / 右 0），四态计数之和与 `fileCount` 相等。口径与取证见 `docs/symlink-no-follow.md`。
+
+### 升级方式
+
+下载 v0.2.5 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `OpenCompare-Setup-0.2.5.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+
 ## v0.2.4
 
 本版包含 v0.2.3 已合入但未发布的改动：悬空链接容错、摘要缓存改进。v0.2.3 从未打 tag、从未公开 Release，其用户可见内容并入本版。同批合入目录对比的批量分页扫描、进度与取消、窗口化目录树与相位计数修复。不新增、不改动其它功能。
