@@ -177,6 +177,8 @@ export interface CompareSidesOptions {
   readonly onProgress?: ProgressReporter
   /** Test/support override of the digest chunk size. */
   readonly digestBatchSize?: number
+  /** Per-chunk real digest accounting; the memory harness records it. */
+  readonly onDigestStats?: (stats: { readonly files: number; readonly bytes: number }) => void
 }
 
 /** Compares two sides (either real directory or mounted snapshot) and refreshes the cache. */
@@ -192,6 +194,7 @@ export function compareSides(
     signal: options.signal,
     onProgress: options.onProgress,
     digestBatchSize,
+    onDigestStats: options.onDigestStats,
     // One `operationId` covers every digest chunk of this comparison.
     digestFiles: (paths) =>
       platform.digestFiles(paths, operationId === undefined ? undefined : { operationId }),
