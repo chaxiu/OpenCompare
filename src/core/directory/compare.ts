@@ -188,6 +188,12 @@ export interface ComparisonIoOptions extends ScanDirectoryOptions {
    * merged scan totals so digest progress never restarts at zero.
    */
   readonly progressBase?: ProgressBase
+  /**
+   * Optional per-chunk accounting hook: how many files this chunk actually
+   * hashed and how many bytes those successful digests consumed. It never
+   * changes the comparison; the memory harness uses it to record real work.
+   */
+  readonly onDigestStats?: (stats: { readonly files: number; readonly bytes: number }) => void
 }
 
 /** Content digest of one file, keyed by the metadata it was computed for. */
@@ -915,6 +921,7 @@ export async function digestContentCandidates(
       // The contract is one result per request, in input order; a missing slot
       // or a failed item is just an unreadable body, never a batch-wide failure.
       let chunkBytes = 0
+      let chunkHashedFiles = 0
       chunk.forEach((path, index) => {
         const digest = digests[index]
         if (digest === undefined || !digest.ok) {
@@ -926,6 +933,7 @@ export async function digestContentCandidates(
           throw new Error(`No scanned file at ${path}; call planContentReads first.`)
         }
         chunkBytes += digest.bytes
+        chunkHashedFiles += 1
         cache.hashes.set(path, {
           size: node.size,
           modifiedMs: node.modifiedMs,
@@ -935,6 +943,7 @@ export async function digestContentCandidates(
 
       settledFiles += chunk.length
       settledBytes += chunkBytes
+      options.onDigestStats?.({ files: chunkHashedFiles, bytes: chunkBytes })
       onProgress?.({
         phase: 'digest',
         files: base.files + settledFiles,

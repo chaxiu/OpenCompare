@@ -1,0 +1,16 @@
+{
+  "real": {
+    "rendererPeakBytes": 1610612736,
+    "appTotalPeakBytes": 2684354560,
+    "roundDeltaMaxBytes": 104857600,
+    "roundDeltaRatio": 0.3,
+    "roundDeltaFloorBytes": 26214400
+  },
+  "gate": {
+    "rendererPeakBytes": 1073741824,
+    "appTotalPeakBytes": 2147483648,
+    "roundDeltaMaxBytes": 104857600,
+    "roundDeltaRatio": 0.3,
+    "roundDeltaFloorBytes": 26214400
+  }
+}

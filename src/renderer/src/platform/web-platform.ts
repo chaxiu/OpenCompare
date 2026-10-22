@@ -9,7 +9,6 @@ import type {
   SelectFileOptions
 } from '@shared/platform/types'
 import { sha256Bytes } from '@core/directory/hash'
-import { OperationCancelledError } from '@core/io'
 
 declare global {
   interface Window {
@@ -150,8 +149,8 @@ export function createWebPlatformPort(): PlatformPort {
 
   /**
    * Web cancellation has no real streams to destroy, so it records the id and
-   * lets a digest request carrying it fail with the same error type the desktop
-   * runtime raises. Ids are never reused, so the marker stays harmless.
+   * lets a digest request carrying it settle as the same structured marker the
+   * desktop runtime returns. Ids are never reused, so the marker stays harmless.
    */
   const cancelledOperations = new Set<string>()
 
@@ -269,7 +268,7 @@ export function createWebPlatformPort(): PlatformPort {
     digestFiles: async (paths, options) => {
       const operationId = options?.operationId
       if (operationId !== undefined && cancelledOperations.has(operationId)) {
-        throw new OperationCancelledError()
+        return { cancelled: true }
       }
       const encoder = new TextEncoder()
       return paths.map<FileDigest>((path) => {

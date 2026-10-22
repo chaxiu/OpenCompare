@@ -26,6 +26,7 @@ import { buildSyncPlan } from '@core/directory/sync'
 import { DIRECTORY_SCENE, DIRECTORY_SAMPLE_PATHS, SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
+  DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
   FileDigest,
@@ -38,6 +39,7 @@ import {
   activeDigestStreamCount,
   cancelOperation,
   digestFiles,
+  digestOperationCount,
   listDirectories,
   registerPlatformIpc
 } from './electron-platform'
@@ -71,6 +73,16 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   return Promise.resolve(handler({}, ...args))
 }
 
+/**
+ * What the renderer adapter does with a structured cancellation: turn it back
+ * into the core's `OperationCancelledError` inside its own process.
+ */
+async function coreDigest(request: Promise<DigestFilesResult>): Promise<readonly FileDigest[]> {
+  const result = await request
+  if (Array.isArray(result)) return result
+  throw new OperationCancelledError()
+}
+
 const platform: PlatformPort = {
   kind: 'electron',
   homeDirectory: () => invoke(PLATFORM_CHANNELS.homeDirectory) as Promise<string>,
@@ -87,7 +99,7 @@ const platform: PlatformPort = {
     >,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   digestFiles: (paths, options) =>
-    invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<readonly FileDigest[]>,
+    invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
     invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
   writeTextFile: (path, content, modifiedMs) =>
@@ -682,7 +694,7 @@ describe('batch directory listing', () => {
 
     const list: ListDirectory = (path) => platform.listDirectory(path)
     const batched = (paths: readonly string[]) => platform.listDirectories(paths)
-    const digestFiles = (paths: readonly string[]) => platform.digestFiles(paths)
+    const digestFiles = (paths: readonly string[]) => coreDigest(platform.digestFiles(paths))
 
     try {
       await chmod(join(left, 'locked'), 0o000)
@@ -754,7 +766,7 @@ describe('batch directory listing', () => {
       createComparisonCache(),
       undefined,
       {
-        digestFiles: (paths) => platform.digestFiles(paths),
+        digestFiles: (paths) => coreDigest(platform.digestFiles(paths)),
         listDirectories: batched
       }
     )
@@ -829,7 +841,7 @@ describe('byte digest', () => {
 
     const paths = cases.map((item) => join(root, item.name))
     const missing = join(root, 'missing.bin')
-    const digests = await platform.digestFiles([...paths, missing])
+    const digests = await coreDigest(platform.digestFiles([...paths, missing]))
 
     // One result per requested path, in input order.
     expect(digests).toHaveLength(paths.length + 1)
@@ -860,7 +872,7 @@ describe('byte digest', () => {
     const target = join(root, 'invalid.bin')
     await writeFile(target, bytes)
 
-    const [digest] = await platform.digestFiles([target])
+    const [digest] = await coreDigest(platform.digestFiles([target]))
     expect(digest.ok).toBe(true)
     if (!digest.ok) return
 
@@ -872,7 +884,7 @@ describe('byte digest', () => {
     const sample = SAMPLE_FIXTURE_FILES.find((file) => file.path === '/samples/csv/orders.left.csv')
     if (sample === undefined) throw new Error('missing bundled sample fixture')
 
-    const [digest] = await platform.digestFiles([sample.path])
+    const [digest] = await coreDigest(platform.digestFiles([sample.path]))
     expect(digest).toMatchObject({
       ok: true,
       sha256: sha256Hex(sample.text),
@@ -890,7 +902,7 @@ describe('byte digest', () => {
       },
       createComparisonCache(),
       undefined,
-      { digestFiles: (paths) => platform.digestFiles(paths) }
+      { digestFiles: (paths) => coreDigest(platform.digestFiles(paths)) }
     )
 
     expect(comparison.counts).toEqual({
@@ -927,7 +939,7 @@ describe('byte digest', () => {
       },
       createComparisonCache(),
       undefined,
-      { digestFiles: (paths) => platform.digestFiles(paths) }
+      { digestFiles: (paths) => coreDigest(platform.digestFiles(paths)) }
     )
 
     expect(comparison.counts).toEqual({ same: 0, added: 0, removed: 0, modified: 1 })
@@ -1095,14 +1107,7 @@ describe('digest cancellation', () => {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
-  async function errorOf(promise: Promise<unknown>): Promise<unknown> {
-    return promise.then(
-      () => 'resolved',
-      (error: unknown) => error
-    )
-  }
-
-  it('destroys every in-flight stream and rejects instead of returning partial slots', async () => {
+  it('destroys every in-flight stream and settles as a structured cancellation', async () => {
     const streams: HangingStream[] = []
     const run = digestFiles(['/virtual/a.bin', '/virtual/b.bin', '/virtual/c.bin'], {
       operationId: 'streams-op',
@@ -1115,14 +1120,16 @@ describe('digest cancellation', () => {
     })
 
     await waitUntil(() => streams.length === 2 && activeDigestStreamCount() === 2)
+
     await cancelOperation('streams-op')
 
-    const error = await errorOf(run)
-    expect(error).toBeInstanceOf(OperationCancelledError)
-    expect((error as OperationCancelledError).code).toBe('ECANCELED')
+    const result = await run
+    expect(Array.isArray(result)).toBe(false)
+    expect(result).toEqual({ cancelled: true })
     expect(streams.every((stream) => stream.destroyed)).toBe(true)
     await delay(20)
     expect(activeDigestStreamCount()).toBe(0)
+    expect(digestOperationCount()).toBe(0)
   })
 
   it('treats unknown and repeated ids as harmless and reclaims finished operations', async () => {
@@ -1131,8 +1138,11 @@ describe('digest cancellation', () => {
     await writeFile(file, 'done')
 
     const normal = await digestFiles([file], { operationId: 'normal-op' })
+    expect(Array.isArray(normal)).toBe(true)
+    if (!Array.isArray(normal)) throw new Error('expected a digest array')
     expect(normal[0]).toMatchObject({ ok: true })
     expect(activeDigestStreamCount()).toBe(0)
+    expect(digestOperationCount()).toBe(0)
 
     await expect(cancelOperation('never-registered')).resolves.toBeUndefined()
     await expect(cancelOperation('normal-op')).resolves.toBeUndefined()
@@ -1153,7 +1163,8 @@ describe('digest cancellation', () => {
     expect(streams[0].destroyed).toBe(false)
 
     await cancelOperation('other-op')
-    expect(await errorOf(other)).toBeInstanceOf(OperationCancelledError)
+    expect(await other).toEqual({ cancelled: true })
+    expect(digestOperationCount()).toBe(0)
   })
 
   it('scopes cancellation to one operation and lets the other finish correctly', async () => {
@@ -1186,12 +1197,14 @@ describe('digest cancellation', () => {
 
     await waitUntil(() => aStreams.length === 2 && bStreams.length === 2)
     await cancelOperation('op-a')
-    expect(await errorOf(a)).toBeInstanceOf(OperationCancelledError)
+    expect(await a).toEqual({ cancelled: true })
     // B still holds both of its streams after A was cancelled.
     expect(activeDigestStreamCount()).toBe(2)
 
     releaseGate()
     const results = await b
+    expect(Array.isArray(results)).toBe(true)
+    if (!Array.isArray(results)) throw new Error('expected a digest array')
     const expected = createHash('sha256').update(payload).digest('hex')
     expect(results).toEqual([
       { path: '/b/one.txt', ok: true, sha256: expected, bytes: payload.length },
@@ -1224,7 +1237,7 @@ describe('digest cancellation', () => {
       createComparisonCache(),
       undefined,
       {
-        digestFiles: (paths) => platform.digestFiles(paths),
+        digestFiles: (paths) => coreDigest(platform.digestFiles(paths)),
         listDirectories: (paths) => platform.listDirectories(paths)
       }
     )
@@ -1240,18 +1253,21 @@ describe('digest cancellation', () => {
       undefined,
       {
         digestFiles: (paths) =>
-          digestFiles(paths, {
-            operationId: 'real-cancel',
-            streamFactory: (path) => gatedRealStream(path, gate)
-          }),
+          coreDigest(
+            digestFiles(paths, {
+              operationId: 'real-cancel',
+              streamFactory: (path) => gatedRealStream(path, gate)
+            })
+          ),
         listDirectories: (paths) => platform.listDirectories(paths)
       }
     )
 
     await waitUntil(() => activeDigestStreamCount() > 0)
     await cancelOperation('real-cancel')
-    expect(await errorOf(cancelled)).toBeInstanceOf(OperationCancelledError)
+    await expect(cancelled).rejects.toBeInstanceOf(OperationCancelledError)
     expect(activeDigestStreamCount()).toBe(0)
+    expect(digestOperationCount()).toBe(0)
 
     const retried = await compareDirectories(
       left,
@@ -1261,7 +1277,8 @@ describe('digest cancellation', () => {
       createComparisonCache(),
       undefined,
       {
-        digestFiles: (paths) => platform.digestFiles(paths, { operationId: 'real-retry' }),
+        digestFiles: (paths) =>
+          coreDigest(platform.digestFiles(paths, { operationId: 'real-retry' })),
         listDirectories: (paths) => platform.listDirectories(paths)
       }
     )

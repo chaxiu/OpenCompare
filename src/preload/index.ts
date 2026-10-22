@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type { CompareRequestPayload } from '@shared/compareRequest'
+import type { PerfHarnessConfig, PerfRendererEvent } from '@shared/perf/types'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
+  DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
-  FileDigest,
   PlatformPort
 } from '@shared/platform/types'
 
@@ -33,9 +34,7 @@ const platform: PlatformPort = {
   readTextFile: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   digestFiles: (paths, options) =>
-    ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<
-      readonly FileDigest[]
-    >,
+    ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
   writeTextFile: (path, content, modifiedMs) =>
@@ -60,7 +59,16 @@ const platform: PlatformPort = {
     }
   },
   compareRequestsReady: () =>
-    ipcRenderer.invoke(PLATFORM_CHANNELS.compareRequestsReady) as Promise<void>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.compareRequestsReady) as Promise<void>,
+  // Inert outside a harness run: the main process registers these handlers only
+  // when the measurement mode is active, and the perf window is the only one
+  // that asks for them.
+  perf: {
+    config: () =>
+      ipcRenderer.invoke(PLATFORM_CHANNELS.perfConfig) as Promise<PerfHarnessConfig | null>,
+    event: (event: PerfRendererEvent) =>
+      ipcRenderer.invoke(PLATFORM_CHANNELS.perfEvent, event) as Promise<void>
+  }
 }
 
 contextBridge.exposeInMainWorld('openComparePlatform', platform)
