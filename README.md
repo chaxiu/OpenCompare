@@ -2,7 +2,7 @@
 
 对标的 **Beyond Compare 5 Pro** 的现代跨平台桌面对比与三向合并工具。基于 Electron + React 19 + TypeScript，一套代码同时构建桌面应用与浏览器预览。
 
-> ✅ **当前发布状态：v0.2.5 待发布；最新公开 Release 为 [v0.2.4](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4)。** v0.2.5 收口大目录反复对比的三处退化：多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径，见 [`docs/release-notes/v0.2.5.md`](docs/release-notes/v0.2.5.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
+> ✅ **当前发布状态：v0.2.5 已发布；最新公开 Release 为 [v0.2.5](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5)。** v0.2.5 收口大目录反复对比的三处退化：多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径，见 [`docs/release-notes/v0.2.5.md`](docs/release-notes/v0.2.5.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 对开发者与运维团队最常用的四类对比，OpenCompare 内置了可直接试跑的完整样本，并支持打开/保存本地真实文件：
 
@@ -10,10 +10,10 @@
 
 | 版本 | 状态 | 说明 |
 | --- | --- | --- |
-| [v0.2.5](docs/release-notes/v0.2.5.md) | 待发布 | 多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径，见[发布说明](docs/release-notes/v0.2.5.md) |
-| [v0.2.4](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4) | 已发布（最新公开 Release） | 承接 v0.2.3 未发布内容，并合入目录对比批量扫描、进度与取消、窗口化目录树等修复，见[发布说明](docs/release-notes/v0.2.4.md) |
+| [v0.2.5](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5) | 已发布（最新公开 Release） | 多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径，见[发布说明](docs/release-notes/v0.2.5.md) |
+| [v0.2.4](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4) | 已发布（上一版） | 承接 v0.2.3 未发布内容，并合入目录对比批量扫描、进度与取消、窗口化目录树等修复，见[发布说明](docs/release-notes/v0.2.4.md) |
 | v0.2.3 | 未发布，内容并入 v0.2.4 | 从未打 tag、从未公开 Release；用户可见改动全部见 v0.2.4 |
-| [v0.2.2](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2) | 已发布（上一版） | 大目录对比 EMFILE 修复 |
+| [v0.2.2](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2) | 已发布 | 大目录对比 EMFILE 修复 |
 
 ## 核心能力
 
