@@ -43,7 +43,7 @@
 测量对象为本机真实目录 `/Users/zhutao/Cursor/DawnChat` ↔ `/Users/zhutao/Cursor/ZenMind`。两个数字都由 `scripts/measure-symlink-footer.evidence.test.ts` 通过应用同一条核心 + 平台入口（`compareDirectories` + `listDirectories` + `digestFiles`）测量，不是手填或从历史发布说明抄录。
 
 - 测量命令：`pnpm measure:symlink`（可用 `OPENCOMPARE_EVIDENCE_LEFT` / `OPENCOMPARE_EVIDENCE_RIGHT` 覆盖目录，`OPENCOMPARE_EVIDENCE_OUT` 指定结果文件）
-- 原始输出（vitest 日志）：旧口径 `docs/evidence/symlink-footer-old.raw.log`，新口径 `docs/evidence/symlink-footer-new.raw.log`
+- 原始输出：`pnpm measure:symlink` 在 stdout 打印一行 `OPENCOMPARE_SYMLINK_EVIDENCE <JSON>`；设置 `OPENCOMPARE_EVIDENCE_OUT` 时，同一份 report 以纯 JSON（无前缀）落盘，可直接 `JSON.parse`
 - 机器可读结果：`docs/evidence/symlink-footer-old.json` / `docs/evidence/symlink-footer-new.json`
 
 | 口径 | 被测 commit | footer 条目总数 | same | added | removed | modified | 已跳过（左/右） |
@@ -53,8 +53,8 @@
 
 逐行取证信息：
 
-- 旧行：命令 `OPENCOMPARE_EVIDENCE_OUT=docs/evidence/symlink-footer-old.json pnpm measure:symlink`，被测 commit `abd32e5`（该 commit 的 `listDirectories` 用 `stat` 跟随链接），原始输出 `docs/evidence/symlink-footer-old.raw.log` 与 `docs/evidence/symlink-footer-old.json`。
-- 新行：同一命令，被测 commit 为 `abd32e5` 加上本 WI 的符号链接改动（worktree 实测），原始输出 `docs/evidence/symlink-footer-new.raw.log` 与 `docs/evidence/symlink-footer-new.json`。
+- 旧行：命令 `OPENCOMPARE_EVIDENCE_OUT=docs/evidence/symlink-footer-old.json pnpm measure:symlink`，被测 commit `abd32e5`（该 commit 的 `listDirectories` 用 `stat` 跟随链接），原始输出为 stdout 的 `OPENCOMPARE_SYMLINK_EVIDENCE` 行，机器可读结果 `docs/evidence/symlink-footer-old.json`。
+- 新行：同一命令，被测 commit 为 `abd32e5` 加上本 WI 的符号链接改动（worktree 实测），原始输出同样来自 stdout，机器可读结果 `docs/evidence/symlink-footer-new.json`。
 
 差异归因：旧数字把指向目录的链接目标子树整棵重复计入（DawnChat 14 条目录链接、ZenMind 2,420 条目录链接），并把这 461 条悬空链接记为跳过；新口径下链接各计 1 条、目标子树 0 条、悬空链接不再跳过。条目总数从 1,338,294 降到 752,479（差额 585,815 = same −433 + added −585,327 + modified −55），四态差异只出现在链接相关条目。两次测量的链接普查一致：DawnChat 240 条链接（14 目录 / 217 文件 / 9 悬空），ZenMind 3,326 条链接（2,420 目录 / 454 文件 / 452 悬空）。
 

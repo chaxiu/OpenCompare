@@ -4,9 +4,11 @@
  * uses, and prints the footer numbers as JSON.
  *
  * It intentionally contains no assertions and never runs under `pnpm test`;
- * run it with `pnpm measure:symlink` and capture stdout. The same file also
- * runs against the pre-change commit (it only touches APIs that already
- * existed), which is how the old footer numbers were produced.
+ * run it with `pnpm measure:symlink`. The `OPENCOMPARE_SYMLINK_EVIDENCE` marker
+ * line goes to stdout, while an `OPENCOMPARE_EVIDENCE_OUT` file receives plain
+ * JSON (see `symlink-evidence-format.ts`). The same file also runs against the
+ * pre-change commit (it only touches APIs that already existed), which is how
+ * the old footer numbers were produced.
  */
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -23,6 +25,7 @@ vi.mock('electron', () => ({
 
 import { compareDirectories, createComparisonCache } from '../src/core/directory/compare'
 import { digestFiles, listDirectories } from '../src/main/platform/electron-platform'
+import { formatSymlinkEvidence } from './symlink-evidence-format'
 
 const LEFT = process.env.OPENCOMPARE_EVIDENCE_LEFT ?? '/Users/zhutao/Cursor/DawnChat'
 const RIGHT = process.env.OPENCOMPARE_EVIDENCE_RIGHT ?? '/Users/zhutao/Cursor/ZenMind'
@@ -88,9 +91,11 @@ describe('real DawnChat ↔ ZenMind symlink footer evidence', () => {
       rightSkipped: (comparison as { rightSkipped?: number }).rightSkipped,
       linkCensus: { left: leftCensus, right: rightCensus }
     }
-    const handoff = `OPENCOMPARE_SYMLINK_EVIDENCE ${JSON.stringify(report)}\n`
+    const { json, handoff } = formatSymlinkEvidence(report)
     const out = process.env.OPENCOMPARE_EVIDENCE_OUT
-    if (out === undefined) process.stdout.write(handoff)
-    else await writeFile(out, handoff, 'utf8')
+    // The marker line always goes to stdout; the OUT file is plain JSON so it
+    // stays machine-readable (`JSON.parse`) instead of a marker-prefixed blob.
+    if (out !== undefined) await writeFile(out, json, 'utf8')
+    process.stdout.write(handoff)
   })
 })
