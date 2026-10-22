@@ -129,6 +129,8 @@ const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md'), 'utf8
 
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 
+const symlinkDoc = readFileSync(join(repoRoot, 'docs/symlink-no-follow.md'), 'utf8')
+
 const changelog = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')
 
 const releaseNotesPath = join(repoRoot, `docs/release-notes/${currentTag}.md`)
@@ -938,6 +940,25 @@ describe('release signing credentials checklist', () => {
     expect(issues).toContain('当前版本已修复')
   })
 
+  it('documents the no-follow symlink policy and drops the contradictory copy', () => {
+    const issues = readme.slice(readme.indexOf('## 已知问题'))
+    expect(issues).toContain('不跟随符号链接')
+    expect(issues).not.toContain('符号链接计数放大')
+    expect(readme).not.toMatch(/悬空符号链接[^\n]*跳过并计数/)
+    for (const phrase of [
+      '不进入链接指向的任何目录',
+      '链接自身作为一条叶条目',
+      '悬空链接',
+      'EACCES',
+      '已跳过：左 X / 右 Y',
+      '指向**文件**的链接',
+      '指向**目录**的链接',
+      'opencompare.snapshot/v1'
+    ]) {
+      expect(symlinkDoc).toContain(phrase)
+    }
+  })
+
   it('attributes the file-handle bug to v0.2.1 and earlier in the README', () => {
     const issues = readme.slice(readme.indexOf('## 已知问题'))
     expect(issues).toContain('v0.2.1 及更早')
@@ -1176,23 +1197,20 @@ describe('release document consistency', () => {
     expect(readme).not.toContain(`最新公开 Release 为 [${ghostTag}]`)
   })
 
-  it('records the three unfixed known issues without claiming a fix', () => {
+  it('records the remaining unfixed known issues without claiming a fix', () => {
     const issues = readme.slice(readme.indexOf('## 已知问题'))
     expect(issues.match(/当前版本已修复/g)?.length).toBe(2)
     const unfixed = issues
       .split(/\r?\n/)
       .filter((line) => line.startsWith('- ') && line.includes('已知未修'))
-    expect(unfixed).toHaveLength(3)
-    for (const phrase of [
-      '849',
-      '1,510 MB',
-      '未 OOM',
-      'ECANCELED',
-      '不影响取消结果',
-      '符号链接计数放大'
-    ]) {
+    expect(unfixed).toHaveLength(2)
+    for (const phrase of ['849', '1,510 MB', '未 OOM', 'ECANCELED', '不影响取消结果']) {
       expect(issues).toContain(phrase)
     }
+    // The symlink counting issue is resolved by the no-follow policy; only the
+    // release-025 item may flip the other three known-issue claims.
+    expect(issues).toContain('不跟随符号链接')
+    expect(issues).not.toContain('符号链接计数放大')
     for (const line of unfixed) {
       expect(line).not.toContain('已修复')
     }

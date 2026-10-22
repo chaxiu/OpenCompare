@@ -10,6 +10,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  readlink,
   rm,
   stat,
   utimes,
@@ -31,6 +32,7 @@ import type {
   DirectoryListing,
   FileDigest,
   FileDigestSuccess,
+  LinkTargetKind,
   ListDirectoriesOptions,
   PathProbeKind
 } from '@shared/platform/types'
@@ -48,6 +50,8 @@ export const DEFAULT_STAT_CONCURRENCY = 16
 /** The subset of `fs.Stats` a listing reads; injectable so tests can observe it. */
 export interface ListableStat {
   isDirectory(): boolean
+  /** Present on real `lstat` results; absent in narrow test doubles. */
+  isSymbolicLink?: () => boolean
   readonly size: number
   readonly mtimeMs: number
 }
@@ -55,8 +59,8 @@ export interface ListableStat {
 export interface LocalListDirectoriesOptions extends ListDirectoriesOptions {
   /** Overrides {@link DEFAULT_STAT_CONCURRENCY}. */
   readonly statConcurrency?: number
-  /** Test seam replacing the `stat` syscall; defaults to `node:fs/promises`. */
-  readonly statFile?: (path: string) => Promise<ListableStat>
+  /** Test seam replacing the `lstat` syscall; defaults to `node:fs/promises`. */
+  readonly lstatFile?: (path: string) => Promise<ListableStat>
 }
 
 function resolveStatBudget(requested: number | undefined): number {
@@ -243,51 +247,38 @@ function readableFailure(subject: '目录' | '文件', error: unknown, path: str
 /** Readable reason one entry is flagged `broken`; never empty. */
 function brokenReason(error: unknown, entry: Dirent): string {
   const code = errorCode(error)
-  const kind = entry.isSymbolicLink() ? '悬空符号链接' : '不可读条目'
-  return `${kind}：${describeFileSystemCode(code)}${code ? `（${code}）` : ''}`
+  const kind = entry.isSymbolicLink() ? '符号链接' : '不可读条目'
+  return `${kind}无法检查：${describeFileSystemCode(code)}${code ? `（${code}）` : ''}`
 }
 
-/** Inspects one directory entry, flagging (never failing on) a broken one. */
+/** Resolves a link target's shape without the scan ever entering it. */
+async function inspectLinkTarget(entryPath: string): Promise<LinkTargetKind> {
+  try {
+    return (await stat(entryPath)).isDirectory() ? 'directory' : 'file'
+  } catch {
+    // A dangling link (ENOENT) or a link loop (ELOOP) still has a comparable
+    // target string; it is not an unreadable entry, so it is never skipped.
+    return 'missing'
+  }
+}
+
+/**
+ * Inspects one directory entry from `lstat` only, so a symbolic link is listed
+ * as its own leaf entry and its target subtree is never walked.
+ */
 async function inspectEntry(
   entryPath: string,
   entry: Dirent,
-  statFile: (path: string) => Promise<ListableStat>
+  lstatFile: (path: string) => Promise<ListableStat>
 ): Promise<DirectoryEntry> {
-  let statFailure: unknown
+  let info: ListableStat
   try {
-    const info = await statFile(entryPath)
-    return {
-      name: entry.name,
-      path: entryPath,
-      isDirectory: info.isDirectory(),
-      size: info.size,
-      modifiedMs: info.mtimeMs
-    }
+    info = await lstatFile(entryPath)
   } catch (error) {
     // Descriptor exhaustion would fail every remaining entry: stay fatal.
     const fatal = toReadableIoError(error)
     if (fatal !== error) throw fatal
-    statFailure = error
     if (!ENTRY_FALLBACK_CODES.has(errorCode(error) ?? '')) throw error
-  }
-
-  // A dangling symbolic link or unreadable child is listed but cannot be
-  // inspected; keep it in the result with its own link metadata so one bad
-  // entry never fails the comparison. The scan counts these as skipped.
-  try {
-    const info = await lstat(entryPath)
-    return {
-      name: entry.name,
-      path: entryPath,
-      isDirectory: info.isDirectory(),
-      size: info.size,
-      modifiedMs: info.mtimeMs,
-      broken: true,
-      skippedReason: brokenReason(statFailure, entry)
-    }
-  } catch (error) {
-    const fatal = toReadableIoError(error)
-    if (fatal !== error) throw fatal
     return {
       name: entry.name,
       path: entryPath,
@@ -298,6 +289,46 @@ async function inspectEntry(
       broken: true,
       skippedReason: brokenReason(error, entry)
     }
+  }
+
+  const isSymbolicLink = info.isSymbolicLink?.() ?? entry.isSymbolicLink()
+  if (isSymbolicLink) {
+    try {
+      const linkTarget = await readlink(entryPath)
+      return {
+        name: entry.name,
+        path: entryPath,
+        // A link is always a leaf: never a directory the scan may recurse into.
+        isDirectory: false,
+        size: info.size,
+        modifiedMs: info.mtimeMs,
+        isSymbolicLink: true,
+        linkTarget,
+        linkTargetKind: await inspectLinkTarget(entryPath)
+      }
+    } catch (error) {
+      const fatal = toReadableIoError(error)
+      if (fatal !== error) throw fatal
+      if (!ENTRY_FALLBACK_CODES.has(errorCode(error) ?? '')) throw error
+      return {
+        name: entry.name,
+        path: entryPath,
+        isDirectory: false,
+        size: info.size,
+        modifiedMs: info.mtimeMs,
+        isSymbolicLink: true,
+        broken: true,
+        skippedReason: brokenReason(error, entry)
+      }
+    }
+  }
+
+  return {
+    name: entry.name,
+    path: entryPath,
+    isDirectory: info.isDirectory(),
+    size: info.size,
+    modifiedMs: info.mtimeMs
   }
 }
 
@@ -319,7 +350,7 @@ export async function listDirectories(
   paths: readonly string[],
   options: LocalListDirectoriesOptions = {}
 ): Promise<readonly DirectoryListing[]> {
-  const statFile = options.statFile ?? ((path: string) => stat(path))
+  const lstatFile = options.lstatFile ?? ((path: string) => lstat(path))
   const statConcurrency = resolveStatBudget(options.statConcurrency)
 
   const readSlots = await mapWithLimit(
@@ -352,7 +383,7 @@ export async function listDirectories(
   const inspected = await mapWithLimit(tasks, { concurrency: statConcurrency }, async (task) => {
     const slot = readSlots[task.slot]
     if (slot.kind !== 'dirents') throw new Error('Unreachable: stat task without a listing.')
-    return inspectEntry(join(slot.path, task.entry.name), task.entry, statFile)
+    return inspectEntry(join(slot.path, task.entry.name), task.entry, lstatFile)
   })
 
   const entriesBySlot = readSlots.map(() => [] as DirectoryEntry[])

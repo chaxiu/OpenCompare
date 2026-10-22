@@ -111,6 +111,8 @@ export function createLargeDirectoryComparison(): DirectoryComparison {
     root,
     counts,
     fileCount: LARGE_FILE_COUNT,
+    leftSkipped: 0,
+    rightSkipped: 0,
     skipped: 0
   }
 }

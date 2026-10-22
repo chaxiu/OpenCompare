@@ -11,6 +11,9 @@ import type { PerfBridge } from '../perf/types'
 
 export type PlatformKind = 'electron' | 'web'
 
+/** What a symbolic link resolves to, without the scan ever entering it. */
+export type LinkTargetKind = 'file' | 'directory' | 'missing'
+
 /** A directory entry as returned by {@link PlatformPort.listDirectory}. */
 export interface DirectoryEntry {
   readonly name: string
@@ -19,9 +22,18 @@ export interface DirectoryEntry {
   readonly size: number
   readonly modifiedMs: number
   /**
-   * True when the entry could not be fully inspected (a dangling symbolic link,
-   * an unreadable entry, …). Such an entry is still returned so a caller can
-   * count it instead of failing the whole listing; absent on healthy entries.
+   * True when the entry is a symbolic link. The scan compares the link itself
+   * and never descends into its target.
+   */
+  readonly isSymbolicLink?: boolean
+  /** Raw link target string, absent on non-link entries. */
+  readonly linkTarget?: string
+  /** Resolved shape of {@link linkTarget}; `missing` when the link dangles. */
+  readonly linkTargetKind?: LinkTargetKind
+  /**
+   * True when the entry could not be inspected at all (an unreadable entry, …).
+   * Such an entry is still returned so a caller can count it instead of failing
+   * the whole listing; absent on healthy entries.
    */
   readonly broken?: boolean
   /** Readable reason an entry is marked {@link broken}. */

@@ -13,7 +13,12 @@
  * bodies nor recomputes digests.
  */
 import type { DiffStatus } from '@shared/fixtures'
-import type { DirectoryEntry, DirectoryListing, FileDigest } from '@shared/platform/types'
+import type {
+  DirectoryEntry,
+  DirectoryListing,
+  FileDigest,
+  LinkTargetKind
+} from '@shared/platform/types'
 import {
   OperationCancelledError,
   abortable,
@@ -34,7 +39,11 @@ export const FILE_DIFF_STATUSES: readonly FileDiffStatus[] = [
   'modified'
 ]
 
-/** One scanned entry: directory or file, with the metadata the fast path needs. */
+/**
+ * One scanned entry: directory or file, with the metadata the fast path needs.
+ * A symbolic link is always a file-kind leaf carrying its target string; the
+ * scan never descends into the target.
+ */
 export interface ScannedNode {
   readonly name: string
   readonly path: string
@@ -42,6 +51,10 @@ export interface ScannedNode {
   readonly size: number
   readonly modifiedMs: number
   readonly children: readonly ScannedNode[]
+  /** Raw link target string; present only on symbolic-link entries. */
+  readonly linkTarget?: string
+  /** Shape of {@link linkTarget}; `missing` for a dangling link or a loop. */
+  readonly linkTargetKind?: LinkTargetKind
 }
 
 export interface ScannedTree {
@@ -49,8 +62,9 @@ export interface ScannedTree {
   /** Relative path (`''` for the root) to scanned node. */
   readonly index: ReadonlyMap<string, ScannedNode>
   /**
-   * Entries left out of the tree because they could not be read: dangling
-   * symbolic links, unreadable entries and subtrees whose listing failed.
+   * Entries left out of the tree because they could not be read: unreadable
+   * entries and subtrees whose listing failed. Symbolic links (including
+   * dangling ones) are entries, never skips.
    */
   readonly skipped: number
 }
@@ -212,6 +226,8 @@ interface PendingNode {
   readonly size: number
   readonly modifiedMs: number
   readonly children: PendingNode[]
+  readonly linkTarget?: string
+  readonly linkTargetKind?: LinkTargetKind
 }
 
 interface PendingDirectory {
@@ -370,10 +386,27 @@ export async function scanDirectory(
         directory.parent?.children.push(directory.node)
 
         for (const entry of listing.entries) {
-          // A dangling / unreadable entry is still listed by the platform so the
-          // caller can count it, but it has no trustworthy metadata to compare.
+          // An unreadable entry is still listed by the platform so the caller can
+          // count it, but it has no trustworthy metadata to compare.
           if (entry.broken) {
             skipped += 1
+            continue
+          }
+          // A symbolic link is one leaf entry: its target subtree is never
+          // walked, and a dangling target still compares by target string.
+          if (entry.isSymbolicLink) {
+            batchFiles += 1
+            batchBytes += entry.size
+            directory.node.children.push({
+              name: entry.name,
+              path: entry.path,
+              kind: 'file',
+              size: entry.size,
+              modifiedMs: entry.modifiedMs,
+              children: [],
+              linkTarget: entry.linkTarget ?? '',
+              linkTargetKind: entry.linkTargetKind ?? 'missing'
+            })
             continue
           }
           if (entry.isDirectory) {
@@ -432,7 +465,9 @@ export async function scanDirectory(
       kind: node.kind,
       size: node.size,
       modifiedMs: node.modifiedMs,
-      children
+      children,
+      linkTarget: node.linkTarget,
+      linkTargetKind: node.linkTargetKind
     }
   }
 
@@ -463,8 +498,9 @@ interface CompareContext {
   readonly hash: (text: string) => string
   /** Paths whose body could not be read; their pair is reported as `modified`. */
   readonly unreadable: ReadonlySet<string>
-  /** Pairs settled as `modified` because a body could not be read. */
-  readonly unreadablePairs: { count: number }
+  /** Unreadable bodies per side, so skips stay attributable to left / right. */
+  readonly leftUnreadable: { count: number }
+  readonly rightUnreadable: { count: number }
 }
 
 export interface ComparisonInputs {
@@ -495,6 +531,8 @@ export interface DirectoryDiffNode {
   /** Modification time on the left side; lets a copy preserve source metadata. */
   readonly leftModifiedMs?: number
   readonly rightModifiedMs?: number
+  /** Shape of a symbolic-link target; absent on ordinary file entries. */
+  readonly linkTargetKind?: LinkTargetKind
 }
 
 export interface DirectoryComparison {
@@ -505,7 +543,13 @@ export interface DirectoryComparison {
   readonly root: DirectoryDiffNode
   readonly counts: Readonly<Record<FileDiffStatus, number>>
   readonly fileCount: number
-  /** Entries and file bodies left out of both sides because they were unreadable. */
+  /**
+   * Entries left out of the left / right scan because they were unreadable.
+   * Kept per side so the footer and the notice never show an ambiguous total.
+   */
+  readonly leftSkipped: number
+  readonly rightSkipped: number
+  /** Merged total, kept for callers that only need the sum. */
   readonly skipped: number
 }
 
@@ -555,9 +599,10 @@ export function planContentReads(
   const wanted = new Set<string>()
 
   for (const [relativePath, leftNode] of left.index) {
-    if (leftNode.kind !== 'file') continue
+    if (leftNode.kind !== 'file' || leftNode.linkTarget !== undefined) continue
     const rightNode = right.index.get(relativePath)
     if (rightNode === undefined || rightNode.kind !== 'file') continue
+    if (rightNode.linkTarget !== undefined) continue
     if (!needsContent(leftNode, rightNode)) continue
     if (needsHash(leftNode, cache)) wanted.add(leftNode.path)
     if (needsHash(rightNode, cache)) wanted.add(rightNode.path)
@@ -587,10 +632,20 @@ function hashFile(node: ScannedNode, context: CompareContext): string {
 }
 
 function classifyPair(left: ScannedNode, right: ScannedNode, context: CompareContext): FileDiffStatus {
+  // Symbolic links compare by their target string only; the target body is
+  // never hashed, so equal targets stay `same` even when the bodies differ.
+  if (left.linkTarget !== undefined || right.linkTarget !== undefined) {
+    return left.linkTarget !== undefined &&
+      right.linkTarget !== undefined &&
+      left.linkTarget === right.linkTarget
+      ? 'same'
+      : 'modified'
+  }
   // A body the platform could not read is unknowable, so the pair is reported
   // as modified (it needs attention) and counted as skipped instead of aborting.
   if (context.unreadable.has(left.path) || context.unreadable.has(right.path)) {
-    context.unreadablePairs.count += 1
+    if (context.unreadable.has(left.path)) context.leftUnreadable.count += 1
+    if (context.unreadable.has(right.path)) context.rightUnreadable.count += 1
     return 'modified'
   }
   if (left.size !== right.size) return 'modified'
@@ -624,7 +679,8 @@ function markSubtree(
       leftSize: side === 'left' ? node.size : undefined,
       rightSize: side === 'right' ? node.size : undefined,
       leftModifiedMs: side === 'left' ? node.modifiedMs : undefined,
-      rightModifiedMs: side === 'right' ? node.modifiedMs : undefined
+      rightModifiedMs: side === 'right' ? node.modifiedMs : undefined,
+      linkTargetKind: node.linkTargetKind
     }
   }
 
@@ -691,7 +747,28 @@ function buildNode(
       leftSize: left.size,
       rightSize: right.size,
       leftModifiedMs: left.modifiedMs,
-      rightModifiedMs: right.modifiedMs
+      rightModifiedMs: right.modifiedMs,
+      linkTargetKind: left.linkTargetKind ?? right.linkTargetKind
+    }
+  }
+
+  // A symbolic link against a directory on the other side is one type-clash
+  // entry: the link is a leaf, so the directory subtree is never flattened in.
+  if (left && right && (left.linkTarget !== undefined || right.linkTarget !== undefined)) {
+    return {
+      name,
+      relativePath,
+      kind: 'file',
+      status: 'modified',
+      children: [],
+      counts: countEntry('modified'),
+      leftPath: left.path,
+      rightPath: right.path,
+      leftSize: left.kind === 'file' ? left.size : undefined,
+      rightSize: right.kind === 'file' ? right.size : undefined,
+      leftModifiedMs: left.kind === 'file' ? left.modifiedMs : undefined,
+      rightModifiedMs: right.kind === 'file' ? right.modifiedMs : undefined,
+      linkTargetKind: left.linkTargetKind ?? right.linkTargetKind
     }
   }
 
@@ -730,9 +807,12 @@ export function compareScannedTrees(
     cache: inputs.cache,
     hash: inputs.hash ?? sha256Hex,
     unreadable: inputs.unreadable ?? new Set(),
-    unreadablePairs: { count: 0 }
+    leftUnreadable: { count: 0 },
+    rightUnreadable: { count: 0 }
   }
   const root = buildNode('', left.root, right.root, context)
+  const leftSkipped = left.skipped + context.leftUnreadable.count
+  const rightSkipped = right.skipped + context.rightUnreadable.count
   return {
     leftRoot: left.root.path,
     rightRoot: right.root.path,
@@ -741,7 +821,9 @@ export function compareScannedTrees(
     root,
     counts: root.counts,
     fileCount: FILE_DIFF_STATUSES.reduce((total, status) => total + root.counts[status], 0),
-    skipped: left.skipped + right.skipped + context.unreadablePairs.count
+    leftSkipped,
+    rightSkipped,
+    skipped: leftSkipped + rightSkipped
   }
 }
 

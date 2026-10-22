@@ -553,8 +553,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       setStatus('ready')
       // A comparison that succeeded with unreadable entries is still a success:
       // report what was left out instead of turning it into an error.
-      if (comparison.skipped > 0) {
-        report(`已跳过 ${comparison.skipped} 个不可读项/悬空链接`, 'info')
+      if (comparison.leftSkipped + comparison.rightSkipped > 0) {
+        report(
+          `已跳过：左 ${comparison.leftSkipped} / 右 ${comparison.rightSkipped}`,
+          'info'
+        )
       }
       return true
     } catch (cause) {
@@ -751,6 +754,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   /** Opens a directory-tree file in the matching file-level view. */
   async function openFile(node: DirectoryDiffNode): Promise<void> {
     if (node.kind !== 'file') return
+    // A link to a directory is a leaf under the no-follow policy: never read a
+    // "body" for it (which would fail) and never turn it into a file session.
+    if (node.linkTargetKind === 'directory') {
+      report(`「${node.name}」是符号链接且指向目录，按不跟随口径不下钻内容。`, 'info')
+      return
+    }
 
     const source = active
     const current = activeSides

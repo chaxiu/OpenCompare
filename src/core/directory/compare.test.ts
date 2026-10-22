@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { DigestFiles, DirectoryProgress, ListDirectories, ListDirectory } from './compare'
-import type { DirectoryListing } from '@shared/platform/types'
+import type { DirectoryEntry, DirectoryListing } from '@shared/platform/types'
 import {
   DEFAULT_DIRECTORY_BATCH_SIZE,
   DEFAULT_DIGEST_BATCH_SIZE,
@@ -397,7 +397,7 @@ describe('directory comparison engine', () => {
     expect((outcome as Error).message).toContain('EMFILE')
   })
 
-  it('keeps a dangling entry in the listing but out of the scan, counted as skipped', async () => {
+  it('keeps an unreadable entry in the listing but out of the scan, counted as skipped', async () => {
     const fs = createTrees(
       { 'same.txt': { text: 'alpha' }, docs: { 'kept.txt': { text: 'deep' } } },
       { 'same.txt': { text: 'alpha' } }
@@ -413,7 +413,7 @@ describe('directory comparison engine', () => {
               size: 0,
               modifiedMs: 0,
               broken: true,
-              skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+              skippedReason: '不可读条目：没有访问权限（EACCES）'
             }
           ]
         : fs.list(path)
@@ -456,23 +456,23 @@ describe('directory comparison engine', () => {
     await expect(scanDirectory('/left', list)).rejects.toThrow(/无法读取目录 \/left/)
   })
 
-  it('aggregates each side skipped count into the comparison', async () => {
+  it('reports a skip on the side it belongs to, never as a merged total', async () => {
     const fs = createTrees(
       { 'same.txt': { text: 'alpha' } },
       { 'same.txt': { text: 'alpha' }, 'right-only.txt': { text: 'new' } }
     )
     const brokenEntry = (root: string) => ({
-      name: 'dangling',
-      path: `${root}/dangling`,
+      name: 'unreadable',
+      path: `${root}/unreadable`,
       isDirectory: false,
       size: 0,
       modifiedMs: 0,
       broken: true,
-      skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+      skippedReason: '不可读条目：没有访问权限（EACCES）'
     })
     const list: ListDirectory = async (path) => {
       const entries = await fs.list(path)
-      return path === '/left' || path === '/right'
+      return path === '/left'
         ? [...entries, brokenEntry(path)]
         : entries
     }
@@ -485,7 +485,9 @@ describe('directory comparison engine', () => {
       createComparisonCache()
     )
 
-    expect(comparison.skipped).toBe(2)
+    expect(comparison.leftSkipped).toBe(1)
+    expect(comparison.rightSkipped).toBe(0)
+    expect(comparison.skipped).toBe(1)
     expect(comparison.counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
     expect(comparison.fileCount).toBe(
       comparison.counts.same +
@@ -493,6 +495,182 @@ describe('directory comparison engine', () => {
         comparison.counts.removed +
         comparison.counts.modified
     )
+  })
+
+  it('scans symbolic links as leaf entries and never walks their target kind', async () => {
+    const links: DirectoryEntry[] = [
+      {
+        name: 'dir-link',
+        path: '/left/dir-link',
+        isDirectory: false,
+        size: 7,
+        modifiedMs: 1,
+        isSymbolicLink: true,
+        linkTarget: '/shared',
+        linkTargetKind: 'directory'
+      },
+      {
+        name: 'loop',
+        path: '/left/loop',
+        isDirectory: false,
+        size: 5,
+        modifiedMs: 1,
+        isSymbolicLink: true,
+        linkTarget: '/left',
+        linkTargetKind: 'directory'
+      },
+      {
+        name: 'dangling',
+        path: '/left/dangling',
+        isDirectory: false,
+        size: 12,
+        modifiedMs: 1,
+        isSymbolicLink: true,
+        linkTarget: '/nonexistent',
+        linkTargetKind: 'missing'
+      },
+      { name: 'real.txt', path: '/left/real.txt', isDirectory: false, size: 4, modifiedMs: 1 }
+    ]
+    const list: ListDirectory = async (path) => (path === '/left' ? links : [])
+
+    const tree = await scanDirectory('/left', list)
+
+    expect([...tree.index.keys()].sort()).toEqual(['', 'dangling', 'dir-link', 'loop', 'real.txt'])
+    expect(tree.index.get('dir-link')).toMatchObject({ kind: 'file', linkTargetKind: 'directory' })
+    // A directory link is never a pending directory, even when the target is real.
+    expect([...tree.index.keys()].some((key) => key.startsWith('dir-link/'))).toBe(false)
+    expect([...tree.index.keys()].some((key) => key.startsWith('loop/'))).toBe(false)
+    expect(tree.index.get('dangling')?.linkTargetKind).toBe('missing')
+    expect(tree.skipped).toBe(0)
+  })
+
+  it('classifies link pairs by target string into the four states', async () => {
+    const link = (
+      root: string,
+      name: string,
+      target: string,
+      kind: 'file' | 'directory' = 'directory'
+    ): DirectoryEntry => ({
+      name,
+      path: `${root}/${name}`,
+      isDirectory: false,
+      size: target.length,
+      modifiedMs: 0,
+      isSymbolicLink: true,
+      linkTarget: target,
+      linkTargetKind: kind
+    })
+    const plain = (root: string, name: string, text: string): DirectoryEntry => ({
+      name,
+      path: `${root}/${name}`,
+      isDirectory: false,
+      size: text.length,
+      modifiedMs: 0
+    })
+
+    const leftEntries = [
+      link('/left', 'same-link', '/targets/a'),
+      link('/left', 'diff-link', '/targets/a'),
+      link('/left', 'removed-link', '/targets/a'),
+      link('/left', 'clash', '/targets/a'),
+      plain('/left', 'readme.txt', 'left')
+    ]
+    const rightEntries = [
+      link('/right', 'same-link', '/targets/a'),
+      link('/right', 'diff-link', '/targets/b'),
+      link('/right', 'added-link', '/targets/b'),
+      plain('/right', 'clash', 'plain'),
+      plain('/right', 'readme.txt', 'right')
+    ]
+    const list: ListDirectory = async (path) =>
+      path === '/left' ? leftEntries : path === '/right' ? rightEntries : []
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      list,
+      async () => {
+        throw new Error('link comparison must never read a body')
+      },
+      createComparisonCache()
+    )
+
+    expect(comparison.counts).toEqual({ same: 1, added: 1, removed: 1, modified: 3 })
+    expect(comparison.fileCount).toBe(
+      comparison.counts.same +
+        comparison.counts.added +
+        comparison.counts.removed +
+        comparison.counts.modified
+    )
+    const byName = new Map(comparison.root.children.map((child) => [child.name, child]))
+    expect(byName.get('same-link')).toMatchObject({ kind: 'file', status: 'same' })
+    expect(byName.get('diff-link')).toMatchObject({ kind: 'file', status: 'modified' })
+    expect(byName.get('removed-link')).toMatchObject({ kind: 'file', status: 'removed' })
+    expect(byName.get('added-link')).toMatchObject({ kind: 'file', status: 'added' })
+    expect(byName.get('clash')).toMatchObject({ kind: 'file', status: 'modified' })
+  })
+
+  it('reports a link against a same-path directory as one modified entry', async () => {
+    const list: ListDirectory = async (path) =>
+      path === '/left'
+        ? [
+            {
+              name: 'clash',
+              path: '/left/clash',
+              isDirectory: false,
+              size: 8,
+              modifiedMs: 0,
+              isSymbolicLink: true,
+              linkTarget: '/targets/dir',
+              linkTargetKind: 'directory'
+            }
+          ]
+        : path === '/right'
+          ? [{ name: 'clash', path: '/right/clash', isDirectory: true, size: 0, modifiedMs: 0 }]
+          : []
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      list,
+      async () => '',
+      createComparisonCache()
+    )
+
+    expect(comparison.counts).toEqual({ same: 0, added: 0, removed: 0, modified: 1 })
+    expect(comparison.fileCount).toBe(1)
+    expect(comparison.root.children[0]).toMatchObject({ kind: 'file', status: 'modified' })
+  })
+
+  it('keeps dangling links as comparable entries with zero skips', async () => {
+    const dangling = (root: string, name: string, target: string): DirectoryEntry => ({
+      name,
+      path: `${root}/${name}`,
+      isDirectory: false,
+      size: target.length,
+      modifiedMs: 0,
+      isSymbolicLink: true,
+      linkTarget: target,
+      linkTargetKind: 'missing'
+    })
+    const list: ListDirectory = async (path) =>
+      path === '/left'
+        ? [dangling('/left', 'same', '/missing-a'), dangling('/left', 'left-only', '/missing-b')]
+        : path === '/right'
+          ? [dangling('/right', 'same', '/missing-a')]
+          : []
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      list,
+      async () => '',
+      createComparisonCache()
+    )
+
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 1, modified: 0 })
+    expect(comparison.leftSkipped).toBe(0)
+    expect(comparison.rightSkipped).toBe(0)
   })
 
   it('hashes planned files through one digest batch instead of reading their text', async () => {
@@ -880,19 +1058,19 @@ describe('batched directory scan', () => {
       },
       {}
     )
-    const dangling = {
-      name: 'dangling',
+    const unreadable = {
+      name: 'unreadable',
       path: '/left/dangling',
       isDirectory: false,
       size: 0,
       modifiedMs: 0,
       broken: true,
-      skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+      skippedReason: '不可读条目：没有访问权限（EACCES）'
     }
     const list: ListDirectory = async (path) => {
       if (path === '/left/locked') throw new Error('EACCES: permission denied')
       const entries = await fs.list(path)
-      return path === '/left' ? [...entries, dangling] : entries
+      return path === '/left' ? [...entries, unreadable] : entries
     }
 
     const probe = probeBatch({ ...fs, list })

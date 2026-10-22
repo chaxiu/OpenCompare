@@ -5,6 +5,7 @@ import type { DirectoryDiffNode, ListDirectory } from './compare'
 import { createComparisonCache, scanDirectory } from './compare'
 import { countTreeFiles, filterDirectoryTree, projectDirectoryTree } from './filter'
 import { sha256Hex } from './hash'
+import type { DirectoryEntry } from '@shared/platform/types'
 import { DEFAULT_IO_CONCURRENCY, FileHandleExhaustedError } from '../io'
 import {
   SnapshotContentError,
@@ -386,6 +387,62 @@ describe('snapshot comparison', () => {
       path: '/snapshots/right/remote/nested/deep.txt'
     })
     expect(tree.index.get('nested')).toMatchObject({ kind: 'directory' })
+  })
+
+  it('round-trips file, directory, dangling and loop links through the wire format', async () => {
+    const link = (
+      name: string,
+      target: string,
+      kind: 'file' | 'directory' | 'missing'
+    ): DirectoryEntry => ({
+      name,
+      path: `/links/${name}`,
+      isDirectory: false,
+      size: target.length,
+      modifiedMs: 7,
+      isSymbolicLink: true,
+      linkTarget: target,
+      linkTargetKind: kind
+    })
+    const entries: DirectoryEntry[] = [
+      link('file-link', '/targets/a.txt', 'file'),
+      link('dir-link', '/targets/dir', 'directory'),
+      link('dangling', '/targets/missing', 'missing'),
+      link('loop', '/links', 'directory'),
+      { name: 'readme.txt', path: '/links/readme.txt', isDirectory: false, size: 4, modifiedMs: 5 }
+    ]
+    const list: ListDirectory = async (path) => (path === '/links' ? entries : [])
+    const readTextFile = async (path: string): Promise<string> => {
+      if (path === '/links/readme.txt') return 'body'
+      throw new Error(`link target body must never be read: ${path}`)
+    }
+
+    const tree = await scanDirectory('/links', list)
+    const { snapshot } = await buildSnapshot(tree, {
+      name: 'links',
+      exportedAt: EXPORTED_AT,
+      readTextFile
+    })
+
+    expect(snapshot.schema).toBe(SNAPSHOT_SCHEMA)
+    expect(snapshot.entries).toHaveLength(5)
+    for (const entry of snapshot.entries) {
+      expect(Object.keys(entry).sort()).toEqual(['content', 'modifiedMs', 'path', 'sha256', 'size'])
+    }
+
+    const parsed = parseSnapshot(serializeSnapshot(snapshot))
+    const comparison = await compareDirectorySides(
+      { kind: 'directory', path: '/links' },
+      { kind: 'snapshot', snapshot: parsed, mountPath: '/snapshots/right/links' },
+      list,
+      readTextFile,
+      createComparisonCache()
+    )
+
+    expect(comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
+    expect(comparison.fileCount).toBe(5)
+    expect(comparison.leftSkipped).toBe(0)
+    expect(comparison.rightSkipped).toBe(0)
   })
 
   it('classifies a real directory against a snapshot', async () => {

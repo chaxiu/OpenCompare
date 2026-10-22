@@ -86,6 +86,8 @@ function comparison(rootSpec: Spec): DirectoryComparison {
     root,
     counts: root.counts,
     fileCount: FILE_DIFF_STATUSES.reduce((total, status) => total + root.counts[status], 0),
+    leftSkipped: 0,
+    rightSkipped: 0,
     skipped: 0
   }
 }

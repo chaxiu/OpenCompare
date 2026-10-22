@@ -24,6 +24,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "measure:symlink": "vitest run --config vitest.evidence.config.mts",
     "perf:dir": "electron-vite build && node scripts/perf-dir.mjs",
     "perf:gate": "electron-vite build && node scripts/perf-gate.mjs",
     "dist": "electron-builder",

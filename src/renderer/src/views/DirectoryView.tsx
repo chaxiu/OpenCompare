@@ -372,9 +372,9 @@ export function DirectoryView({
         ]}
       />
 
-      {comparison.skipped > 0 ? (
+      {comparison.leftSkipped + comparison.rightSkipped > 0 ? (
         <p className="shrink-0 text-2xs text-diff-added">
-          已跳过 {comparison.skipped} 个不可读项/悬空链接
+          已跳过：左 {comparison.leftSkipped} / 右 {comparison.rightSkipped}
         </p>
       ) : null}
 

@@ -437,24 +437,24 @@ describe('real file workbench', () => {
     expect(screen.getByRole('contentinfo').textContent).toContain('差异')
   })
 
-  it('reports skipped dangling entries as an info notice and a view count', async () => {
+  it('reports skipped unreadable entries per side as an info notice and a view count', async () => {
     const base = scriptedPort({
       dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
     })
-    const dangling = {
-      name: 'dangling',
-      path: `${DIRECTORY_SAMPLE_PATHS.left}/dangling`,
+    const unreadable = {
+      name: 'unreadable',
+      path: `${DIRECTORY_SAMPLE_PATHS.left}/unreadable`,
       isDirectory: false,
       size: 0,
       modifiedMs: 0,
       broken: true,
-      skippedReason: '悬空符号链接：路径不存在或已被移动（ENOENT）'
+      skippedReason: '不可读条目：没有访问权限（EACCES）'
     }
     const platform: PlatformPort = {
       ...base,
       listDirectory: async (path) => [
         ...(await base.listDirectory(path)),
-        ...(path === DIRECTORY_SAMPLE_PATHS.left ? [dangling] : [])
+        ...(path === DIRECTORY_SAMPLE_PATHS.left ? [unreadable] : [])
       ],
       // The real scan goes through the batch channel, so the injected broken
       // entry has to be visible there too.
@@ -465,7 +465,7 @@ describe('real file workbench', () => {
             return {
               path,
               ok: true as const,
-              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, dangling] : entries
+              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, unreadable] : entries
             }
           })
         )
@@ -479,10 +479,112 @@ describe('real file workbench', () => {
 
     // A successful comparison reports the skips at info level, not as an error.
     const notice = await screen.findByRole('alert')
-    expect(notice.textContent).toContain('已跳过 1 个不可读项/悬空链接')
+    expect(notice.textContent).toContain('已跳过：左 1 / 右 0')
     expect(notice.className).toContain('text-diff-added')
-    // The directory view keeps the count visible as well.
-    expect(screen.getAllByText('已跳过 1 个不可读项/悬空链接')).toHaveLength(2)
+    // The directory view keeps the per-side count visible as well.
+    expect(screen.getAllByText('已跳过：左 1 / 右 0')).toHaveLength(2)
+  })
+
+  it('does not drill into a directory link or read its target', async () => {
+    const base = scriptedPort({
+      dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    })
+    const dirLink = {
+      name: 'dir-link',
+      path: `${DIRECTORY_SAMPLE_PATHS.left}/dir-link`,
+      isDirectory: false,
+      size: 9,
+      modifiedMs: 0,
+      isSymbolicLink: true,
+      linkTarget: '/targets/shared',
+      linkTargetKind: 'directory' as const
+    }
+    const readTextFile = vi.fn((path: string) => base.readTextFile(path))
+    const platform: PlatformPort = {
+      ...base,
+      readTextFile,
+      listDirectory: async (path) => [
+        ...(await base.listDirectory(path)),
+        ...(path === DIRECTORY_SAMPLE_PATHS.left ? [dirLink] : [])
+      ],
+      listDirectories: async (paths) =>
+        Promise.all(
+          paths.map(async (path) => {
+            const entries = await base.listDirectory(path)
+            return {
+              path,
+              ok: true as const,
+              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, dirLink] : entries
+            }
+          })
+        )
+    }
+
+    render(<Workbench platform={platform} />)
+    dropPaths(screen.getByRole('main'), [
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right
+    ])
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('dir-link')[0])
+
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toContain('不跟随')
+    expect(readTextFile).not.toHaveBeenCalledWith(`${DIRECTORY_SAMPLE_PATHS.left}/dir-link`)
+    expect(screen.queryByRole('tab', { name: /dir-link/ })).toBeNull()
+  })
+
+  it('drills into a file link by reading the target body', async () => {
+    const base = scriptedPort({
+      dropped: [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    })
+    const fileLink = {
+      name: 'linked-engine.ts',
+      path: `${DIRECTORY_SAMPLE_PATHS.left}/linked-engine.ts`,
+      isDirectory: false,
+      size: 18,
+      modifiedMs: 0,
+      isSymbolicLink: true,
+      linkTarget: '/targets/engine.ts',
+      linkTargetKind: 'file' as const
+    }
+    const platform: PlatformPort = {
+      ...base,
+      readTextFile: async (path) =>
+        path === `${DIRECTORY_SAMPLE_PATHS.left}/linked-engine.ts`
+          ? 'LINKED TARGET BODY'
+          : base.readTextFile(path),
+      listDirectory: async (path) => [
+        ...(await base.listDirectory(path)),
+        ...(path === DIRECTORY_SAMPLE_PATHS.left ? [fileLink] : [])
+      ],
+      listDirectories: async (paths) =>
+        Promise.all(
+          paths.map(async (path) => {
+            const entries = await base.listDirectory(path)
+            return {
+              path,
+              ok: true as const,
+              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, fileLink] : entries
+            }
+          })
+        )
+    }
+
+    render(<Workbench platform={platform} />)
+    dropPaths(screen.getByRole('main'), [
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right
+    ])
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(
+      within(screen.getAllByRole('tree')[0]).getAllByText('linked-engine.ts')[0]
+    )
+
+    expect(await screen.findByText('LINKED TARGET BODY', {}, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByRole('tab', { name: /linked-engine\.ts/ })).toBeDefined()
   })
 
   it('shows no skip notice when every entry was readable', async () => {
