@@ -4,7 +4,7 @@
 // scan of the files: block, membership against the release asset names) and adds
 // the Windows artifact-name form check. Standard library only: it runs on a
 // plain Node without a build step, and it never touches the network.
-import { readdirSync, readFileSync } from 'node:fs'
+import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -55,6 +55,93 @@ export function findLegacyWindowsNames(names) {
     }
   }
   return [...hits]
+}
+
+// Same line rules as the workflow's AppImage blockmap gate: a files[] entry
+// starts at `- url:` and its `blockMapSize` sits on a following indented line.
+// The AppImage trailer is a 4-byte uint32 that electron-builder writes in a
+// platform-dependent order, so both LE and BE decodings are candidates.
+export function extractAppImageEntries(text) {
+  const lines = text.split(/\r?\n/)
+  const entries = []
+  let inFiles = false
+  let current = null
+  for (const line of lines) {
+    if (/^files:\s*$/.test(line)) {
+      inFiles = true
+      current = null
+      continue
+    }
+    if (!inFiles) continue
+    if (/^\S/.test(line)) {
+      inFiles = false
+      current = null
+      continue
+    }
+    const entry = /^\s*-\s*url:\s*(.+?)\s*$/.exec(line)
+    if (entry) {
+      current = { url: normalizeRef(entry[1]), blockMapSize: null }
+      entries.push(current)
+      continue
+    }
+    if (!current) continue
+    const blockMap = /^\s*blockMapSize:\s*(\d+)\s*$/.exec(line)
+    if (blockMap) current.blockMapSize = Number(blockMap[1])
+  }
+  return entries.filter((entry) => entry.url.endsWith('.AppImage'))
+}
+
+const APPIMAGE_TAIL_BYTES = 4
+
+// Mirrors the release workflow gate on the local release/ directory: every
+// .AppImage entry declared by latest-linux.yml must exist, declare blockMapSize
+// and match one of the two 4-byte trailer decodings without exceeding the file
+// size. Failures land in problems, never as a silent pass.
+const inspectAppImageBlockmaps = ({ dir, file, text, problems }) => {
+  for (const entry of extractAppImageEntries(text)) {
+    const name = entry.url
+    if (entry.blockMapSize === null) {
+      problems.push(`${file} 中 ${name} 缺少 blockMapSize`)
+      continue
+    }
+    const path = join(dir, name)
+    let size
+    try {
+      size = statSync(path).size
+    } catch {
+      problems.push(`${file} 声明的 AppImage 文件缺失: ${name}`)
+      continue
+    }
+    if (size < APPIMAGE_TAIL_BYTES) {
+      problems.push(`${name} 小于 4 字节，无法读取 blockMapSize 尾部`)
+      continue
+    }
+    const tail = Buffer.alloc(APPIMAGE_TAIL_BYTES)
+    let fd
+    try {
+      fd = openSync(path, 'r')
+      readSync(fd, tail, 0, APPIMAGE_TAIL_BYTES, size - APPIMAGE_TAIL_BYTES)
+    } catch (error) {
+      problems.push(
+        `AppImage 不可读: ${name} (${error instanceof Error ? error.message : error})`
+      )
+      continue
+    } finally {
+      if (fd !== undefined) closeSync(fd)
+    }
+    const candidates = [tail.readUInt32LE(0), tail.readUInt32BE(0)]
+    const inRange = candidates.filter((value) => value <= size)
+    if (inRange.includes(entry.blockMapSize)) continue
+    if (inRange.length === 0) {
+      problems.push(
+        `${name} 尾部候选值 LE=${candidates[0]} BE=${candidates[1]} 超过文件大小 ${size}`
+      )
+      continue
+    }
+    problems.push(
+      `${name} 尾部候选值 LE=${candidates[0]} BE=${candidates[1]} 与 ${file} 声明 blockMapSize=${entry.blockMapSize} 不等`
+    )
+  }
 }
 
 export function inspectReleaseMetadata({ dir, assets }) {
@@ -108,6 +195,9 @@ export function inspectReleaseMetadata({ dir, assets }) {
       missing: fileMissing,
       hits: refs.length - fileMissing.length
     })
+    if (name === 'latest-linux.yml') {
+      inspectAppImageBlockmaps({ dir, file: name, text, problems })
+    }
   }
 
   const legacyHits = findLegacyWindowsNames([...assetNames, ...allRefs])

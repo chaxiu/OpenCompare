@@ -305,44 +305,74 @@ describe('update metadata consistency', () => {
   const appImageGateStep = packageStep('Assert the AppImage embeds its declared blockmap')
   const appImageGateScript = appImageGateStep?.run ?? ''
 
+  // v0.2.5 CI trailer `00 01 EF A4`: big-endian 126884 is what latest-linux.yml
+  // declares, little-endian is 2767126784. The old LE-only gate rejected it.
+  const v025Trailer = Buffer.from([0x00, 0x01, 0xef, 0xa4])
+  const v025BlockMapSize = 126884
+  const v025LittleEndian = 2767126784
+
   it('verifies the embedded AppImage blockmap inside the linux packaging job', () => {
     expect(appImageGateStep).toBeDefined()
     expect(appImageGateStep?.if).toBe("matrix.target == 'linux'")
     expect(appImageGateScript).toContain('release/*.AppImage')
     expect(appImageGateScript).toContain('latest-linux.yml')
     expect(appImageGateScript).toContain('blockMapSize')
+    // Both byte orders are read and matched; the old LE-only wording is gone.
     expect(appImageGateScript).toMatch(/readUInt32LE/)
+    expect(appImageGateScript).toMatch(/readUInt32BE/)
+    expect(appImageGateScript).not.toContain('little-endian uint32')
     expect(appImageGateScript).toContain('exit 1')
     // No separate *.AppImage.blockmap artifact is required or expected.
     expect(appImageGateScript).not.toContain('AppImage.blockmap')
   })
 
+  interface AppImageGateOptions {
+    declared?: number
+    tail?: Buffer
+    size?: number
+    images?: number
+    metadata?: string | null
+  }
+
+  const appImageMetadata = (declared: number | null): string =>
+    [
+      'version: 0.2.5',
+      'files:',
+      '  - url: OpenCompare-0.2.5.AppImage',
+      '    sha512: fixture',
+      '    size: 262144',
+      ...(declared === null ? [] : [`    blockMapSize: ${declared}`]),
+      '  - url: opencompare_0.2.5_amd64.deb',
+      '    sha512: fixture',
+      '    size: 262144',
+      'path: OpenCompare-0.2.5.AppImage',
+      'sha512: fixture'
+    ].join('\n')
+
   // Tempdir fixtures are the only place this suite writes AppImage bytes.
-  const runAppImageGate = (declared: number, actual: number): { status: number; output: string } => {
+  const runAppImageGate = (
+    options: AppImageGateOptions = {}
+  ): { status: number; output: string } => {
+    const {
+      declared = v025BlockMapSize,
+      tail = v025Trailer,
+      size = v025BlockMapSize,
+      images = 1,
+      metadata = appImageMetadata(declared)
+    } = options
     const dir = mkdtempSync(join(tmpdir(), 'opencompare-appimage-'))
     try {
       const releaseDir = join(dir, 'release')
       mkdirSync(releaseDir, { recursive: true })
-      const image = join(releaseDir, 'OpenCompare-0.2.4.AppImage')
-      const bytes = Buffer.alloc(16)
-      bytes.writeUInt32LE(actual, bytes.length - 4)
-      writeFileSync(image, bytes)
-      writeFileSync(
-        join(releaseDir, 'latest-linux.yml'),
-        [
-          'version: 0.2.4',
-          'files:',
-          '  - url: OpenCompare-0.2.4.AppImage',
-          '    sha512: fixture',
-          '    size: 16',
-          `    blockMapSize: ${declared}`,
-          '  - url: opencompare_0.2.4_amd64.deb',
-          '    sha512: fixture',
-          '    size: 16',
-          'path: OpenCompare-0.2.4.AppImage',
-          'sha512: fixture'
-        ].join('\n')
-      )
+      const bytes = Buffer.alloc(size, 0)
+      tail.copy(bytes, size - tail.length)
+      for (let index = 0; index < images; index += 1) {
+        const suffix = index === 0 ? '' : `-${index}`
+        writeFileSync(join(releaseDir, `OpenCompare-0.2.5${suffix}.AppImage`), bytes)
+      }
+      if (metadata !== null) {
+        writeFileSync(join(releaseDir, 'latest-linux.yml'), metadata)
+      }
       const script = join(dir, 'appimage-gate.sh')
       writeFileSync(script, appImageGateScript)
       const result = spawnSync('bash', [script], { cwd: dir, encoding: 'utf8' })
@@ -355,18 +385,57 @@ describe('update metadata consistency', () => {
     }
   }
 
-  it('passes when the AppImage trailer matches blockMapSize', () => {
-    const { status, output } = runAppImageGate(126886, 126886)
-    expect(output).toContain('embedded blockMapSize=126886')
+  it('passes the v0.2.5 fixture as big-endian while LE single-order would fail', () => {
+    // Negative control on the same fixture: the old LE-only rule cannot pass.
+    expect(v025Trailer.readUInt32BE(0)).toBe(v025BlockMapSize)
+    expect(v025Trailer.readUInt32LE(0)).toBe(v025LittleEndian)
+    expect(v025Trailer.readUInt32LE(0)).not.toBe(v025BlockMapSize)
+
+    const { status, output } = runAppImageGate()
+    expect(output).toContain('embedded blockMapSize=126884')
     expect(status).toBe(0)
   })
 
-  it('fails closed when the AppImage trailer disagrees with blockMapSize', () => {
-    const { status, output } = runAppImageGate(126886, 999)
-    expect(output).toContain('::error::')
-    expect(output).toContain('blockMapSize 999')
-    expect(output).toContain('declares 126886')
+  it('fails closed when neither trailer byte order matches blockMapSize', () => {
+    // Trailer `00 00 01 00`: BE 256 and LE 65536 are both in range but wrong.
+    const { status, output } = runAppImageGate({ tail: Buffer.from([0x00, 0x00, 0x01, 0x00]) })
     expect(status).not.toBe(0)
+    expect(output).toContain('::error::')
+    expect(output).toContain(`blockMapSize=${v025BlockMapSize}`)
+    expect(output).toContain('LE=65536')
+    expect(output).toContain('BE=256')
+  })
+
+  it('fails closed when both trailer candidates exceed the file size', () => {
+    const { status, output } = runAppImageGate({
+      declared: 4294967295,
+      size: 16,
+      tail: Buffer.from([0xff, 0xff, 0xff, 0xff])
+    })
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::')
+    expect(output).toContain('exceed the file size 16')
+  })
+
+  it('fails closed when latest-linux.yml has no blockMapSize for the AppImage', () => {
+    const { status, output } = runAppImageGate({ metadata: appImageMetadata(null) })
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::')
+    expect(output).toContain('blockMapSize')
+  })
+
+  it('fails closed when the metadata file or the single AppImage is missing', () => {
+    const missingMetadata = runAppImageGate({ metadata: null })
+    expect(missingMetadata.status).not.toBe(0)
+    expect(missingMetadata.output).toContain('Missing release/latest-linux.yml')
+
+    const noImage = runAppImageGate({ images: 0 })
+    expect(noImage.status).not.toBe(0)
+    expect(noImage.output).toContain('Expected exactly one .AppImage')
+
+    const twoImages = runAppImageGate({ images: 2 })
+    expect(twoImages.status).not.toBe(0)
+    expect(twoImages.output).toContain('found 2')
   })
 })
 
