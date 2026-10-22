@@ -47,10 +47,12 @@ const ghostEvidencePath = `docs/release-evidence/${ghostTag}.md`
 // assertions below can never match their own source text.
 const pendingWord = ['待', '发布'].join('')
 
-// Published tags a document may still link to; the current tag shipped as
-// v0.2.4, so it belongs to this set as well, everything else would be a dead
+// Published tags a document may still link to. v0.2.4 is the newest public
+// release; the current tag is still pending, so it is never a release link.
+// Everything outside this set (plus the current pending tag) would be a dead
 // release link.
-const publishedTags = ['v0.2.0', 'v0.2.1', 'v0.2.2', currentTag]
+const latestPublishedTag = 'v0.2.4'
+const publishedTags = ['v0.2.0', 'v0.2.1', 'v0.2.2', latestPublishedTag]
 const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
 
 const documentPaths = (): string[] => {
@@ -141,8 +143,15 @@ const previousReleaseNotes = existsSync(previousReleaseNotesPath)
   ? readFileSync(previousReleaseNotesPath, 'utf8')
   : ''
 
-// The last publicly released notes stay on v0.2.2 while the current version is
-// still pending; the current notes carry the dangling-link tolerance.
+// v0.2.4 shipped; its notes stay byte-identical while v0.2.5 is pending, so the
+// assertions that describe v0.2.4 content read that historical file directly.
+const historicalNotesV024Path = join(repoRoot, 'docs/release-notes/v0.2.4.md')
+const historicalNotesV024 = existsSync(historicalNotesV024Path)
+  ? readFileSync(historicalNotesV024Path, 'utf8')
+  : ''
+
+// Historical notes stay readable while the current version is still pending;
+// the assertions about their content move with the tags instead of the bump.
 const lastReleasedNotesPath = join(repoRoot, 'docs/release-notes/v0.2.2.md')
 const lastReleasedNotes = existsSync(lastReleasedNotesPath)
   ? readFileSync(lastReleasedNotesPath, 'utf8')
@@ -451,8 +460,9 @@ describe('release version gate', () => {
     expect(changelog).toContain(`## ${currentTag}`)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(readme).toContain(`https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`)
+    expect(readme).toContain(`当前发布状态：${currentTag} ${pendingWord}`)
+    expect(readme).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
+    expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 
@@ -909,12 +919,14 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as published and links its release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(readme).toContain(`https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`)
+  it('reports the current tag as pending and keeps the last public release linked', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} ${pendingWord}`)
+    expect(readme).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain(`${currentTag} ${pendingWord}`)
-    // The previous release is published history, no longer the latest one.
+    expect(readme).not.toContain(`${currentTag} 已发布`)
+    expect(readme).not.toContain('当前发布状态：v0.2.4')
+    // v0.2.4 is the newest public release; v0.2.2 stays published history.
+    expect(readme).toContain(`releases/tag/${latestPublishedTag}`)
     expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(readme).toContain('releases/tag/v0.2.2')
     expect(readme).not.toContain('当前发布状态：v0.2.2')
@@ -925,9 +937,11 @@ describe('release signing credentials checklist', () => {
     expect(readme).not.toMatch(/发布状态：冻结/)
   })
 
-  it('reports the signing doc status as published for the current tag', () => {
-    expect(signingDoc).toContain(`当前状态：${currentTag} 已发布`)
-    expect(signingDoc).not.toContain(`${currentTag} ${pendingWord}`)
+  it('reports the signing doc status as pending for the current tag', () => {
+    expect(signingDoc).toContain(`当前状态：${currentTag} ${pendingWord}`)
+    expect(signingDoc).toContain(`正式版发布姿态（${currentTag}）`)
+    expect(signingDoc).not.toContain(`${currentTag} 已发布`)
+    expect(signingDoc).not.toContain('当前状态：v0.2.4')
     expect(signingDoc).not.toContain('当前状态：v0.2.2')
   })
 
@@ -985,19 +999,41 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/latest\*\.yml/)
   })
 
-  it('orders the current, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
+  it('orders the current, v0.2.4, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
     const current = changelog.indexOf(`## ${currentTag}`)
+    const released = changelog.indexOf('## v0.2.4')
     const previousEntry = changelog.indexOf('## v0.2.2')
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    expect(previousEntry).toBeGreaterThan(current)
+    expect(released).toBeGreaterThan(current)
+    expect(previousEntry).toBeGreaterThan(released)
     expect(superseded).toBeGreaterThan(previousEntry)
     expect(previous).toBeGreaterThan(superseded)
   })
 
-  it('documents the dangling-link fix in the current changelog entry', () => {
+  it('documents the v0.2.5 fixes in the current changelog entry', () => {
     const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf('## v0.2.4')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const section = changelog.slice(start, end)
+    for (const phrase of [
+      '### 修复',
+      '### 升级方式',
+      '内存收敛',
+      'ECANCELED',
+      '不跟随符号链接',
+      'docs/perf/large-directory-memory.md',
+      'docs/symlink-no-follow.md'
+    ]) {
+      expect(section).toContain(phrase)
+    }
+    expect(section).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+  })
+
+  it('keeps the dangling-link fix in the v0.2.4 changelog entry as history', () => {
+    const start = changelog.indexOf('## v0.2.4')
     const end = changelog.indexOf('## v0.2.2')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1018,7 +1054,7 @@ describe('release notes changelog', () => {
   it('drops the never-published entry and adds no fake version heading', () => {
     expect(changelog).not.toMatch(new RegExp(`^## ${ghostTag}`, 'm'))
     const start = changelog.indexOf(`## ${currentTag}`)
-    const end = changelog.indexOf('## v0.2.2')
+    const end = changelog.indexOf('## v0.2.4')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
@@ -1093,7 +1129,9 @@ describe('release notes changelog', () => {
     }
   })
 
-  it('records the dangling-link fix in the current release notes', () => {
+  it('keeps the dangling-link fix in the v0.2.4 release notes as history', () => {
+    expect(existsSync(historicalNotesV024Path)).toBe(true)
+    expect(firstHeading(historicalNotesV024)).toMatch(/v0\.2\.4/)
     for (const phrase of [
       '悬空符号链接',
       '不可读项',
@@ -1102,10 +1140,29 @@ describe('release notes changelog', () => {
       '134 万',
       '10.67 GiB'
     ]) {
+      expect(historicalNotesV024).toContain(phrase)
+    }
+    expect(historicalNotesV024).toMatch(/v0\.2\.2 及更早/)
+    expect(historicalNotesV024).toContain('升级')
+  })
+
+  it('documents the v0.2.5 release notes with the three fixes and no leftovers', () => {
+    for (const phrase of [
+      '不跟随符号链接',
+      '已跳过：左 X / 右 Y',
+      '结构化取消',
+      '有界缓存',
+      '升级方式',
+      '1,257,750,528',
+      '71,286,784',
+      'docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json',
+      'docs/symlink-no-follow.md'
+    ]) {
       expect(releaseNotes).toContain(phrase)
     }
-    expect(releaseNotes).toMatch(/v0\.2\.2 及更早/)
-    expect(releaseNotes).toContain('升级')
+    expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(releaseNotes).not.toMatch(/[0-9a-f]{64}/)
+    expect(releaseNotes).not.toContain('已知未修')
   })
 
   it('keeps the v0.2.0 release notes as history', () => {
@@ -1151,12 +1208,13 @@ describe('release document consistency', () => {
     expect(offenders).toEqual([])
   })
 
-  it('keeps the published status and the signing copy on README line 5', () => {
+  it('keeps the pending status and the signing copy on README line 5', () => {
     const statusLine = readme.split(/\r?\n/)[4] ?? ''
-    expect(statusLine).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(statusLine).toContain(`https://github.com/chaxiu/OpenCompare/releases/tag/${currentTag}`)
+    expect(statusLine).toContain(`当前发布状态：${currentTag} ${pendingWord}`)
+    expect(statusLine).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
     expect(statusLine).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(statusLine).not.toContain(pendingWord)
+    expect(statusLine).not.toContain(`${currentTag} 已发布`)
+    expect(statusLine).not.toContain(`当前发布状态：${latestPublishedTag}`)
     expect(statusLine).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(statusLine).not.toContain(ghostNotesPath)
     expect(statusLine).toContain('Developer ID 签名 + Apple 公证')
@@ -1178,54 +1236,85 @@ describe('release document consistency', () => {
       .filter((line) => line.startsWith('|'))
     const currentRow = rows.find((row) => row.startsWith(`| [${currentTag}]`))
     const ghostRow = rows.find((row) => row.startsWith(`| ${ghostTag}`))
+    const latestRow = rows.find((row) => row.startsWith(`| [${latestPublishedTag}]`))
     const releasedRow = rows.find((row) => row.startsWith('| [v0.2.2]'))
     expect(currentRow).toBeDefined()
-    expect(currentRow).toContain('已发布')
-    expect(currentRow).toContain(`releases/tag/${currentTag}`)
+    expect(currentRow).toContain(pendingWord)
     expect(currentRow).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(currentRow).not.toContain(`releases/tag/${currentTag}`)
     expect(ghostRow).toBeDefined()
     expect(ghostRow).toContain('未发布')
-    expect(ghostRow).toContain(`内容并入 ${currentTag}`)
+    // The ghost row is a historical fact: it stays merged into v0.2.4.
+    expect(ghostRow).toContain(`内容并入 ${latestPublishedTag}`)
     expect(ghostRow).not.toContain(ghostReleaseLink)
+    expect(latestRow).toBeDefined()
+    expect(latestRow).toContain('已发布（最新公开 Release）')
+    expect(latestRow).toContain(`releases/tag/${latestPublishedTag}`)
     expect(releasedRow).toBeDefined()
     expect(releasedRow).toContain('已发布')
     expect(releasedRow).not.toContain('最新公开 Release')
     expect(releasedRow).toContain('releases/tag/v0.2.2')
-    // The latest public release moved to the just-published tag.
-    expect(readme).toContain('已发布（最新公开 Release）')
     expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(readme).not.toContain(`最新公开 Release 为 [${ghostTag}]`)
   })
 
-  it('records the remaining unfixed known issues without claiming a fix', () => {
+  it('records zero unfixed known issues and both v0.2.5 fix attributions', () => {
     const issues = readme.slice(readme.indexOf('## 已知问题'))
-    expect(issues.match(/当前版本已修复/g)?.length).toBe(2)
-    const unfixed = issues
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith('- ') && line.includes('已知未修'))
-    expect(unfixed).toHaveLength(2)
-    for (const phrase of ['849', '1,510 MB', '未 OOM', 'ECANCELED', '不影响取消结果']) {
+    const lines = issues.split(/\r?\n/).filter((line) => line.startsWith('- '))
+    expect(lines.filter((line) => line.includes('已知未修'))).toHaveLength(0)
+
+    const memory = lines.find((line) => line.includes('内存增长'))
+    const cancel = lines.find((line) => line.includes('ECANCELED'))
+    expect(memory).toBeDefined()
+    expect(cancel).toBeDefined()
+    for (const line of [memory, cancel]) {
+      expect(line).toContain(`已在 ${currentTag} 修复`)
+    }
+    expect(memory).toContain('docs/perf/large-directory-memory.md')
+    expect(memory).toContain(
+      'docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json'
+    )
+    expect(cancel).toContain('pnpm test:cancel')
+
+    // The numbers are quoted from the archived perf evidence, never re-derived.
+    const perfDoc = readFileSync(join(repoRoot, 'docs/perf/large-directory-memory.md'), 'utf8')
+    for (const number of ['1,960,394,752', '1,257,750,528', '71,286,784']) {
+      expect(perfDoc).toContain(number)
+      expect(memory).toContain(number)
+    }
+    for (const marker of [
+      '零 `Error occurred in handler`',
+      '零 `OperationCancelledError`',
+      '零 `ECANCELED`'
+    ]) {
+      expect(cancel).toContain(marker)
+    }
+
+    // Historical wording and the no-follow policy stay in place.
+    for (const phrase of [
+      'v0.2.2 及更早',
+      'v0.2.1 及更早',
+      '8 路',
+      '有界并发',
+      '文件句柄耗尽',
+      '不跟随符号链接',
+      '已跳过'
+    ]) {
       expect(issues).toContain(phrase)
     }
-    // The symlink counting issue is resolved by the no-follow policy; only the
-    // release-025 item may flip the other three known-issue claims.
-    expect(issues).toContain('不跟随符号链接')
     expect(issues).not.toContain('符号链接计数放大')
-    for (const line of unfixed) {
-      expect(line).not.toContain('已修复')
-    }
   })
 
-  it('documents the unsolved known issues outside the fix list', () => {
-    expect(existsSync(releaseNotesPath)).toBe(true)
-    expect(releaseNotes).toContain('已知问题')
-    const fixesStart = releaseNotes.indexOf('## 本次修复')
-    const knownStart = releaseNotes.indexOf('## 已知问题')
+  it('keeps the unsolved known issues in the v0.2.4 release notes as history', () => {
+    expect(existsSync(historicalNotesV024Path)).toBe(true)
+    expect(historicalNotesV024).toContain('已知问题')
+    const fixesStart = historicalNotesV024.indexOf('## 本次修复')
+    const knownStart = historicalNotesV024.indexOf('## 已知问题')
     expect(fixesStart).toBeGreaterThan(-1)
     expect(knownStart).toBeGreaterThan(fixesStart)
-    const fixes = releaseNotes.slice(fixesStart, knownStart)
+    const fixes = historicalNotesV024.slice(fixesStart, knownStart)
     expect(fixes).not.toContain('已知未修')
-    const known = releaseNotes.slice(knownStart)
+    const known = historicalNotesV024.slice(knownStart)
     expect(known.split('已知未修').length - 1).toBeGreaterThanOrEqual(3)
     for (const phrase of [
       '849',
@@ -1237,6 +1326,8 @@ describe('release document consistency', () => {
     ]) {
       expect(known).toContain(phrase)
     }
+    // The current notes carry no leftover unfixed item.
+    expect(releaseNotes).not.toContain('已知未修')
   })
 })
 

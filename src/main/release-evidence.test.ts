@@ -380,3 +380,116 @@ describe('v0.2.4 release evidence document', () => {
     expect(text).toContain('内嵌')
   })
 })
+
+// v0.2.5 has not been released yet. Its evidence file is deliberately a pending
+// skeleton: readiness checklist plus empty backfill slots, never fabricated
+// digests or passing output.
+const evidenceV025Path = join(repoRoot, 'docs/release-evidence/v0.2.5.md')
+
+describe('v0.2.5 pending release evidence document', () => {
+  const doc = (): string => readEvidence(evidenceV025Path)
+
+  it('exists, is non-empty and declares pending exactly once', () => {
+    expect(existsSync(evidenceV025Path)).toBe(true)
+    const text = doc()
+    expect(text.trim().length).toBeGreaterThan(0)
+    expect(text).toContain('v0.2.5')
+    expect(text.match(/^status:\s*pending$/gm)?.length).toBe(1)
+    expect(text.match(/^status:/gm)?.length).toBe(1)
+  })
+
+  it('carries no fabricated sha256 and no passing marker', () => {
+    const text = doc()
+    expect(text.match(/[0-9a-f]{64}/g)).toBeNull()
+    for (const marker of [
+      'valid on disk',
+      'The validate action worked!',
+      'source=Notarized Developer ID',
+      '已发布',
+      '已验证',
+      '全部通过'
+    ]) {
+      expect(text).not.toContain(marker)
+    }
+  })
+
+  it('lists the six readiness objects with their 0.2.5 values', () => {
+    const text = doc()
+    for (const path of [
+      'package.json',
+      'CHANGELOG.md',
+      'docs/release-notes/v0.2.5.md',
+      'README.md',
+      '.github/workflows/release.yml',
+      'docs/release-signing.md'
+    ]) {
+      expect(text).toContain(path)
+    }
+    expect(text).toContain('0.2.5')
+    expect(text).toContain('v0.2.5')
+    expect(text).toContain('断言名')
+  })
+
+  it('reserves eleven empty asset rows for the post-release backfill', () => {
+    const text = doc()
+    const start = text.indexOf('## 2.')
+    const end = text.indexOf('\n## 3.')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const rows = text
+      .slice(start, end)
+      .split(/\r?\n/)
+      .filter((line) => /^\| .+\|$/.test(line))
+      .filter((line) => !line.startsWith('| 资产 |') && !line.startsWith('| --- |'))
+    expect(rows).toHaveLength(11)
+    for (const row of rows) {
+      const cells = row
+        .split('|')
+        .slice(1, -1)
+        .map((cell) => cell.trim())
+      expect(cells).toHaveLength(3)
+      expect(cells[0].length).toBeGreaterThan(0)
+      // Byte count and sha256 stay blank until the release exists.
+      expect(cells[1]).toBe('')
+      expect(cells[2]).toBe('')
+    }
+  })
+
+  it('reserves the uniqueness, latest, mac signing and metadata output slots', () => {
+    const text = doc()
+    for (const marker of [
+      'releases for v0.2.5: 1 (drafts: 0, prereleases: 0)',
+      'latest published release: v0.2.5 (this tag: v0.2.5)',
+      'codesign --verify --deep --strict --verbose=2',
+      'codesign -dv --verbose=4',
+      'xcrun stapler validate',
+      'spctl -a -vv --type execute',
+      'pnpm release:metadata --dir release',
+      '旧错位名'
+    ]) {
+      expect(text).toContain(marker)
+    }
+    // Every raw-output slot is an empty fenced block until the release exists.
+    expect(text.match(/^```text$/gm)?.length).toBeGreaterThanOrEqual(6)
+  })
+
+  it('hands the public re-verification conditions to product-qa', () => {
+    const text = doc()
+    for (const marker of [
+      'product-qa',
+      '干净环境',
+      '3 轮',
+      '取消',
+      '已跳过：左 X / 右 Y',
+      '不跟随符号链接',
+      'latest*.yml',
+      'spctl',
+      'stapler',
+      'codesign'
+    ]) {
+      expect(text).toContain(marker)
+    }
+    expect(text).toContain('`pending`')
+    expect(text).toContain('`verified`')
+  })
+})
