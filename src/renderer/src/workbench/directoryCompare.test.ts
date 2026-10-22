@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { DirectoryDiffNode } from '@core/directory/compare'
-import { createDrilldownSession, resolveDirectoryReturn } from './directoryCompare'
+import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
+import { createComparisonCache } from '@core/directory/compare'
+import {
+  createDrilldownSession,
+  releaseDirectoryComparison,
+  resolveDirectoryReturn
+} from './directoryCompare'
 import type { DrilldownTarget } from './fileKinds'
 import type { WorkbenchSession } from './session'
 
@@ -66,5 +71,86 @@ describe('resolveDirectoryReturn', () => {
       stats: []
     }
     expect(resolveDirectoryReturn([file], 'directory:missing')).toBeNull()
+  })
+})
+
+function comparisonOf(leftRoot: string, rightRoot: string): DirectoryComparison {
+  const counts = { same: 0, added: 0, removed: 0, modified: 0 }
+  return {
+    leftRoot,
+    rightRoot,
+    leftName: leftRoot.slice(leftRoot.lastIndexOf('/') + 1),
+    rightName: rightRoot.slice(rightRoot.lastIndexOf('/') + 1),
+    root: {
+      name: '',
+      relativePath: '',
+      kind: 'directory',
+      status: 'same',
+      children: [],
+      counts
+    },
+    counts,
+    fileCount: 0,
+    leftSkipped: 0,
+    rightSkipped: 0,
+    skipped: 0
+  }
+}
+
+function comparedSession(id: string, leftRoot: string, rightRoot: string): WorkbenchSession {
+  return { ...directorySession(id), directory: comparisonOf(leftRoot, rightRoot) }
+}
+
+describe('releaseDirectoryComparison', () => {
+  const entry = { size: 1, modifiedMs: 0, hash: 'a'.repeat(64) }
+
+  it('evicts both roots of a closed session and keeps other sessions cached', () => {
+    const cache = createComparisonCache()
+    cache.set('/left/a.txt', entry)
+    cache.set('/left/nested/b.txt', entry)
+    cache.set('/right/c.txt', entry)
+    cache.set('/other/d.txt', entry)
+    cache.set('/other-extra/e.txt', entry)
+
+    const closing = comparedSession('directory:a ↔ b', '/left', '/right')
+    const other = comparedSession('directory:other', '/other', '/other-extra')
+    const released = releaseDirectoryComparison(cache, closing.directory as DirectoryComparison, [
+      other
+    ])
+
+    expect(released).toBe(3)
+    expect([...cache.hashes.keys()].sort()).toEqual(['/other-extra/e.txt', '/other/d.txt'])
+  })
+
+  it('keeps a root cached while another open session compares from it', () => {
+    const cache = createComparisonCache()
+    cache.set('/shared/a.txt', entry)
+    cache.set('/right/b.txt', entry)
+
+    const closing = comparedSession('directory:shared ↔ right', '/shared', '/right')
+    const sibling = comparedSession('directory:shared ↔ other', '/shared', '/other')
+    const released = releaseDirectoryComparison(cache, closing.directory as DirectoryComparison, [
+      sibling
+    ])
+
+    expect(released).toBe(1)
+    expect(cache.hashes.has('/shared/a.txt')).toBe(true)
+    expect(cache.hashes.has('/right/b.txt')).toBe(false)
+  })
+
+  it('drops a replaced comparison so the new object is the only one held', () => {
+    const cache = createComparisonCache()
+    cache.set('/left/a.txt', entry)
+    const previous = comparedSession('directory:left ↔ right', '/left', '/right')
+    const replacement: WorkbenchSession = {
+      ...comparedSession('directory:left ↔ right', '/left', '/right')
+    }
+
+    releaseDirectoryComparison(cache, previous.directory as DirectoryComparison, [replacement])
+
+    // Same roots stay warm for the replacement, but the old tree is gone.
+    expect(previous.directory).not.toBe(replacement.directory)
+    expect(replacement.directory).not.toBe(undefined)
+    expect(cache.hashes.has('/left/a.txt')).toBe(true)
   })
 })

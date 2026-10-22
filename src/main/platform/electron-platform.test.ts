@@ -378,7 +378,7 @@ describe('directory listing', () => {
       createComparisonCache(),
       undefined,
       {
-        digestFiles: (paths) => platform.digestFiles(paths),
+        digestFiles: (paths) => coreDigest(platform.digestFiles(paths)),
         listDirectories: (paths) => platform.listDirectories(paths)
       }
     )
@@ -426,7 +426,7 @@ describe('directory listing', () => {
       createComparisonCache(),
       undefined,
       {
-        digestFiles: (paths) => platform.digestFiles(paths),
+        digestFiles: (paths) => coreDigest(platform.digestFiles(paths)),
         listDirectories: (paths) => platform.listDirectories(paths)
       }
     )

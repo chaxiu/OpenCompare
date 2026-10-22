@@ -43,6 +43,7 @@ import {
   createDirectorySession,
   createDrilldownSession,
   openFilePairSession,
+  releaseDirectoryComparison,
   resolveDirectoryReturn
 } from './directoryCompare'
 import {
@@ -316,12 +317,29 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     )
   }, [])
 
+  /**
+   * Explicitly releases a session's directory comparison: its roots' digest
+   * entries leave the shared cache unless some open session still uses them.
+   * Close, re-compare and sync refresh all go through here — never GC timing.
+   */
+  function releaseDirectorySession(
+    previous: WorkbenchSession,
+    openSessions: readonly WorkbenchSession[]
+  ): void {
+    if (previous.directory === undefined) return
+    releaseDirectoryComparison(cache.current, previous.directory, openSessions)
+  }
+
   /** Closes one session, landing on its neighbour and cleaning shell caches. */
   function closeSession(id: string): void {
     const index = sessions.findIndex((session) => session.id === id)
     if (index < 0) return
 
+    const closing = sessions[index]
     const remaining = sessions.filter((session) => session.id !== id)
+    // The comparison (whole tree + row counts) is dropped with the session; the
+    // cache entries under its roots go too, so a closed tab leaves nothing big.
+    releaseDirectorySession(closing, remaining)
     if (activeId === id) {
       // Prefer the next tab; the previous one is the fallback at the right edge.
       setActiveId((remaining[index] ?? remaining[index - 1])?.id ?? null)
@@ -486,6 +504,15 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   /** Upserts a session, preserving the tab order it already had. */
   function upsertSession(session: WorkbenchSession): void {
+    const previous = sessions.find((item) => item.id === session.id)
+    if (previous !== undefined) {
+      // A re-compare replaces the old comparison object; the new one (and any
+      // other tab on the same roots) keeps the cache warm.
+      releaseDirectorySession(previous, [
+        ...sessions.filter((item) => item.id !== session.id),
+        session
+      ])
+    }
     setSessions((current) =>
       current.some((item) => item.id === session.id)
         ? current.map((item) => (item.id === session.id ? session : item))
@@ -500,6 +527,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
    * keeps the identity it was opened with instead of leaving a stale one behind.
    */
   function replaceSession(id: string, session: WorkbenchSession): void {
+    const previous = sessions.find((item) => item.id === id)
+    if (previous !== undefined) {
+      releaseDirectorySession(previous, [
+        ...sessions.filter((item) => item.id !== id),
+        { ...session, id }
+      ])
+    }
     setSessions((current) => current.map((item) => (item.id === id ? { ...session, id } : item)))
     setActiveId(id)
   }

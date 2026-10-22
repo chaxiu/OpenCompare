@@ -203,13 +203,182 @@ export interface ContentHashEntry {
   readonly hash: string
 }
 
-/** Cross-comparison memo so an unchanged tree is never read or hashed twice. */
-export interface ComparisonCache {
-  readonly hashes: Map<string, ContentHashEntry>
+/**
+ * Default bounds of the cross-session digest memo.
+ *
+ * A real pair (DawnChat ↔ ZenMind) settles around 78k equal-size/mtime pairs,
+ * so the entry cap leaves room for one full comparison plus its warm rounds
+ * while still bounding a process that opens many unrelated trees. The byte cap
+ * is the second, independent bound: an entry is `path + digest` text plus a
+ * fixed bookkeeping overhead, so a deep tree with long paths hits the byte
+ * budget before the entry count does.
+ */
+export const DEFAULT_COMPARISON_CACHE_MAX_ENTRIES = 200_000
+export const DEFAULT_COMPARISON_CACHE_MAX_BYTES = 128 * 1024 * 1024
+
+/**
+ * Bookkeeping cost charged per cached entry on top of its key and digest.
+ * `estimatedEntryBytes` = overhead + 2 × (path + hash) characters, i.e. UTF-16
+ * strings. It is an estimate of the Map slot, the key and the entry object —
+ * documented in `docs/perf/large-directory-memory.md` — not a heap measurement.
+ */
+export const COMPARISON_CACHE_ENTRY_OVERHEAD_BYTES = 96
+
+/** Estimated bytes one cache entry occupies under the documented formula. */
+export function estimatedEntryBytes(path: string, entry: ContentHashEntry): number {
+  return COMPARISON_CACHE_ENTRY_OVERHEAD_BYTES + 2 * (path.length + entry.hash.length)
 }
 
-export function createComparisonCache(): ComparisonCache {
-  return { hashes: new Map() }
+/** Readable cache counters; `evictions` counts both capacity and root evictions. */
+export interface ComparisonCacheStats {
+  readonly entries: number
+  readonly estimatedBytes: number
+  readonly hits: number
+  readonly misses: number
+  readonly evictions: number
+}
+
+export interface ComparisonCacheOptions {
+  /** Capacity in entries; below 1 is invalid and falls back to the default. */
+  readonly maxEntries?: number
+  /** Estimated-byte capacity; below 1 is invalid and falls back to the default. */
+  readonly maxBytes?: number
+}
+
+/**
+ * Cross-comparison memo so an unchanged tree is never read or hashed twice,
+ * bounded by entries and estimated bytes with LRU eviction.
+ *
+ * `hashes` stays a plain `Map` because snapshot seeding and the cancellation
+ * tests read it directly; its iteration order is the recency order (oldest
+ * first), and every writer goes through {@link ComparisonCache.set} so the
+ * byte accounting cannot drift. A write that does not fit the budget evicts
+ * the least recently used entries — never the whole cache, and never the entry
+ * that was just written.
+ */
+export interface ComparisonCache {
+  readonly hashes: Map<string, ContentHashEntry>
+  readonly maxEntries: number
+  readonly maxBytes: number
+  readonly stats: ComparisonCacheStats
+  /** LRU read: a hit moves the entry to the newest position. */
+  get(path: string): ContentHashEntry | undefined
+  /** LRU write: refreshes recency, charges bytes and evicts down to the caps. */
+  set(path: string, entry: ContentHashEntry): void
+  /** Drops one entry without counting it as an eviction (invalidation). */
+  delete(path: string): void
+  /**
+   * Evicts every entry under one of the roots (root included), e.g. when a
+   * session is closed. Returns how many entries were released.
+   */
+  evictUnderRoots(roots: readonly string[]): number
+  /**
+   * Pins the entries written until the returned release runs, so one in-flight
+   * comparison is never torn apart between digest and classify when it outgrows
+   * the caps. Capacity is re-applied at release (comparison boundary), which is
+   * what keeps the cross-comparison memo bounded.
+   */
+  hold(): () => void
+}
+
+function usableLimit(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value) || value < 1) return fallback
+  return Math.floor(value)
+}
+
+function normalizedRoot(root: string): string {
+  return root.replace(/[\\/]+$/, '')
+}
+
+function belongsToRoot(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`)
+}
+
+export function createComparisonCache(options: ComparisonCacheOptions = {}): ComparisonCache {
+  const maxEntries = usableLimit(options.maxEntries, DEFAULT_COMPARISON_CACHE_MAX_ENTRIES)
+  const maxBytes = usableLimit(options.maxBytes, DEFAULT_COMPARISON_CACHE_MAX_BYTES)
+  const hashes = new Map<string, ContentHashEntry>()
+  let estimatedBytes = 0
+  let hits = 0
+  let misses = 0
+  let evictions = 0
+  /** Comparisons currently in flight; capacity waits for the last one to end. */
+  let holds = 0
+
+  function drop(path: string): ContentHashEntry | undefined {
+    const entry = hashes.get(path)
+    if (entry === undefined) return undefined
+    estimatedBytes -= estimatedEntryBytes(path, entry)
+    hashes.delete(path)
+    return entry
+  }
+
+  function evictOldest(): void {
+    const oldest = hashes.keys().next()
+    if (oldest.done === true) return
+    drop(oldest.value)
+    evictions += 1
+  }
+
+  function evictDownToCaps(): void {
+    // `hashes.size > 1` keeps the freshest entry even when its own estimate
+    // exceeds the byte budget, so a write never empties the cache.
+    while ((hashes.size > maxEntries || estimatedBytes > maxBytes) && hashes.size > 1) {
+      evictOldest()
+    }
+  }
+
+  return {
+    hashes,
+    maxEntries,
+    maxBytes,
+    get stats(): ComparisonCacheStats {
+      return { entries: hashes.size, estimatedBytes, hits, misses, evictions }
+    },
+    get(path) {
+      const entry = hashes.get(path)
+      if (entry === undefined) {
+        misses += 1
+        return undefined
+      }
+      // Re-insert as the newest entry; the value itself is never copied.
+      hashes.delete(path)
+      hashes.set(path, entry)
+      hits += 1
+      return entry
+    },
+    set(path, entry) {
+      drop(path)
+      hashes.set(path, entry)
+      estimatedBytes += estimatedEntryBytes(path, entry)
+      if (holds === 0) evictDownToCaps()
+    },
+    delete(path) {
+      drop(path)
+    },
+    hold() {
+      holds += 1
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        holds = Math.max(0, holds - 1)
+        if (holds === 0) evictDownToCaps()
+      }
+    },
+    evictUnderRoots(roots) {
+      const bases = roots.map(normalizedRoot).filter((root) => root.length > 0)
+      if (bases.length === 0) return 0
+      let released = 0
+      for (const path of [...hashes.keys()]) {
+        if (!bases.some((base) => belongsToRoot(path, base))) continue
+        drop(path)
+        released += 1
+        evictions += 1
+      }
+      return released
+    }
+  }
 }
 
 function basename(path: string): string {
@@ -583,7 +752,7 @@ function needsContent(left: ScannedNode, right: ScannedNode): boolean {
 }
 
 function needsHash(node: ScannedNode, cache: ComparisonCache): boolean {
-  const cached = cache.hashes.get(node.path)
+  const cached = cache.get(node.path)
   return cached === undefined || cached.size !== node.size || cached.modifiedMs !== node.modifiedMs
 }
 
@@ -612,7 +781,7 @@ export function planContentReads(
 }
 
 function hashFile(node: ScannedNode, context: CompareContext): string {
-  const cached = context.cache.hashes.get(node.path)
+  const cached = context.cache.get(node.path)
   if (cached !== undefined && cached.size === node.size && cached.modifiedMs === node.modifiedMs) {
     return cached.hash
   }
@@ -623,7 +792,7 @@ function hashFile(node: ScannedNode, context: CompareContext): string {
   }
 
   const digest = context.hash(content)
-  context.cache.hashes.set(node.path, {
+  context.cache.set(node.path, {
     size: node.size,
     modifiedMs: node.modifiedMs,
     hash: digest
@@ -934,7 +1103,7 @@ export async function digestContentCandidates(
         }
         chunkBytes += digest.bytes
         chunkHashedFiles += 1
-        cache.hashes.set(path, {
+        cache.set(path, {
           size: node.size,
           modifiedMs: node.modifiedMs,
           hash: digest.sha256
@@ -961,7 +1130,7 @@ export async function digestContentCandidates(
       if (node === undefined) {
         throw new Error(`No scanned file at ${path}; call planContentReads first.`)
       }
-      cache.hashes.set(path, {
+      cache.set(path, {
         size: node.size,
         modifiedMs: node.modifiedMs,
         hash: hash(await abortable(read(path), signal))
@@ -995,6 +1164,9 @@ export async function compareDirectories(
   /** In-flight body-read window and optional digest capability. */
   options: ComparisonIoOptions = {}
 ): Promise<DirectoryComparison> {
+  // One comparison keeps its freshly computed digests until it has classified
+  // every pair; the caps apply again the moment this comparison ends.
+  const releaseHold = cache.hold()
   try {
     // Both side scans feed one monotonic progress stream.
     const sideProgress = createScanProgressMerger(options.onProgress)
@@ -1018,5 +1190,7 @@ export async function compareDirectories(
     return compareScannedTrees(left, right, { contents: new Map(), cache, hash, unreadable })
   } catch (error) {
     throw toReadableIoError(error)
+  } finally {
+    releaseHold()
   }
 }

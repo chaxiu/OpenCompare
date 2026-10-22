@@ -6,12 +6,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { DigestFiles, DirectoryProgress, ListDirectories, ListDirectory } from './compare'
 import type { DirectoryEntry, DirectoryListing } from '@shared/platform/types'
 import {
+  COMPARISON_CACHE_ENTRY_OVERHEAD_BYTES,
+  DEFAULT_COMPARISON_CACHE_MAX_BYTES,
+  DEFAULT_COMPARISON_CACHE_MAX_ENTRIES,
   DEFAULT_DIRECTORY_BATCH_SIZE,
   DEFAULT_DIGEST_BATCH_SIZE,
   DEFAULT_TRAVERSAL_CONCURRENCY,
   compareDirectories,
   compareScannedTrees,
   createComparisonCache,
+  estimatedEntryBytes,
   planContentReads,
   scanDirectory
 } from './compare'
@@ -205,6 +209,84 @@ describe('sha256Bytes', () => {
     const bytes = pseudoRandomBytes(1024 * 1024 + 7)
 
     expect(sha256Bytes(bytes)).toBe(createHash('sha256').update(bytes).digest('hex'))
+  })
+})
+
+describe('comparison cache bounds', () => {
+  const digest = 'a'.repeat(64)
+  const entry = (): { size: number; modifiedMs: number; hash: string } => ({
+    size: 1,
+    modifiedMs: 0,
+    hash: digest
+  })
+
+  it('exposes finite default caps and never grows past the entry cap', () => {
+    const cache = createComparisonCache()
+
+    expect(cache.maxEntries).toBe(DEFAULT_COMPARISON_CACHE_MAX_ENTRIES)
+    expect(cache.maxBytes).toBe(DEFAULT_COMPARISON_CACHE_MAX_BYTES)
+    expect(cache.maxEntries).toBeGreaterThan(0)
+    expect(cache.maxBytes).toBeGreaterThan(0)
+    // The estimate counts the fixed overhead plus both UTF-16 strings.
+    expect(estimatedEntryBytes('/a/b.txt', entry())).toBe(
+      COMPARISON_CACHE_ENTRY_OVERHEAD_BYTES + 2 * ('/a/b.txt'.length + digest.length)
+    )
+
+    for (let index = 0; index < DEFAULT_COMPARISON_CACHE_MAX_ENTRIES + 10; index += 1) {
+      cache.set(`/root/file-${index}.txt`, entry())
+    }
+
+    expect(cache.stats.entries).toBe(cache.hashes.size)
+    expect(cache.stats.entries).toBeLessThanOrEqual(cache.maxEntries)
+    expect(cache.stats.evictions).toBe(10)
+  })
+
+  it('keeps the estimated bytes under an explicit tiny byte budget', () => {
+    const cache = createComparisonCache({ maxBytes: 1_000 })
+    for (let index = 0; index < 20; index += 1) cache.set(`/root/file-${index}.txt`, entry())
+
+    expect(cache.stats.estimatedBytes).toBeLessThanOrEqual(1_000)
+    // Bounded by eviction, not by dropping everything.
+    expect(cache.hashes.size).toBeGreaterThan(0)
+    expect(cache.stats.entries).toBe(cache.hashes.size)
+  })
+
+  it('evicts the least recently used entry first', () => {
+    const cache = createComparisonCache({ maxEntries: 3 })
+    for (const path of ['/A', '/B', '/C']) cache.set(path, entry())
+
+    // Reading A makes B the oldest entry.
+    expect(cache.get('/A')).toBeDefined()
+    cache.set('/D', entry())
+    expect(cache.hashes.has('/B')).toBe(false)
+    expect([...cache.hashes.keys()].sort()).toEqual(['/A', '/C', '/D'])
+
+    cache.set('/E', entry())
+    expect(cache.hashes.has('/C')).toBe(false)
+    expect([...cache.hashes.keys()].sort()).toEqual(['/A', '/D', '/E'])
+  })
+
+  it('counts hits, misses and evictions and lets the estimate fall again', () => {
+    const cache = createComparisonCache({ maxEntries: 2 })
+    cache.set('/a', entry())
+    cache.set('/b', entry())
+    const full = cache.stats
+
+    expect(cache.get('/a')).toBeDefined()
+    expect(cache.get('/missing')).toBeUndefined()
+    expect(cache.stats.hits).toBe(1)
+    expect(cache.stats.misses).toBe(1)
+
+    cache.set('/c', entry())
+    const afterEvict = cache.stats
+    expect(afterEvict.evictions).toBe(1)
+    expect(afterEvict.entries).toBe(2)
+    expect(afterEvict.estimatedBytes).toBeLessThanOrEqual(full.estimatedBytes)
+    expect(afterEvict.entries).toBe(cache.hashes.size)
+
+    cache.delete('/a')
+    expect(cache.stats.entries).toBe(1)
+    expect(cache.stats.estimatedBytes).toBeLessThan(afterEvict.estimatedBytes)
   })
 })
 

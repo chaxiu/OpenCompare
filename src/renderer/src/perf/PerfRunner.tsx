@@ -46,6 +46,9 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
               await perf.event({ type: 'round-start', round })
             },
             onSession: (next) => setSession(next),
+            // Drop the previous round's session before the boundary sample, so
+            // only one round's tree is ever held by the runner.
+            onReleaseSession: () => setSession(null),
             onRoundEnd: async (report) => {
               setStatus(
                 `第 ${report.index}/${config.rounds} 轮完成（${Math.round(report.wallMs / 100) / 10}s，` +

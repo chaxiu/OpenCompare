@@ -6,7 +6,11 @@
  */
 import type { TextSample } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
-import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
+import type {
+  ComparisonCache,
+  DirectoryComparison,
+  DirectoryDiffNode
+} from '@core/directory/compare'
 import type { DrilldownTarget } from './fileKinds'
 import { baseName, classifyFile } from './fileKinds'
 import type { AdhocFilePair, WorkbenchSession } from './session'
@@ -45,6 +49,31 @@ export function createDirectorySession(
     directory: comparison,
     sides
   }
+}
+
+/**
+ * Releases one directory comparison whose session was closed or replaced:
+ * evicts the digest-cache entries under its two roots, unless another open
+ * session still compares from that root. Callers pass the sessions that remain
+ * open (for a replacement, including the new session for the same pair), so a
+ * shared root keeps its warm cache. The old `DirectoryComparison` object is
+ * dropped by the caller's session update; nothing here waits for GC.
+ */
+export function releaseDirectoryComparison(
+  cache: ComparisonCache,
+  comparison: DirectoryComparison,
+  openSessions: readonly WorkbenchSession[]
+): number {
+  const inUse = new Set<string>()
+  for (const session of openSessions) {
+    const other = session.directory
+    if (other === undefined) continue
+    inUse.add(other.leftRoot)
+    inUse.add(other.rightRoot)
+  }
+  return cache.evictUnderRoots(
+    [comparison.leftRoot, comparison.rightRoot].filter((root) => !inUse.has(root))
+  )
 }
 
 /**
