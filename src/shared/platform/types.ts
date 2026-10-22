@@ -90,6 +90,22 @@ export interface FileDigestFailure {
 
 export type FileDigest = FileDigestSuccess | FileDigestFailure
 
+/**
+ * Structured cancellation of a digest batch. Cancellation is a normal answer at
+ * the platform / IPC boundary, so a cancelled call resolves to this instead of
+ * rejecting across `ipcMain.handle`.
+ */
+export interface DigestFilesCancelled {
+  readonly cancelled: true
+}
+
+/**
+ * Answer of {@link PlatformPort.digestFiles}: one slot per requested path in
+ * input order, or the structured cancellation marker. Callers tell them apart
+ * with `Array.isArray` (no extra wrapper object to unpack).
+ */
+export type DigestFilesResult = readonly FileDigest[] | DigestFilesCancelled
+
 export interface DigestFilesOptions {
   /** In-flight streaming reads; defaults to the platform's bounded window. */
   readonly concurrency?: number
@@ -142,14 +158,19 @@ export interface PlatformPort {
    * decoded as text, so binary content (including invalid UTF-8) is compared
    * byte for byte. A file that cannot be read only marks that item failed; the
    * batch still resolves. Descriptor exhaustion rejects the whole call.
+   *
+   * Cancelling the call's `operationId` settles it as
+   * {@link DigestFilesCancelled} instead of rejecting with a partial result;
+   * the renderer turns that marker back into an `OperationCancelledError` inside
+   * its own process, so no cancellation ever crosses the IPC handler boundary.
    */
   digestFiles(
     paths: readonly string[],
     options?: DigestFilesOptions
-  ): Promise<readonly FileDigest[]>
+  ): Promise<DigestFilesResult>
   /**
    * Cancels the in-flight work registered under `operationId`: the affected
-   * `digestFiles` call rejects with the cancellation error instead of returning
+   * `digestFiles` call resolves to {@link DigestFilesCancelled} instead of
    * partial slots. Unknown and repeated ids resolve harmlessly.
    */
   cancelOperation(operationId: string): Promise<void>

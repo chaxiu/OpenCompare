@@ -39,6 +39,7 @@ import {
 } from '@core/directory/snapshot'
 import type { ComparisonSide } from '@core/directory/snapshot'
 import { classifyFile } from './fileKinds'
+import { digestFilesForComparison } from '../platform'
 
 export type SidePosition = 'left' | 'right'
 
@@ -194,7 +195,11 @@ export function compareSides(
     digestBatchSize,
     // One `operationId` covers every digest chunk of this comparison.
     digestFiles: (paths) =>
-      platform.digestFiles(paths, operationId === undefined ? undefined : { operationId }),
+      digestFilesForComparison(
+        platform,
+        paths,
+        operationId === undefined ? undefined : { operationId }
+      ),
     listDirectories: (paths) => platform.listDirectories(paths)
   }
   return compareDirectorySides(

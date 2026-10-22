@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { CSV_SCENE } from '@shared/fixtures'
 import { sha256Hex } from '@core/directory/hash'
 import { OperationCancelledError } from '@core/io'
+import { digestFilesForComparison, unwrapDigestResult } from './index'
 import { createWebPlatformPort } from './web-platform'
 
 /** The hidden `<input type="file">` the web picker appends while it is open. */
@@ -103,6 +104,8 @@ describe('web byte digest', () => {
     ])
 
     // One result per path, in input order.
+    expect(Array.isArray(digests)).toBe(true)
+    if (!Array.isArray(digests)) throw new Error('expected a digest array')
     expect(digests).toHaveLength(3)
     expect(digests[0]).toMatchObject({
       path: sample.path,
@@ -127,7 +130,7 @@ describe('web byte digest', () => {
     for (const [index, text] of samples.entries()) {
       const path = `/memory/digest-${index}.txt`
       await platform.writeTextFile(path, text)
-      const [digest] = await platform.digestFiles([path])
+      const [digest] = unwrapDigestResult(await platform.digestFiles([path]))
       expect(digest).toMatchObject({
         ok: true,
         sha256: sha256Hex(text),
@@ -146,27 +149,43 @@ describe('web digest cancellation', () => {
     await expect(platform.cancelOperation('used-twice')).resolves.toBeUndefined()
   })
 
-  it('rejects a digest whose operation was already cancelled, unchanged otherwise', async () => {
+  it('resolves a cancelled digest as the structured marker, unchanged otherwise', async () => {
     const platform = createWebPlatformPort()
     const sample = CSV_SCENE.left
 
     const before = await platform.digestFiles([sample.path], { operationId: 'live-op' })
+    expect(Array.isArray(before)).toBe(true)
+    if (!Array.isArray(before)) throw new Error('expected a digest array')
     expect(before[0]).toMatchObject({ ok: true, sha256: sha256Hex(sample.text) })
 
     await platform.cancelOperation('cancelled-op')
-    const error = await platform
-      .digestFiles([sample.path], { operationId: 'cancelled-op' })
-      .then(
-        () => new Error('expected the digest to reject'),
-        (cause: unknown) => cause
-      )
-    expect(error).toBeInstanceOf(OperationCancelledError)
-    expect((error as OperationCancelledError).name).toBe('OperationCancelledError')
-    expect((error as OperationCancelledError).code).toBe('ECANCELED')
+    const cancelled = await platform.digestFiles([sample.path], { operationId: 'cancelled-op' })
+    expect(Array.isArray(cancelled)).toBe(false)
+    expect(cancelled).toEqual({ cancelled: true })
 
     // A different operation id keeps the previous, unchanged behaviour.
     const after = await platform.digestFiles([sample.path], { operationId: 'other-op' })
     expect(after).toEqual(before.map((item) => item))
+  })
+
+  it('lets the renderer adapter turn the marker back into a core cancellation', async () => {
+    const platform = createWebPlatformPort()
+    const sample = CSV_SCENE.left
+
+    const live = await digestFilesForComparison(platform, [sample.path], {
+      operationId: 'adapter-live'
+    })
+    expect(live[0]).toMatchObject({ ok: true, sha256: sha256Hex(sample.text) })
+
+    await platform.cancelOperation('adapter-cancelled')
+    const error = await digestFilesForComparison(platform, [sample.path], {
+      operationId: 'adapter-cancelled'
+    }).then(
+      () => new Error('expected the adapter to reject'),
+      (cause: unknown) => cause
+    )
+    expect(error).toBeInstanceOf(OperationCancelledError)
+    expect((error as OperationCancelledError).code).toBe('ECANCELED')
   })
 })
 

@@ -31,6 +31,11 @@
       "id": "test",
       "cwd": ".",
       "command": "pnpm test"
+    },
+    {
+      "id": "cancel-gate",
+      "cwd": ".",
+      "command": "pnpm test:cancel"
     }
   ]
 }

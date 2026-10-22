@@ -3,9 +3,9 @@ import type { IpcRendererEvent } from 'electron'
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
+  DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
-  FileDigest,
   PlatformPort
 } from '@shared/platform/types'
 
@@ -33,9 +33,7 @@ const platform: PlatformPort = {
   readTextFile: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   digestFiles: (paths, options) =>
-    ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<
-      readonly FileDigest[]
-    >,
+    ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
   writeTextFile: (path, content, modifiedMs) =>
