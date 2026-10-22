@@ -557,8 +557,9 @@ jobs:
       # electron-builder embeds the blockmap payload in the AppImage trailer and
       # ships no separate Linux blockmap artifact; latest-linux.yml records its
       # length as blockMapSize. Reject metadata whose declared length does not
-      # match the archive's last 4 bytes (little-endian uint32), so an update
-      # client can never be handed a blockmap the file does not carry.
+      # match the archive's last 4 bytes read as both little-endian and
+      # big-endian uint32, so an update client can never be handed a blockmap
+      # the file does not carry.
       - name: Assert the AppImage embeds its declared blockmap
         if: matrix.target == 'linux'
         shell: bash
@@ -576,8 +577,9 @@ jobs:
             echo "::error::Missing ${metadata}; cannot verify the embedded AppImage blockmap." >&2
             exit 1
           fi
-          declared="$(METADATA="${metadata}" IMAGE_NAME="$(basename "${image}")" node -e '
+          IMAGE="${image}" IMAGE_NAME="$(basename "${image}")" METADATA="${metadata}" node -e '
             const fs = require("fs")
+            const image = process.env.IMAGE || ""
             const wanted = process.env.IMAGE_NAME || ""
             const lines = fs.readFileSync(process.env.METADATA, "utf8").split(/\r?\n/)
             let current = ""
@@ -602,11 +604,6 @@ jobs:
               console.error("::error::latest-linux.yml has no blockMapSize for " + wanted + ".")
               process.exit(1)
             }
-            process.stdout.write(declared)
-          ')"
-          actual="$(IMAGE="${image}" node -e '
-            const fs = require("fs")
-            const image = process.env.IMAGE || ""
             const size = fs.statSync(image).size
             if (size < 4) {
               console.error("::error::" + image + " is smaller than 4 bytes.")
@@ -616,13 +613,19 @@ jobs:
             const tail = Buffer.alloc(4)
             fs.readSync(fd, tail, 0, 4, size - 4)
             fs.closeSync(fd)
-            process.stdout.write(String(tail.readUInt32LE(0)))
-          ')"
-          if [ "${declared}" != "${actual}" ]; then
-            echo "::error::${image} ends with blockMapSize ${actual} but latest-linux.yml declares ${declared}." >&2
-            exit 1
-          fi
-          echo "Verified ${image}: embedded blockMapSize=${declared} matches latest-linux.yml."
+            const candidates = [tail.readUInt32LE(0), tail.readUInt32BE(0)]
+            const inRange = candidates.filter((value) => value <= size)
+            if (inRange.includes(Number(declared))) {
+              console.log("Verified " + image + ": embedded blockMapSize=" + declared + " matches latest-linux.yml.")
+              process.exit(0)
+            }
+            if (inRange.length === 0) {
+              console.error("::error::" + image + " trailer candidates LE=" + candidates[0] + " BE=" + candidates[1] + " both exceed the file size " + size + ".")
+              process.exit(1)
+            }
+            console.error("::error::" + image + " trailer candidates LE=" + candidates[0] + " BE=" + candidates[1] + " do not match latest-linux.yml blockMapSize=" + declared + ".")
+            process.exit(1)
+          '
       # Upload this platform's artifacts into the single pre-created release.
       # `shell: bash` guarantees globbing works on the windows runner too.
       - name: Upload installers to the tag's release
