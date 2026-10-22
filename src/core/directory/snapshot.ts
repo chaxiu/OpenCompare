@@ -499,6 +499,9 @@ export async function compareDirectorySides(
   /** In-flight body-read window and optional raw-byte digest capability. */
   options: ComparisonIoOptions = {}
 ): Promise<DirectoryComparison> {
+  // The comparison's own digests stay pinned until it has classified every
+  // pair; the cache caps apply again at this comparison's boundary.
+  const releaseHold = cache.hold()
   try {
     // Directory sides of a mixed pair still report one monotonic scan stream.
     const sideProgress = createScanProgressMerger(options.onProgress)
@@ -554,5 +557,7 @@ export async function compareDirectorySides(
     })
   } catch (error) {
     throw toReadableIoError(error)
+  } finally {
+    releaseHold()
   }
 }

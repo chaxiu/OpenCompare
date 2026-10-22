@@ -260,5 +260,5 @@ export function invalidateComparisonCache(
   cache: ComparisonCache,
   paths: readonly string[]
 ): void {
-  for (const path of paths) cache.hashes.delete(path)
+  for (const path of paths) cache.delete(path)
 }

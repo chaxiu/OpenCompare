@@ -31,7 +31,8 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
-    "test:cancel": "vitest run src/cancel-gate.test.ts"
+    "test:cancel": "vitest run src/cancel-gate.test.ts",
+    "test:memory": "vitest run src/memory-gate.test.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.21",

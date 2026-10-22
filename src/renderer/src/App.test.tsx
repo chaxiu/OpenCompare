@@ -11,6 +11,22 @@ import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
 
 /**
+ * Counts real row-model builds, so a tab switch can prove that only the active
+ * directory session ever builds (or rebuilds) its rows.
+ */
+const rowBuilds = vi.hoisted(() => ({ count: 0 }))
+vi.mock('@core/directory/rows', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@core/directory/rows')>()
+  return {
+    ...actual,
+    buildDirectoryRowModel: (...args: Parameters<typeof actual.buildDirectoryRowModel>) => {
+      rowBuilds.count += 1
+      return actual.buildDirectoryRowModel(...args)
+    }
+  }
+})
+
+/**
  * jsdom reports zero-sized elements, which would give the virtualised tree no
  * viewport at all. A fixed 1200×640 client box stands in for the real panel.
  */
@@ -84,6 +100,14 @@ function scriptedPort(script: PortScript): PlatformPort {
     selectDirectory: async () => directories.shift() ?? null,
     resolveDroppedPath: async () => dropped.shift() ?? ''
   }
+}
+
+/** Row titles of the left tree pane, in render order. */
+function treeRowTitles(): string[] {
+  const tree = screen.getAllByRole('tree')[0]
+  return within(tree)
+    .getAllByRole('treeitem')
+    .map((row) => row.getAttribute('title') ?? '')
 }
 
 /** Dispatches a file drop whose handles resolve to `paths`. */
@@ -360,6 +384,67 @@ describe('real file workbench', () => {
       await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
     ).toBeDefined()
     expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)
+  })
+
+  it('builds directory rows only for the active session', async () => {
+    rowBuilds.count = 0
+    render(
+      <Workbench
+        platform={scriptedPort({
+          directories: [
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.incoming,
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    const firstTab = await screen.findByRole(
+      'tab',
+      { name: /baseline ↔ incoming/ },
+      { timeout: 4000 }
+    )
+    // One mounted directory view = one row model per side.
+    const afterFirst = rowBuilds.count
+    expect(afterFirst).toBe(2)
+    const firstRows = treeRowTitles()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    // The background session built nothing while hidden behind the new tab.
+    expect(rowBuilds.count).toBe(afterFirst + 2)
+
+    fireEvent.click(firstTab)
+    await waitFor(() => expect(rowBuilds.count).toBe(afterFirst + 4))
+    // Coming back rebuilds from the same comparison: rows are unchanged.
+    expect(treeRowTitles()).toEqual(firstRows)
+  })
+
+  it('keeps one tab when the same directory pair is compared again', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          directories: [
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right,
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    await waitFor(() => {
+      const tabs = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+      expect(tabs.filter((tab) => /baseline ↔ candidate/.test(tab.textContent ?? ''))).toHaveLength(1)
+    })
   })
 
   it('leaves the workbench untouched when a picker is cancelled', async () => {

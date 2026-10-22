@@ -27,6 +27,12 @@ export interface PerfRoundHooks {
   readonly onRoundStart?: (round: number, startedAt: string) => void | Promise<void>
   /** Called after the fresh session is built and before the post-round sample. */
   readonly onSession?: (session: WorkbenchSession) => void
+  /**
+   * Called right before the previous round's session reference is dropped —
+   * always before the next `onRoundStart`, so a holder (the runner's React
+   * state) never keeps the previous round's tree alive across the boundary.
+   */
+  readonly onReleaseSession?: (sessionId: string) => void
   readonly onRoundEnd?: (report: PerfRoundReport) => void | Promise<void>
   readonly onProgress?: ProgressReporter
   /** Injectable clock in milliseconds; defaults to `Date.now`. */
@@ -75,8 +81,14 @@ export async function runPerfRounds(
   const cache: ComparisonCache = createComparisonCache()
   const now = hooks.now ?? (() => Date.now())
   const reports: PerfRoundReport[] = []
+  /** Only the round in flight; the previous one is released at the boundary. */
+  const held: { session: WorkbenchSession | null } = { session: null }
 
   for (let round = 1; round <= input.rounds; round += 1) {
+    if (held.session !== null) {
+      hooks.onReleaseSession?.(held.session.id)
+      held.session = null
+    }
     const startedAt = new Date(now()).toISOString()
     await hooks.onRoundStart?.(round, startedAt)
     const startMs = now()
@@ -104,6 +116,7 @@ export async function runPerfRounds(
       id: roundSessionId(baseId, round)
     }
     hooks.onSession?.(roundSession)
+    held.session = roundSession
 
     const endedAt = new Date(now()).toISOString()
     const report: PerfRoundReport = {

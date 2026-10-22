@@ -1,7 +1,7 @@
 # 大目录多轮内存测量与上限门
 
-本文只描述**测量与门禁**：不改缓存、不释放会话、不做内存优化。接口与证据字段以代码
-`src/shared/perf/types.ts` 为准。
+本文覆盖 **测量入口 / 自动门禁 / 有界缓存与跨轮释放** 三部分。接口与证据字段以代码
+`src/shared/perf/types.ts` 为准；缓存上限常量与淘汰实现在 `src/core/directory/compare.ts`。
 
 ## 1. 一条命令测量真实两目录
 
@@ -42,6 +42,24 @@ pnpm perf:gate
 - 单次运行（含 `electron-vite build`）目标 ≤ 3 分钟；进程超时或阈值不通过均以非零退出，
   输出被违反的阈值 id。
 - `.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`。
+
+还有一条更轻的门禁，只断言**缓存规模与多轮不增长**，不启动 Electron：
+
+```bash
+pnpm test:memory
+```
+
+- 在系统临时目录生成真实落盘数据集（每侧 2,000 个文件、共 4,002 个文件、约 39.1 MiB
+  内容、`d0/d1/bucket-*/` 三层嵌套、每 25 个文件一处同大小不同内容、左右各一个单侧文件），
+  用 `fs` 真实列目录、真实流式 SHA-256 跑 3 轮，结束后删除数据集；不使用
+  `src/shared/fixtures/` 或 `/samples`。
+- 断言每轮 `stats.entries <= maxEntries`、`stats.estimatedBytes <= maxBytes`；第 2 与第 3 轮
+  结束后的 `stats.entries` 相等、第 3 轮估算字节不高于第 2 轮；warm 轮 `hashedFiles === 0`；
+  关闭会话后该根下条目归零；四态 `counts` 三轮回合逐项相等。
+- 判定函数 `src/memory-gate.ts` 是纯函数，超上限 / 轮次递增 / 会话泄漏 / 轮数不足都返回
+  `ok=false` 与非零退出码，并由 `src/memory-gate.test.ts` 的红路径用例覆盖。
+- 单次运行在本机约 1.5 秒，远低于 180 秒上限；`.munk/code-gates.json` 的 `memory-gate`
+  一项就是 `pnpm test:memory`（单 argv）。
 
 ## 3. 阈值与判定
 
@@ -106,13 +124,53 @@ RSS 口径（同时写入证据 `memoryDefinition`）：
 每轮至少各有 1 条 `pre-round` 与 `post-round`，轮次边界成对出现；某轮 `wallMs` 越长，其周期
 采样条数相应覆盖 `floor(wallMs / interval) - 1` 以上。
 
-## 5. 已归档的真实取证
+## 5. 有界摘要缓存与跨轮释放
+
+### 5.1 默认上限
+
+摘要缓存 `ComparisonCache`（`src/core/directory/compare.ts`）继续由 `Workbench` 的
+`useRef` 单例持有，跨会话复用；上限集中在这两个导出常量：
+
+| 常量 | 取值 | 含义 |
+| --- | --- | --- |
+| `DEFAULT_COMPARISON_CACHE_MAX_ENTRIES` | `200000` | 条目数上限 |
+| `DEFAULT_COMPARISON_CACHE_MAX_BYTES` | `134217728`（128 MiB） | 估算字节上限 |
+| `COMPARISON_CACHE_ENTRY_OVERHEAD_BYTES` | `96` | 每条固定开销 |
+
+估算口径：`estimatedEntryBytes(path, entry) = 96 + 2 × (path.length + entry.hash.length)`，
+即固定开销 + 路径与 64 位十六进制摘要按 UTF-16 字符计的字节数。它是**估算**，用于容量
+判定，不是堆内存测量；真实两目录一次完整对比约 7.8 万条、估算约 40 MiB，低于两项上限，
+因此 warm 轮仍可全部命中。
+
+### 5.2 淘汰策略
+
+- `cache.hashes` 的 `Map` 插入顺序即最近使用顺序（最旧在前）。`cache.get` 命中后把条目
+  移到队尾（LRU touch），未命中计入 `misses`；`cache.set` 先按路径覆盖旧条目，再按新值
+  计入估算字节，最后从队首逐个淘汰，直到条目数与估算字节都不超限。
+- 单条自身就超过字节预算时也会保留刚写入的那一条（`hashes.size > 1`），不会用「整体清空」
+  规避上限，因此 `stats.entries > 0` 恒成立。
+- 一次对比在 run 期持有 **hold**：对比从扫描到分类结束之间不因容量淘汰自己刚算出的摘要，
+  避免「摘要阶段算完、分类阶段已被淘汰」导致结果不确定；对比结束（成功或失败）立即重新
+  应用上限。跨轮/跨会话的上限语义由这个边界保证。
+- 关闭或替换目录会话走 `releaseDirectoryComparison`（`directoryCompare.ts`）：显式淘汰该
+  会话 `leftRoot` / `rightRoot` 下的条目，但跳过仍被其它活动会话使用的根；不依赖 GC 时机。
+  重新对比同一对目录时新会话仍持有同一批根，因此缓存保持温暖。
+- 淘汰只影响「是否重哈希」：被淘汰的条目在下一轮回落到真实读取 / 真实摘要，四态 `counts`
+  与每个节点 `status` 不变（`pnpm test:memory` 的 `maxEntries: 1` 用例即此断言）。
+- 行模型仍只在激活的 `DirectoryView` 内构建（`buildDirectoryRowModel` 只对屏幕上的会话
+  调用）；测量 harness 在每轮 `onRoundStart` 之前显式释放上一轮会话，`PerfRoundReport`
+  只保留标量计数。
+
+## 6. 已归档的真实取证
 
 `docs/perf/evidence/` 下保存一次真实两目录（非内置样本）实跑生成的证据 JSON。当前归档见
 该目录文件名中的日期与 `roots`；若未跑满 3 轮，文件中 `rounds.length` 与 `error`/文档说明
 如实记录已完成轮次与原因，禁止填充或估算数字。
 
-### 5.1 2026-10-22 真实两目录取证
+### 6.1 2026-10-22 真实两目录取证（改动前基线）
+
+> 本节是 `memory-harness` 落地时的**改动前基线**（有界缓存与跨轮释放之前），保留原文
+> 以避免重写历史。
 
 命令（实际执行）：
 
@@ -139,10 +197,57 @@ pnpm perf:dir \
 - 采样 46 条（startup 1、pre-round 2、post-round 2、boundary 4、periodic 37）。
 
 判定：`verdict.ok=false`，`violations=["renderer-peak"]`——renderer 峰值 1.96 GB 超过真实档
-1.5 GB；app 总峰值 2.51 GB 未超过 2.5 GiB（2,684,354,560 B）。这是 `memory-harness`
-落地时的**现状基线**，本项不做优化；缓存上限/会话释放归 `memory-bounded`。
+1.5 GB；app 总峰值 2.51 GB 未超过 2.5 GiB（2,684,354,560 B）。这是有界缓存与会话释放
+落地前的基线，用于对照后续修复结果。
 
-仅跑 2 轮的原因：第 2 轮 post-round 已超过 renderer 峰值上限，而 `Δ3` 规则需要第 3 轮；
-本项只交付测量入口与门禁，3 轮增长判定留待 `memory-bounded` 修复后用同一命令补跑（把
-`--rounds 3` 与新的 `--out` 传给上面的命令即可）。上述数字全部来自归档证据文件，未做任何
-估算。
+仅跑 2 轮的原因：第 2 轮 post-round 已超过 renderer 峰值上限，而 `Δ3` 规则需要第 3 轮。
+上述数字全部来自归档证据文件，未做任何估算。
+
+### 6.2 2026-10-22 真实两目录 3 轮取证（修复后）
+
+命令（实际执行，干净工作区）：
+
+```bash
+pnpm perf:dir \
+  --left /Users/zhutao/Cursor/DawnChat \
+  --right /Users/zhutao/Cursor/ZenMind \
+  --rounds 3 \
+  --interval 1000 \
+  --out docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json
+```
+
+环境与规模（证据原文）：
+
+- OS `24.6.0` / arm64 / Apple M3 Max / 16 核 / 137438953472 B 物理内存；
+  Node `22.21.1`（Electron 内置）/ Electron `37.10.3`。
+- `commit.sha = 0d48c817dc81752428a2a4bf52f4e47ec589bea3`，工作区 `dirty=false`；证据文件
+  在本次运行后写入，运行开始时的 HEAD 即上述提交。
+- 对比树：752,479 个文件、97,565 个目录（不跟随符号链接口径）。第 1 轮实际哈希
+  76,604 个文件 / 11,105,870,346 B；第 2、3 轮命中已有缓存，实际哈希 0 个文件 / 0 B。
+- 同一应用实例 `appPid = 66492`，三轮 `rendererPid = 66513`；采样 54 条
+  （startup 1、pre-round 3、post-round 3、boundary 6、periodic 41）。
+- 墙钟：第 1 轮 22,717 ms，第 2 轮 9,361 ms，第 3 轮 9,547 ms，总 41,630 ms。
+
+RSS（每轮 post-round，字节）：
+
+| 轮次 | renderer | app 总 |
+| --- | --- | --- |
+| 1 | 737,427,456 | 1,244,807,168 |
+| 2 | 1,186,463,744 | 1,702,215,680 |
+| 3 | 1,257,750,528 | 1,791,934,464 |
+
+- 峰值：renderer `1,257,750,528` B（1.17 GiB，真实档上限 1,610,612,736 B）、main
+  `409,272,320` B、app 总 `1,791,934,464` B（1.67 GiB，上限 2,684,354,560 B）。
+- 轮次增量（renderer）：`Δ1 = 633,274,368` B、`Δ2 = 449,036,288` B、
+  `Δ3 = 71,286,784` B；实际生效增量阈值 `min(100 MiB, max(30% × Δ1, 25 MiB)) =
+  104,857,600` B，`Δ3` 未超限。
+- 判定：`verdict.ok = true`，`violations = []`；证据文件
+  `docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json`。
+
+对照 6.1 的改动前基线：renderer 峰值由 `1,960,394,752` B 降到 `1,257,750,528` B（−702,644,224 B），
+app 总峰值由 `2,505,654,272` B 降到 `1,791,934,464` B（−713,719,808 B）。第 2、3 轮的
+renderer RSS 仍高于第 1 轮，但两轮之差 `Δ3` 已降到 68 MiB，进入阈值内且不再是线性抬升：
+第 2 轮增量 `449,036,288` B 与「首次全量扫描 / 哈希后的进程驻留内存（V8 未立即回收的临时
+对象与堆扩容）」的形态一致（本轮未对该增量做单独归因测量），而第 3 轮仅 `71,286,784` B，
+说明增量已收敛而不是逐轮等比增长。上述数字全部来自归档证据文件，未做任何估算；若后续重跑，保留本
+文件并按时间命名新文件，不覆盖历史证据。

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DIRECTORY_SAMPLE_PATHS, REMOTE_SNAPSHOT } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
 import { createComparisonCache } from '@core/directory/compare'
@@ -93,6 +94,34 @@ describe('snapshotOps comparison', () => {
 
     const comparison = await compareSides(platform, sides, createComparisonCache())
     expect(comparison.counts).toEqual({ same: 15, added: 0, removed: 0, modified: 0 })
+  })
+
+  it('hits snapshot-seeded digests and recomputes the same result after eviction', async () => {
+    const base = createWebPlatformPort()
+    const exported = await exportSideSnapshot(base, { kind: 'directory', path: LEFT })
+    const imported = parseSnapshotText(exported.text)
+    const sides = withSide(
+      directorySides(LEFT, DIRECTORY_SAMPLE_PATHS.right),
+      'right',
+      snapshotSide('right', imported)
+    )
+    const readTextFile = vi.fn((path: string) => base.readTextFile(path))
+    const platform: PlatformPort = { ...base, readTextFile }
+    const cache = createComparisonCache()
+
+    const first = await compareSides(platform, sides, cache)
+    expect(first.counts).toEqual({ same: 15, added: 0, removed: 0, modified: 0 })
+    // The seeded digests cover the mounted side: no body is ever read from a
+    // virtual `/snapshots/...` path through the platform.
+    expect(readTextFile.mock.calls.filter(([path]) => path.startsWith('/snapshots/'))).toEqual([])
+
+    // Evicting the seeded entries must not change the result: the snapshot
+    // document itself supplies the body, never a platform read of the mount.
+    const released = cache.evictUnderRoots([first.rightRoot])
+    expect(released).toBeGreaterThan(0)
+    const second = await compareSides(platform, sides, cache)
+    expect(second.counts).toEqual(first.counts)
+    expect(readTextFile.mock.calls.filter(([path]) => path.startsWith('/snapshots/'))).toEqual([])
   })
 
   it('compares snapshot against snapshot', async () => {

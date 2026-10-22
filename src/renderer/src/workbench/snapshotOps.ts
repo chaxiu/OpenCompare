@@ -160,7 +160,7 @@ export function findSnapshotMount(
 export function seedSnapshotCache(cache: ComparisonCache, sides: ComparisonSides): void {
   for (const mount of snapshotMounts(sides)) {
     for (const entry of mount.snapshot.entries) {
-      cache.hashes.set(`${mount.mountPath}/${entry.path}`, {
+      cache.set(`${mount.mountPath}/${entry.path}`, {
         size: entry.size,
         modifiedMs: entry.modifiedMs,
         hash: entry.sha256
