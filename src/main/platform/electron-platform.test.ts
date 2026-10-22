@@ -209,7 +209,7 @@ describe('directory listing', () => {
     expect(byName(listed)).toEqual(byName(serial))
   })
 
-  it('keeps a dangling symbolic link in the listing and flags it broken', async () => {
+  it('keeps a dangling symbolic link as a comparable link entry, not broken', async () => {
     const root = await scratchRoot()
     const tree = join(root, 'tree')
     await mkdir(join(tree, 'nested'), { recursive: true })
@@ -220,20 +220,21 @@ describe('directory listing', () => {
     expect(listed).toHaveLength(3)
 
     const dangling = listed.find((entry) => entry.name === 'dangling')
-    expect(dangling?.broken).toBe(true)
-    expect(dangling?.skippedReason).toBeTruthy()
-    expect(dangling?.isDirectory).toBe(false)
+    expect(dangling).toMatchObject({
+      isDirectory: false,
+      isSymbolicLink: true,
+      linkTarget: '/nonexistent-opencompare-target',
+      linkTargetKind: 'missing'
+    })
+    // A dangling link is still a readable entry: only its target is missing.
+    expect(dangling?.broken).toBeUndefined()
 
-    // The batch channel keeps the same broken entry and its readable reason.
+    // The batch channel keeps the same link entry.
     const [batchSlot] = (await platform.listDirectories([tree])) as DirectoryListing[]
     if (!batchSlot.ok) throw new Error('expected the batch slot to resolve')
-    const batchedDangling = batchSlot.entries.find((entry) => entry.name === 'dangling')
-    expect(batchedDangling).toMatchObject({
-      broken: true,
-      skippedReason: dangling?.skippedReason
-    })
+    expect(batchSlot.entries.find((entry) => entry.name === 'dangling')).toEqual(dangling)
 
-    // Every healthy entry keeps exactly the pre-fix `stat` shape.
+    // Healthy entries keep the pre-fix `stat` shape (lstat of a plain entry matches).
     const serial: DirectoryEntry[] = []
     for (const name of ['kept.txt', 'nested']) {
       const info = await stat(join(tree, name))
@@ -245,13 +246,13 @@ describe('directory listing', () => {
         modifiedMs: info.mtimeMs
       })
     }
-    expect(listed.filter((entry) => !entry.broken)).toEqual(
+    expect(listed.filter((entry) => !entry.isSymbolicLink)).toEqual(
       expect.arrayContaining(serial)
     )
-    expect(listed.filter((entry) => !entry.broken)).toHaveLength(2)
+    expect(listed.filter((entry) => !entry.isSymbolicLink)).toHaveLength(2)
   })
 
-  it('does not fail the listing when broken entries and an unreadable target mix', async () => {
+  it('keeps link entries comparable when the target is unreadable', async () => {
     const root = await scratchRoot()
     const tree = join(root, 'mixed')
     const locked = join(tree, 'locked')
@@ -276,12 +277,223 @@ describe('directory listing', () => {
       const readable = listed.find((entry) => entry.name === 'readable.txt')
       expect(readable?.broken).toBeUndefined()
       for (const name of ['blocked', 'dangling']) {
-        const broken = listed.find((entry) => entry.name === name)
-        expect(broken?.broken).toBe(true)
-        expect(broken?.skippedReason).toBeTruthy()
+        const link = listed.find((entry) => entry.name === name)
+        expect(link?.isSymbolicLink).toBe(true)
+        expect(link?.linkTargetKind).toBe('missing')
+        // The unreadable target never turns the link itself into a skipped entry.
+        expect(link?.broken).toBeUndefined()
       }
     } finally {
       await chmod(locked, 0o755)
+    }
+  })
+
+  it('scans a directory link, a link loop and a dangling link as single leaf entries', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    const target = join(root, 'shared', 'target')
+    await mkdir(target, { recursive: true })
+    await mkdir(left)
+    await mkdir(right)
+    for (let index = 0; index < 12; index += 1) {
+      await writeFile(join(target, `file-${index}.txt`), `target-${index}`)
+    }
+    await writeFile(join(left, 'real.txt'), 'real')
+    await symlink(target, join(left, 'dir-link'))
+    // A loop back to the scanned root must never be re-entered.
+    await symlink(left, join(left, 'loop'))
+    await symlink('/nonexistent-opencompare-target', join(left, 'dangling'))
+
+    const list: ListDirectory = (path) => platform.listDirectory(path)
+    const batched = (paths: readonly string[]) => platform.listDirectories(paths)
+    const startedAt = Date.now()
+    const tree = await scanDirectory(left, list, { listDirectories: batched })
+    expect(Date.now() - startedAt).toBeLessThan(5000)
+
+    expect(tree.index.get('dir-link')).toMatchObject({ kind: 'file', linkTargetKind: 'directory' })
+    expect(tree.index.get('loop')).toMatchObject({ kind: 'file', linkTargetKind: 'directory' })
+    expect(tree.index.get('dangling')).toMatchObject({
+      kind: 'file',
+      linkTargetKind: 'missing'
+    })
+    // root + real.txt + three link entries; no target subtree was walked.
+    expect([...tree.index.keys()]).toHaveLength(5)
+    expect([...tree.index.keys()].some((key) => key.startsWith('dir-link/'))).toBe(false)
+    expect([...tree.index.keys()].some((key) => key.startsWith('loop/'))).toBe(false)
+    expect(tree.skipped).toBe(0)
+
+    // Comparing against an empty right side counts root-level entries only:
+    // real.txt plus the three link leaves, never the 12-file target subtree.
+    const comparison = await compareDirectories(
+      left,
+      right,
+      list,
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      { listDirectories: batched }
+    )
+    expect(comparison.fileCount).toBe(4)
+    expect(comparison.counts).toEqual({ same: 0, added: 0, removed: 4, modified: 0 })
+  })
+
+  it('classifies real link entries into all four states by target string', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    const sharedA = join(root, 'shared-a')
+    const sharedB = join(root, 'shared-b')
+    await mkdir(left)
+    await mkdir(right)
+    await mkdir(sharedA)
+    await mkdir(sharedB)
+
+    await symlink(sharedA, join(left, 'same-link'))
+    await symlink(sharedA, join(right, 'same-link'))
+    await symlink(sharedA, join(left, 'diff-link'))
+    await symlink(sharedB, join(right, 'diff-link'))
+    await symlink(sharedA, join(left, 'removed-link'))
+    await symlink(sharedB, join(right, 'added-link'))
+    await symlink(sharedA, join(left, 'clash'))
+    await writeFile(join(right, 'clash'), 'plain file')
+
+    const comparison = await compareDirectories(
+      left,
+      right,
+      (path) => platform.listDirectory(path),
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: (paths) => platform.digestFiles(paths),
+        listDirectories: (paths) => platform.listDirectories(paths)
+      }
+    )
+
+    expect(comparison.counts).toEqual({ same: 1, added: 1, removed: 1, modified: 2 })
+    expect(comparison.fileCount).toBe(5)
+    expect(
+      comparison.counts.same +
+        comparison.counts.added +
+        comparison.counts.removed +
+        comparison.counts.modified
+    ).toBe(comparison.fileCount)
+
+    const byName = new Map(comparison.root.children.map((child) => [child.name, child]))
+    expect(byName.get('same-link')?.status).toBe('same')
+    expect(byName.get('diff-link')?.status).toBe('modified')
+    expect(byName.get('removed-link')?.status).toBe('removed')
+    expect(byName.get('added-link')?.status).toBe('added')
+    // A link against a plain file is one type-clash entry.
+    expect(byName.get('clash')).toMatchObject({ kind: 'file', status: 'modified' })
+  })
+
+  it('compares links by target string, never by target file content', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    await mkdir(left)
+    await mkdir(right)
+    // The same relative target string resolves to different bodies per side.
+    await writeFile(join(left, 'target.txt'), 'LEFT-BODY')
+    await writeFile(join(right, 'target.txt'), 'RIGHT-BODY')
+    await symlink('target.txt', join(left, 'same-target'))
+    await symlink('target.txt', join(right, 'same-target'))
+    // Different target strings point at identical bodies outside both roots.
+    await writeFile(join(root, 'a.txt'), 'IDENTICAL')
+    await writeFile(join(root, 'b.txt'), 'IDENTICAL')
+    await symlink('../a.txt', join(left, 'diff-target'))
+    await symlink('../b.txt', join(right, 'diff-target'))
+
+    const comparison = await compareDirectories(
+      left,
+      right,
+      (path) => platform.listDirectory(path),
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      {
+        digestFiles: (paths) => platform.digestFiles(paths),
+        listDirectories: (paths) => platform.listDirectories(paths)
+      }
+    )
+
+    const byName = new Map(comparison.root.children.map((child) => [child.name, child]))
+    expect(byName.get('same-target')).toMatchObject({
+      kind: 'file',
+      status: 'same',
+      linkTargetKind: 'file'
+    })
+    expect(byName.get('diff-target')).toMatchObject({ kind: 'file', status: 'modified' })
+  })
+
+  it('compares dangling links without counting them as skipped', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    await mkdir(left)
+    await mkdir(right)
+    await symlink('/nonexistent-opencompare-target', join(left, 'same-dangling'))
+    await symlink('/nonexistent-opencompare-target', join(right, 'same-dangling'))
+    await symlink('/nonexistent-opencompare-target', join(left, 'left-dangling'))
+
+    const comparison = await compareDirectories(
+      left,
+      right,
+      (path) => platform.listDirectory(path),
+      (path) => platform.readTextFile(path),
+      createComparisonCache(),
+      undefined,
+      { listDirectories: (paths) => platform.listDirectories(paths) }
+    )
+
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 1, modified: 0 })
+    expect(comparison.leftSkipped).toBe(0)
+    expect(comparison.rightSkipped).toBe(0)
+  })
+
+  it('reports skips per side instead of merging both sides', async () => {
+    const root = await scratchRoot()
+    const left = join(root, 'left')
+    const right = join(root, 'right')
+    await mkdir(join(left, 'locked'), { recursive: true })
+    await writeFile(join(left, 'locked', 'hidden.txt'), 'hidden')
+    await writeFile(join(left, 'seen.txt'), 'seen')
+    await mkdir(right)
+    await writeFile(join(right, 'seen.txt'), 'seen')
+
+    const compare = () =>
+      compareDirectories(
+        left,
+        right,
+        (path) => platform.listDirectory(path),
+        (path) => platform.readTextFile(path),
+        createComparisonCache(),
+        undefined,
+        { listDirectories: (paths) => platform.listDirectories(paths) }
+      )
+
+    try {
+      await chmod(join(left, 'locked'), 0o000)
+      const leftRun = await compare()
+      expect(leftRun.leftSkipped).toBe(1)
+      expect(leftRun.rightSkipped).toBe(0)
+      expect(leftRun.skipped).toBe(1)
+    } finally {
+      await chmod(join(left, 'locked'), 0o755)
+    }
+
+    await mkdir(join(right, 'locked'), { recursive: true })
+    await writeFile(join(right, 'locked', 'hidden.txt'), 'hidden')
+    try {
+      await chmod(join(right, 'locked'), 0o000)
+      const rightRun = await compare()
+      expect(rightRun.leftSkipped).toBe(0)
+      expect(rightRun.rightSkipped).toBe(1)
+      expect(rightRun.skipped).toBe(1)
+    } finally {
+      await chmod(join(right, 'locked'), 0o755)
     }
   })
 
@@ -387,7 +599,7 @@ describe('batch directory listing', () => {
       return { isDirectory: () => false, size: 1, mtimeMs: 1 }
     }
 
-    const listings = await listDirectories(directories, { statFile })
+    const listings = await listDirectories(directories, { lstatFile: statFile })
 
     expect(listings).toHaveLength(directoryCount)
     expect(listings.every((listing) => listing.ok)).toBe(true)
@@ -407,7 +619,7 @@ describe('batch directory listing', () => {
       return { isDirectory: () => false, size: 1, mtimeMs: 1 }
     }
     const narrowed = await listDirectories(directories, {
-      statFile: narrowStat,
+      lstatFile: narrowStat,
       statConcurrency: 3
     })
     expect(narrowed.every((listing) => listing.ok)).toBe(true)
@@ -422,7 +634,7 @@ describe('batch directory listing', () => {
     await writeFile(join(directory, 'file.txt'), 'x')
 
     const outcome = await listDirectories([directory], {
-      statFile: async () => {
+      lstatFile: async () => {
         throw codedError('EMFILE')
       }
     }).then(
@@ -480,10 +692,10 @@ describe('batch directory listing', () => {
       expect(batchedLeft.root).toEqual(baselineLeft.root)
       expect([...batchedLeft.index.keys()].sort()).toEqual([...baselineLeft.index.keys()].sort())
       expect(batchedLeft.skipped).toBe(baselineLeft.skipped)
-      // both broken links plus the unlistable subtree
-      expect(batchedLeft.skipped).toBe(3)
-      expect(batchedLeft.index.has('dangling')).toBe(false)
-      expect(batchedLeft.index.has('blocked')).toBe(false)
+      // Only the unlistable subtree is skipped; both links remain entries.
+      expect(batchedLeft.skipped).toBe(1)
+      expect(batchedLeft.index.get('dangling')?.linkTargetKind).toBe('missing')
+      expect(batchedLeft.index.get('blocked')?.linkTargetKind).toBe('missing')
       expect(batchedLeft.index.has('locked')).toBe(false)
       // .git / node_modules are listed and compared, never silently ignored
       expect(batchedLeft.index.has('.git/config')).toBe(true)
@@ -782,7 +994,7 @@ const REAL_LEFT = process.env.OPENCOMPARE_REAL_LEFT
 const REAL_RIGHT = process.env.OPENCOMPARE_REAL_RIGHT
 
 describe.skipIf(REAL_LEFT === undefined || REAL_RIGHT === undefined)('real project trees', () => {
-  it('compares two real trees, counts dangling links and never throws', async () => {
+  it('compares two real trees without throwing and keeps per-side skip counts', async () => {
     const comparison = await compareDirectories(
       REAL_LEFT as string,
       REAL_RIGHT as string,
@@ -797,7 +1009,7 @@ describe.skipIf(REAL_LEFT === undefined || REAL_RIGHT === undefined)('real proje
     )
 
     expect(comparison.fileCount).toBe(same + added + removed + modified)
-    expect(comparison.skipped).toBeGreaterThanOrEqual(1)
+    expect(comparison.skipped).toBe(comparison.leftSkipped + comparison.rightSkipped)
   }, 900_000)
 })
 

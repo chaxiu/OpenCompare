@@ -25,7 +25,8 @@
 - **扫描 / 摘要进度（`src/core/directory/compare.ts`，流水线累计口径）**：`scanDirectory` / `compareDirectories` / `compareDirectorySides` 提供可选 `onProgress(progress)` 尾参，每结算一个真实批次（批量列目录或摘要分块）最多回报一次 `DirectoryProgress = { phase: 'scan' | 'digest', files, bytes, phaseFiles, phaseBytes }`。**`files` / `bytes` 表示整条流水线的累计值，跨相位单调不减**——digest 相位以 `createScanProgressMerger` 已累计的扫描末态（两路 side 合并后的 `totals()`，经 `ComparisonIoOptions.progressBase` 注入）为基数，只叠加本相位真实增量，绝不从 0 或单个摘要块大小重新起算；**`phaseFiles` / `phaseBytes` 表示相位内增量**（scan 相位即其流水线累计值，digest 相位从 0 起、末态等于真实待校验候选文件数）。扫描阶段统计已发现（非 `broken`）文件数与其 `size` 之和，两侧扫描合并成一条单调流；不做定时器插值/预估，块未结算不报、对比结束后不再报；全缓存二次对比不产生 `files > 0` 的 digest 事件。
 - **摘要分块与进度步长（`src/core/directory/compare.ts`）**：`digestContentCandidates` 不再把所有待确认路径压成一次请求，改按导出常量 `DEFAULT_DIGEST_BATCH_SIZE`（64）顺序分块调用 `digestFiles`，每结算一块才写该块成功项的 `cache.hashes` 并回报一次 digest 进度；块大小可经 `ComparisonIoOptions.digestBatchSize` 覆盖（低于 1 回退默认）。单块内仍由平台层有界并发。
 - **核心层取消（`src/core/directory/compare.ts` + `src/core/io.ts`）**：`ScanDirectoryOptions` / `ComparisonIoOptions` 新增可选 `signal: AbortSignal`；扫描与摘要每个批次边界检查，abort 后不再发起新批次；在飞批次经 `abortable` 与 signal **竞速**立即以取消错误 reject——即使平台调用永不 resolve 也不得挂住。取消是独立失败路径：`scanDirectory` / `compareDirectories` / `compareDirectorySides` 取消即 reject，**绝不返回部分树、部分对比结果或空树**，`OperationCancelledError` 不会被转成 `FileHandleExhaustedError`、不计入 `skipped`；被中断块的路径不写缓存，已结算块保留，随后用同一缓存重新对比结果与未取消基线逐项相等。
-- **不可读项 / 悬空链接容错（横切契约，归 `io-tolerance` 域）**：`scanDirectory` 跳过平台标注的 `broken` 条目与不可列举子树并累计 `ScannedTree.skipped`（根目录失败仍 reject）；`compareDirectories` / `compareDirectorySides` 把两侧 `skipped` 与正文不可读对汇总到 `DirectoryComparison.skipped`，正文读取失败的文件对判 `modified` 而不中止整次对比；`fileCount` 仍等于 `same + added + removed + modified`。坏项不进任何状态计数。
+- **符号链接不跟随（横切契约，归 `symlink-semantics` 域）**：`scanDirectory` 把平台标注的链接条目作为 `kind: 'file'` 的**叶节点**（携带 `linkTarget` / `linkTargetKind`）收进树，目标子树不产生节点、不占 `index` 键、不计 `fileCount` / `skipped`；`compareScannedTrees` 对任一侧是链接的条目按**目标串**出四态（相同 → `same`，不同 → `modified`，单侧 → `added` / `removed`，链接 vs 普通文件/目录 → 单条类型冲突 `modified`），链接路径不进 `planContentReads`、不对目标正文取摘要；四态之和恒等于 `fileCount`，每条链接各计 1。指向目录的链接在树中不是可展开目录节点，双击不下钻（归 `workbench` 的 `openFile` 提示）。
+- **不可读项容错（横切契约，归 `io-tolerance` 域）**：`scanDirectory` 跳过平台标注的 `broken` 条目与不可列举子树并累计 `ScannedTree.skipped`（根目录失败仍 reject）；`compareDirectories` / `compareDirectorySides` 产出按侧 `DirectoryComparison.leftSkipped` / `rightSkipped`（`skipped` 为两侧之和），正文读取失败的文件对判 `modified` 而不中止整次对比；`fileCount` 仍等于 `same + added + removed + modified`。坏项不进任何状态计数。目录视图 footer 在 `leftSkipped + rightSkipped > 0` 时显示「已跳过：左 X / 右 Y」，两侧为 0 不显示，不再显示合并总数。
 
 ## 验收
 
@@ -85,9 +86,9 @@
 - **ac-batch-multi-dir-per-call**：对含 ≥ 8 个目录的临时 fixture 扫描，记录到的批量列目录调用中至少有一次携带 ≥ 2 个目录路径，且总批量调用次数严格小于被扫描目录数（证明一个往返覆盖多个目录）。
 - **ac-default-concurrency-16**：对含 ≥ 32 个可列目录的 fixture，用默认参数扫描：实测在飞批量请求峰值 ≥ 16，且 ≤ 遍历并发上限常量；该默认常量在单一来源导出且数值 ≥ 16。
 - **ac-concurrency-cap**：显式传入并发上限（如 4）扫描同一 fixture：实测在飞峰值 ≤ 4，产出的树、`index` 键集合、四态计数与 `skipped` 与默认并发下逐项相等。
-- **ac-parity-temp-fixture**：真实临时目录 fixture（多级嵌套、空目录、同名不同层文件、仅 mtime 不同、同 size 同 mtime 不同内容、悬空符号链接、不可读条目）上，批量/并发扫描得到的树（名称、层级、顺序、`size`、`modifiedMs`）、`index` 键集合、`skipped` 与同 fixture 的串行基线扫描逐项相等；`compareDirectories` 的四态计数与串行基线相等。
+- **ac-parity-temp-fixture**：真实临时目录 fixture（多级嵌套、空目录、同名不同层文件、仅 mtime 不同、同 size 同 mtime 不同内容、符号链接、不可读条目）上，批量/并发扫描得到的树（名称、层级、顺序、`size`、`modifiedMs`）、`index` 键集合、`skipped` 与同 fixture 的串行基线扫描逐项相等；`compareDirectories` 的四态计数与串行基线相等。
 - **ac-parity-samples**：内置样本 `/samples/directory/**` 目录对比经批量扫描后，树、四态计数与 `skipped` 与既有串行基线和现有测试断言一致（样本路径在批量通道可用）。
-- **ac-skipped-semantics**：fixture 中悬空符号链接与不可读条目仍出现在返回条目里并各计 `skipped` 1 次；一个不可列子树只计 `skipped` 1 次且不出现在树中，扫描仍整体成功；fixture 中的 `.git`、`node_modules` 目录被正常列出并参与对比，不被静默跳过。
+- **ac-skipped-semantics**：fixture 中不可读条目保持平台标注 `broken` 并各计 `skipped` 1 次，符号链接（含悬空链接）作为叶条目进树、不计 `skipped`（口径见 `symlink-semantics` 域 `ac-dangling-link-compared`）；一个不可列子树只计 `skipped` 1 次且不出现在树中，扫描仍整体成功；fixture 中的 `.git`、`node_modules` 目录被正常列出并参与对比，不被静默跳过。
 - **ac-root-unreadable-rejects**：根目录自身不可列时 `scanDirectory` / `compareDirectories` 以错误 reject（消息含「无法读取目录」与路径），不返回空树。
 - **ac-compat-existing-scan**：现有 `scanDirectory(rootPath, list)` 调用形态（`snapshot.ts` / `directoryOps.ts` / `loadSampleSessions.ts` 与既有测试）继续可用；未提供批量能力时扫描结果与批量路径一致。
 - **ac-progress-scan-monotonic**：真实临时小目录 fixture（多级嵌套、≥ 3 个待列批次、两侧文件数 ≥ 10）上 `compareDirectories` 带 `onProgress`：收到 ≥ 2 条 `phase === 'scan'` 事件，其 `files` 与 `bytes` 序列各自单调不减；最后一条 scan 事件的 `files` 等于两侧文件总数，`bytes` 等于两侧文件 `size` 之和。
@@ -119,7 +120,7 @@
 - 不做会话关闭与未保存提示（`session-tabs-lifecycle` 子项）、不做原位保存与结果导出（`save-in-place-and-export` 子项）。
 - 不做三向或超过两个目录的对比；不做快捷键绑定、命令面板、主题切换与浅色皮肤；不做打包分发、签名、公证、自动更新、CI 发布。
 - **不做跨进程进度推送与取消之外的调度**：不新增 `webContents.send` 类 main → renderer 进度事件（进度只由核心批次结算结果在 renderer 侧汇总）；不做暂停 / 恢复 / 断点续传、不做取消确认对话框、不做取消后自动重试（取消就是一次性终止）；不给快照导出 / 同步 / 模板 / 下钻加进度或取消。不新增持久化缓存、不改缓存键 `(path, size, modifiedMs)` 与失效语义。
-- **不新增默认忽略规则**：`.git` / `node_modules` / 隐藏文件一律照列；不把不可读条目、悬空链接、不可列子树改成整次失败，也不把 EMFILE/ENFILE 吞成 `skipped`。
+- **不新增默认忽略规则**：`.git` / `node_modules` / 隐藏文件一律照列；不把不可读条目、不可列子树改成整次失败，也不把 EMFILE/ENFILE 吞成 `skipped`；符号链接按不跟随口径只计 1 条叶条目。
 - 不改样本 answer key（`src/shared/fixtures/` 的 `status` 字段）；不改 `.munk/baseline/**`（由 Delivery 折入）。
 - **窗口化不改数据语义与取数契约**：不改四态语义、对比 / 合并算法、行级 diff、快照线格式与发布模型；不动 `src/main/**` 扫描与 IPC、`src/preload/**`、`src/shared/platform/**`（批量列目录扫描层已由 `wi_ws_deb41e1c6a5a2b8f` 落地，其契约与语义本期不改）；不新增默认忽略规则、不砍 unreadable / 悬空链接 / 不可读子树的容错。
 - **不把 `ScannedTree` / `DirectoryComparison` 搬去主进程或 worker**：本期只做 renderer 窗口化；若窗口化后真实 1.1M 仍 OOM，只写瓶颈归因与下一步建议，不自行扩线。

@@ -14,6 +14,7 @@
  * two real trees would.
  */
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
+import type { LinkTargetKind } from '@shared/platform/types'
 import type { SnapshotDocument, SnapshotEntry } from '@shared/snapshot'
 import { toReadableIoError } from '../io'
 import type {
@@ -190,6 +191,32 @@ export function parseSnapshot(text: string): SnapshotDocument {
 /* Building a snapshot from a scanned tree                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Symbolic links keep the wire format untouched: their entry stores the target
+ * (and resolved shape) in the existing `content` field behind this marker, so
+ * an imported snapshot can reconstruct link semantics without a new field.
+ */
+const SYMLINK_CONTENT_PREFIX = '\u0000opencompare-symlink:v1:'
+
+function encodeLinkContent(node: ScannedNode): string {
+  return `${SYMLINK_CONTENT_PREFIX}${node.linkTargetKind ?? 'missing'}:${node.linkTarget ?? ''}`
+}
+
+interface DecodedLink {
+  readonly target: string
+  readonly kind: LinkTargetKind
+}
+
+function decodeLinkContent(content: string | undefined): DecodedLink | null {
+  if (content === undefined || !content.startsWith(SYMLINK_CONTENT_PREFIX)) return null
+  const rest = content.slice(SYMLINK_CONTENT_PREFIX.length)
+  const separator = rest.indexOf(':')
+  if (separator === -1) return null
+  const kind = rest.slice(0, separator)
+  if (kind !== 'file' && kind !== 'directory' && kind !== 'missing') return null
+  return { target: rest.slice(separator + 1), kind }
+}
+
 export interface BuildSnapshotOptions {
   /** Display name of the captured root. */
   readonly name: string
@@ -218,7 +245,9 @@ export async function buildSnapshot(
   options: BuildSnapshotOptions
 ): Promise<SnapshotBuildResult> {
   const inlineContent = options.inlineContent ?? ((): boolean => true)
-  const files = [...tree.index.entries()].filter(([, node]) => node.kind === 'file')
+  const scannedFiles = [...tree.index.entries()].filter(([, node]) => node.kind === 'file')
+  const links = scannedFiles.filter(([, node]) => node.linkTarget !== undefined)
+  const files = scannedFiles.filter(([, node]) => node.linkTarget === undefined)
 
   const { contents, unreadable } = await readContentCandidates(
     files.map(([, node]) => node.path),
@@ -226,21 +255,35 @@ export async function buildSnapshot(
     {}
   )
 
-  const entries = files
-    .filter(([, node]) => !unreadable.has(node.path))
-    .map(([relativePath, node]): SnapshotEntry => {
-      const text = contents.get(node.path)
-      if (text === undefined) {
-        throw new Error(`Missing body for ${node.path}; the read should have failed instead.`)
-      }
+  const entries = [
+    // Link entries always carry their marker, even in metadata-only exports:
+    // dropping it would silently turn a link into an ordinary file on import.
+    ...links.map(([relativePath, node]): SnapshotEntry => {
+      const encoded = encodeLinkContent(node)
       return {
         path: relativePath,
         size: node.size,
         modifiedMs: node.modifiedMs,
-        sha256: sha256Hex(text),
-        ...(inlineContent(relativePath, node) ? { content: text } : {})
+        sha256: sha256Hex(encoded),
+        content: encoded
       }
-    })
+    }),
+    ...files
+      .filter(([, node]) => !unreadable.has(node.path))
+      .map(([relativePath, node]): SnapshotEntry => {
+        const text = contents.get(node.path)
+        if (text === undefined) {
+          throw new Error(`Missing body for ${node.path}; the read should have failed instead.`)
+        }
+        return {
+          path: relativePath,
+          size: node.size,
+          modifiedMs: node.modifiedMs,
+          sha256: sha256Hex(text),
+          ...(inlineContent(relativePath, node) ? { content: text } : {})
+        }
+      })
+  ]
 
   entries.sort((left, right) => left.path.localeCompare(right.path))
   return {
@@ -265,6 +308,8 @@ interface PendingNode {
   readonly size: number
   readonly modifiedMs: number
   readonly children: PendingNode[]
+  readonly linkTarget?: string
+  readonly linkTargetKind?: LinkTargetKind
 }
 
 /**
@@ -309,13 +354,16 @@ export function snapshotToScannedTree(
       parent = directory
     }
 
+    const link = decodeLinkContent(entry.content)
     parent.children.push({
       name: segments[segments.length - 1],
       path: `${mountPath}/${entry.path}`,
       kind: 'file',
       size: entry.size,
       modifiedMs: entry.modifiedMs,
-      children: []
+      children: [],
+      linkTarget: link?.target,
+      linkTargetKind: link?.kind
     })
   }
 
@@ -336,7 +384,9 @@ export function snapshotToScannedTree(
       kind: node.kind,
       size: node.size,
       modifiedMs: node.modifiedMs,
-      children
+      children,
+      linkTarget: node.linkTarget,
+      linkTargetKind: node.linkTargetKind
     }
     index.set(relativePath, finalized)
     return finalized

@@ -228,6 +228,8 @@ function syntheticComparison(fileCount: number): DirectoryComparison {
     root,
     counts,
     fileCount,
+    leftSkipped: 0,
+    rightSkipped: 0,
     skipped: 0
   }
 }
@@ -628,6 +630,8 @@ describe('DirectoryView windowed tree', () => {
         root,
         counts,
         fileCount: 1,
+        leftSkipped: 0,
+        rightSkipped: 0,
         skipped: 0
       }
     })()
