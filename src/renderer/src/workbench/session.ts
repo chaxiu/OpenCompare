@@ -76,8 +76,9 @@ export interface WorkbenchSession extends FixtureSession {
   readonly codeBuffer?: CodeFileBuffer
   /**
    * The directory session this file session was drilled out of. Set only on a
-   * directory-tree drilldown, so the file view can offer「返回上级目录视图」and
-   * two directory sessions never claim each other's same-path drilldown.
+   * directory-tree drilldown, so the file view can offer "back to the directory
+   * view" and two directory sessions never claim each other's same-path
+   * drilldown.
    */
   readonly parentDirectoryId?: string
   /**

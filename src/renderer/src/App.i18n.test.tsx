@@ -216,6 +216,25 @@ describe('English shell copy', () => {
     expect(screen.getByRole('button', { name: 'Close engine.ts' })).toBeDefined()
   })
 
+  it('localizes the sample library failure without leaking Chinese detail', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
+    fireEvent.click(screen.getByRole('button', { name: 'Demo samples' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Demo: sample read failure/ }))
+
+    expect(
+      await screen.findByRole(
+        'heading',
+        { name: 'Could not read the sample library' },
+        { timeout: 4000 }
+      )
+    ).toBeDefined()
+    const main = screen.getByRole('main')
+    expect(main.textContent).toContain(
+      'Could not read the built-in sample library: /samples/csv/orders.left.csv is missing.'
+    )
+    expect(main.textContent ?? '').not.toMatch(/\p{Script=Han}/u)
+  })
+
   it('renders sample sessions from dictionary keys instead of fixture Chinese', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
     fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
@@ -657,6 +676,7 @@ describe('pickers and no extra work', () => {
     const base = createWebPlatformPort()
     const fileTitles: (SelectFileOptions | undefined)[] = []
     const saveTitles: string[] = []
+    const saveFilters: (SelectFileOptions['filters'] | undefined)[] = []
     let pickerCalls = 0
     const port: PlatformPort = {
       ...base,
@@ -667,6 +687,7 @@ describe('pickers and no extra work', () => {
       },
       saveFile: async (options) => {
         saveTitles.push(options.title ?? '')
+        saveFilters.push(options.filters)
         return null
       }
     }
@@ -682,6 +703,29 @@ describe('pickers and no extra work', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Export left snapshot' }))
     await waitFor(() => expect(saveTitles).toHaveLength(1))
     expect(saveTitles[0]).toBe('Export directory snapshot')
+    expect(saveFilters[0]).toEqual([
+      { name: 'OpenCompare snapshot', extensions: ['ocsnap.json', 'json'] }
+    ])
+  })
+
+  it('builds the snapshot filter name in the active language', async () => {
+    const saveFilters: (SelectFileOptions['filters'] | undefined)[] = []
+    const port: PlatformPort = {
+      ...createWebPlatformPort(),
+      saveFile: async (options) => {
+        saveFilters.push(options.filters)
+        return null
+      }
+    }
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tab', { name: /代码 Diff & 3-Way Merge/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+    await waitFor(() => expect(saveFilters).toHaveLength(1))
+    expect(saveFilters[0]).toEqual([
+      { name: 'OpenCompare 快照', extensions: ['ocsnap.json', 'json'] }
+    ])
   })
 
   it('renders the same sessions with the same platform calls in both languages', async () => {

@@ -8,37 +8,43 @@
 import type { FileDialogFilter, PlatformPort } from '@shared/platform/types'
 
 /** Code / plain-text bodies for the two-column diff and the merge panes. */
-export const TEXT_FILE_FILTER: FileDialogFilter = {
-  name: '代码 / 文本',
-  extensions: [
-    'txt',
-    'ts',
-    'tsx',
-    'js',
-    'jsx',
-    'mjs',
-    'cjs',
-    'css',
-    'html',
-    'md',
-    'py',
-    'go',
-    'rs',
-    'java',
-    'kt',
-    'swift',
-    'rb',
-    'php',
-    'c',
-    'h',
-    'cpp',
-    'sql',
-    'sh',
-    'xml',
-    'toml',
-    'ini',
-    'log'
-  ]
+const TEXT_FILE_EXTENSIONS = [
+  'txt',
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'css',
+  'html',
+  'md',
+  'py',
+  'go',
+  'rs',
+  'java',
+  'kt',
+  'swift',
+  'rb',
+  'php',
+  'c',
+  'h',
+  'cpp',
+  'sql',
+  'sh',
+  'xml',
+  'toml',
+  'ini',
+  'log'
+] as const
+
+/**
+ * The code / text picker filter for one language: the name is the caller's
+ * localized copy, never a module-level translation, while the extensions stay
+ * byte-for-byte the same.
+ */
+export function textFileFilter(name: string): FileDialogFilter {
+  return { name, extensions: TEXT_FILE_EXTENSIONS }
 }
 
 export const DELIMITED_FILE_FILTER: FileDialogFilter = {

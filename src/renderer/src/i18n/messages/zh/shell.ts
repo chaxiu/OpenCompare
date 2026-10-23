@@ -41,6 +41,7 @@ export const shell = {
   'shell.loading.description':
     '读取内置样本库，扫描内置样本目录并按大小 / 修改时间 / 内容哈希完成对比，同时解析 CSV / TSV 表格。',
   'shell.error.title': '样本库读取失败',
+  'shell.error.sampleRead': '无法读取内置样本库：/samples/csv/orders.left.csv 不存在。',
   'shell.error.unknown': '读取内置样本时发生未知错误。',
   'shell.error.hint': '样本库随应用内置，可直接重试。',
   'shell.notice.skipped': '已跳过：左 {left} / 右 {right}',
@@ -86,6 +87,7 @@ export const shell = {
   'shell.picker.leftFile': '选择左侧文件',
   'shell.picker.rightFile': '选择右侧文件',
   'shell.picker.exportSnapshot': '导出目录快照',
+  'shell.filter.snapshot': 'OpenCompare 快照',
   'shell.closeUnsaved.title': '关闭含未保存修改的会话？',
   'shell.closeUnsaved.description': '会话「{title}」还有未保存修改，关闭后这些修改会丢失。',
   'shell.closeUnsaved.continue': '继续编辑',
@@ -108,6 +110,17 @@ export const shell = {
     '暂不支持对比 {name}（仅支持代码 / 文本 · CSV / TSV · JSON / YAML）。',
   'shell.file.error.mixed':
     '两侧文件类型不一致（{left} 是 {leftKind}，{right} 是 {rightKind}），请选择同类文件。',
+  'shell.snapshot.error.invalid-json': '快照导入失败：所选文件不是合法 JSON。',
+  'shell.snapshot.error.invalid-schema': '快照导入失败：schema 不是 opencompare.snapshot/v1。',
+  'shell.snapshot.error.invalid-metadata': '快照导入失败：缺少有效的 name / exportedAt 元数据。',
+  'shell.snapshot.error.invalid-entry': '快照导入失败：条目缺少必需字段或类型不正确。',
+  'shell.snapshot.error.invalid-path': '快照导入失败：路径非法。',
+  'shell.snapshot.error.invalid-pathWithPath': '快照导入失败：路径非法（{path}）。',
+  'shell.snapshot.error.duplicate-path': '快照导入失败：存在重复路径（{path}）。',
+  'shell.snapshot.error.invalid-hash': '快照导入失败：sha256 格式非法（{path}）。',
+  'shell.snapshot.error.content-not-inlined':
+    '该快照未内联 {path} 的内容，无法离线下钻对比；导出时未内联该文件。',
+  'shell.snapshot.error.content-missing': '快照中不存在 {path}。',
   'shell.stat.sourceFiles': '文件（源）',
   'shell.stat.targetFiles': '文件（目标）',
   'shell.stat.differences': '差异',

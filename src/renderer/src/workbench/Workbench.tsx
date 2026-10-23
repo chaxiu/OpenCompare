@@ -60,7 +60,7 @@ import {
 } from './directoryOps'
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
-import { loadSampleSessions } from './loadSampleSessions'
+import { loadSampleSessions, SampleLibraryError } from './loadSampleSessions'
 import {
   describeSession,
   fileKindMessageKey,
@@ -72,20 +72,19 @@ import type { CompareOpenOutcome } from './NewCompareDialog'
 import { commitSessionTree, closeSessions } from './sessionStore'
 import {
   compareSides,
-  describeSnapshotContentError,
-  describeSnapshotImportError,
   directorySides,
   exportSideSnapshot,
   parseSnapshotText,
   readFileText,
   readSideFile,
   remoteSnapshotSides,
+  snapshotFileFilter,
   snapshotFileName,
-  SNAPSHOT_FILE_FILTER,
   snapshotSide,
   withSide
 } from './snapshotOps'
 import type { ComparisonSides, SidePosition } from './snapshotOps'
+import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import type { CodeFileBuffer, WorkbenchSession } from './session'
 
 type WorkbenchStatus = 'empty' | 'loading' | 'ready' | 'error'
@@ -162,6 +161,11 @@ function copyNotice(key: MessageKey, params?: NoticeParams): Notice {
 
 function detailNotice(text: string): Notice {
   return { kind: 'detail', text }
+}
+
+/** Diagnostic text of a failure whose code the shell does not localize. */
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
 }
 
 /** Renders a notice in the active language, nested fragments included. */
@@ -308,13 +312,32 @@ function filePairErrorMessage(cause: unknown, t: Translate): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+/** Localizes the known snapshot import failures; unknown details pass through. */
+function snapshotImportNotice(cause: unknown): Notice {
+  const copy = snapshotImportCopy(cause)
+  return copy === null ? detailNotice(errorText(cause)) : copyNotice(copy.key, copy.params)
+}
+
+/** Localizes a snapshot that cannot serve a drilldown body. */
+function snapshotContentNotice(cause: unknown, displayPath: string): Notice {
+  const copy = snapshotContentCopy(cause, displayPath)
+  return copy === null ? detailNotice(errorText(cause)) : copyNotice(copy.key, copy.params)
+}
+
+/** Localizes the built-in sample library failure; unknown details pass through. */
+function sampleErrorNotice(cause: unknown): Notice {
+  return cause instanceof SampleLibraryError
+    ? copyNotice('shell.error.sampleRead')
+    : detailNotice(errorText(cause))
+}
+
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
 export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
   const { t } = useI18n()
   const [status, setStatus] = useState<WorkbenchStatus>('empty')
   const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Notice | null>(null)
   const [codeMerge, setCodeMerge] = useState<Record<string, CodeMergeState>>({})
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
@@ -578,13 +601,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     } catch (cause) {
       if (sessions.length > 0) {
         // Keep what the user already has open and report the auxiliary failure.
-        report(detailNotice(cause instanceof Error ? cause.message : String(cause)))
+        report(sampleErrorNotice(cause))
         setStatus('ready')
         return
       }
       setSessions([])
       setActiveId(null)
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(sampleErrorNotice(cause))
       setStatus('error')
     }
   }
@@ -908,7 +931,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       ])
       upsertSession(createDrilldownSession(source.id, node, target, leftText, rightText))
     } catch (cause) {
-      report(detailNotice(describeSnapshotContentError(cause, node.relativePath)))
+      report(snapshotContentNotice(cause, node.relativePath))
     } finally {
       setDirectoryBusy(false)
     }
@@ -926,7 +949,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const path = await platform.saveFile({
         title: t('shell.picker.exportSnapshot'),
         defaultPath: snapshotFileName(exported.snapshot.name),
-        filters: [SNAPSHOT_FILE_FILTER],
+        filters: [snapshotFileFilter(t('shell.filter.snapshot'))],
         content: exported.text
       })
       if (path === null) return
@@ -977,7 +1000,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         'info'
       )
     } catch (cause) {
-      report(detailNotice(describeSnapshotImportError(cause)))
+      report(snapshotImportNotice(cause))
     } finally {
       setDirectoryBusy(false)
     }
@@ -1466,7 +1489,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             tone="danger"
             icon={<AlertTriangle aria-hidden className="size-5" />}
             title={t('shell.error.title')}
-            description={error ?? t('shell.error.unknown')}
+            description={error === null ? t('shell.error.unknown') : noticeText(error, t)}
             action={
               <ToolbarButton
                 variant="danger"

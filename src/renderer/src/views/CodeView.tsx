@@ -34,7 +34,7 @@ import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
-import { TEXT_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
+import { pickTextFile, textFileFilter } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { CodeFileBuffer, FilePair } from '@renderer/workbench/session'
 
@@ -208,7 +208,7 @@ function CodeDiffView({
       const picked = await pickTextFile(
         platform,
         t(side === 'left' ? 'files.code.openLeftTitle' : 'files.code.openRightTitle'),
-        [TEXT_FILE_FILTER]
+        [textFileFilter(t('common.fileKind.code'))]
       )
       if (picked === null) return
       if (side === 'left') {
@@ -461,7 +461,7 @@ function CodeMergeView({
       const picked = await pickTextFile(
         platform,
         t('files.merge.openSideTitle', { side: t(MERGE_SIDE_KEYS[which]) }),
-        [TEXT_FILE_FILTER]
+        [textFileFilter(t('common.fileKind.code'))]
       )
       if (picked === null) return
       onOpenSide(which, picked)
@@ -477,7 +477,7 @@ function CodeMergeView({
       const path = await platform.saveFile({
         title: t('files.merge.saveTitle'),
         defaultPath: 'merged.txt',
-        filters: [TEXT_FILE_FILTER],
+        filters: [textFileFilter(t('common.fileKind.code'))],
         content: renderMergeText(render)
       })
       if (path === null) return

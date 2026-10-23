@@ -90,9 +90,9 @@ function comparisonStats(
 ): WorkbenchSession['stats'] {
   const { same, added, removed, modified } = counts
   return [
-    { label: '文件（源）', value: same + removed + modified },
-    { label: '文件（目标）', value: same + added + modified },
-    { label: '差异', value: added + removed + modified }
+    { label: 'sourceFiles', value: same + removed + modified },
+    { label: 'targetFiles', value: same + added + modified },
+    { label: 'differences', value: added + removed + modified }
   ]
 }
 
@@ -237,8 +237,8 @@ export function createFilePairSession(
     subtitle: `${left.path} ↔ ${right.path} · ${target.label}`,
     columns: 2,
     stats: [
-      { label: '行数（左）', value: countTextLines(left.text) },
-      { label: '行数（右）', value: countTextLines(right.text) }
+      { label: 'linesLeft', value: countTextLines(left.text) },
+      { label: 'linesRight', value: countTextLines(right.text) }
     ],
     adhoc
   }
@@ -267,9 +267,10 @@ export function createDrilldownSession(
 }
 
 /**
- * Where「返回上级目录视图」lands. The source directory session when it is still
- * open, otherwise any remaining directory session (reported as a fallback), or
- * `null` when the workbench has no directory view left to return to.
+ * Where the "back to directory view" action lands. The source directory session
+ * when it is still open, otherwise any remaining directory session (reported as
+ * a fallback), or `null` when the workbench has no directory view left to return
+ * to.
  */
 export function resolveDirectoryReturn(
   sessions: readonly WorkbenchSession[],
@@ -295,7 +296,7 @@ function requireComparableFile(path: string): { readonly target: DrilldownTarget
     throw new FilePairError(
       'unsupported-type',
       { name },
-      `暂不支持对比 ${name}（仅支持代码 / 文本 · CSV / TSV · JSON / YAML）。`
+      `Unsupported file type: ${name}.`
     )
   }
   return { target }
@@ -325,7 +326,7 @@ export async function openFilePairSession(
         leftKind: left.target.label,
         rightKind: right.target.label
       },
-      `两侧文件类型不一致（${baseName(leftPath)} 是 ${left.target.label}，${baseName(rightPath)} 是 ${right.target.label}），请选择同类文件。`
+      `Mixed file types: ${baseName(leftPath)} is ${left.target.label}, ${baseName(rightPath)} is ${right.target.label}.`
     )
   }
 

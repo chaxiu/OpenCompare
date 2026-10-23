@@ -9,6 +9,8 @@ import { createComparisonCache } from '@core/directory/compare'
 import { serializeSnapshot } from '@core/directory/snapshot'
 import { sha256Hex } from '@core/directory/hash'
 import { App } from './App'
+import { renderWithI18n } from './i18n/testing'
+import { en, zh } from './i18n/messages'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
 import {
@@ -264,5 +266,101 @@ describe('snapshot workbench integration', () => {
     })
     // No empty drilldown session replaced the comparison.
     expect(screen.getByRole('contentinfo').textContent).toContain('/snapshots/right/meta-only')
+  })
+})
+
+describe('snapshot failure copy', () => {
+  it('renders every known import failure in English', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
+    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
+    await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+
+    const hash = 'a'.repeat(64)
+    const base = {
+      schema: SNAPSHOT_SCHEMA,
+      name: 'broken',
+      exportedAt: '2026-10-17T00:00:00.000Z'
+    }
+    const entry = (path: string, sha256 = hash) => ({ path, size: 0, modifiedMs: 0, sha256 })
+    const cases = [
+      { file: 'not-json.json', text: 'nope', copy: en['shell.snapshot.error.invalid-json'] },
+      { file: 'schema.json', text: '{"a":1}', copy: en['shell.snapshot.error.invalid-schema'] },
+      {
+        file: 'metadata.json',
+        text: JSON.stringify({ schema: SNAPSHOT_SCHEMA, entries: [] }),
+        copy: en['shell.snapshot.error.invalid-metadata']
+      },
+      {
+        file: 'entry.json',
+        text: JSON.stringify({ ...base, entries: {} }),
+        copy: en['shell.snapshot.error.invalid-entry']
+      },
+      {
+        file: 'path.json',
+        text: JSON.stringify({ ...base, entries: [entry('/abs')] }),
+        copy: en['shell.snapshot.error.invalid-pathWithPath'].replace('{path}', '/abs')
+      },
+      {
+        file: 'duplicate.json',
+        text: JSON.stringify({ ...base, entries: [entry('a.txt'), entry('a.txt')] }),
+        copy: en['shell.snapshot.error.duplicate-path'].replace('{path}', 'a.txt')
+      },
+      {
+        file: 'hash.json',
+        text: JSON.stringify({ ...base, entries: [entry('a.txt', 'bad')] }),
+        copy: en['shell.snapshot.error.invalid-hash'].replace('{path}', 'a.txt')
+      }
+    ]
+
+    for (const testCase of cases) {
+      selectedFileInto('Choose left snapshot file', new File([testCase.text], testCase.file))
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(testCase.copy))
+      expect(screen.getByRole('alert').textContent ?? '').not.toMatch(/\p{Script=Han}/u)
+    }
+  })
+
+  it('localizes a snapshot body that was not inlined in English', async () => {
+    const document: SnapshotDocument = {
+      schema: SNAPSHOT_SCHEMA,
+      name: 'meta-only',
+      exportedAt: '2026-10-17T00:00:00.000Z',
+      entries: [{ path: 'src/notes.ts', size: 3, modifiedMs: 0, sha256: sha256Hex('abc') }]
+    }
+
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
+    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
+    await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    selectedFileInto(
+      'Choose right snapshot file',
+      new File([serializeSnapshot(document)], 'meta-only.ocsnap.json')
+    )
+    await screen.findByText('/snapshots/right/meta-only')
+
+    fireEvent.doubleClick(screen.getAllByText('notes.ts')[0])
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe(
+        en['shell.snapshot.error.content-not-inlined'].replace('{path}', 'src/notes.ts')
+      )
+    )
+  })
+
+  it('re-translates an on-screen import failure when the language switches', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'zh')
+    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    await screen.findByRole('tablist', { name: '会话' }, { timeout: 4000 })
+
+    selectedFileInto('选择左侧快照文件', new File(['{"a":1}'], 'broken.json'))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      zh['shell.snapshot.error.invalid-schema']
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('tab', { name: 'English' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe(
+        en['shell.snapshot.error.invalid-schema']
+      )
+    )
   })
 })

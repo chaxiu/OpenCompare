@@ -38,6 +38,17 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Stable failure of the built-in sample library. The shell maps it to copy in
+ * the active language, so the thrown message is a diagnostic, never UI copy.
+ */
+export class SampleLibraryError extends Error {
+  constructor(readonly code: 'read-failed') {
+    super('The built-in sample library could not be read.')
+    this.name = 'SampleLibraryError'
+  }
+}
+
+/**
  * Loads the built-in sample library into workbench sessions.
  *
  * The directory scene is *computed* through the comparison engine rather than
@@ -52,7 +63,7 @@ export async function loadSampleSessions(
 
   if (options.simulateFailure) {
     await delay(LOADING_FLOOR_MS)
-    throw new Error('无法读取内置样本库：/samples/csv/orders.left.csv 不存在。')
+    throw new SampleLibraryError('read-failed')
   }
 
   const cache = options.cache ?? createComparisonCache()

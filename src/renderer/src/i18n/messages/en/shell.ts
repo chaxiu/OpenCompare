@@ -45,6 +45,8 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.loading.description':
     'Reading the built-in sample library, scanning the sample directories, comparing by size / modification time / content hash and parsing the CSV / TSV tables.',
   'shell.error.title': 'Could not read the sample library',
+  'shell.error.sampleRead':
+    'Could not read the built-in sample library: /samples/csv/orders.left.csv is missing.',
   'shell.error.unknown': 'An unknown error occurred while reading the built-in samples.',
   'shell.error.hint': 'The sample library ships with the app, so you can retry right away.',
   'shell.notice.skipped': 'Skipped: {left} on the left / {right} on the right',
@@ -98,6 +100,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.picker.leftFile': 'Choose the left file',
   'shell.picker.rightFile': 'Choose the right file',
   'shell.picker.exportSnapshot': 'Export directory snapshot',
+  'shell.filter.snapshot': 'OpenCompare snapshot',
   'shell.closeUnsaved.title': 'Close a session with unsaved changes?',
   'shell.closeUnsaved.description':
     '"{title}" has unsaved changes. Closing it discards those changes.',
@@ -125,6 +128,21 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Cannot compare {name} yet (only code / text · CSV / TSV · JSON / YAML are supported).',
   'shell.file.error.mixed':
     'The two files have different types ({left} is {leftKind}, {right} is {rightKind}). Choose files of the same type.',
+  'shell.snapshot.error.invalid-json':
+    'Snapshot import failed: the selected file is not valid JSON.',
+  'shell.snapshot.error.invalid-schema':
+    'Snapshot import failed: schema is not opencompare.snapshot/v1.',
+  'shell.snapshot.error.invalid-metadata':
+    'Snapshot import failed: the name / exportedAt metadata is missing or invalid.',
+  'shell.snapshot.error.invalid-entry':
+    'Snapshot import failed: an entry is missing a required field or has the wrong type.',
+  'shell.snapshot.error.invalid-path': 'Snapshot import failed: invalid path.',
+  'shell.snapshot.error.invalid-pathWithPath': 'Snapshot import failed: invalid path ({path}).',
+  'shell.snapshot.error.duplicate-path': 'Snapshot import failed: duplicate path ({path}).',
+  'shell.snapshot.error.invalid-hash': 'Snapshot import failed: invalid sha256 ({path}).',
+  'shell.snapshot.error.content-not-inlined':
+    'This snapshot did not inline the content of {path}, so it cannot be drilled into offline; the file was not inlined on export.',
+  'shell.snapshot.error.content-missing': 'The snapshot has no file at {path}.',
   'shell.stat.sourceFiles': 'Source files',
   'shell.stat.targetFiles': 'Target files',
   'shell.stat.differences': 'Differences',

@@ -283,10 +283,9 @@ export async function exportSideSnapshot(
 /* DOM plumbing (import picker)                                        */
 /* ------------------------------------------------------------------ */
 
-/** Save-dialog filter of the `.ocsnap.json` protocol. */
-export const SNAPSHOT_FILE_FILTER: FileDialogFilter = {
-  name: 'OpenCompare 快照',
-  extensions: ['ocsnap.json', 'json']
+/** Save-dialog filter of the `.ocsnap.json` protocol, named in the caller's language. */
+export function snapshotFileFilter(name: string): FileDialogFilter {
+  return { name, extensions: ['ocsnap.json', 'json'] }
 }
 
 /** Canonical file name of a snapshot export: `<name>.ocsnap.json`. */
@@ -299,45 +298,48 @@ export function readFileText(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
-    reader.onerror = () => reject(reader.error ?? new Error('读取所选文件失败。'))
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read the selected file.'))
     reader.readAsText(file)
   })
 }
 
 /* ------------------------------------------------------------------ */
-/* Readable error hints                                                */
+/* Readable error identities                                           */
 /* ------------------------------------------------------------------ */
 
-/** Readable Chinese hint for a rejected snapshot import. */
-export function describeSnapshotImportError(error: unknown): string {
-  if (error instanceof SnapshotFormatError) {
-    switch (error.code) {
-      case 'invalid-json':
-        return '快照导入失败：所选文件不是合法 JSON。'
-      case 'invalid-schema':
-        return '快照导入失败：schema 不是 opencompare.snapshot/v1。'
-      case 'invalid-metadata':
-        return '快照导入失败：缺少有效的 name / exportedAt 元数据。'
-      case 'invalid-path':
-        return `快照导入失败：路径非法${error.path ? `（${error.path}）` : ''}。`
-      case 'duplicate-path':
-        return `快照导入失败：存在重复路径${error.path ? `（${error.path}）` : ''}。`
-      case 'invalid-hash':
-        return `快照导入失败：sha256 格式非法${error.path ? `（${error.path}）` : ''}。`
-      case 'invalid-entry':
-        return '快照导入失败：条目缺少必需字段或类型不正确。'
-    }
+/**
+ * Stable identity of a rejected snapshot import. The shell turns it into copy
+ * in the active language, so this module never resolves language itself.
+ */
+export type SnapshotImportFailure =
+  | { readonly code: 'invalid-json' | 'invalid-schema' | 'invalid-metadata' | 'invalid-entry' }
+  | { readonly code: 'invalid-path' | 'duplicate-path' | 'invalid-hash'; readonly path?: string }
+
+export function snapshotImportFailure(error: unknown): SnapshotImportFailure | null {
+  if (!(error instanceof SnapshotFormatError)) return null
+  switch (error.code) {
+    case 'invalid-json':
+    case 'invalid-schema':
+    case 'invalid-metadata':
+    case 'invalid-entry':
+      return { code: error.code }
+    case 'invalid-path':
+    case 'duplicate-path':
+    case 'invalid-hash':
+      return { code: error.code, path: error.path }
   }
-  return error instanceof Error ? error.message : String(error)
 }
 
-/** Readable Chinese hint when a snapshot cannot serve a drilldown body. */
-export function describeSnapshotContentError(error: unknown, displayPath: string): string {
-  if (error instanceof SnapshotContentError) {
-    if (error.code === 'content-not-inlined') {
-      return `该快照未内联 ${displayPath} 的内容，无法离线下钻对比；导出时未内联该文件。`
-    }
-    return `快照中不存在 ${displayPath}。`
+/** Stable identity of a snapshot that cannot serve a drilldown body. */
+export interface SnapshotContentFailure {
+  readonly code: 'content-not-inlined' | 'missing'
+  readonly path: string
+}
+
+export function snapshotContentFailure(error: unknown): SnapshotContentFailure | null {
+  if (!(error instanceof SnapshotContentError)) return null
+  return {
+    code: error.code === 'content-not-inlined' ? 'content-not-inlined' : 'missing',
+    path: error.path
   }
-  return error instanceof Error ? error.message : String(error)
 }

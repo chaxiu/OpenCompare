@@ -8,7 +8,7 @@ import { I18nProvider } from '@renderer/i18n/I18nProvider'
 import { useI18n } from '@renderer/i18n/context'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
-import { TEXT_FILE_FILTER } from '@renderer/workbench/fileIO'
+import { textFileFilter } from '@renderer/workbench/fileIO'
 import { CodeView } from './CodeView'
 import type { CodeMergeState } from './CodeView'
 
@@ -329,7 +329,7 @@ describe('English diff copy', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Open left file' }))
-    expect(selectFile).toHaveBeenCalledWith({ title: 'Open left local file', filters: [TEXT_FILE_FILTER] })
+    expect(selectFile).toHaveBeenCalledWith({ title: 'Open left local file', filters: [textFileFilter('Code / text')] })
     expect(screen.getByText('1/2')).toBeDefined()
     expect(container.textContent).not.toMatch(/\p{Script=Han}/u)
   })
@@ -347,7 +347,7 @@ describe('English diff copy', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
     expect(selectFile).toHaveBeenCalledWith({
       title: '打开左侧本地文件',
-      filters: [TEXT_FILE_FILTER]
+      filters: [textFileFilter('代码 / 文本')]
     })
   })
 
@@ -456,12 +456,17 @@ describe('English merge copy', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Export merged text' }))
     expect(await screen.findByText('Saved to /tmp/out.txt')).toBeDefined()
-    expect(saveFile).toHaveBeenCalledWith(expect.objectContaining({ title: 'Save merged result' }))
+    expect(saveFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Save merged result',
+        filters: [textFileFilter('Code / text')]
+      })
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Open ours' }))
     expect(selectFile).toHaveBeenCalledWith({
       title: 'Open ours local file',
-      filters: [TEXT_FILE_FILTER]
+      filters: [textFileFilter('Code / text')]
     })
     Reflect.deleteProperty(navigator, 'clipboard')
   })

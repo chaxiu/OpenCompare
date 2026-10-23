@@ -8,6 +8,7 @@ export const common: Record<keyof typeof zhCommon, string> = {
   'common.retry': 'Try again',
   'common.dismiss': 'Dismiss',
   'common.loading': 'Loading…',
+  'common.splitPane.divider': 'Resize panes',
   'common.error.title': 'Something went wrong',
   'common.error.unknown': 'Unknown error',
   'common.itemCount': '{count} items',

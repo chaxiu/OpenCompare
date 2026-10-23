@@ -1,5 +1,6 @@
 import { Fragment, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
+import { useI18n } from '@renderer/i18n/context'
 import { cx } from './utils'
 
 /** Smallest share of the container a single pane may keep while dragging. */
@@ -39,6 +40,7 @@ export interface SplitPaneProps {
  * dividers. Ratios fall back to an even split whenever the pane count changes.
  */
 export function SplitPane({ panes, className }: SplitPaneProps): JSX.Element {
+  const { t } = useI18n()
   const container = useRef<HTMLDivElement>(null)
   const dragging = useRef<number | null>(null)
   const [ratios, setRatios] = useState<number[]>(() => defaultRatios(panes.length))
@@ -74,7 +76,7 @@ export function SplitPane({ panes, className }: SplitPaneProps): JSX.Element {
               <div
                 role="separator"
                 aria-orientation="vertical"
-                aria-label="调整分栏宽度"
+                aria-label={t('common.splitPane.divider')}
                 tabIndex={0}
                 onPointerDown={(event) => {
                   dragging.current = boundary
