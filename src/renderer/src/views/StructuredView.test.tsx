@@ -1,14 +1,29 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { JSX } from 'react'
 import { diffStructured } from '@core/structured/diff'
 import { STRUCTURED_SCENE } from '@shared/fixtures'
+import type { Language, PlatformPort } from '@shared/platform/types'
+import { I18nProvider } from '@renderer/i18n/I18nProvider'
+import { useI18n } from '@renderer/i18n/context'
+import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { StructuredView } from './StructuredView'
 
 afterEach(cleanup)
 
 const platform = createWebPlatformPort()
+
+/** Test-only probe: switches the provider language from inside the tree. */
+function LanguageSwitch({ to }: { readonly to: Language }): JSX.Element {
+  const { setLanguage } = useI18n()
+  return (
+    <button type="button" onClick={() => setLanguage(to)}>
+      switch-language
+    </button>
+  )
+}
 
 /** Drives the web runtime's hidden file picker with a chosen local file. */
 function chooseFile(name: string, text: string): void {
@@ -147,5 +162,157 @@ describe('local file entry points', () => {
     chooseFile('notes.txt', 'plain text, not structured')
 
     expect(await screen.findByRole('heading', { name: '结构化解析失败' })).toBeDefined()
+  })
+})
+
+const jsonEntries = diffStructured(
+  STRUCTURED_SCENE.json.left.text,
+  STRUCTURED_SCENE.json.right.text,
+  'json'
+).entries.length
+
+const yamlResult = diffStructured(
+  STRUCTURED_SCENE.yaml.left.text,
+  STRUCTURED_SCENE.yaml.right.text,
+  'yaml'
+)
+
+function diffPair(): { left: { path: string; text: string }; right: { path: string; text: string } } {
+  return {
+    left: { path: 'config/deploy.left.yaml', text: 'service:\n  replicas: 2\nprofile: production\n' },
+    right: {
+      path: 'config/deploy.right.yaml',
+      text: 'profile: staging\nservice:\n  replicas: 4\n  health:\n    path: /healthz\n'
+    }
+  }
+}
+
+describe('English copy', () => {
+  it('renders the format switch, filters, counts and panel copy in English', () => {
+    const { container } = renderWithI18n(
+      <StructuredView fixture={STRUCTURED_SCENE} platform={platform} />,
+      'en'
+    )
+
+    expect(screen.getByRole('tablist', { name: 'Structured format' })).toBeDefined()
+    expect(screen.getByRole('tablist', { name: 'Status filter' })).toBeDefined()
+    for (const name of ['All', 'Added', 'Removed', 'Modified', 'Type changed', 'Same']) {
+      expect(screen.getByRole('tab', { name })).toBeDefined()
+    }
+    expect(screen.getByRole('group', { name: 'structured counts' })).toBeDefined()
+    expect(screen.getByText(`${jsonEntries} nodes · counts reflect the runtime comparison`)).toBeDefined()
+    expect(screen.getByText('Node path changes')).toBeDefined()
+    expect(screen.getByText(`Showing ${jsonEntries} / ${jsonEntries}`)).toBeDefined()
+    expect(screen.getByText('Left source')).toBeDefined()
+    expect(screen.getByText('Right source')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open left file' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open right file' })).toBeDefined()
+    expect(container.textContent).not.toMatch(/\p{Script=Han}/u)
+  })
+
+  it('describes a YAML drilldown and localizes its picker title', () => {
+    const selectFile = vi.fn(async () => null)
+    const port: PlatformPort = { ...platform, selectFile }
+    renderWithI18n(<StructuredView pair={diffPair()} format="yaml" platform={port} />, 'en')
+
+    expect(screen.getByText('Local file · YAML source · semantic comparison')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open left file' }))
+    expect(selectFile).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Open left JSON / YAML file' })
+    )
+  })
+
+  it('keeps the Chinese wording for counts, panel titles and sources', () => {
+    render(<StructuredView fixture={STRUCTURED_SCENE} platform={platform} />)
+
+    expect(
+      screen.getByText(`共 ${jsonEntries} 个节点 · 计数为运行时对比结果`)
+    ).toBeDefined()
+    expect(screen.getByText('节点路径变更')).toBeDefined()
+    expect(screen.getByText('左原文')).toBeDefined()
+    expect(screen.getByText('右原文')).toBeDefined()
+  })
+})
+
+describe('parse errors and empty states', () => {
+  const broken = {
+    left: { path: 'broken.json', text: '{"a": 1' },
+    right: { path: 'right.json', text: '{}' }
+  }
+
+  it('localizes the error frame but keeps the raw core message', () => {
+    renderWithI18n(<StructuredView pair={broken} format="json" platform={platform} />, 'en')
+
+    expect(screen.getByRole('heading', { name: 'Structured parsing failed' })).toBeDefined()
+    expect(screen.getByText('Parse failed')).toBeDefined()
+    expect(screen.getByText(/left side: JSON parse error/)).toBeDefined()
+    expect(
+      screen.getByText('Only this session is affected: fix the input and drill down again, or switch to another session.')
+    ).toBeDefined()
+  })
+
+  it('localizes the no-data and filtered empty states', () => {
+    const empty = renderWithI18n(<StructuredView platform={platform} />, 'en')
+    expect(screen.getByRole('heading', { name: 'No structured data to compare' })).toBeDefined()
+    expect(empty.container.textContent).not.toMatch(/\p{Script=Han}/u)
+
+    cleanup()
+    render(<StructuredView platform={platform} />)
+    expect(screen.getByRole('heading', { name: '无可对比的结构化数据' })).toBeDefined()
+
+    cleanup()
+    renderWithI18n(
+      <StructuredView
+        pair={{ left: { path: 'a.json', text: '{"a":1}' }, right: { path: 'b.json', text: '{"a":2}' } }}
+        format="json"
+        platform={platform}
+      />,
+      'en'
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Type changed' }))
+    expect(screen.getByText(/No nodes under the current filter/)).toBeDefined()
+    expect(screen.getByText(/Switch back to All/)).toBeDefined()
+
+    cleanup()
+    render(
+      <StructuredView
+        pair={{ left: { path: 'a.json', text: '{"a":1}' }, right: { path: 'b.json', text: '{"a":2}' } }}
+        format="json"
+        platform={platform}
+      />
+    )
+    fireEvent.click(screen.getByRole('tab', { name: '类型变更' }))
+    const zhEmpty = screen.getByText(/当前过滤条件下没有节点/)
+    expect(zhEmpty.textContent).toContain('全部')
+  })
+})
+
+describe('language switch keeps structured state', () => {
+  it('keeps the YAML format, type-change filter and counts', () => {
+    render(
+      <I18nProvider initialLanguage="zh">
+        <StructuredView fixture={STRUCTURED_SCENE} platform={platform} />
+        <LanguageSwitch to="en" />
+      </I18nProvider>
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    fireEvent.click(screen.getByRole('tab', { name: '类型变更' }))
+
+    const countsBefore = countsGroup().textContent ?? ''
+    const showingBefore = screen.getByText(/^显示 /).textContent ?? ''
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch-language' }))
+
+    expect(screen.getByRole('tab', { name: 'YAML' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Type changed' }).getAttribute('aria-selected')).toBe('true')
+    const countsAfter = screen.getByRole('group', { name: 'structured counts' }).textContent ?? ''
+    expect(countsAfter.match(/\d+/g)).toEqual(countsBefore.match(/\d+/g))
+    const showingAfter = screen.getByText(/^Showing /).textContent ?? ''
+    expect(showingAfter.match(/\d+/g)).toEqual(showingBefore.match(/\d+/g))
+    // The YAML pair has no type change, so the filter keeps its (empty) result
+    // while the runtime entry count stays intact across the switch.
+    expect(showingAfter.match(/\d+/g)).toEqual(['0', String(yamlResult.entries.length)])
   })
 })

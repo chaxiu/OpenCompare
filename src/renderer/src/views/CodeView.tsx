@@ -32,29 +32,31 @@ import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
+import { useI18n } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 import { TEXT_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { CodeFileBuffer, FilePair } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
 
-const MODE_OPTIONS = [
-  { value: 'diff', label: '双栏 Diff' },
-  { value: 'merge', label: '三向合并 base · ours · theirs' }
-] as const
-
-const ACCEPT_OPTIONS: readonly { readonly value: MergeAccept; readonly label: string }[] = [
-  { value: 'ours', label: 'Accept Ours' },
-  { value: 'theirs', label: 'Accept Theirs' },
-  { value: 'both', label: 'Accept Both' },
-  { value: 'base', label: 'Accept Base' }
+const MODE_OPTIONS: readonly { readonly value: CodeMode; readonly key: MessageKey }[] = [
+  { value: 'diff', key: 'files.code.mode.diff' },
+  { value: 'merge', key: 'files.code.mode.merge' }
 ]
 
-const ACCEPT_LABELS: Record<MergeAccept, string> = {
-  ours: 'ours',
-  theirs: 'theirs',
-  both: 'ours + theirs',
-  base: 'base'
+const ACCEPT_OPTIONS: readonly { readonly value: MergeAccept; readonly key: MessageKey }[] = [
+  { value: 'ours', key: 'files.merge.accept.ours' },
+  { value: 'theirs', key: 'files.merge.accept.theirs' },
+  { value: 'both', key: 'files.merge.accept.both' },
+  { value: 'base', key: 'files.merge.accept.base' }
+]
+
+const ACCEPT_LABELS: Record<MergeAccept, MessageKey> = {
+  ours: 'files.merge.choice.ours',
+  theirs: 'files.merge.choice.theirs',
+  both: 'files.merge.choice.both',
+  base: 'files.merge.choice.base'
 }
 
 /** Merge progress reported up to the workbench status bar. */
@@ -91,6 +93,7 @@ function CodeDiffView({
   /** Reports the editable state up so a tab switch cannot drop unsaved work. */
   readonly onBufferChange?: (buffer: CodeFileBuffer) => void
 }): JSX.Element {
+  const { t } = useI18n()
   const initial = {
     leftPath: buffer?.leftPath ?? pair.left.path,
     rightPath: buffer?.rightPath ?? pair.right.path,
@@ -193,7 +196,7 @@ function CodeDiffView({
       await platform.writeTextFile(path, content)
       if (side === 'left') setLeftSource(content)
       else setRightSource(content)
-      setNotice({ text: `已写回 ${path}`, tone: 'ok' })
+      setNotice({ text: t('files.notice.wroteBack', { path }), tone: 'ok' })
     } catch (cause) {
       setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
     }
@@ -204,7 +207,7 @@ function CodeDiffView({
     try {
       const picked = await pickTextFile(
         platform,
-        side === 'left' ? '打开左侧本地文件' : '打开右侧本地文件',
+        t(side === 'left' ? 'files.code.openLeftTitle' : 'files.code.openRightTitle'),
         [TEXT_FILE_FILTER]
       )
       if (picked === null) return
@@ -218,7 +221,7 @@ function CodeDiffView({
         setRightText(picked.text)
       }
       setActive(0)
-      setNotice({ text: `已打开 ${picked.path}`, tone: 'ok' })
+      setNotice({ text: t('files.notice.opened', { path: picked.path }), tone: 'ok' })
     } catch (cause) {
       setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
     }
@@ -228,19 +231,19 @@ function CodeDiffView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <IconButton
-          label="上一个差异块"
+          label={t('files.code.prevDifference')}
           icon={<ChevronUp aria-hidden className="size-3.5" />}
           onClick={() => step(-1)}
           disabled={blockCount === 0}
         />
         <IconButton
-          label="下一个差异块"
+          label={t('files.code.nextDifference')}
           icon={<ChevronDown aria-hidden className="size-3.5" />}
           onClick={() => step(1)}
           disabled={blockCount === 0}
         />
         <span className="flex items-center gap-1.5 text-2xs text-content-muted">
-          差异块
+          {t('files.code.blocks')}
           <span className="tabular font-mono text-content-secondary">
             {activeIndex + 1}/{blockCount}
           </span>
@@ -253,7 +256,7 @@ function CodeDiffView({
           onClick={() => overwrite('to-right')}
           disabled={activeBlock === null}
         >
-          覆写到右
+          {t('files.code.overwriteRight')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
@@ -261,7 +264,7 @@ function CodeDiffView({
           onClick={() => overwrite('to-left')}
           disabled={activeBlock === null}
         >
-          覆写到左
+          {t('files.code.overwriteLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
@@ -269,7 +272,7 @@ function CodeDiffView({
           icon={<RotateCcw aria-hidden className="size-3.5" />}
           onClick={reset}
         >
-          重置
+          {t('files.code.reset')}
         </ToolbarButton>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <ToolbarButton
@@ -277,22 +280,26 @@ function CodeDiffView({
           icon={<Save aria-hidden className="size-3.5" />}
           onClick={() => void save('left')}
           disabled={!leftDirty}
-          title="直接把左侧修改原位写回其磁盘路径（不弹保存对话框）"
+          title={t('files.code.saveLeftTitle')}
         >
-          保存左文件
+          {t('files.code.saveLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<Save aria-hidden className="size-3.5" />}
           onClick={() => void save('right')}
           disabled={!rightDirty}
-          title="直接把右侧修改原位写回其磁盘路径（不弹保存对话框）"
+          title={t('files.code.saveRightTitle')}
         >
-          保存右文件
+          {t('files.code.saveRight')}
         </ToolbarButton>
         {dirty ? (
           <span role="status" className="text-2xs text-diff-modified">
-            未保存：{[leftDirty ? '左' : null, rightDirty ? '右' : null].filter(Boolean).join('、')}
+            {leftDirty && rightDirty
+              ? t('files.code.unsavedBoth')
+              : leftDirty
+                ? t('files.code.unsavedLeft')
+                : t('files.code.unsavedRight')}
           </span>
         ) : null}
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
@@ -301,14 +308,14 @@ function CodeDiffView({
           icon={<FolderOpen aria-hidden className="size-3.5" />}
           onClick={() => void open('left')}
         >
-          打开左文件
+          {t('files.action.openLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<FolderOpen aria-hidden className="size-3.5" />}
           onClick={() => void open('right')}
         >
-          打开右文件
+          {t('files.action.openRight')}
         </ToolbarButton>
         {notice ? (
           <span
@@ -328,10 +335,10 @@ function CodeDiffView({
           <Panel
             key="left"
             title={leftPath}
-            subtitle="左"
+            subtitle={t('files.code.sideLeft')}
             meta={
               leftDirty ? (
-                <span className="text-2xs text-diff-modified">已修改（未保存）</span>
+                <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
               ) : null
             }
           >
@@ -346,10 +353,10 @@ function CodeDiffView({
           <Panel
             key="right"
             title={rightPath}
-            subtitle="右"
+            subtitle={t('files.code.sideRight')}
             meta={
               rightDirty ? (
-                <span className="text-2xs text-diff-modified">已修改（未保存）</span>
+                <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
               ) : null
             }
           >
@@ -380,10 +387,10 @@ export interface MergeSides {
 
 export type MergeSideKey = keyof MergeSides
 
-const MERGE_SIDE_LABELS: Record<MergeSideKey, string> = {
-  base: 'base',
-  ours: 'ours',
-  theirs: 'theirs'
+const MERGE_SIDE_KEYS: Record<MergeSideKey, MessageKey> = {
+  base: 'files.merge.side.base',
+  ours: 'files.merge.side.ours',
+  theirs: 'files.merge.side.theirs'
 }
 
 function CodeMergeView({
@@ -405,6 +412,7 @@ function CodeMergeView({
   readonly platform: PlatformPort
   readonly onOpenSide: (which: MergeSideKey, picked: PickedTextFile) => void
 }): JSX.Element {
+  const { t } = useI18n()
   const baseScroll = useRef<HTMLDivElement>(null)
   const oursScroll = useRef<HTMLDivElement>(null)
   const theirsScroll = useRef<HTMLDivElement>(null)
@@ -452,12 +460,12 @@ function CodeMergeView({
     try {
       const picked = await pickTextFile(
         platform,
-        `打开 ${MERGE_SIDE_LABELS[which]} 本地文件`,
+        t('files.merge.openSideTitle', { side: t(MERGE_SIDE_KEYS[which]) }),
         [TEXT_FILE_FILTER]
       )
       if (picked === null) return
       onOpenSide(which, picked)
-      flash(`已打开 ${picked.path}`)
+      flash(t('files.notice.opened', { path: picked.path }))
     } catch (cause) {
       flash(cause instanceof Error ? cause.message : String(cause), 'error')
     }
@@ -467,13 +475,13 @@ function CodeMergeView({
   async function saveText(): Promise<void> {
     try {
       const path = await platform.saveFile({
-        title: '保存合并结果',
+        title: t('files.merge.saveTitle'),
         defaultPath: 'merged.txt',
         filters: [TEXT_FILE_FILTER],
         content: renderMergeText(render)
       })
       if (path === null) return
-      flash(`已保存到 ${path}`)
+      flash(t('files.notice.saved', { path }))
     } catch (cause) {
       flash(cause instanceof Error ? cause.message : String(cause), 'error')
     }
@@ -482,9 +490,9 @@ function CodeMergeView({
   async function copyText(): Promise<void> {
     try {
       await navigator.clipboard.writeText(renderMergeText(render))
-      flash('已复制到剪贴板')
+      flash(t('files.notice.copied'))
     } catch {
-      flash('复制失败，请手动选择预览文本', 'error')
+      flash(t('files.notice.copyFailed'), 'error')
     }
   }
 
@@ -492,19 +500,19 @@ function CodeMergeView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <IconButton
-          label="上一个冲突块"
+          label={t('files.merge.prevConflict')}
           icon={<ChevronUp aria-hidden className="size-3.5" />}
           onClick={() => step(-1)}
           disabled={conflictCount === 0}
         />
         <IconButton
-          label="下一个冲突块"
+          label={t('files.merge.nextConflict')}
           icon={<ChevronDown aria-hidden className="size-3.5" />}
           onClick={() => step(1)}
           disabled={conflictCount === 0}
         />
         <span className="flex items-center gap-1.5 text-2xs text-content-muted">
-          待决冲突
+          {t('files.merge.pending')}
           <span className="tabular font-mono text-content-secondary">
             {render.unresolved}/{conflictCount}
           </span>
@@ -520,18 +528,18 @@ function CodeMergeView({
             }}
             disabled={activeId === null}
           >
-            {option.label}
+            {t(option.key)}
           </ToolbarButton>
         ))}
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        {(Object.keys(MERGE_SIDE_LABELS) as MergeSideKey[]).map((which) => (
+        {(Object.keys(MERGE_SIDE_KEYS) as MergeSideKey[]).map((which) => (
           <ToolbarButton
             key={which}
             size="sm"
             icon={<FolderOpen aria-hidden className="size-3.5" />}
             onClick={() => void openSide(which)}
           >
-            打开 {MERGE_SIDE_LABELS[which]}
+            {t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })}
           </ToolbarButton>
         ))}
         <span className="ml-auto flex shrink-0 items-center gap-2">
@@ -552,7 +560,7 @@ function CodeMergeView({
             onClick={() => void copyText()}
             disabled={render.unresolved > 0}
           >
-            复制
+            {t('files.action.copy')}
           </ToolbarButton>
           <ToolbarButton
             size="sm"
@@ -561,24 +569,24 @@ function CodeMergeView({
             onClick={() => void saveText()}
             disabled={render.unresolved > 0}
           >
-            导出合并文本
+            {t('files.merge.export')}
           </ToolbarButton>
         </span>
       </div>
 
       <SplitPane
         panes={[
-          <Panel key="base" title={sides.base.path} subtitle="base">
+          <Panel key="base" title={sides.base.path} subtitle={t(MERGE_SIDE_KEYS.base)}>
             <MergePane lines={baseLines.map((text) => ({ text }))} scrollRef={baseScroll} />
           </Panel>,
-          <Panel key="ours" title={sides.ours.path} subtitle="ours">
+          <Panel key="ours" title={sides.ours.path} subtitle={t(MERGE_SIDE_KEYS.ours)}>
             <MergePane
               lines={oursLines.map((text) => ({ text }))}
               activeRange={activeBlock?.oursRange}
               scrollRef={oursScroll}
             />
           </Panel>,
-          <Panel key="theirs" title={sides.theirs.path} subtitle="theirs">
+          <Panel key="theirs" title={sides.theirs.path} subtitle={t(MERGE_SIDE_KEYS.theirs)}>
             <MergePane
               lines={theirsLines.map((text) => ({ text }))}
               activeRange={activeBlock?.theirsRange}
@@ -590,14 +598,18 @@ function CodeMergeView({
 
       <div className="flex h-60 shrink-0">
         <Panel
-          title="合并结果预览"
-          subtitle={render.unresolved === 0 ? '全部冲突已解决' : '未解决块以冲突标记保留'}
+          title={t('files.merge.preview')}
+          subtitle={
+            render.unresolved === 0
+              ? t('files.merge.previewResolved')
+              : t('files.merge.previewUnresolved')
+          }
           meta={render.unresolved > 0 ? <DiffDot status="conflict" /> : null}
         >
           <div className="flex h-full min-h-0 divide-x divide-line-subtle">
             <div className="flex w-64 shrink-0 flex-col overflow-auto">
               {conflictCount === 0 ? (
-                <p className="p-3 text-2xs text-content-muted">无冲突块。</p>
+                <p className="p-3 text-2xs text-content-muted">{t('files.merge.noConflicts')}</p>
               ) : (
                 model.conflictIds.map((id, index) => {
                   const accept = resolutions[id]
@@ -616,7 +628,7 @@ function CodeMergeView({
                         className="focus-ring flex w-full items-center gap-2 rounded-xs text-left"
                       >
                         <span className="text-xs font-medium text-content-primary">
-                          冲突 {index + 1}
+                          {t('files.merge.conflict', { n: index + 1 })}
                         </span>
                         <span
                           className={cx(
@@ -624,7 +636,9 @@ function CodeMergeView({
                             accept ? 'text-diff-added' : 'text-content-muted'
                           )}
                         >
-                          {accept ? `已采纳 ${ACCEPT_LABELS[accept]}` : '未解决'}
+                          {accept
+                            ? t('files.merge.accepted', { choice: t(ACCEPT_LABELS[accept]) })
+                            : t('files.merge.unresolved')}
                         </span>
                       </button>
                       <div className="mt-1.5 flex flex-wrap gap-1">
@@ -638,7 +652,7 @@ function CodeMergeView({
                               onResolve(id, option.value)
                             }}
                           >
-                            {option.label}
+                            {t(option.key)}
                           </ToolbarButton>
                         ))}
                       </div>
@@ -691,6 +705,7 @@ export function CodeView({
   /** Reports the diff pair's editable state up to the session model. */
   readonly onBufferChange?: (buffer: CodeFileBuffer) => void
 }): JSX.Element {
+  const { t } = useI18n()
   const [mode, setMode] = useState<CodeMode>(defaultMode)
   const adhoc = pair !== undefined
   const effectiveMode: CodeMode = adhoc ? 'diff' : mode
@@ -733,21 +748,22 @@ export function CodeView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
       <div className="flex shrink-0 items-center gap-2">
         {adhoc ? (
-          <span className="text-2xs text-content-muted">
-            本地文件 · 双栏字符级 Diff
-          </span>
+          <span className="text-2xs text-content-muted">{t('files.code.drilldown')}</span>
         ) : (
           <>
             <SegmentedControl
-              label="代码视图"
-              options={MODE_OPTIONS}
+              label={t('files.code.modeLabel')}
+              options={MODE_OPTIONS.map((option) => ({
+                value: option.value,
+                label: t(option.key)
+              }))}
               value={mode}
               onChange={setMode}
             />
             <span className="hidden text-2xs text-content-muted md:inline">
               {mode === 'diff'
-                ? '行级 + 行内字符级 Diff · 同步滚动与逐块覆写'
-                : '按行切分 diff3 · 逐块点选采纳并保存结果'}
+                ? t('files.code.modeHint.diff')
+                : t('files.code.modeHint.merge')}
             </span>
           </>
         )}

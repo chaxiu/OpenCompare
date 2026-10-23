@@ -24,7 +24,22 @@ const LATIN_ONLY_KEYS = new Set([
   'common.fileKind.tsv',
   'common.fileKind.json',
   'common.fileKind.yaml',
-  'shell.view.structured'
+  'shell.view.structured',
+  // Merge accept actions and side names are existing English technical words.
+  'files.merge.accept.ours',
+  'files.merge.accept.theirs',
+  'files.merge.accept.both',
+  'files.merge.accept.base',
+  'files.merge.choice.ours',
+  'files.merge.choice.theirs',
+  'files.merge.choice.both',
+  'files.merge.choice.base',
+  'files.merge.side.base',
+  'files.merge.side.ours',
+  'files.merge.side.theirs',
+  // Format identifiers stay JSON / YAML in both dictionaries.
+  'files.structured.format.json',
+  'files.structured.format.yaml'
 ])
 
 const PAIRS: Record<string, [Record<string, string>, Record<string, string>]> = {
