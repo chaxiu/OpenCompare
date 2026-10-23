@@ -40,6 +40,7 @@ describe('parsePerfArgs', () => {
       left: '/real/left',
       right: '/real/right',
       rounds: DEFAULT_PERF_ROUNDS,
+      hotRounds: 0,
       settleMs: DEFAULT_PERF_SETTLE_MS,
       intervalMs: DEFAULT_PERF_INTERVAL_MS,
       out: 'evidence.json',
@@ -211,6 +212,88 @@ describe('parsePerfArgs', () => {
     )
     expect(multiOne.ok).toBe(false)
     if (!multiOne.ok) expect(multiOne.error).toContain('multisession')
+  })
+
+  it('defaults a retained run to two hot rounds and accepts an explicit count', async () => {
+    const result = await parsePerfArgs(
+      argv(
+        '--mode',
+        'retained',
+        '--left',
+        '/real/a',
+        '--left',
+        '/real/b',
+        '--right',
+        '/real/x',
+        '--right',
+        '/real/y',
+        '--out',
+        'e.json'
+      ),
+      readable
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.config.mode).toBe('retained')
+    expect(result.config.rounds).toBe(2)
+    expect(result.config.hotRounds).toBe(2)
+
+    const explicit = await parsePerfArgs(
+      argv(
+        '--mode',
+        'retained',
+        '--left',
+        '/real/a',
+        '--left',
+        '/real/b',
+        '--right',
+        '/real/x',
+        '--right',
+        '/real/y',
+        '--hot-rounds',
+        '5',
+        '--out',
+        'e.json'
+      ),
+      readable
+    )
+    expect(explicit.ok).toBe(true)
+    if (explicit.ok) expect(explicit.config.hotRounds).toBe(5)
+  })
+
+  it('rejects --hot-rounds outside retained and a retained --rounds mismatch', async () => {
+    const upsert = await parsePerfArgs(argv(...onePair, '--hot-rounds', '2'), readable)
+    expect(upsert.ok).toBe(false)
+    if (!upsert.ok) expect(upsert.error).toContain('--hot-rounds')
+
+    const mismatch = await parsePerfArgs(
+      argv(
+        '--mode',
+        'retained',
+        '--left',
+        '/real/a',
+        '--left',
+        '/real/b',
+        '--right',
+        '/real/x',
+        '--right',
+        '/real/y',
+        '--rounds',
+        '5',
+        '--out',
+        'e.json'
+      ),
+      readable
+    )
+    expect(mismatch.ok).toBe(false)
+    if (!mismatch.ok) expect(mismatch.error).toContain('--rounds')
+
+    const retainedOne = await parsePerfArgs(
+      argv('--mode', 'retained', ...onePair),
+      readable
+    )
+    expect(retainedOne.ok).toBe(false)
+    if (!retainedOne.ok) expect(retainedOne.error).toContain('retained')
   })
 
   it('rejects a multisession --rounds below the pair count', async () => {

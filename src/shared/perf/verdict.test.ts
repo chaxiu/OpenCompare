@@ -136,7 +136,7 @@ describe('evaluatePerf', () => {
     expect(verdict.violations).toContain(VIOLATION_HOLD_TABS)
   })
 
-  it('accepts the multisession structural shape i/i/i and rejects a lower count', () => {
+  it('accepts the multisession retained-tab shape and rejects one comparison per tab', () => {
     const green = evaluatePerf({
       profile: 'real',
       thresholds: real,
@@ -144,9 +144,14 @@ describe('evaluatePerf', () => {
       roundDeltas: deltas(400 * MB, 300 * MB, 200 * MB),
       mode: 'multisession',
       settle: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB },
-      holds: [hold(1, 1), hold(2, 2), hold(3, 3), { ...hold(3, 3), label: 'settle' }]
+      holds: [
+        hold(1, 1),
+        hold(2, 1),
+        hold(3, 1),
+        { ...hold(3, 1), label: 'settle' }
+      ]
     })
-    // A multisession run appends a real tab per round; the growth cap does not apply.
+    // Every inactive tab is summary-only, so one live comparison is the norm.
     expect(green.ok).toBe(true)
 
     const red = evaluatePerf({
@@ -156,9 +161,126 @@ describe('evaluatePerf', () => {
       roundDeltas: deltas(400 * MB, 300 * MB, 200 * MB),
       mode: 'multisession',
       settle: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB },
-      holds: [hold(1, 1), hold(2, 1), hold(3, 3)]
+      holds: [hold(1, 1), hold(2, 2), hold(3, 3)]
     })
     expect(red.violations).toContain(VIOLATION_HOLD_COMPARISONS)
+  })
+
+  it('treats a transient multisession peak as a guardrail and reports the target as a notice', () => {
+    const overTarget = evaluatePerf({
+      profile: 'real',
+      thresholds: real,
+      peaks: { renderer: 1700 * MB, main: 300 * MB, appTotal: 2000 * MB },
+      roundDeltas: deltas(400 * MB, 300 * MB, 200 * MB),
+      roundPeaks: [1700 * MB],
+      mode: 'multisession',
+      settle: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB }
+    })
+    expect(overTarget.ok).toBe(true)
+    expect(overTarget.notices).toContain('renderer-peak-over-target')
+    expect(overTarget.notices).toContain('renderer-round-peak-over-target')
+
+    const overGuardrail = evaluatePerf({
+      profile: 'real',
+      thresholds: real,
+      peaks: { renderer: 2350 * MB, main: 300 * MB, appTotal: 2600 * MB },
+      roundDeltas: deltas(400 * MB, 300 * MB, 200 * MB),
+      roundPeaks: [2350 * MB],
+      mode: 'multisession',
+      settle: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB }
+    })
+    // 2.25 GiB guardrail and 2.5 GiB app ceiling are both hard failures.
+    expect(overGuardrail.violations).toContain(VIOLATION_RENDERER_PEAK)
+    expect(overGuardrail.violations).toContain(VIOLATION_RENDERER_ROUND_PEAK)
+    expect(overGuardrail.violations).toContain(VIOLATION_APP_TOTAL_PEAK)
+  })
+
+  it('fails a retained run whose hot rounds hash, grow, settle up or fail to reclaim', () => {
+    const base = {
+      profile: 'real' as const,
+      thresholds: real,
+      peaks: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB },
+      roundDeltas: deltas(200 * MB, 200 * MB, 0),
+      mode: 'retained' as const,
+      retained: { pairs: 3, hotRounds: 2 },
+      settle: { renderer: 1000 * MB, main: 300 * MB, appTotal: 1500 * MB },
+      settleStages: [
+        {
+          label: 'after-3-tabs',
+          rss: { renderer: 1000 * MB, main: 300 * MB, appTotal: 1500 * MB },
+          at: '2026-10-22T00:00:00.000Z',
+          tabs: 3
+        },
+        {
+          label: 'after-hot-upserts',
+          rss: { renderer: 1010 * MB, main: 300 * MB, appTotal: 1510 * MB },
+          at: '2026-10-22T00:00:10.000Z',
+          tabs: 3
+        }
+      ],
+      reclaim: {
+        tabs: 2,
+        rss: { renderer: 900 * MB, main: 300 * MB, appTotal: 1400 * MB },
+        at: '2026-10-22T00:00:20.000Z'
+      },
+      holds: [
+        hold(1, 1),
+        hold(2, 1),
+        hold(3, 1),
+        { ...hold(3, 1), label: 'after-3-tabs' },
+        hold(4, 1, 2, 3),
+        hold(5, 1, 2, 3),
+        { ...hold(5, 1, 2, 3), label: 'after-hot-upserts' },
+        { ...hold(5, 1, 2, 2), label: 'reclaim' }
+      ],
+      roundHashedFiles: [10, 0, 0, 0, 0],
+      rendererPids: [5151, 5151, 5151, 5151, 5151]
+    }
+    expect(evaluatePerf(base).ok).toBe(true)
+
+    const hashed = evaluatePerf({ ...base, roundHashedFiles: [10, 0, 0, 5, 0] })
+    expect(hashed.violations).toContain('hot-round-hashed')
+
+    const grown = evaluatePerf({
+      ...base,
+      roundPeaks: [600 * MB, 650 * MB, 700 * MB, 900 * MB, 900 * MB]
+    })
+    expect(grown.violations).toContain('hot-round-growth')
+
+    const settled = evaluatePerf({
+      ...base,
+      settleStages: [
+        base.settleStages[0],
+        {
+          ...base.settleStages[1],
+          rss: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1700 * MB }
+        }
+      ]
+    })
+    expect(settled.violations).toContain('settle-growth')
+
+    const noReclaim = evaluatePerf({ ...base, reclaim: null })
+    expect(noReclaim.violations).toContain('reclaim-missing')
+
+    const lateReclaim = evaluatePerf({
+      ...base,
+      reclaim: {
+        ...base.reclaim,
+        rss: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1700 * MB }
+      }
+    })
+    expect(lateReclaim.violations).toContain('reclaim-renderer')
+
+    const restarted = evaluatePerf({ ...base, rendererPids: [5151, 5151, 6161, 6161, 6161] })
+    expect(restarted.violations).toContain('renderer-restart')
+
+    const wrongTabs = evaluatePerf({
+      ...base,
+      holds: base.holds.map((item) =>
+        item.label === 'reclaim' ? { ...item, tabs: 3 } : item
+      )
+    })
+    expect(wrongTabs.violations).toContain(VIOLATION_HOLD_TABS)
   })
 
   it('turns an unmeasured or empty hold series into a red verdict', () => {

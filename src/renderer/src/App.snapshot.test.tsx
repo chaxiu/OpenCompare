@@ -133,6 +133,8 @@ describe('snapshot workbench integration', () => {
         name: /baseline ↔ remote-prod/
       })
     )
+    // The snapshot tab was inactive (summary-only); activation rebuilds its tree.
+    await waitFor(() => expect(screen.getAllByText('report.csv').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
     expect(
       await screen.findAllByText(/\/snapshots\/right\/remote-prod\/src\/data\/report\.csv/)
@@ -143,6 +145,7 @@ describe('snapshot workbench integration', () => {
         name: /baseline ↔ remote-prod/
       })
     )
+    await waitFor(() => expect(screen.getAllByText('deploy.yaml').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
     expect(
       await screen.findAllByText(/\/snapshots\/right\/remote-prod\/config\/deploy\.yaml/)

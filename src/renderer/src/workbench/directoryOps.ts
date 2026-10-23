@@ -19,6 +19,7 @@ import type { SyncDirection, SyncMode, SyncPlan } from '@core/directory/sync'
 import { extractTemplateMatches, matchTemplate, matchTemplateSlots } from '@core/directory/template'
 import type { TemplateMatchResult } from '@core/directory/template'
 import { digestFilesForComparison } from '../platform'
+import { aliasSideRoots } from './rootAliases'
 
 const SAMPLE_ROOT = '/samples'
 
@@ -89,12 +90,13 @@ export async function previewSync(
   }
 }
 
-function compareRoots(
+async function compareRoots(
   platform: PlatformPort,
   leftRoot: string,
   rightRoot: string,
   cache: ComparisonCache
 ): Promise<DirectoryComparison> {
+  await aliasSideRoots(platform, cache, [leftRoot, rightRoot])
   return compareDirectories(
     leftRoot,
     rightRoot,

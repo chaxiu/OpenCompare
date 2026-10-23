@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { DirectoryComparison } from '@core/directory/compare'
 import { createComparisonCache } from '@core/directory/compare'
-import { createDirectorySession } from './directoryCompare'
-import { commitUpsert, closeSessions, replaceSessions, upsertSessions } from './sessionStore'
+import { createDirectorySession, releaseSessionTree } from './directoryCompare'
+import {
+  commitSessionTree,
+  commitUpsert,
+  closeSessions,
+  replaceSessions,
+  retainActiveTree,
+  upsertSessions
+} from './sessionStore'
 import { directorySides } from './snapshotOps'
 import type { WorkbenchSession } from './session'
 
@@ -69,6 +76,86 @@ describe('session list semantics', () => {
     const a = session('/a', '/b')
     const c = session('/c', '/d')
     expect(closeSessions([a, c], a.id)).toEqual([c])
+  })
+})
+
+describe('retaining only the active tree', () => {
+  it('keeps the active comparison and reduces every other tab to its summary', () => {
+    const a = session('/a', '/b')
+    const c = session('/c', '/d')
+    const file: WorkbenchSession = {
+      id: 'file:x',
+      scene: 'code',
+      title: 'x',
+      subtitle: 'x',
+      columns: 2,
+      stats: []
+    }
+
+    const next = retainActiveTree([a, c, file], c.id)
+
+    expect(next.map((item) => item.id)).toEqual([a.id, c.id, file.id])
+    expect(next[0]).not.toBe(a)
+    expect(next[0].directory).toBeUndefined()
+    expect(next[0].directorySummary?.fileCount).toBe(a.directory?.fileCount)
+    expect(next[0].directorySummary?.counts).toEqual(a.directory?.counts)
+    expect(next[0].sides).toBe(a.sides)
+    expect(next[1]).toBe(c)
+    expect(next[2]).toBe(file)
+  })
+
+  it('returns an already-summary tab unchanged', () => {
+    const a = session('/a', '/b')
+    const c = session('/c', '/d')
+    const once = retainActiveTree([a, c], c.id)
+    expect(retainActiveTree(once, c.id)).toEqual(once)
+    expect(retainActiveTree(once, c.id)[0]).toBe(once[0])
+  })
+})
+
+describe('commitSessionTree', () => {
+  it('never drops a tab and keeps only the committed tree resident', () => {
+    const cache = createComparisonCache()
+    const a = session('/a', '/b')
+    const c = session('/c', '/d')
+    const next = commitSessionTree(cache, [a], c)
+
+    expect(next.map((item) => item.id)).toEqual([a.id, c.id])
+    expect(next[0].directory).toBeUndefined()
+    expect(next[1].directory).toBeDefined()
+  })
+
+  it('replaces a tab in place and releases the summary roots it owned', () => {
+    const cache = createComparisonCache()
+    cache.set('/c/z.txt', entry)
+    cache.set('/d/w.txt', entry)
+    const first = session('/a', '/b')
+    const summary = retainActiveTree([first, session('/c', '/d')], first.id)[1]
+    const replacement = session('/e', '/f')
+
+    const next = commitSessionTree(cache, [summary], replacement, { replaceId: summary.id })
+
+    expect(next).toHaveLength(1)
+    expect(next[0].id).toBe(summary.id)
+    expect(next[0].directory).toBeDefined()
+    // The replaced summary had no tree, so its roots come from `sides`.
+    expect(cache.hashes.has('/c/z.txt')).toBe(false)
+    expect(cache.hashes.has('/d/w.txt')).toBe(false)
+  })
+
+  it('releases a summary-only session without touching another tab root', () => {
+    const cache = createComparisonCache()
+    cache.aliasRoot('/alias/left', '/real/left')
+    cache.set('/real/left/a.txt', entry)
+    cache.set('/real/left/b.txt', entry)
+    const closed = retainActiveTree([session('/alias/left', '/alias/right')], null)[0]
+    const open = session('/real/left', '/real/right')
+
+    releaseSessionTree(cache, closed, [open])
+
+    // Closing the alias tab must not evict the real path another tab still uses.
+    expect(cache.hashes.has('/real/left/a.txt')).toBe(true)
+    expect(cache.hashes.has('/real/left/b.txt')).toBe(true)
   })
 })
 

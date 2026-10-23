@@ -306,6 +306,9 @@ export function createWebPlatformPort(): PlatformPort {
       nodes.delete(path)
     },
     temporaryDirectory: async () => ROOT,
+    // The memory file system has no symbolic links, so every path is its own
+    // real form. The contract is identical to the desktop runtime's.
+    realpath: async (paths) => paths.map((path) => path),
     // The browser runtime has no launch source (`argv` / URL scheme), so the
     // stream is an inert stub with the very same signature as the desktop one.
     onCompareRequest: () => () => undefined,

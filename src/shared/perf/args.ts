@@ -12,9 +12,10 @@ export const PERF_HARNESS_FLAG = '--perf-harness'
 /** Environment variable the harness scripts set. */
 export const PERF_ENV_VAR = 'OPENCOMPARE_PERF'
 
-export const PERF_MODES: readonly PerfMode[] = ['upsert', 'multisession']
+export const PERF_MODES: readonly PerfMode[] = ['upsert', 'multisession', 'retained']
 export const DEFAULT_PERF_ROUNDS = 3
 export const DEFAULT_PERF_INTERVAL_MS = 1000
+export const DEFAULT_PERF_HOT_ROUNDS = 2
 export const MAX_PERF_INTERVAL_MS = 2000
 export const DEFAULT_PERF_SETTLE_MS = 20_000
 export const MAX_PERF_SETTLE_MS = 60_000
@@ -77,6 +78,8 @@ export async function parsePerfArgs(
   let out: string | undefined
   let mode: PerfMode = 'upsert'
   let rounds: number | undefined
+  let hotRounds: number | string = DEFAULT_PERF_HOT_ROUNDS
+  let hotRoundsProvided = false
   let settleMs: number | string = DEFAULT_PERF_SETTLE_MS
   let intervalMs: number | string = DEFAULT_PERF_INTERVAL_MS
   let profile: PerfProfileName = 'real'
@@ -129,6 +132,15 @@ export async function parsePerfArgs(
       const parsed = parsePositiveInteger(flag, value)
       if (typeof parsed === 'string') return { ok: false, error: parsed }
       rounds = parsed
+      continue
+    }
+    if (flag === '--hot-rounds') {
+      const value = inline ?? rest[index + 1]
+      if (inline === undefined) index += 1
+      const parsed = parsePositiveInteger(flag, value)
+      if (typeof parsed === 'string') return { ok: false, error: parsed }
+      hotRounds = parsed
+      hotRoundsProvided = true
       continue
     }
     if (flag === '--settle') {
@@ -186,7 +198,11 @@ export async function parsePerfArgs(
     if (pairs.length !== 1) {
       return { ok: false, error: '--mode upsert 只接受 1 对 --left / --right。' }
     }
-  } else {
+    if (hotRoundsProvided) {
+      return { ok: false, error: '--hot-rounds 只用于 --mode retained。' }
+    }
+    hotRounds = 0
+  } else if (mode === 'multisession') {
     if (pairs.length < 2) {
       return { ok: false, error: '--mode multisession 至少需要 2 对 --left / --right。' }
     }
@@ -196,6 +212,21 @@ export async function parsePerfArgs(
         error: `--mode multisession 的 --rounds 必须等于对数（${pairs.length}），收到 ${rounds}。`
       }
     }
+    if (hotRoundsProvided) {
+      return { ok: false, error: '--hot-rounds 只用于 --mode retained。' }
+    }
+    hotRounds = 0
+  } else {
+    if (pairs.length < 2) {
+      return { ok: false, error: '--mode retained 至少需要 2 对 --left / --right。' }
+    }
+    if (rounds !== undefined && rounds !== pairs.length) {
+      return {
+        ok: false,
+        error: `--mode retained 的 --rounds 必须等于对数（${pairs.length}），收到 ${rounds}。`
+      }
+    }
+    if (typeof hotRounds !== 'number') return { ok: false, error: hotRounds }
   }
   const roundCount = rounds ?? (mode === 'upsert' ? DEFAULT_PERF_ROUNDS : pairs.length)
 
@@ -216,6 +247,7 @@ export async function parsePerfArgs(
       left: pairs[0].left,
       right: pairs[0].right,
       rounds: roundCount,
+      hotRounds: typeof hotRounds === 'number' ? hotRounds : DEFAULT_PERF_HOT_ROUNDS,
       settleMs,
       intervalMs,
       out,

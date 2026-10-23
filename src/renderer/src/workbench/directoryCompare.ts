@@ -14,7 +14,7 @@ import type {
 } from '@core/directory/compare'
 import type { DrilldownTarget } from './fileKinds'
 import { baseName, classifyFile } from './fileKinds'
-import type { AdhocFilePair, WorkbenchSession } from './session'
+import type { AdhocFilePair, DirectorySummary, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
 
@@ -60,34 +60,117 @@ export function directoryViewKey(session: WorkbenchSession): string {
     : `${session.id}#${directoryComparisonKey(comparison)}`
 }
 
+/** The counts and skip totals a directory tab keeps while it is inactive. */
+export function summarizeComparison(comparison: DirectoryComparison): DirectorySummary {
+  return {
+    counts: { ...comparison.counts },
+    fileCount: comparison.fileCount,
+    leftSkipped: comparison.leftSkipped,
+    rightSkipped: comparison.rightSkipped,
+    skipped: comparison.skipped
+  }
+}
+
+/** Stats derived from a comparison's four-state counts. */
+function comparisonStats(
+  counts: DirectoryComparison['counts']
+): WorkbenchSession['stats'] {
+  const { same, added, removed, modified } = counts
+  return [
+    { label: '文件（源）', value: same + removed + modified },
+    { label: '文件（目标）', value: same + added + modified },
+    { label: '差异', value: added + removed + modified }
+  ]
+}
+
+/**
+ * Attaches a freshly built comparison to one existing session, preserving its
+ * identity (id, title, subtitle, sides). The first build and an activation
+ * rebuild share this path, so liveness accounting can never be bypassed.
+ */
+export function attachDirectoryComparison(
+  session: WorkbenchSession,
+  comparison: DirectoryComparison
+): WorkbenchSession {
+  trackLive('comparison', comparison)
+  directoryComparisonKey(comparison)
+  return {
+    ...session,
+    composition: { ...comparison.counts, conflict: 0 },
+    stats: comparisonStats(comparison.counts),
+    directory: comparison,
+    directorySummary: summarizeComparison(comparison)
+  }
+}
+
+/** Drops one session's comparison tree while keeping its restorable summary. */
+export function detachDirectoryComparison(session: WorkbenchSession): WorkbenchSession {
+  const comparison = session.directory
+  if (comparison === undefined) return session
+  return {
+    ...session,
+    directory: undefined,
+    directorySummary: session.directorySummary ?? summarizeComparison(comparison)
+  }
+}
+
 /** Builds the directory session whose stats and inputs come from the runtime comparison. */
 export function createDirectorySession(
   comparison: DirectoryComparison,
   sides: ComparisonSides
 ): WorkbenchSession {
-  const { same, added, removed, modified } = comparison.counts
-  // Register at creation, outside render, so the measurement can attribute a
-  // live comparison to the session that owns it; disabled runs pay one check.
-  trackLive('comparison', comparison)
-  directoryComparisonKey(comparison)
+  return attachDirectoryComparison(
+    {
+      id: directorySessionId(comparison.leftRoot, comparison.rightRoot),
+      scene: 'directory',
+      title: `${comparison.leftName} ↔ ${comparison.rightName}`,
+      // The subtitle carries the two real roots, so a session opened from the file
+      // system never reads as a sample path.
+      subtitle: `${comparison.leftRoot} ↔ ${comparison.rightRoot}`,
+      columns: 2,
+      stats: [],
+      sides
+    },
+    comparison
+  )
+}
 
-  return {
-    id: directorySessionId(comparison.leftRoot, comparison.rightRoot),
-    scene: 'directory',
-    title: `${comparison.leftName} ↔ ${comparison.rightName}`,
-    // The subtitle carries the two real roots, so a session opened from the file
-    // system never reads as a sample path.
-    subtitle: `${comparison.leftRoot} ↔ ${comparison.rightRoot}`,
-    columns: 2,
-    composition: { ...comparison.counts, conflict: 0 },
-    stats: [
-      { label: '文件（源）', value: same + removed + modified },
-      { label: '文件（目标）', value: same + added + modified },
-      { label: '差异', value: added + removed + modified }
-    ],
-    directory: comparison,
-    sides
+/** Every root a session compares from, whether it holds the tree or only its summary. */
+function sessionRoots(session: WorkbenchSession): string[] {
+  const roots: string[] = []
+  if (session.directory !== undefined) {
+    roots.push(session.directory.leftRoot, session.directory.rightRoot)
   }
+  const sides = session.sides
+  if (sides !== undefined) {
+    for (const side of [sides.left, sides.right]) {
+      if (side.kind === 'directory') roots.push(side.path)
+    }
+  }
+  return roots
+}
+
+/**
+ * Releases one closed or replaced session's cache entries. A summary-only
+ * session has no comparison, so its roots come from `sides`; both forms are
+ * canonicalised before the in-use comparison, so closing an alias tab never
+ * evicts the real path's warm entries.
+ */
+export function releaseSessionTree(
+  cache: ComparisonCache,
+  session: WorkbenchSession,
+  openSessions: readonly WorkbenchSession[]
+): number {
+  const roots = sessionRoots(session)
+  if (roots.length === 0) return 0
+  const inUse = new Set<string>()
+  for (const open of openSessions) {
+    for (const root of sessionRoots(open)) inUse.add(cache.canonicalPath(root))
+  }
+  const release = [
+    ...new Set(roots.map((root) => cache.canonicalPath(root)).filter((root) => !inUse.has(root)))
+  ]
+  return cache.evictUnderRoots(release)
 }
 
 /**
@@ -103,15 +186,18 @@ export function releaseDirectoryComparison(
   comparison: DirectoryComparison,
   openSessions: readonly WorkbenchSession[]
 ): number {
-  const inUse = new Set<string>()
-  for (const session of openSessions) {
-    const other = session.directory
-    if (other === undefined) continue
-    inUse.add(other.leftRoot)
-    inUse.add(other.rightRoot)
-  }
-  return cache.evictUnderRoots(
-    [comparison.leftRoot, comparison.rightRoot].filter((root) => !inUse.has(root))
+  return releaseSessionTree(
+    cache,
+    {
+      id: directorySessionId(comparison.leftRoot, comparison.rightRoot),
+      scene: 'directory',
+      title: '',
+      subtitle: '',
+      columns: 2,
+      stats: [],
+      directory: comparison
+    },
+    openSessions
   )
 }
 

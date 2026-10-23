@@ -47,6 +47,12 @@ describe('web PlatformPort', () => {
     expect(entries.every((entry) => entry.isDirectory === false)).toBe(true)
   })
 
+  it('returns every path as its own real form (the memory VFS has no links)', async () => {
+    const platform = createWebPlatformPort()
+    const paths = ['/samples/directory/baseline', '/memory/missing']
+    await expect(platform.realpath(paths)).resolves.toEqual(paths)
+  })
+
   it('mirrors nested sample directories', async () => {
     const platform = createWebPlatformPort()
 

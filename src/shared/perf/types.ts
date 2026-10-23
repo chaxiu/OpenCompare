@@ -10,9 +10,11 @@ export type PerfProfileName = 'real' | 'gate'
 /**
  * Holding mode of a measurement run. `upsert` re-compares one pair in the same
  * tab (what a re-compare in the UI does); `multisession` appends one tab per
- * pair, so 3 pairs land at 1 → 2 → 3 tabs.
+ * pair, so 3 pairs land at 1 → 2 → 3 tabs; `retained` builds one tab per pair,
+ * runs hot upserts on the active one and finally closes it, proving that open
+ * tabs stay open across round boundaries.
  */
-export type PerfMode = 'upsert' | 'multisession'
+export type PerfMode = 'upsert' | 'multisession' | 'retained'
 
 /** One left/right root pair of a run. */
 export interface PerfPair {
@@ -46,7 +48,9 @@ export interface PerfHarnessConfig {
   readonly left: string
   readonly right: string
   readonly rounds: number
-  /** Wait after the last round before the single settle sample. */
+  /** In-place hot upserts after the tabs are built; `0` outside `retained`. */
+  readonly hotRounds: number
+  /** Wait after each measured stage before the settle sample. */
   readonly settleMs: number
   readonly intervalMs: number
   readonly out: string
@@ -148,6 +152,8 @@ export interface PerfVerdict {
   readonly ok: boolean
   /** Stable violation ids, e.g. `renderer-peak` / `app-total-peak` / `round-delta`. */
   readonly violations: readonly string[]
+  /** Non-fatal observations (e.g. a transient peak over the profile target). */
+  readonly notices: readonly string[]
   readonly appliedThresholds: PerfAppliedThresholds
 }
 
@@ -205,11 +211,30 @@ export interface PerfEvidence {
   /** Post-settle reading; `null` when the run never produced one. */
   readonly settle: PerfRss | null
   readonly settleAt: string | null
+  /** Per-stage settle readings of a `retained` run, in measurement order. */
+  readonly settleStages?: readonly PerfSettleStage[]
+  /** Reading taken after the active tab was closed (`retained` only). */
+  readonly reclaim?: PerfReclaim | null
   readonly holds: readonly PerfHoldSample[]
   readonly roundDeltas: readonly PerfRoundDelta[]
   readonly verdict: PerfVerdict
   /** Present only when the harness itself failed; `verdict.ok` is then false. */
   readonly error?: string
+}
+
+/** One named settle stage of a `retained` run (e.g. after 3 tabs are built). */
+export interface PerfSettleStage {
+  readonly label: string
+  readonly rss: PerfRss
+  readonly at: string
+  readonly tabs: number
+}
+
+/** Reading taken after the active tab was closed, with the remaining tab count. */
+export interface PerfReclaim {
+  readonly tabs: number
+  readonly rss: PerfRss
+  readonly at: string
 }
 
 /** Total-app RSS definition, identical for every profile. */
@@ -233,6 +258,8 @@ export type PerfRendererEvent =
       readonly gc: boolean
     }
   | { readonly type: 'settle' }
+  | { readonly type: 'settle-stage'; readonly label: string; readonly tabs: number }
+  | { readonly type: 'reclaim'; readonly tabs: number }
   | { readonly type: 'complete' }
   | { readonly type: 'failed'; readonly message: string }
 

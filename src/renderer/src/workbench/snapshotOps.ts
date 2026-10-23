@@ -39,6 +39,7 @@ import {
 } from '@core/directory/snapshot'
 import type { ComparisonSide } from '@core/directory/snapshot'
 import { classifyFile } from './fileKinds'
+import { aliasSideRoots } from './rootAliases'
 import { digestFilesForComparison } from '../platform'
 
 export type SidePosition = 'left' | 'right'
@@ -92,6 +93,15 @@ export function directorySides(leftRoot: string, rightRoot: string): ComparisonS
     left: { kind: 'directory', path: leftRoot },
     right: { kind: 'directory', path: rightRoot }
   }
+}
+
+/** The on-disk roots of a pair; a mounted snapshot side has no real path. */
+export function directoryRootsOf(sides: ComparisonSides): string[] {
+  const roots: string[] = []
+  for (const side of [sides.left, sides.right]) {
+    if (side.kind === 'directory') roots.push(side.path)
+  }
+  return roots
 }
 
 /** The built-in "local sample directory vs remote-prod snapshot" comparison. */
@@ -183,13 +193,14 @@ export interface CompareSidesOptions {
 }
 
 /** Compares two sides (either real directory or mounted snapshot) and refreshes the cache. */
-export function compareSides(
+export async function compareSides(
   platform: PlatformPort,
   sides: ComparisonSides,
   cache: ComparisonCache,
   options: CompareSidesOptions = {}
 ): Promise<DirectoryComparison> {
   seedSnapshotCache(cache, sides)
+  await aliasSideRoots(platform, cache, directoryRootsOf(sides))
   const { operationId, digestBatchSize } = options
   const ioOptions: ComparisonIoOptions = {
     signal: options.signal,

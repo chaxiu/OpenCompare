@@ -268,6 +268,17 @@ export interface ComparisonCache {
   /** Drops one entry without counting it as an eviction (invalidation). */
   delete(path: string): void
   /**
+   * Registers one root's real (realpath) form. Every later cache key under
+   * `root` is stored and looked up under `canonical`, so the same tree reached
+   * through a symlinked root reuses the digests instead of hashing again.
+   */
+  aliasRoot(root: string, canonical: string): void
+  /**
+   * Canonical form of a path under a registered alias root (longest prefix
+   * wins); a path outside every registered root is returned unchanged.
+   */
+  canonicalPath(path: string): string
+  /**
    * Evicts every entry under one of the roots (root included), e.g. when a
    * session is closed. Returns how many entries were released.
    */
@@ -304,6 +315,18 @@ export function createComparisonCache(options: ComparisonCacheOptions = {}): Com
   let evictions = 0
   /** Comparisons currently in flight; capacity waits for the last one to end. */
   let holds = 0
+  /** Alias root → canonical root; keys under an alias are stored canonically. */
+  const aliases = new Map<string, string>()
+
+  function canonicalPath(path: string): string {
+    let match: { readonly from: string; readonly to: string } | null = null
+    for (const [from, to] of aliases) {
+      if (!belongsToRoot(path, from)) continue
+      if (match === null || from.length > match.from.length) match = { from, to }
+    }
+    if (match === null) return path
+    return `${match.to}${path.slice(match.from.length)}`
+  }
 
   function drop(path: string): ContentHashEntry | undefined {
     const entry = hashes.get(path)
@@ -336,26 +359,35 @@ export function createComparisonCache(options: ComparisonCacheOptions = {}): Com
       return { entries: hashes.size, estimatedBytes, hits, misses, evictions }
     },
     get(path) {
-      const entry = hashes.get(path)
+      const key = canonicalPath(path)
+      const entry = hashes.get(key)
       if (entry === undefined) {
         misses += 1
         return undefined
       }
       // Re-insert as the newest entry; the value itself is never copied.
-      hashes.delete(path)
-      hashes.set(path, entry)
+      hashes.delete(key)
+      hashes.set(key, entry)
       hits += 1
       return entry
     },
     set(path, entry) {
-      drop(path)
-      hashes.set(path, entry)
-      estimatedBytes += estimatedEntryBytes(path, entry)
+      const key = canonicalPath(path)
+      drop(key)
+      hashes.set(key, entry)
+      estimatedBytes += estimatedEntryBytes(key, entry)
       if (holds === 0) evictDownToCaps()
     },
     delete(path) {
-      drop(path)
+      drop(canonicalPath(path))
     },
+    aliasRoot(root, canonical) {
+      const from = normalizedRoot(root)
+      const to = normalizedRoot(canonical)
+      if (from.length === 0 || to.length === 0) return
+      aliases.set(from, to)
+    },
+    canonicalPath,
     hold() {
       holds += 1
       let released = false
@@ -367,7 +399,9 @@ export function createComparisonCache(options: ComparisonCacheOptions = {}): Com
       }
     },
     evictUnderRoots(roots) {
-      const bases = roots.map(normalizedRoot).filter((root) => root.length > 0)
+      const bases = roots
+        .map((root) => normalizedRoot(canonicalPath(root)))
+        .filter((root) => root.length > 0)
       if (bases.length === 0) return 0
       let released = 0
       for (const path of [...hashes.keys()]) {

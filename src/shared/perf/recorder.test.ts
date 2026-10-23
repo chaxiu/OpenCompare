@@ -35,7 +35,15 @@ function report(round: number, tabs = 1, hashedFiles = 20) {
   }
 }
 
-function harness() {
+function harness(
+  options: {
+    mode?: 'upsert' | 'multisession' | 'retained'
+    hotRounds?: number
+    pairs?: { left: string; right: string }[]
+  } = {}
+) {
+  const mode = options.mode ?? 'upsert'
+  const pairs = options.pairs ?? [{ left: '/left', right: '/right' }]
   let nowMs = START
   let rendererBytes = 100 * MB
   const metrics: PerfProcessMetric[] = [
@@ -44,10 +52,11 @@ function harness() {
     { pid: 6161, type: 'Utility', workingSetSize: 50_000 }
   ]
   const recorder = new PerfRecorder({
-    mode: 'upsert',
-    pairs: [{ left: '/left', right: '/right' }],
-    left: '/left',
-    right: '/right',
+    mode,
+    pairs,
+    hotRounds: options.hotRounds ?? 0,
+    left: pairs[0].left,
+    right: pairs[0].right,
     profile: 'real',
     thresholds,
     intervalMs: 1000,
@@ -214,6 +223,53 @@ describe('PerfRecorder', () => {
     expect(evidence.error).toBe('renderer crashed')
     expect(evidence.verdict.ok).toBe(false)
     expect(evidence.verdict.violations).toContain('harness-error')
+  })
+
+  it('records retained settle stages and the reclaim reading', () => {
+    const { recorder, setRenderer } = harness({
+      mode: 'retained',
+      hotRounds: 2,
+      pairs: [
+        { left: '/a', right: '/b' },
+        { left: '/b', right: '/a' },
+        { left: '/c', right: '/d' }
+      ]
+    })
+    recorder.startupBaseline()
+    for (let round = 1; round <= 2; round += 1) {
+      recorder.beginRound(round)
+      recorder.endRound(report(round, 3))
+      recorder.hold({
+        label: `round-${round}`,
+        tabs: round,
+        comparisons: 1,
+        rowModels: 2,
+        gc: true
+      })
+    }
+    setRenderer(500 * MB)
+    recorder.settleStage('after-3-tabs', 3)
+    recorder.hold({ label: 'after-3-tabs', tabs: 3, comparisons: 1, rowModels: 2, gc: true })
+    setRenderer(510 * MB)
+    recorder.settleStage('after-hot-upserts', 3)
+    recorder.hold({ label: 'after-hot-upserts', tabs: 3, comparisons: 1, rowModels: 2, gc: true })
+    setRenderer(400 * MB)
+    recorder.reclaim(2)
+    recorder.hold({ label: 'reclaim', tabs: 2, comparisons: 1, rowModels: 2, gc: true })
+
+    const evidence = recorder.finalize()
+    expect(evidence.mode).toBe('retained')
+    expect(evidence.settleStages?.map((stage) => stage.label)).toEqual([
+      'after-3-tabs',
+      'after-hot-upserts'
+    ])
+    expect(evidence.settleStages?.map((stage) => stage.tabs)).toEqual([3, 3])
+    expect(evidence.reclaim).toMatchObject({ tabs: 2, rss: { renderer: 400 * MB } })
+    // The last settle stage is still the single `settle` column.
+    expect(evidence.settle?.renderer).toBe(510 * MB)
+    // Reclaim is kept out of the instantaneous peak series.
+    expect(evidence.peaks.renderer).toBe(100 * MB)
+    expect(evidence.verdict.ok).toBe(true)
   })
 
   it('rejects out-of-order rounds', () => {

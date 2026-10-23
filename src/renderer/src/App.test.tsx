@@ -239,6 +239,9 @@ describe('workbench shell', () => {
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /baseline ↔ candidate/ }))
 
+    // The tab was summary-only while inactive; activating it rebuilds the tree
+    // from the warm cache.
+    await waitFor(() => expect(screen.getAllByText('deploy.yaml').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
     expect(await screen.findByText(`${DRILLDOWN_PREFIX}config/deploy.yaml`, {}, { timeout: 4000 })).toBeDefined()
     expect(screen.getByText(/YAML 原文/)).toBeDefined()
@@ -421,6 +424,115 @@ describe('real file workbench', () => {
     await waitFor(() => expect(rowBuilds.count).toBe(afterFirst + 4))
     // Coming back rebuilds from the same comparison: rows are unchanged.
     expect(treeRowTitles()).toEqual(firstRows)
+  })
+
+  it('keeps only the active tab materialised and rebuilds a summary tab on activation', async () => {
+    rowBuilds.count = 0
+    const base = createWebPlatformPort()
+    const answers = [
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right,
+      DIRECTORY_SAMPLE_PATHS.right,
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.incoming,
+      DIRECTORY_SAMPLE_PATHS.right
+    ]
+    let directoryCalls = 0
+    let digestCalls = 0
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      listDirectories: async (paths) => {
+        directoryCalls += 1
+        return base.listDirectories(paths)
+      },
+      digestFiles: async (paths, options) => {
+        digestCalls += 1
+        return base.digestFiles(paths, options)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    for (let pair = 0; pair < 3; pair += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+        ).toHaveLength(pair + 1)
+      )
+    }
+
+    const tabs = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+    expect(tabs).toHaveLength(3)
+    // One mounted directory view builds one row model per side.
+    await waitFor(() => expect(rowBuilds.count).toBe(6))
+
+    const firstTab = tabs[0]
+    const digestsBefore = digestCalls
+    const scansBefore = directoryCalls
+    fireEvent.click(firstTab)
+
+    // The summary tab rebuilds from the warm cache: rows come back, no digest.
+    await waitFor(() => expect(rowBuilds.count).toBe(8))
+    expect(digestCalls).toBe(digestsBefore)
+    expect(directoryCalls).toBeGreaterThan(scansBefore)
+    expect(firstTab.getAttribute('aria-selected')).toBe('true')
+    expect(screen.getAllByText('engine.ts').length).toBeGreaterThan(0)
+  })
+
+  it('reuses an alias root through the cache without folding its tab', async () => {
+    const base = createWebPlatformPort()
+    for (const root of ['real', 'alias']) {
+      for (const side of ['left', 'right']) {
+        await base.ensureDirectory(`/memory/${root}/${side}`)
+      }
+    }
+    for (const root of ['real', 'alias']) {
+      // Same size/mtime, different body: the real pass must hash this pair.
+      await base.writeTextFile(`/memory/${root}/left/a.txt`, 'alpha', 1000)
+      await base.writeTextFile(`/memory/${root}/right/a.txt`, 'alphA', 1000)
+      await base.writeTextFile(`/memory/${root}/left/b.txt`, 'bravo', 1000)
+      await base.writeTextFile(`/memory/${root}/right/b.txt`, 'bravo', 1000)
+    }
+    const answers = [
+      '/memory/real/left',
+      '/memory/real/right',
+      '/memory/alias/left',
+      '/memory/alias/right'
+    ]
+    let digestCalls = 0
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => answers.shift() ?? null,
+      realpath: async (paths) =>
+        paths.map((path) => path.replace('/memory/alias/', '/memory/real/')),
+      digestFiles: async (paths, options) => {
+        digestCalls += 1
+        return base.digestFiles(paths, options)
+      }
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+    await waitFor(() => expect(digestCalls).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: '打开文件夹' }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    )
+    const digestsBefore = digestCalls
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    // The alias root registers the real cache key, so the second pass hashes
+    // nothing; the tab itself is still a second tab with the user's path.
+    await waitFor(() =>
+      expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)
+    )
+    expect(digestCalls).toBe(digestsBefore)
+    const aliasTab = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')[1]
+    expect(aliasTab.textContent).toContain('/memory/alias/left')
   })
 
   it('keeps one tab when the same directory pair is compared again', async () => {
@@ -831,6 +943,9 @@ describe('directory drilldown roundtrip', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
 
+    // The source directory tab was inactive while the drilldown was open, so it
+    // rebuilds its tree from the warm cache; its kept filter/scroll restore then.
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     // Back on the source directory session: nothing was reset by the roundtrip.
     expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
     expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
@@ -856,6 +971,7 @@ describe('directory drilldown roundtrip', () => {
       )
       fireEvent.click(back)
 
+      await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
       expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
       expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
       expect(within(paneTree(0)).queryAllByText('engine.ts')).toHaveLength(1)
@@ -888,6 +1004,7 @@ describe('directory drilldown roundtrip', () => {
     // Drill the same relative path out of the first (candidate → baseline) session.
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /candidate ↔ baseline/ }))
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
     await screen.findByText(`file:${REVERSED_DIRECTORY_ID}::src/core/engine.ts`, {}, { timeout: 4000 })
 
@@ -896,11 +1013,13 @@ describe('directory drilldown roundtrip', () => {
 
     // The active drilldown returns to its own source session.
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     expect(screen.getByRole('contentinfo').textContent).toContain(REVERSED_DIRECTORY_ID)
 
     // The other drilldown still returns to the other source session.
     fireEvent.click(within(sessionTabs).getAllByRole('tab', { name: /engine\.ts/ })[0])
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     expect(screen.getByRole('contentinfo').textContent).toContain(SAMPLE_DIRECTORY_ID)
   })
 })
@@ -2349,6 +2468,7 @@ describe('directory progress and cancel UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
     fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '预览并同步' })).toBeDefined())
     expect(progressBar()).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))

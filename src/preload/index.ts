@@ -49,6 +49,8 @@ const platform: PlatformPort = {
   deleteFile: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
   temporaryDirectory: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
+  realpath: (paths) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
   onCompareRequest: (listener) => {
     const forward = (_event: IpcRendererEvent, payload: CompareRequestPayload): void => {
       listener(payload)
