@@ -1,6 +1,6 @@
 # Domain: i18n
 
-renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider` / `useI18n()` 语言上下文、首启语言解析的纯函数与只读 loader、两个测试辅助（`renderWithI18n`、中文硬编码扫描器），以及**应用外壳接入**——`App` 启动解析 + Provider 挂载、工作台壳层 / 新建对比 / 共享展示组件的可见文案、会话标题·副标题·统计标签的渲染期解析。平台侧设置读写与系统语言通道（`readUserSettings` / `writeUserSettings` / `systemLocale`）归 `foundation` 域，本域只消费其契约；四个业务视图（`views/**`）与设置面板的语言切换 UI 归后续 WI。
+renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider` / `useI18n()` 语言上下文、首启语言解析的纯函数与只读 loader、两个测试辅助（`renderWithI18n`、中文硬编码扫描器），以及**应用外壳接入**——`App` 启动解析 + Provider 挂载、工作台壳层 / 新建对比 / 共享展示组件的可见文案、会话标题·副标题·统计标签的渲染期解析。平台侧设置读写与系统语言通道（`readUserSettings` / `writeUserSettings` / `systemLocale`）归 `foundation` 域，本域只消费其契约；**目录对比视图面**（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx` + 共享键映射 `views/directoryCopy.ts`）已接入，代码 / CSV / 结构化视图面与设置面板的语言切换 UI 归后续 WI。
 
 ## 范围
 
@@ -18,6 +18,12 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **共享展示组件文案**：`Dialog` 关闭按钮可访问名；`SessionTabs` 的 `tablist` 可访问名、未保存修改标记（`title` + `sr-only`）、关闭按钮可访问名（`关闭 {title}` → en `Close {title}`）；`StatusBar` / `DiffBadge` / `diffSemantics` 的差异语义标签改为 `DIFF_LABEL_KEYS: Record<DiffStatus, MessageKey>`，`CompositionLegend` 与 `DiffBadge` 渲染期解析，`DIFF_STATUSES` 与颜色类不变。`StateView` 自身不含文案，不改。
 - **文件类型稳定标识（`workbench/fileKinds.ts` 最小改动）**：`DrilldownTarget.label` 由中文文案改为稳定标识 `FileKind = 'code' | 'csv' | 'tsv' | 'json' | 'yaml'`，显示名渲染期取词典（zh 仍为「代码 / 文本」，`CSV` / `TSV` / `JSON` / `YAML` 不变）；「两侧文件类型不一致」按稳定标识判断（结构化按 `json` / `yaml` 区分），该错误与「暂不支持对比」改为带稳定 code 的错误（`mixed-family` / `unsupported-type`），由外壳按当前语言渲染；`directoryCompare.ts` 拼接副标题与比较类型处同步改用该标识，会话 id / `sides` / 比较结果 / 缓存调用序列不变。
 - **本域词典面纪律（外壳接入轮）**：只往既有 `common` 与 `shell` 两个表面成对加键（`messages/{zh,en}/*` 同名文件），不新增表面文件、不改既有键语义；zh 值逐字沿用当前界面中文（含标点、全角括号与「」），en 为句子式产品措辞，插值只用 `{name}`；多变量句子（进度、已跳过、导出 / 导入结果等）用整句模板 + 占位符，不按中文语序逐段拼接，计数单复数用最小 `one` / `other` 键。
+- **目录对比视图面文案（`views/DirectoryView.tsx`）**：过滤组可访问名（`差异过滤`）与五档过滤项改为 `DirectoryFilter → MessageKey` 映射（`FILTER_LABEL_KEYS`）渲染期 `t()` 解析，选项顺序仍由 `DIRECTORY_FILTERS` 决定、`value` 与 `onFilterChange` 行为不变；十个工具栏按钮（选择左右目录 / 加载演示目录 / 预览并同步 / 模板归位 / 导出·导入左右快照 / 演示远端快照）的可见文本与 `title` 全部走词典，两个隐藏 file input 的 `aria-label`（选择左 / 右侧快照文件）走词典；`pickerAvailable === false` 时选择按钮 `title` 为空并渲染 Web 预览提示，`true` 时提示不渲染、`title` 为当前语言说明句；左右 Panel 的 `meta` 来源标识（`源目录` / `目标目录` / `快照`）走词典，而 Panel 的 `title` / `subtitle` 与 `TreeView` 的 `label` 仍是根名与真实路径（用户数据不翻译）；单侧过滤后 0 行的空态句、`leftSkipped + rightSkipped > 0` 的持久提示行（`已跳过：左 {left} / 右 {right}`）、底部下钻说明长句均走词典；视图内差异图例由既有已本地化的 `CompositionLegend` 渲染，本项不改其代码。
+- **目录树展开/折叠可访问名（`components/TreeView.tsx`）**：目录行展开 / 折叠按钮 `aria-label` 走词典（`展开 {name}` / `折叠 {name}` → `Expand {name}` / `Collapse {name}`），`node.name` 原样插入；树的 `aria-label`（根名）、行 `title`（相对路径 / 名称）与 `CountSummary` 前缀与数字保持不变。
+- **同步预览对话框（`views/DirectorySyncDialog.tsx`）**：标题（方向 · 模式 + `同步预览`）、描述（`目标根：` + 路径 + 只读样本树说明 + 合计 `{count} 项 / {size}`）、三个分组标题（`待新增拷贝` / `待覆盖修改` / `待删除（镜像）`）、分组计数（`{count} 个 · {size}`）、空分组 `无`、空计划整句、取消 / 确认 / 进行中按钮文案、镜像删除项复选框 `aria-label`（`删除 {path}`）全部走词典；`SYNC_DIRECTION_KEYS` / `SYNC_MODE_KEYS` 取代对话框内自带的 `DIRECTION_LABELS` / `MODE_LABELS`，`incremental` 仍不渲染删除分组，`plan.totalCount === 0` 时确认按钮 `disabled`，`deletePaths` 仍按当前勾选计算。
+- **模板归位对话框（`views/TemplateDialog.tsx`）**：标题、描述三段标签（`模板 A：` / `散乱树 B：` / `输出根：`）、四个分区标题（`已匹配` / `缺失槽位` / `冲突项` / `B 未使用文件`）、分区计数、空分组 `无`、冲突原因（`同名多候选` / `同名内容不同`）、取消 / 确认 / 进行中按钮文案全部走词典；候选路径仍以 ` · ` 连接，`result.matched.length === 0` 时确认按钮 `disabled`。
+- **目录面共享键映射（`views/directoryCopy.ts`，纯常量 / 纯函数、无 React / DOM）**：只导出 `FILTER_LABEL_KEYS: Record<DirectoryFilter, MessageKey>`、`SYNC_DIRECTION_KEYS: Record<SyncDirection, MessageKey>`、`SYNC_MODE_KEYS: Record<SyncMode, MessageKey>` 与 `countKey(one, other, count)`（仅 `count === 1` 取单数），由视图、两个对话框与测试共同引用，避免三处各写一份中文映射。
+- **本域词典面纪律（目录视图轮）**：只往既有 `directory` 表面成对加键（`messages/{zh,en}/directory.ts`），不新增表面文件、不改既有键与 `common` / `shell` 键；`zh/directory.ts` 与 `en/directory.ts` 键集相等、值 `trim()` 非空、同键占位符集合一致、en 无 `\p{Script=Han}`；既有 `directory.filter.label` / `filter.clear` / `tree.empty` / `action.refresh` / `summary.files` 五个键原样保留（不使用、不删除）；单复数只拆同步合计、同步分组、模板分区三处 `one` / `other`，zh 两条值相同。
 
 ## 验收
 
@@ -66,16 +72,39 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **ac-en-smoke-no-han**：en 下空态 + 新建对比对话框 + 演示样本标签条 + 状态栏的可见文本不含汉字（`{Script=Han}` 计数为 0，ASCII 测试路径除外）。
 - **ac-no-extra-work**：同一会话在中英两种渲染下，`listDirectory/listDirectories/digestFiles/readTextFile` 的调用次数相同，标签数量、会话 id、顺序与活动标签一致（本地化不引入重新扫描或新建会话）。
 - **ac-existing-suite**：`pnpm test` 全绿，其中既有 App / snapshot / Workbench 行为断言除「启动前需预置 zh 记录并等待首屏」外不变。
+- **ac-filter-copy**：zh 下五个过滤项与组可访问名与现状逐字一致（`全部/仅差异/左独有/右独有/相同`、`差异过滤`）；en 下分别为 `All / Differences only / Left only / Right only / Same` 与 `Difference filter`，且五个 `value` 顺序仍为 `DIRECTORY_FILTERS` 顺序。
+- **ac-toolbar-copy**：en 下十个按钮可见文本分别为 `Choose left folder` / `Choose right folder` / `Load demo folder` / `Preview & sync` / `Place from template` / `Export left snapshot` / `Import left snapshot` / `Export right snapshot` / `Import right snapshot` / `Demo: remote snapshot`，且各自 `title` 为英文；zh 下文本与 `title` 与现状逐字一致；同一按钮在 zh 与 en 两次渲染中文本不同、`title` 不同。
+- **ac-picker-title-gate**：`pickerAvailable === false` 时左右选择按钮 `title` 为空且渲染 Web 预览提示；`true` 时提示不渲染、`title` 为当前语言的说明句。两种语言下均成立。
+- **ac-snapshot-input-aria**：两个隐藏 file input 的 `aria-label` 在 zh 下为 `选择左侧快照文件` / `选择右侧快照文件`，en 下为 `Choose left snapshot file` / `Choose right snapshot file`。
+- **ac-panel-meta**：真实目录对 en 下左侧 `meta` 为 `Source folder`、右侧为 `Target folder`；任一侧挂载快照时该侧 `meta` 为 `Snapshot`；zh 下分别为 `源目录` / `目标目录` / `快照`。
+- **ac-panel-title-user-data**：无论 zh 还是 en，两侧 Panel 的 `title`/`subtitle` 与两个 `role="tree"` 的 `aria-label` 都等于比较结果的根名与真实路径（用含中文名的比较结果验证不被翻译、不被替换）。
+- **ac-empty-filter-copy**：单侧过滤后 0 行时，该侧渲染当前语言空态句且另一侧行数不受影响；en 空态句不含汉字；zh 与现状逐字一致。
+- **ac-skipped-line**：`leftSkipped=2, rightSkipped=1` 时 en 渲染 `Skipped: left 2 / right 1`，zh 渲染 `已跳过：左 2 / 右 1`；两者均为 0 时该行不渲染。
+- **ac-drilldown-hint**：en 底部说明含 `Double-click` 与 `CSV / TSV / JSON / YAML` 且不含汉字；zh 与现状逐字一致。
+- **ac-tree-toggle-aria**：折叠目录行按钮可访问名为 `Expand {name}`、展开后为 `Collapse {name}`（en），zh 为 `展开 {name}` / `折叠 {name}`；点击按钮仍只切换折叠、不改变 `selectedPath`。
+- **ac-legend-en**：en 下 DirectoryView 内 `CompositionLegend` 的语义标签为 `Same/Added/Removed/Modified`，zh 下为 `相同/新增/删除/修改`；计数数字与 `visibleCounts` 一致。
+- **ac-sync-dialog-copy**：en 下标题形如 `Left → Right · Incremental sync preview`（方向、模式均为英文）、描述含 `Target root:` 与目标根原文、处理中文本为 `Syncing…`、空闲为 `Apply changes`、取消为 `Cancel`；zh 下与现状逐字一致；`Cancel` 调用 `onCancel` 一次，`Apply changes` 以当前勾选后的 `deletePaths` 调用 `onConfirm`。
+- **ac-sync-dialog-groups**：en 下分组标题为 `Files to copy` / `Files to overwrite` / `Files to delete (mirror)`，分组计数按 `{count} item(s) · {size}` 渲染；`mode === 'incremental'` 时不渲染删除分组；空分组渲染 `None`（zh 为 `无`）。
+- **ac-sync-dialog-empty**：`plan.totalCount === 0` 时 en 渲染 `This direction has no changes to sync; the target already matches the source.` 且确认按钮 `disabled`；zh 与现状逐字一致，同样 `disabled`。
+- **ac-sync-delete-aria**：mirror 模式 en 下删除项复选框 `aria-label` 为 `Delete {path}`（path 原样），zh 为 `删除 {path}`；取消勾选后该项不出现在传给 `onConfirm` 的 `deletePaths` 中。
+- **ac-template-dialog-copy**：en 下标题为 `Template placement preview`、描述含 `Template A:` / `Scattered tree B:` / `Output root:` 与三个根路径原文、分区标题为 `Matched` / `Missing slots` / `Conflicts` / `Unused files in B`、处理中为 `Placing…`、空闲为 `Extract and place`；zh 下与现状逐字一致；`result.matched.length === 0` 时确认按钮 `disabled`。
+- **ac-template-reason-copy**：en 下 `ambiguous` 冲突原因为 `Multiple candidates with the same name`、内容不同为 `Same name, different content`；zh 为 `同名多候选` / `同名内容不同`；两种语言下候选路径仍以 ` · ` 连接。
+- **ac-count-plural**：en 下计数 1 用单数（`1 item`）、0 与 3 用复数（`0 items` / `3 items`），覆盖同步合计、同步分组和模板分区三处；zh 下恒为 `合计 {count} 项` / `{count} 个`，不随数量变化。
+- **ac-dict-directory**：`zh/directory.ts` 与 `en/directory.ts` 键集相等、所有值 `trim()` 非空、同键占位符集合一致、en 值无 `\p{Script=Han}`（并入既有 `messages.test.ts` 断言后全绿）；既有 `directory` 键不被改名或删除。
+- **ac-han-scan-directory**：`scanHardcodedChinese` 对本范围清单（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx`、`views/directoryCopy.ts`）命中数为 0（注释、`aria-label`、`title` 不豁免）。
+- **ac-existing-tests-by-key**：`DirectoryView.test.tsx` 中不再出现 `全部/仅差异/左独有/右独有/相同` 与 `展开 {name}`/`折叠 {name}` 字面量（改为经 `zh[FILTER_LABEL_KEYS[...]]` / zh 键取值），`DirectoryView.test.tsx` 与 `TreeView.test.tsx` 全部断言仍通过。
+- **ac-translation-is-render-only**：同一比较结果分别以 zh 与 en 渲染 DirectoryView，两侧渲染出的行路径序列、`role="treeitem"` 数量、当前过滤 tab 的 `aria-selected`、折叠后不可见路径与 `onTogglePath`/`onSelectPath` 调用序列完全相同（本地化不改变行模型、过滤、展开与选中）。
+- **ac-en-smoke-no-han-directory**：en 下上述视图与两个对话框的指定表面（五个过滤项、十个按钮及其 `title`、两侧 `meta`、提示行、空态句、下钻说明、图例、两个对话框标题/描述标签/分组标题/按钮/空态句）文本 `\p{Script=Han}` 命中数为 0（路径、文件名、`Left → Right` 箭头等用户数据/符号除外）。
 
 ## 非目标
 
 - 不做设置面板 / 齿轮入口 / 语言切换 UI 与写盘（归「设置面板与即时切换」WI）；外壳接入 WI 只消费 `initialLanguage`，不做 `setLanguage` 交互。
-- 不做 `src/renderer/src/views/**` 的任何文案（目录树、四态过滤、同步 / 模板对话框、代码 / CSV / 结构化视图、`TemplateDialog`、`DirectorySyncDialog`），也不做这些视图的「切换不重算」验收。
+- 目录视图面（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx`、`views/directoryCopy.ts`）的文案已在「目录对比视图与同步/模板对话框双语化」轮接入；代码 / CSV / 结构化视图（`views/CodeView.tsx`、`CsvView.tsx`、`StructuredView.tsx`）及其测试的文案归「文件级视图双语化」WI，设置面板 / 齿轮入口 / 语言即时切换与写盘归「设置面板与即时切换」WI。
 - 不改 `workbench/snapshotOps.ts`、`workbench/loadSampleSessions.ts`、`workbench/session.ts`、`workbench/fileIO.ts` 里的中文提示与注释（属目录 / 快照面与后续 WI）：它们产出的 message 作为**错误详情**原样展示，外壳文案由外壳接入 WI 本地化。
 - 不改 `src/core/**`、`src/main/**`、`src/preload/**`、`src/shared/compareRequest.ts`、`src/shared/platform/**` 的任何文案或行为。
 - 不改 `src/shared/fixtures/**` 的数据与 `FixtureSession` / `SessionStat` 类型语义（`SessionStat.label` 保留，但 `Workbench` 不再渲染它、也不再据它判断）；不把 fixture 中文改成英文。
 - 不改会话 id 生成规则、对比 / 扫描 / 摘要 / 缓存 / 取消逻辑、四态语义、差异色、布局与字号；不新增或修改 `code_gates.json` 条目。
-- 不做浏览器 / 真机 / 桌面点选验收（`needSelfTest=false`），不做 perf 窗口与 `components/TreeView.tsx` / `SplitPane.tsx` 的文案。
+- 不做浏览器 / 真机 / 桌面点选验收（`needSelfTest=false`），不做 perf 窗口与 `components/SplitPane.tsx` 的文案（`components/TreeView.tsx` 的展开 / 折叠可访问名已在目录视图轮接入）。
 - 不跑全主链路中文扫描（仅本范围显式清单）；收口扫描归收口 WI。
 - 不引入 i18next / react-intl 等第三方框架，不新增运行时依赖、不新增专用 code gate。
 - 不新建第二套存储：不写 electron-store、不加第二个 localStorage key、不新增配置文件（存储实现归 `foundation` 域）。
@@ -97,12 +126,15 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - 扫描清单写成一个常量数组供测试直接遍历；新增 shell 文件必须同时加入清单，否则视为未覆盖。
 - 既有 `App.test.tsx` / `App.snapshot.test.tsx` 的适配方式：`beforeEach` 写入 `localStorage['opencompare.userSettings'] = '{"language":"zh"}'`（`afterEach` 清理），首屏断言改为 `await screen.findByRole(...)`；不得为通过测试把生产默认语言改成中文。`Workbench` 直连渲染的测试因无 Provider 回落 zh，不改断言。
 - renderer 仍不得 import Electron；不引入 `@core` 之外的新依赖、不引入 i18next / react-intl；新代码注释用英文（扫描不豁免注释）。
+- **目录视图轮接线纪律**：四个组件用 `useI18n()`；无 Provider 时既有 zh 回落保证 `DirectoryView.test.tsx` / `TreeView.test.tsx` 的 `render()` 调用方式不需要包 Provider 即可继续断言中文；不得把 `language` 用作组件或 `TreeView` 的 `key`，不得改 `DirectoryViewProps` 形状。`DIRECTORY_FILTERS` 顺序、`buildDirectoryRowModel` 入参、`trackLive('rowModel')` 注册、`useLayoutEffect` 滚动恢复、`selectedPath` / `collapsedPaths` 受控语义、隐藏 input 的 `accept` 与 `onChange` 重置逻辑、`Dialog` 的 `onClose` busy 行为、`deletePaths` 计算全部保持原样。
+- **目录视图轮测试写法**：en 场景统一用 `@renderer/i18n/testing` 的 `renderWithI18n(ui, 'en')`；zh 断言用 `zh[key]` 取值；扫描清单写成常量数组（四个页面文件 + `directoryCopy.ts` 全列），不得把 `.test.*` 加进扫描清单靠排除规则蒙混；en 无汉字断言按「指定表面文本」逐个元素校验，不对含随机临时目录名的整棵 DOM 做全量汉字扫描。`views/directoryI18n.test.tsx`（中英双语冒烟：DirectoryView + 两个对话框直接构造 `SyncPreview` / `TemplatePreview`）、`views/directoryScan.test.ts`（5 文件 0 命中 + 两个既有测试文件不再含被本地化字面量）为本轮回归钉板。
+- **插值限制（目录面）**：只用 `{name}` 占位；`Dialog` 的 `description` 允许由「词典片段 + `<span className="font-mono">` 用户数据」拼成，片段自身必须整句可用（en 语序由模板决定，不把中文语序逐段拼英文），词典值内不得出现 HTML / JSX。
 
 ## 最近交付证明
 
-- WI：`wi_ws_a0d69b96e026b9df`（工作台外壳与新建对比双语化：启动接线 + 壳层文案 + 会话显示渲染期化，`kind: feature`）
-- 日期：2026-10-23
+- WI：`wi_ws_76862eb920bf9b10`（目录对比视图与同步/模板对话框双语化，`kind: feature`）
+- 日期：2026-10-24
 - 结果：code_gates passed（9 门禁，attempt 001；`needSelfTest=false`，UI 自测跳过）。
-- 覆盖摘要：`App.tsx` 启动调 `loadInitialLanguage(platform)`，解析期只渲染无文字品牌帧（无文本节点 / heading / button / tablist），settle 后以结果作 `I18nProvider initialLanguage` 挂载一次 `<Workbench platform={platform} />`（语言值不作 `key`；平台订阅与 `compareRequestsReady` 各一次），`?perf=1` 分支保持同步直渲不读设置；`Workbench.tsx` 的顶栏 / 视图切换 / 三态 / 标签条入参 / 通知条 / 关闭确认对话框 / 目录进度与取消 / 状态栏与 `CompositionLegend` / 选择器与保存 `title` 全部改渲染期取键；新增纯函数 `workbench/sessionDisplay.ts`（样本 id / `scene` / `adhoc` / `directory` / `sides` 决定键，标题 / 副标题 / 稳定统计 key + 用户数据片段，缺失侧用稳定标记）、`NewCompareDialog.tsx` 按 `compareRequest` 稳定错误码取文案（未知 I/O 只保留原始详情）、`Dialog` / `SessionTabs` / `StatusBar` / `DiffBadge` / `diffSemantics` 的 `DIFF_LABEL_KEYS` 接词典、`fileKinds.label` 改稳定文件族标识（`code|csv|tsv|json|yaml`）并由 `directoryCompare.ts` 同步使用。词典只在 `common`（27 键）/ `shell`（128 键）成对扩充，zh 逐字沿用原界面、en 句子式措辞。新增测试 `App.i18n.test.tsx`（启动 en/zh/记录优先/无文字启动门/perf 分支；英文顶栏与三态、标签条、样本与运行时显示、冲突统计按 key、关闭确认、进度取消、三类拖拽提示、跳过与快照、校验码、未知 I/O、下钻两种返回、选择器 title、中英同平台调用序列、无汉字冒烟）、`components/sharedI18n.test.tsx`、`workbench/sessionDisplay.test.ts`、`workbench/shellScan.test.ts`（显式 10 文件清单 0 命中 + `stat.label` 中文比较 0 命中）；`App.test.tsx` / `App.snapshot.test.tsx` 预置 `opencompare.userSettings` zh 记录并等待首屏，`TreeView` / `DirectoryView` 两处 `DIFF_LABELS` 断言改取 zh 词典值。
-- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例，未做 tech / design 手合。后续注意：① 双语链路现已生效，`views/**` 与设置面板仍大量中文硬编码，收口扫描会命中，属预期；② 新增壳层文案必须同时加 `common` / `shell` 成对键并进 `shellScan` 清单；③ 设置面板 WI 必须复用 `opencompare.userSettings` 单键与 `setLanguage`，不得重挂载工作台；④ `SessionStat.label` 已不被渲染 / 判断，后续新增统计须走 `SessionDisplayStat.key`。
-- 历史：底座 WI `wi_ws_80cc30bb21c00dc3`（2026-10-23，词典 / `I18nProvider` / `resolveInitialLanguage` + `loadInitialLanguage` / `renderWithI18n` / `scanHardcodedChinese`；平台设置与系统语言通道折叠在 `domains/foundation`）。
+- 覆盖摘要：`views/DirectoryView.tsx` 的过滤组 / 五档过滤项、十个工具栏按钮与其 `title`、`pickerAvailable` 门控的 Web 提示、两个隐藏快照 input 的 `aria-label`、左右 Panel 的 `meta` 来源标识、单侧空态句、`已跳过：左 {left} / 右 {right}` 提示行、下钻说明全部改渲染期取键（Panel `title` / `subtitle` 与树 `label` 仍为根名 / 真实路径）；`components/TreeView.tsx` 的展开 / 折叠 `aria-label` 走 `directory.tree.expand|collapse` 插值；`views/DirectorySyncDialog.tsx` 去掉了自带 `DIRECTION_LABELS` / `MODE_LABELS`，标题 / 描述片段 / 三个分组 / 分组计数 / 空分组 / 空计划 / 忙碌与确认取消 / 镜像删除 `aria-label` 全部取键，`incremental` 仍不渲染删除分组、`totalCount === 0` 仍 disabled；`views/TemplateDialog.tsx` 的标题、三段标签、四个分区、分区计数、空分组、两种冲突原因、忙碌与确认按钮取键，`matched.length === 0` 仍 disabled。新增纯常量 / 纯函数 `views/directoryCopy.ts`（`FILTER_LABEL_KEYS` / `SYNC_DIRECTION_KEYS` / `SYNC_MODE_KEYS` / `countKey(one, other, count)`，无 React / DOM），三处不再各写一份中文映射。词典只在 `directory` 表面成对扩充：5→78 键（新增 73，既有 5 键原样保留），zh 逐字沿用原界面、en 句子式措辞；单复数只在同步合计 / 同步分组 / 模板分区三处拆 `one` / `other`，zh 两条值相同。新增测试 `views/directoryI18n.test.tsx`（26 例：过滤顺序与逐字 zh、十个按钮 + title 双语、picker 门控、隐藏 input、Panel meta、用户数据不翻译、单侧空态、跳过行、下钻说明、图例、展开折叠不改变选中、中英行模型 / 过滤 / 折叠 / 回调序列全等、en 指定表面无汉字、两个对话框的分组 / 空计划 / 计数单复数 / 删除勾选与 `deletePaths` / 冲突原因、共享键映射完备）与 `views/directoryScan.test.ts`（5 文件 0 命中 + `DirectoryView.test.tsx` / `TreeView.test.tsx` 不再含过滤与展开折叠字面量）；`DirectoryView.test.tsx` 断言改取 `zh[FILTER_LABEL_KEYS[...]]` / zh 键，`App.i18n.test.tsx` 两处目录按钮 / 快照 input 断言从中文改为 en 实际文案（壳层测试现在渲染英文目录视图，属预期联动）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例，未做 tech / design 手合。后续注意：① `App.i18n.test.tsx` 等壳层测试会随视图本地化被动改动，新增视图文案须同步排查壳层里按中文 selector 的断言；② `TreeView` 现在依赖 `useI18n()`，无 Provider 的渲染仍回落 zh，但新增树文案必须同时加 `directory` 成对键并进 `directoryScan` 清单；③ 代码 / CSV / 结构化视图与设置面板仍中文硬编码，收口扫描会命中，属预期；④ 设置面板 WI 必须复用 `opencompare.userSettings` 单键与 `setLanguage`，不得重挂载工作台。
+- 历史：外壳接入 WI `wi_ws_a0d69b96e026b9df`（2026-10-23，`App` 启动接线 + 工作台壳层 / 新建对比 / 共享组件文案 + `workbench/sessionDisplay.ts` 渲染期化；`common` 27 键 / `shell` 128 键）；底座 WI `wi_ws_80cc30bb21c00dc3`（2026-10-23，词典 / `I18nProvider` / `resolveInitialLanguage` + `loadInitialLanguage` / `renderWithI18n` / `scanHardcodedChinese`；平台设置与系统语言通道折叠在 `domains/foundation`）。
