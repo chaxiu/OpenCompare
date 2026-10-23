@@ -4,6 +4,7 @@ import { ChevronRight, FileCode2, FileText, Folder, FolderOpen } from 'lucide-re
 import type { DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import { DIRECTORY_ROW_HEIGHT, createDirectoryScrollMap } from '@core/directory/rows'
+import { useI18n } from '@renderer/i18n/context'
 import { DiffBadge } from './DiffBadge'
 import { cx } from './utils'
 
@@ -59,6 +60,7 @@ function TreeRow({
   readonly onSelect: () => void
   readonly onOpenFile?: (node: DirectoryDiffNode) => void
 }): JSX.Element {
+  const { t } = useI18n()
   const isDirectory = node.kind === 'directory'
   const Icon = isDirectory
     ? open
@@ -90,7 +92,9 @@ function TreeRow({
       {isDirectory ? (
         <button
           type="button"
-          aria-label={open ? `折叠 ${node.name}` : `展开 ${node.name}`}
+          aria-label={t(open ? 'directory.tree.collapse' : 'directory.tree.expand', {
+            name: node.name
+          })}
           aria-expanded={open}
           onClick={(event) => {
             // Expanding is its own action; it must not also move the selection.

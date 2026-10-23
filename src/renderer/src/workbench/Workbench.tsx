@@ -11,6 +11,7 @@ import {
   Layers,
   LoaderCircle,
   RefreshCw,
+  Settings,
   Sparkles,
   Table2
 } from 'lucide-react'
@@ -24,7 +25,7 @@ import { visibleDirectoryCounts } from '@core/directory/rows'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
-import { ToolbarButton } from '@renderer/components/Button'
+import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { DropdownMenu } from '@renderer/components/DropdownMenu'
 import type { DropdownItem } from '@renderer/components/DropdownMenu'
@@ -66,6 +67,7 @@ import {
   renderSessionText
 } from './sessionDisplay'
 import { NewCompareDialog } from './NewCompareDialog'
+import { SettingsDialog } from './SettingsDialog'
 import type { CompareOpenOutcome } from './NewCompareDialog'
 import { commitSessionTree, closeSessions } from './sessionStore'
 import {
@@ -136,6 +138,42 @@ interface DirectoryProgressState {
 interface ActiveDirectoryOperation {
   readonly id: string
   readonly controller: AbortController
+}
+
+/** A localized fragment inside a notice parameter, resolved when it renders. */
+interface NoticeMessage {
+  readonly message: MessageKey
+}
+
+type NoticeParams = Readonly<Record<string, string | number | NoticeMessage>>
+
+/**
+ * One workbench notice. A dictionary copy keeps only its key and params, so a
+ * language switch re-translates the notice already on screen; a raw error detail
+ * from a non-localized module stays plain text.
+ */
+type Notice =
+  | { readonly kind: 'copy'; readonly key: MessageKey; readonly params?: NoticeParams }
+  | { readonly kind: 'detail'; readonly text: string }
+
+function copyNotice(key: MessageKey, params?: NoticeParams): Notice {
+  return { kind: 'copy', key, params }
+}
+
+function detailNotice(text: string): Notice {
+  return { kind: 'detail', text }
+}
+
+/** Renders a notice in the active language, nested fragments included. */
+function noticeText(notice: Notice, t: Translate): string {
+  if (notice.kind === 'detail') return notice.text
+  const params = notice.params
+  if (params === undefined) return t(notice.key)
+  const resolved: Record<string, string | number> = {}
+  for (const [name, value] of Object.entries(params)) {
+    resolved[name] = typeof value === 'object' ? t(value.message) : value
+  }
+  return t(notice.key, resolved)
 }
 
 const VIEW_OPTIONS: readonly {
@@ -281,7 +319,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   const [directoryProgress, setDirectoryProgress] = useState<DirectoryProgressState | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryStates, setDirectoryStates] = useState<Record<string, DirectoryViewState>>({})
   const [directoryScroll, setDirectoryScroll] = useState<Record<string, DirectoryScroll>>({})
@@ -291,6 +329,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   /** The dirty session whose close is waiting for the unsaved-edits prompt. */
   const [closeTarget, setCloseTarget] = useState<WorkbenchSession | null>(null)
   const [compareDialogOpen, setCompareDialogOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
   /** The directory comparison that can still be cancelled, if one is running. */
@@ -302,11 +341,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     launchRequest.current = (payload) => {
       if (payload.ok) {
         // The injected request follows the same route as the manual entry.
-        void openCompareRequest(payload.request, (message) => report(message))
+        void openCompareRequest(payload.request, (message) => report(detailNotice(message)))
         return
       }
       // A rejected launch source only reports; sessions and the active tab stay.
-      report(payload.message)
+      report(detailNotice(payload.message))
     }
   })
 
@@ -427,8 +466,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     closeSession(id)
   }
 
-  function report(message: string, tone: 'danger' | 'info' = 'danger'): void {
-    setNotice(message)
+  function report(next: Notice, tone: 'danger' | 'info' = 'danger'): void {
+    setNotice(next)
     setNoticeTone(tone)
   }
 
@@ -497,7 +536,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   function backToDirectory(sourceId: string): void {
     const destination = resolveDirectoryReturn(sessions, sourceId)
     if (!destination) {
-      report(t('shell.notice.returnUnavailable'))
+      report(copyNotice('shell.notice.returnUnavailable'))
       return
     }
     if (destination.fallback) {
@@ -505,7 +544,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const title = fallback
         ? renderSessionText(describeSession(fallback).title, t)
         : destination.id
-      report(t('shell.notice.returnFallback', { title }), 'info')
+      report(copyNotice('shell.notice.returnFallback', { title }), 'info')
     }
     selectSession(destination.id)
   }
@@ -539,7 +578,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     } catch (cause) {
       if (sessions.length > 0) {
         // Keep what the user already has open and report the auxiliary failure.
-        report(cause instanceof Error ? cause.message : String(cause))
+        report(detailNotice(cause instanceof Error ? cause.message : String(cause)))
         setStatus('ready')
         return
       }
@@ -638,7 +677,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       // report what was left out instead of turning it into an error.
       if (comparison.leftSkipped + comparison.rightSkipped > 0) {
         report(
-          t('shell.notice.skipped', {
+          copyNotice('shell.notice.skipped', {
             left: comparison.leftSkipped,
             right: comparison.rightSkipped
           }),
@@ -649,12 +688,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     } catch (cause) {
       // Cancellation never commits a session; the shell keeps what it had.
       if (isOperationCancelled(cause)) {
-        report(t('shell.notice.cancelled'), 'info')
+        report(copyNotice('shell.notice.cancelled'), 'info')
         return false
       }
       const message = cause instanceof Error ? cause.message : String(cause)
       if (onError && !fromDialog) onError(message)
-      else report(message)
+      else report(detailNotice(message))
       return false
     } finally {
       activeDirectoryOperation.current = null
@@ -697,7 +736,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     } catch (cause) {
       const message = filePairErrorMessage(cause, t)
       if (onError) onError(message)
-      else report(message)
+      else report(detailNotice(message))
       return false
     } finally {
       setDirectoryBusy(false)
@@ -781,7 +820,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     const paths = resolved.filter((path) => path.length > 0)
 
     if (paths.length === 0) {
-      report(t('shell.notice.dropUnresolved'))
+      report(copyNotice('shell.notice.dropUnresolved'))
       return
     }
 
@@ -789,9 +828,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const directory = await isDirectoryPath(platform, paths[0])
       setPendingLeft({ path: paths[0], kind: directory ? 'directory' : 'file' })
       report(
-        t('shell.notice.dropSingle', {
+        copyNotice('shell.notice.dropSingle', {
           path: paths[0],
-          kind: t(directory ? 'common.kind.folder' : 'common.kind.file')
+          kind: { message: directory ? 'common.kind.folder' : 'common.kind.file' }
         }),
         'info'
       )
@@ -799,7 +838,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
 
     if (paths.length !== 2) {
-      report(t('shell.notice.dropMany', { count: paths.length }))
+      report(copyNotice('shell.notice.dropMany', { count: paths.length }))
       return
     }
 
@@ -808,7 +847,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       isDirectoryPath(platform, paths[1])
     ])
     if (leftDirectory !== rightDirectory) {
-      report(t('shell.notice.dropMixed'))
+      report(copyNotice('shell.notice.dropMixed'))
       return
     }
 
@@ -846,7 +885,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     // A link to a directory is a leaf under the no-follow policy: never read a
     // "body" for it (which would fail) and never turn it into a file session.
     if (node.linkTargetKind === 'directory') {
-      report(t('shell.notice.symlinkDirectory', { name: node.name }), 'info')
+      report(copyNotice('shell.notice.symlinkDirectory', { name: node.name }), 'info')
       return
     }
 
@@ -856,7 +895,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
     const target = classifyFile(node.name)
     if (target === null) {
-      report(t('shell.notice.unsupportedDrilldown', { name: node.name }))
+      report(copyNotice('shell.notice.unsupportedDrilldown', { name: node.name }))
       return
     }
 
@@ -869,7 +908,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       ])
       upsertSession(createDrilldownSession(source.id, node, target, leftText, rightText))
     } catch (cause) {
-      report(describeSnapshotContentError(cause, node.relativePath))
+      report(detailNotice(describeSnapshotContentError(cause, node.relativePath)))
     } finally {
       setDirectoryBusy(false)
     }
@@ -893,7 +932,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       if (path === null) return
       report(
         exported.skipped > 0
-          ? t(
+          ? copyNotice(
               countKey(
                 'shell.notice.exportedWithSkipped.one',
                 'shell.notice.exportedWithSkipped.other',
@@ -901,7 +940,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               ),
               { path, count: exported.entryCount, skipped: exported.skipped }
             )
-          : t(
+          : copyNotice(
               countKey(
                 'shell.notice.exported.one',
                 'shell.notice.exported.other',
@@ -912,7 +951,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         'info'
       )
     } catch (cause) {
-      report(cause instanceof Error ? cause.message : String(cause))
+      report(detailNotice(cause instanceof Error ? cause.message : String(cause)))
     } finally {
       setDirectoryBusy(false)
     }
@@ -931,14 +970,14 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const comparison = await compareSides(platform, next, cache.current)
       upsertSession(createDirectorySession(comparison, next))
       report(
-        t('shell.notice.snapshotMounted', {
+        copyNotice('shell.notice.snapshotMounted', {
           name: snapshot.name,
-          side: t(side === 'left' ? 'shell.side.left' : 'shell.side.right')
+          side: { message: side === 'left' ? 'shell.side.left' : 'shell.side.right' }
         }),
         'info'
       )
     } catch (cause) {
-      report(describeSnapshotImportError(cause))
+      report(detailNotice(describeSnapshotImportError(cause)))
     } finally {
       setDirectoryBusy(false)
     }
@@ -956,7 +995,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const preview = await previewSync(platform, comparison, direction, mode, opSequence.current)
       setSyncPreview(preview)
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
       setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
@@ -980,7 +1019,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       )
       setSyncPreview(null)
       setNotice(
-        t('shell.notice.syncComplete', {
+        copyNotice('shell.notice.syncComplete', {
           copied: result.copied,
           updated: result.updated,
           deleted: result.deleted
@@ -988,7 +1027,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       )
       setNoticeTone('info')
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
       setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
@@ -1012,7 +1051,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       )
       setTemplatePreview(preview)
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
       setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
@@ -1030,7 +1069,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const result = await applyTemplateExtract(platform, preview)
       setTemplatePreview(null)
       setNotice(
-        t('shell.notice.templateComplete', {
+        copyNotice('shell.notice.templateComplete', {
           extracted: result.extracted,
           matched: result.verifiedMatched,
           missing: result.verifiedMissing,
@@ -1039,7 +1078,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       )
       setNoticeTone('info')
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : String(cause))
+      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
       setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
@@ -1265,6 +1304,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             items={sampleMenu(t)}
             onSelect={handleMenuSelect}
           />
+          {/* Settings stays reachable in every workbench state, so the language
+              can be switched during an empty screen or a running scan. */}
+          <IconButton
+            label={t('shell.settings.open')}
+            icon={<Settings aria-hidden className="size-3.5" />}
+            onClick={() => setSettingsOpen(true)}
+          />
         </div>
       </header>
 
@@ -1296,7 +1342,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             noticeTone === 'info' ? 'text-diff-added' : 'text-danger'
           )}
         >
-          {notice}
+          {noticeText(notice, t)}
         </p>
       ) : null}
 
@@ -1445,6 +1491,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           onPickFiles={pickFilesFromDialog}
           onPickDirectories={pickDirectoriesFromDialog}
         />
+      ) : null}
+
+      {settingsOpen ? (
+        <SettingsDialog platform={platform} onClose={() => setSettingsOpen(false)} />
       ) : null}
 
       {closeTarget ? (

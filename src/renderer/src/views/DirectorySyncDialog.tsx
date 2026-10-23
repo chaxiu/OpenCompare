@@ -5,17 +5,9 @@ import type { SyncPlanGroup } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { formatBytes } from '@renderer/components/utils'
+import { useI18n } from '@renderer/i18n/context'
 import type { SyncPreview } from '@renderer/workbench/directoryOps'
-
-const DIRECTION_LABELS = {
-  'left-to-right': '左 → 右',
-  'right-to-left': '右 → 左'
-} as const
-
-const MODE_LABELS = {
-  incremental: '增量',
-  mirror: '镜像'
-} as const
+import { SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS, countKey } from './directoryCopy'
 
 function GroupHeader({
   title,
@@ -26,11 +18,15 @@ function GroupHeader({
   readonly tone: string
   readonly group: SyncPlanGroup
 }): JSX.Element {
+  const { t } = useI18n()
   return (
     <div className="flex items-center gap-2">
       <span className={tone}>{title}</span>
       <span className="tabular font-mono text-2xs text-content-muted">
-        {group.count} 个 · {formatBytes(group.bytes)}
+        {t(countKey('directory.sync.groupCount.one', 'directory.sync.groupCount.other', group.count), {
+          count: group.count,
+          size: formatBytes(group.bytes)
+        })}
       </span>
     </div>
   )
@@ -80,6 +76,7 @@ export function DirectorySyncDialog({
   onCancel,
   onConfirm
 }: DirectorySyncDialogProps): JSX.Element {
+  const { t } = useI18n()
   const { plan, materializeTarget } = preview
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
 
@@ -101,19 +98,26 @@ export function DirectorySyncDialog({
 
   return (
     <Dialog
-      title={`${DIRECTION_LABELS[plan.direction]} · ${MODE_LABELS[plan.mode]}同步预览`}
+      title={t('directory.sync.title', {
+        direction: t(SYNC_DIRECTION_KEYS[plan.direction]),
+        mode: t(SYNC_MODE_KEYS[plan.mode])
+      })}
       description={
         <>
-          目标根：<span className="font-mono">{plan.targetRoot}</span>
-          {materializeTarget ? '（只读样本树将于确认后复制到可写区）' : ''}
-          {` · 合计 ${plan.totalCount} 项 / ${formatBytes(plan.totalBytes)}`}
+          {t('directory.sync.targetRoot')}
+          <span className="font-mono">{plan.targetRoot}</span>
+          {materializeTarget ? t('directory.sync.materialize') : ''}
+          {t(countKey('directory.sync.total.one', 'directory.sync.total.other', plan.totalCount), {
+            count: plan.totalCount,
+            size: formatBytes(plan.totalBytes)
+          })}
         </>
       }
       onClose={busy ? () => undefined : onCancel}
       footer={
         <>
           <ToolbarButton variant="ghost" onClick={onCancel} disabled={busy}>
-            取消
+            {t('common.cancel')}
           </ToolbarButton>
           <ToolbarButton
             variant="primary"
@@ -121,17 +125,21 @@ export function DirectorySyncDialog({
             disabled={busy || empty}
           >
             {busy ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
-            {busy ? '正在同步…' : '确认执行'}
+            {busy ? t('directory.sync.syncing') : t('directory.sync.apply')}
           </ToolbarButton>
         </>
       }
     >
       {empty ? (
-        <p className="p-3 text-2xs text-content-muted">该方向没有需要同步的变更，目标侧已与源侧一致。</p>
+        <p className="p-3 text-2xs text-content-muted">{t('directory.sync.empty')}</p>
       ) : (
         <div className="flex flex-col gap-3">
           <section>
-            <GroupHeader title="待新增拷贝" tone="text-diff-added" group={plan.copy} />
+            <GroupHeader
+              title={t('directory.sync.group.copy')}
+              tone="text-diff-added"
+              group={plan.copy}
+            />
             {plan.copy.items.length > 0 ? (
               <ul className="mt-1 rounded-sm border border-line-subtle">
                 {plan.copy.items.map((item) => (
@@ -144,12 +152,16 @@ export function DirectorySyncDialog({
                 ))}
               </ul>
             ) : (
-              <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+              <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
             )}
           </section>
 
           <section>
-            <GroupHeader title="待覆盖修改" tone="text-diff-modified" group={plan.update} />
+            <GroupHeader
+              title={t('directory.sync.group.update')}
+              tone="text-diff-modified"
+              group={plan.update}
+            />
             {plan.update.items.length > 0 ? (
               <ul className="mt-1 rounded-sm border border-line-subtle">
                 {plan.update.items.map((item) => (
@@ -162,13 +174,17 @@ export function DirectorySyncDialog({
                 ))}
               </ul>
             ) : (
-              <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+              <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
             )}
           </section>
 
           {plan.mode === 'mirror' ? (
             <section>
-              <GroupHeader title="待删除（镜像）" tone="text-diff-removed" group={plan.delete} />
+              <GroupHeader
+                title={t('directory.sync.group.delete')}
+                tone="text-diff-removed"
+                group={plan.delete}
+              />
               {plan.delete.items.length > 0 ? (
                 <ul className="mt-1 rounded-sm border border-line-subtle">
                   {plan.delete.items.map((item) => (
@@ -180,7 +196,9 @@ export function DirectorySyncDialog({
                         type="checkbox"
                         checked={!excluded.has(item.relativePath)}
                         onChange={() => toggle(item.relativePath)}
-                        aria-label={`删除 ${item.relativePath}`}
+                        aria-label={t('directory.sync.deleteItem', {
+                          path: item.relativePath
+                        })}
                         className="size-3.5 shrink-0 accent-danger"
                       />
                       <span className="truncate font-mono text-xs text-content-secondary">
@@ -193,7 +211,7 @@ export function DirectorySyncDialog({
                   ))}
                 </ul>
               ) : (
-                <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+                <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
               )}
             </section>
           ) : null}

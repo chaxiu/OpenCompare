@@ -23,33 +23,15 @@ import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { CompositionLegend } from '@renderer/components/StatusBar'
 import { TreeView } from '@renderer/components/TreeView'
+import { useI18n } from '@renderer/i18n/context'
 import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
 import type { SidePosition } from '@renderer/workbench/snapshotOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
+import { FILTER_LABEL_KEYS, SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS } from './directoryCopy'
 import { TemplateDialog } from './TemplateDialog'
 
-const FILTER_LABELS: Record<DirectoryFilter, string> = {
-  all: '全部',
-  differences: '仅差异',
-  'left-only': '左独有',
-  'right-only': '右独有',
-  same: '相同'
-}
-
-const FILTER_OPTIONS = DIRECTORY_FILTERS.map((value) => ({
-  value,
-  label: FILTER_LABELS[value]
-}))
-
-const DIRECTION_OPTIONS: readonly { value: SyncDirection; label: string }[] = [
-  { value: 'left-to-right', label: '左 → 右' },
-  { value: 'right-to-left', label: '右 → 左' }
-]
-
-const MODE_OPTIONS: readonly { value: SyncMode; label: string }[] = [
-  { value: 'incremental', label: '增量' },
-  { value: 'mirror', label: '镜像' }
-]
+const DIRECTION_VALUES: readonly SyncDirection[] = ['left-to-right', 'right-to-left']
+const MODE_VALUES: readonly SyncMode[] = ['incremental', 'mirror']
 
 export interface DirectoryViewProps {
   /** Session this view renders; keys the controlled tree state of the shell. */
@@ -127,6 +109,7 @@ export function DirectoryView({
   onCancelTemplate,
   onConfirmTemplate
 }: DirectoryViewProps): JSX.Element {
+  const { t } = useI18n()
   const [direction, setDirection] = useState<SyncDirection>('left-to-right')
   const [mode, setMode] = useState<SyncMode>('incremental')
   const leftInputRef = useRef<HTMLInputElement>(null)
@@ -148,6 +131,19 @@ export function DirectoryView({
     rightBodyRef.current = element
     setRightBody(element)
   }, [])
+
+  const filterOptions = DIRECTORY_FILTERS.map((value) => ({
+    value,
+    label: t(FILTER_LABEL_KEYS[value])
+  }))
+  const directionOptions = DIRECTION_VALUES.map((value) => ({
+    value,
+    label: t(SYNC_DIRECTION_KEYS[value])
+  }))
+  const modeOptions = MODE_VALUES.map((value) => ({
+    value,
+    label: t(SYNC_MODE_KEYS[value])
+  }))
 
   // The panel scroll containers are rebuilt whenever this view remounts (e.g.
   // returning from a drilldown), so the shell's saved offsets are re-applied.
@@ -176,8 +172,8 @@ export function DirectoryView({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SegmentedControl
-          label="差异过滤"
-          options={FILTER_OPTIONS}
+          label={t('directory.filter.group')}
+          options={filterOptions}
           value={filter}
           onChange={onFilterChange}
         />
@@ -188,27 +184,27 @@ export function DirectoryView({
             icon={<FolderSearch aria-hidden className="size-3.5" />}
             onClick={() => onPick('left')}
             disabled={busy || !pickerAvailable}
-            title={pickerAvailable ? '选择真实本地目录作为左（源）目录' : undefined}
+            title={pickerAvailable ? t('directory.toolbar.pickLeftTitle') : undefined}
           >
-            选择左目录
+            {t('directory.toolbar.pickLeft')}
           </ToolbarButton>
           <ToolbarButton
             size="sm"
             icon={<FolderSearch aria-hidden className="size-3.5" />}
             onClick={() => onPick('right')}
             disabled={busy || !pickerAvailable}
-            title={pickerAvailable ? '选择真实本地目录作为右（目标）目录' : undefined}
+            title={pickerAvailable ? t('directory.toolbar.pickRightTitle') : undefined}
           >
-            选择右目录
+            {t('directory.toolbar.pickRight')}
           </ToolbarButton>
           <ToolbarButton
             size="sm"
             icon={<Sparkles aria-hidden className="size-3.5" />}
             onClick={onLoadSample}
             disabled={busy}
-            title="演示用途：把内置样本目录加载为左右两侧"
+            title={t('directory.toolbar.loadSampleTitle')}
           >
-            加载演示目录
+            {t('directory.toolbar.loadSample')}
           </ToolbarButton>
           {busy ? (
             <LoaderCircle aria-hidden className="size-3.5 animate-spin text-content-muted" />
@@ -218,14 +214,14 @@ export function DirectoryView({
 
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SegmentedControl
-          label="同步方向"
-          options={DIRECTION_OPTIONS}
+          label={t('directory.sync.direction')}
+          options={directionOptions}
           value={direction}
           onChange={setDirection}
         />
         <SegmentedControl
-          label="同步模式"
-          options={MODE_OPTIONS}
+          label={t('directory.sync.mode')}
+          options={modeOptions}
           value={mode}
           onChange={setMode}
         />
@@ -234,18 +230,18 @@ export function DirectoryView({
           icon={<SplitSquareHorizontal aria-hidden className="size-3.5" />}
           onClick={() => onPreviewSync(direction, mode)}
           disabled={busy}
-          title="生成变更清单后弹出 Dry-run 预览，确认才写入"
+          title={t('directory.toolbar.previewSyncTitle')}
         >
-          预览并同步
+          {t('directory.toolbar.previewSync')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<Shuffle aria-hidden className="size-3.5" />}
           onClick={onPreviewTemplate}
           disabled={busy}
-          title="以左（源）目录为结构模板，从内置散乱目录树 /samples/directory/incoming 归位文件"
+          title={t('directory.toolbar.templateTitle')}
         >
-          模板归位
+          {t('directory.toolbar.template')}
         </ToolbarButton>
       </div>
 
@@ -255,51 +251,51 @@ export function DirectoryView({
           icon={<Download aria-hidden className="size-3.5" />}
           onClick={() => onExportSnapshot('left')}
           disabled={busy}
-          title="把左侧目录扫描为快照并经系统保存对话框导出为 <name>.ocsnap.json（已挂载快照则原样重导出）"
+          title={t('directory.toolbar.exportLeftTitle')}
         >
-          导出左侧快照
+          {t('directory.toolbar.exportLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<Upload aria-hidden className="size-3.5" />}
           onClick={() => leftInputRef.current?.click()}
           disabled={busy}
-          title="选择一个 .ocsnap.json 并挂载到左栏"
+          title={t('directory.toolbar.importLeftTitle')}
         >
-          导入左侧快照
+          {t('directory.toolbar.importLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<Download aria-hidden className="size-3.5" />}
           onClick={() => onExportSnapshot('right')}
           disabled={busy}
-          title="把右侧目录扫描为快照并经系统保存对话框导出为 <name>.ocsnap.json（已挂载快照则原样重导出）"
+          title={t('directory.toolbar.exportRightTitle')}
         >
-          导出右侧快照
+          {t('directory.toolbar.exportRight')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<Upload aria-hidden className="size-3.5" />}
           onClick={() => rightInputRef.current?.click()}
           disabled={busy}
-          title="选择一个 .ocsnap.json 并挂载到右栏"
+          title={t('directory.toolbar.importRightTitle')}
         >
-          导入右侧快照
+          {t('directory.toolbar.importRight')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<Cloud aria-hidden className="size-3.5" />}
           onClick={onLoadRemoteSnapshotSample}
           disabled={busy}
-          title="演示用途：内置本地样本目录（左）vs 内置远端快照 remote-prod（右）"
+          title={t('directory.toolbar.demoRemoteTitle')}
         >
-          演示：远端快照
+          {t('directory.toolbar.demoRemote')}
         </ToolbarButton>
         <input
           ref={leftInputRef}
           type="file"
           accept=".json,.ocsnap.json,application/json"
-          aria-label="选择左侧快照文件"
+          aria-label={t('directory.snapshot.pickLeftFile')}
           className="sr-only"
           onChange={(event) => {
             selectedFile('left', event.target.files)
@@ -310,7 +306,7 @@ export function DirectoryView({
           ref={rightInputRef}
           type="file"
           accept=".json,.ocsnap.json,application/json"
-          aria-label="选择右侧快照文件"
+          aria-label={t('directory.snapshot.pickRightFile')}
           className="sr-only"
           onChange={(event) => {
             selectedFile('right', event.target.files)
@@ -320,9 +316,7 @@ export function DirectoryView({
       </div>
 
       {pickerAvailable ? null : (
-        <p className="shrink-0 text-2xs text-content-muted">
-          Web 预览模式没有原生目录选择，可用「加载演示目录」查看目录对比；桌面端（pnpm dev）可直接选择本地目录。
-        </p>
+        <p className="shrink-0 text-2xs text-content-muted">{t('directory.picker.unavailable')}</p>
       )}
 
       <SplitPane
@@ -331,7 +325,11 @@ export function DirectoryView({
             key="left"
             title={comparison.leftName}
             subtitle={comparison.leftRoot}
-            meta={<span className="text-2xs text-content-muted">{leftIsSnapshot ? '快照' : '源目录'}</span>}
+            meta={
+              <span className="text-2xs text-content-muted">
+                {t(leftIsSnapshot ? 'directory.panel.snapshot' : 'directory.panel.source')}
+              </span>
+            }
             bodyRef={attachLeftBody}
             onBodyScroll={(scrollTop) => onScrollTopChange('left', scrollTop)}
           >
@@ -347,14 +345,18 @@ export function DirectoryView({
                 onOpenFile={onOpenFile}
               />
             ) : (
-              <p className="p-3 text-2xs text-content-muted">当前过滤下左目录没有条目。</p>
+              <p className="p-3 text-2xs text-content-muted">{t('directory.empty.left')}</p>
             )}
           </Panel>,
           <Panel
             key="right"
             title={comparison.rightName}
             subtitle={comparison.rightRoot}
-            meta={<span className="text-2xs text-content-muted">{rightIsSnapshot ? '快照' : '目标目录'}</span>}
+            meta={
+              <span className="text-2xs text-content-muted">
+                {t(rightIsSnapshot ? 'directory.panel.snapshot' : 'directory.panel.target')}
+              </span>
+            }
             bodyRef={attachRightBody}
             onBodyScroll={(scrollTop) => onScrollTopChange('right', scrollTop)}
           >
@@ -370,7 +372,7 @@ export function DirectoryView({
                 onOpenFile={onOpenFile}
               />
             ) : (
-              <p className="p-3 text-2xs text-content-muted">当前过滤下右目录没有条目。</p>
+              <p className="p-3 text-2xs text-content-muted">{t('directory.empty.right')}</p>
             )}
           </Panel>
         ]}
@@ -378,13 +380,14 @@ export function DirectoryView({
 
       {comparison.leftSkipped + comparison.rightSkipped > 0 ? (
         <p className="shrink-0 text-2xs text-diff-added">
-          已跳过：左 {comparison.leftSkipped} / 右 {comparison.rightSkipped}
+          {t('directory.skipped', {
+            left: comparison.leftSkipped,
+            right: comparison.rightSkipped
+          })}
         </p>
       ) : null}
 
-      <p className="shrink-0 text-2xs text-content-muted">
-        双击文件可下钻到对应文件对比视图（代码 / 文本 · CSV / TSV · JSON / YAML）；左独有文件右侧为空、右独有文件左侧为空。
-      </p>
+      <p className="shrink-0 text-2xs text-content-muted">{t('directory.drilldownHint')}</p>
 
       {syncPreview ? (
         <DirectorySyncDialog

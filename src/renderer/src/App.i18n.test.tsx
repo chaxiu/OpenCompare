@@ -492,12 +492,12 @@ describe('English directory progress and notices', () => {
     renderWithI18n(<Workbench platform={snapshotPort} />, 'en')
     fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
     await screen.findByRole('tab', { name: /Code diff & 3-way merge/ }, { timeout: 4000 })
-    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export left snapshot' }))
     expect((await screen.findByRole('alert')).textContent).toBe(
       'Exported to /memory/baseline.ocsnap.json (15 files).'
     )
 
-    fireEvent.change(screen.getByLabelText('选择右侧快照文件'), {
+    fireEvent.change(screen.getByLabelText('Choose right snapshot file'), {
       target: { files: [new File([exported.text], 'baseline.ocsnap.json')] }
     })
     await waitFor(() =>
@@ -679,7 +679,7 @@ describe('pickers and no extra work', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
     await screen.findByRole('tab', { name: /Code diff & 3-way merge/ }, { timeout: 4000 })
-    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export left snapshot' }))
     await waitFor(() => expect(saveTitles).toHaveLength(1))
     expect(saveTitles[0]).toBe('Export directory snapshot')
   })
