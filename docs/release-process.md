@@ -5,7 +5,11 @@
 ## 触发方式
 
 - 推送 `v*` tag 即触发 GitHub Actions；构建统一 checkout `refs/tags/<tag>`，不改 tag、不升版本。
-- 若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`。该输入的 `tag` 默认值为 `default: 'v0.2.6'`（与 `package.json#version` 同源，即 `v${pkg.version}`），补发时不要指向新版本。
+- 若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`。该输入的 `tag` 默认值为 `default: 'v0.2.7'`（与 `package.json#version` 同源，即 `v${pkg.version}`），补发时不要指向新版本。
+
+## 版本锚点与 README 状态行
+
+README 第 5 行的「最新公开版本 / Latest public release」只指向**已发布**的版本，是发布事实而不是待发版本：版本收敛（改 `package.json#version`、`CHANGELOG`、发布说明与默认 tag）不改这一行。一次发布完成后，由一次一行的收尾提交同时把两版 README 的状态行与 `src/main/release-packaging.test.ts` 中的 `latestPublishedTag` 常量同步到刚发布的 tag。
 
 ## 门禁与祖先校验
 
