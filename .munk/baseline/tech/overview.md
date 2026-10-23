@@ -7,7 +7,7 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 - `src/main/`：Electron 主进程（窗口、IPC、真实文件系统、perf 采样与证据落盘）。
 - `src/preload/`：`contextBridge` 白名单桥。
 - `src/renderer/`：React 19 UI；所有平台能力经 `PlatformPort`，不直接 import Electron。`PlatformPort` 含只读批量 `realpath(paths)`（channel `platform:realpath`；electron 失败逐项回退输入、`/samples` 原样、web 恒等），用于别名根摘要缓存键归一。
-- **i18n 分层**：词典与语言上下文在 `src/renderer/src/i18n/`（`messages/{zh,en}` 五表面成对、`messages/index.ts` 唯一聚合、`I18nProvider` / `useI18n` 无 Provider 回落 zh、`resolveLanguage.ts` 的纯函数 + 只读 loader、`testing.tsx` 的 `renderWithI18n`）；源码中文扫描器在 `src/shared/i18n/`（Node 侧、显式路径清单）。持久化只走 `PlatformPort.readUserSettings` / `writeUserSettings` / `systemLocale`（Electron `userData` 单 JSON 原子写，Web 单键 `opencompare.userSettings` + 内存回退）；renderer 不引入 i18n 框架、不直连存储。
+- **i18n 分层**：词典与语言上下文在 `src/renderer/src/i18n/`（`messages/{zh,en}` 五表面成对、`messages/index.ts` 唯一聚合、`I18nProvider` / `useI18n` 无 Provider 回落 zh、`resolveLanguage.ts` 的纯函数 + 只读 loader、`testing.tsx` 的 `renderWithI18n`）；源码中文扫描器在 `src/shared/i18n/`（Node 侧、显式路径清单）。持久化只走 `PlatformPort.readUserSettings` / `writeUserSettings` / `systemLocale`（Electron `userData` 单 JSON 原子写，Web 单键 `opencompare.userSettings` + 内存回退）；renderer 不引入 i18n 框架、不直连存储。生产入口 `App.tsx` 用 `loadInitialLanguage(platform)` 解析后以 `I18nProvider initialLanguage` 挂载一次 `Workbench`（解析期只渲染无文字品牌帧；语言值不作 React `key`；`?perf=1` 分支不读设置）。壳层可见文案与差异语义 / 文件类型名一律渲染期取键；会话显示由纯函数 `src/renderer/src/workbench/sessionDisplay.ts` 按会话身份产出词典键 + 用户数据片段，统计为稳定角色 key，`SessionStat.label` 不再参与渲染或分支判断。
 - `src/core/`：纯算法与领域模型，零 Electron / DOM，可被 vitest 直接单测。
 - `src/shared/`：跨进程类型、`PlatformPort`、fixtures、perf 契约。
 

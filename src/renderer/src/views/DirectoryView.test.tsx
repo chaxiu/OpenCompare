@@ -22,7 +22,8 @@ import {
 } from '@core/directory/rows'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import type { DirectoryEntry } from '@shared/platform/types'
-import { DIFF_LABELS } from '@renderer/components/diffSemantics'
+import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
+import { zh } from '@renderer/i18n/messages'
 import { DirectoryView } from './DirectoryView'
 
 vi.mock('@core/directory/filter', async (importOriginal) => {
@@ -553,7 +554,7 @@ describe('DirectoryView windowed tree', () => {
       expect(modelRow).toBeDefined()
       indices.push(index ?? -1)
       expect(row.textContent).toContain(modelRow?.node.name)
-      expect(row.textContent).toContain(DIFF_LABELS[modelRow?.node.status ?? 'same'])
+      expect(row.textContent).toContain(zh[DIFF_LABEL_KEYS[modelRow?.node.status ?? 'same']])
       expect(Number(row.getAttribute('aria-level')) - 1).toBe(modelRow?.depth)
     }
 

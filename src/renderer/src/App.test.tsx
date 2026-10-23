@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
@@ -51,9 +51,22 @@ afterAll(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
 })
 
-afterEach(cleanup)
+beforeEach(() => {
+  localStorage.setItem('opencompare.userSettings', JSON.stringify({ language: 'zh' }))
+})
+
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+})
 
 const EMPTY_TITLE = '打开真实文件或文件夹开始对比'
+
+/** Mounts the shell and waits for its first paint at the stored zh language. */
+async function renderApp(): Promise<void> {
+  render(<App />)
+  await screen.findByRole('heading', { name: EMPTY_TITLE })
+}
 const LEFT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.left}/src/core/engine.ts`
 const RIGHT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.right}/src/core/engine.ts`
 const LEFT_REPORT = `${DIRECTORY_SAMPLE_PATHS.left}/src/data/report.csv`
@@ -117,8 +130,8 @@ function dropPaths(element: HTMLElement, paths: readonly string[]): boolean {
 }
 
 describe('workbench shell', () => {
-  it('mounts the empty workbench on the in-memory PlatformPort', () => {
-    render(<App />)
+  it('mounts the empty workbench on the in-memory PlatformPort', async () => {
+    await renderApp()
 
     expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
     expect(screen.getByText('web')).toBeDefined()
@@ -129,7 +142,7 @@ describe('workbench shell', () => {
   })
 
   it('shows the loading state, then every sample session', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     expect(screen.getByRole('heading', { name: '正在载入样本…' })).toBeDefined()
@@ -141,7 +154,7 @@ describe('workbench shell', () => {
   })
 
   it('switches the work area and the status bar with the active session', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     const codeTab = await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -155,7 +168,7 @@ describe('workbench shell', () => {
   })
 
   it('shows the key-aligned CSV reconciliation with runtime counts', async () => {
-    render(<App />)
+    await renderApp()
 
     fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /CSV 主键对比/ }))
@@ -179,7 +192,7 @@ describe('workbench shell', () => {
   })
 
   it('surfaces a readable, retryable error state', async () => {
-    render(<App />)
+    await renderApp()
 
     fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /演示：样本读取失败/ }))
@@ -191,7 +204,7 @@ describe('workbench shell', () => {
   })
 
   it('filters the directory comparison and drills a file into its file view', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -225,7 +238,7 @@ describe('workbench shell', () => {
   })
 
   it('drills CSV and YAML files into their typed views', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -247,7 +260,7 @@ describe('workbench shell', () => {
   })
 
   it('explains why a non-text file cannot be drilled into', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -261,7 +274,7 @@ describe('workbench shell', () => {
   })
 
   it('degrades the native directory picker on the web runtime', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -277,7 +290,7 @@ describe('workbench shell', () => {
   })
 
   it('previews a sync dry-run with byte totals and cancels without writing', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -298,7 +311,7 @@ describe('workbench shell', () => {
   })
 
   it('applies the confirmed sync and refreshes the comparison tree', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -314,7 +327,7 @@ describe('workbench shell', () => {
   })
 
   it('previews the template placement and extracts it into a writable root', async () => {
-    render(<App />)
+    await renderApp()
 
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
@@ -981,7 +994,7 @@ const REVERSED_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.right} ↔ ${D
 
 describe('directory drilldown roundtrip', () => {
   async function loadDirectorySamples(): Promise<void> {
-    render(<App />)
+    await renderApp()
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
   }

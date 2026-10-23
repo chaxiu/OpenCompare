@@ -1,7 +1,8 @@
 import type { JSX, ReactNode } from 'react'
 import type { DiffStatus, SampleComposition } from '@shared/fixtures'
+import { useI18n } from '@renderer/i18n/context'
 import { DiffDot } from './DiffBadge'
-import { DIFF_LABELS, DIFF_STATUSES } from './diffSemantics'
+import { DIFF_LABEL_KEYS, DIFF_STATUSES } from './diffSemantics'
 
 export function StatusBar({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
@@ -35,6 +36,7 @@ export function CompositionLegend({
 }: {
   readonly composition: SampleComposition
 }): JSX.Element {
+  const { t } = useI18n()
   return (
     <span className="flex shrink-0 items-center gap-2.5">
       {DIFF_STATUSES.filter((status) => status !== 'conflict' || composition.conflict > 0).map(
@@ -42,7 +44,7 @@ export function CompositionLegend({
           <span key={status} className="flex items-center gap-1 whitespace-nowrap">
             <DiffDot status={status} />
             <span className="tabular font-mono text-content-secondary">{composition[status]}</span>
-            <span>{DIFF_LABELS[status]}</span>
+            <span>{t(DIFF_LABEL_KEYS[status])}</span>
           </span>
         )
       )}

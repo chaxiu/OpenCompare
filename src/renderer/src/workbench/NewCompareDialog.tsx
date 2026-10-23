@@ -1,11 +1,15 @@
 import { useRef, useState } from 'react'
 import type { FormEvent, JSX, KeyboardEvent } from 'react'
 import { FileCode2, FolderOpen, GitCompare } from 'lucide-react'
+import { isSupportedComparisonFile } from '@shared/fileExtensions'
 import { parseManualPaths, resolveCompareRequest } from '@shared/compareRequest'
-import type { CompareRequest } from '@shared/compareRequest'
+import type { CompareErrorCode, ComparePaths, CompareRequest } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
+import { useI18n } from '@renderer/i18n/context'
+import type { Translate } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 
 /**
  * Result of one dialog action that builds a session itself. `ok` closes the
@@ -19,10 +23,147 @@ export type CompareOpenOutcome =
 const INPUT_CLASSES =
   'focus-ring h-7 w-full rounded-sm border border-line-subtle bg-surface-base px-2 font-mono text-xs text-content-primary placeholder:text-content-muted'
 
+const COMPARE_ERROR_KEYS: Record<CompareErrorCode, MessageKey> = {
+  MISSING_SIDE: 'shell.compare.error.MISSING_SIDE',
+  DUPLICATE_SIDE: 'shell.compare.error.DUPLICATE_SIDE',
+  EMPTY_PATH: 'shell.compare.error.EMPTY_PATH',
+  UNKNOWN_SCHEME: 'shell.compare.error.UNKNOWN_SCHEME',
+  UNKNOWN_ACTION: 'shell.compare.error.UNKNOWN_ACTION',
+  NOT_FOUND: 'shell.compare.error.NOT_FOUND',
+  TYPE_MISMATCH: 'shell.compare.error.TYPE_MISMATCH',
+  UNSUPPORTED_FILE_TYPE: 'shell.compare.error.UNSUPPORTED_FILE_TYPE',
+  ACCESS_DENIED: 'shell.compare.error.ACCESS_DENIED'
+}
+
+type Side = 'left' | 'right'
+
+/** A validation failure kept as data so the alert always follows the language. */
+type CompareIssue =
+  | {
+      readonly kind: 'compare'
+      readonly code: CompareErrorCode
+      readonly params: Record<string, string>
+    }
+  | { readonly kind: 'detail'; readonly message: string }
+
+function sideKey(side: Side): MessageKey {
+  return side === 'left' ? 'common.side.left' : 'common.side.right'
+}
+
+function kindKey(kind: 'file' | 'directory'): MessageKey {
+  return kind === 'file' ? 'common.kind.file' : 'common.kind.directory'
+}
+
+function issueText(issue: CompareIssue, t: Translate): string {
+  if (issue.kind === 'detail') return issue.message
+  return t(COMPARE_ERROR_KEYS[issue.code], issue.params)
+}
+
+const QUOTE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['"', '"'],
+  ["'", "'"],
+  ['“', '”'],
+  ['‘', '’']
+]
+
+function stripPairedQuotes(value: string): string {
+  for (const [open, close] of QUOTE_PAIRS) {
+    if (value.length >= 2 && value.startsWith(open) && value.endsWith(close)) {
+      return value.slice(1, value.length - 1)
+    }
+  }
+  return value
+}
+
+function isBlankInput(value: string): boolean {
+  return stripPairedQuotes(value.trim()).trim() === ''
+}
+
+type ProbeOutcome =
+  | { readonly kind: 'file' | 'directory' }
+  | { readonly kind: 'missing' }
+  | { readonly denied: true }
+
+async function probeSide(platform: PlatformPort, path: string): Promise<ProbeOutcome> {
+  try {
+    const kind = await platform.statPath(path)
+    return kind === 'missing' ? { kind: 'missing' } : { kind }
+  } catch {
+    return { denied: true }
+  }
+}
+
 /**
- * 「新建对比」: the manual, dialog-free entry point. The two typed paths are
- * normalised and validated by the shared compare-request contract, then handed
- * to the workbench's existing session builders. Every failure stays inside this
+ * Localizes one failed compare-request by reading its stable code and
+ * recovering the parameters the shared contract does not expose (side, path,
+ * kinds) from the already-normalised paths.
+ */
+async function describeResolveIssue(
+  code: CompareErrorCode,
+  paths: ComparePaths,
+  platform: PlatformPort,
+  t: Translate
+): Promise<CompareIssue> {
+  if (code === 'TYPE_MISMATCH' || code === 'NOT_FOUND' || code === 'ACCESS_DENIED') {
+    const [left, right] = await Promise.all([
+      probeSide(platform, paths.left),
+      probeSide(platform, paths.right)
+    ])
+    const outcomes = [left, right] as const
+    const sides: readonly Side[] = ['left', 'right']
+
+    for (const [index, outcome] of outcomes.entries()) {
+      if ('denied' in outcome) {
+        const side = sides[index]
+        return {
+          kind: 'compare',
+          code: 'ACCESS_DENIED',
+          params: { side: t(sideKey(side)), path: paths[side] }
+        }
+      }
+    }
+    for (const [index, outcome] of outcomes.entries()) {
+      if ('kind' in outcome && outcome.kind === 'missing') {
+        const side = sides[index]
+        return {
+          kind: 'compare',
+          code: 'NOT_FOUND',
+          params: { side: t(sideKey(side)), path: paths[side] }
+        }
+      }
+    }
+    if (code === 'TYPE_MISMATCH') {
+      const leftKind = 'kind' in left ? left.kind : 'file'
+      const rightKind = 'kind' in right ? right.kind : 'file'
+      return {
+        kind: 'compare',
+        code: 'TYPE_MISMATCH',
+        params: {
+          left: paths.left,
+          right: paths.right,
+          leftKind: t(kindKey(leftKind === 'directory' ? 'directory' : 'file')),
+          rightKind: t(kindKey(rightKind === 'directory' ? 'directory' : 'file'))
+        }
+      }
+    }
+  }
+
+  if (code === 'UNSUPPORTED_FILE_TYPE') {
+    const side: Side = isSupportedComparisonFile(paths.left) ? 'right' : 'left'
+    return {
+      kind: 'compare',
+      code,
+      params: { side: t(sideKey(side)), path: paths[side] }
+    }
+  }
+
+  return { kind: 'compare', code, params: {} }
+}
+
+/**
+ * The manual, dialog-free entry point. The two typed paths are normalised and
+ * validated by the shared compare-request contract, then handed to the
+ * workbench's existing session builders. Every failure stays inside this
  * dialog, so no empty tab is ever created.
  */
 export function NewCompareDialog({
@@ -42,20 +183,21 @@ export function NewCompareDialog({
   readonly onPickFiles: () => Promise<CompareOpenOutcome>
   readonly onPickDirectories: () => Promise<CompareOpenOutcome>
 }): JSX.Element {
+  const { t } = useI18n()
   const [left, setLeft] = useState('')
   const [right, setRight] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [issue, setIssue] = useState<CompareIssue | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const leftInput = useRef<HTMLInputElement>(null)
 
-  function describe(cause: unknown): string {
+  function detailOf(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause)
   }
 
   async function submit(): Promise<void> {
     if (submitting) return
     setSubmitting(true)
-    setError(null)
+    setIssue(null)
     try {
       const context = {
         homeDir: await platform.homeDirectory(),
@@ -63,7 +205,23 @@ export function NewCompareDialog({
       }
       const parsed = parseManualPaths(left, right, context)
       if (!parsed.ok) {
-        setError(parsed.error.message)
+        setIssue({
+          kind: 'compare',
+          code: parsed.error.code,
+          params: {
+            side: t(sideKey(isBlankInput(left) ? 'left' : 'right')),
+            path: isBlankInput(left) ? left : right
+          }
+        })
+        return
+      }
+
+      if (parsed.paths.left === parsed.paths.right) {
+        setIssue({
+          kind: 'compare',
+          code: 'DUPLICATE_SIDE',
+          params: { path: parsed.paths.left }
+        })
         return
       }
 
@@ -72,7 +230,7 @@ export function NewCompareDialog({
         probe: { statPath: (path) => platform.statPath(path) }
       })
       if (!resolved.ok) {
-        setError(resolved.error.message)
+        setIssue(await describeResolveIssue(resolved.error.code, parsed.paths, platform, t))
         return
       }
 
@@ -84,9 +242,9 @@ export function NewCompareDialog({
         onClose()
         return
       }
-      if (feedback.message !== null) setError(feedback.message)
+      if (feedback.message !== null) setIssue({ kind: 'detail', message: feedback.message })
     } catch (cause) {
-      setError(describe(cause))
+      setIssue({ kind: 'detail', message: detailOf(cause) })
     } finally {
       setSubmitting(false)
     }
@@ -95,16 +253,16 @@ export function NewCompareDialog({
   async function pick(action: () => Promise<CompareOpenOutcome>): Promise<void> {
     if (submitting) return
     setSubmitting(true)
-    setError(null)
+    setIssue(null)
     try {
       const outcome = await action()
       if (outcome.ok) {
         onClose()
         return
       }
-      if (outcome.error !== null) setError(outcome.error)
+      if (outcome.error !== null) setIssue({ kind: 'detail', message: outcome.error })
     } catch (cause) {
-      setError(describe(cause))
+      setIssue({ kind: 'detail', message: detailOf(cause) })
     } finally {
       setSubmitting(false)
     }
@@ -123,14 +281,14 @@ export function NewCompareDialog({
 
   return (
     <Dialog
-      title="新建对比"
-      description="直接输入或粘贴左右两个真实路径，按 Enter 建立对比；也可以继续使用系统选择器。"
+      title={t('shell.compare.title')}
+      description={t('shell.compare.description')}
       onClose={onClose}
       initialFocusRef={leftInput}
       footer={
         <>
           <ToolbarButton onClick={onClose} disabled={submitting}>
-            取消
+            {t('common.cancel')}
           </ToolbarButton>
           <ToolbarButton
             variant="primary"
@@ -138,7 +296,7 @@ export function NewCompareDialog({
             onClick={() => void submit()}
             disabled={submitting}
           >
-            建立对比
+            {t('shell.compare.submit')}
           </ToolbarButton>
         </>
       }
@@ -146,7 +304,7 @@ export function NewCompareDialog({
       <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
         <div className="flex flex-col gap-1">
           <label htmlFor="new-compare-left" className="text-2xs text-content-secondary">
-            左侧路径
+            {t('shell.compare.leftPath')}
           </label>
           <input
             id="new-compare-left"
@@ -156,14 +314,14 @@ export function NewCompareDialog({
             value={left}
             spellCheck={false}
             autoComplete="off"
-            placeholder="/Users/you/左 a.txt 或 ~/项目/a.txt"
+            placeholder={t('shell.compare.leftPlaceholder')}
             onChange={(event) => setLeft(event.target.value)}
             onKeyDown={submitOnEnter}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor="new-compare-right" className="text-2xs text-content-secondary">
-            右侧路径
+            {t('shell.compare.rightPath')}
           </label>
           <input
             id="new-compare-right"
@@ -172,15 +330,15 @@ export function NewCompareDialog({
             value={right}
             spellCheck={false}
             autoComplete="off"
-            placeholder="/Users/you/右 b.txt 或 a.txt"
+            placeholder={t('shell.compare.rightPlaceholder')}
             onChange={(event) => setRight(event.target.value)}
             onKeyDown={submitOnEnter}
           />
         </div>
 
-        {error ? (
+        {issue ? (
           <p role="alert" className="text-2xs text-danger">
-            {error}
+            {issueText(issue, t)}
           </p>
         ) : null}
 
@@ -189,19 +347,19 @@ export function NewCompareDialog({
             icon={<FileCode2 aria-hidden className="size-3.5" />}
             onClick={() => void pick(onPickFiles)}
             disabled={submitting}
-            title="依次选择左右两个真实文件"
+            title={t('shell.compare.pickFilesTitle')}
           >
-            打开文件
+            {t('shell.compare.pickFiles')}
           </ToolbarButton>
           <ToolbarButton
             icon={<FolderOpen aria-hidden className="size-3.5" />}
             onClick={() => void pick(onPickDirectories)}
             disabled={submitting}
-            title="依次选择左右两个真实文件夹"
+            title={t('shell.compare.pickFoldersTitle')}
           >
-            打开文件夹
+            {t('shell.compare.pickFolders')}
           </ToolbarButton>
-          <span className="ml-auto text-2xs text-content-muted">Enter 提交 · Esc 关闭</span>
+          <span className="ml-auto text-2xs text-content-muted">{t('shell.compare.hint')}</span>
         </div>
       </form>
     </Dialog>

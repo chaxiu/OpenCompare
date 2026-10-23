@@ -1,5 +1,6 @@
 import type { JSX, ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { useI18n } from '@renderer/i18n/context'
 import { IconButton } from './Button'
 import { cx } from './utils'
 
@@ -22,10 +23,11 @@ export interface SessionTabsProps {
 
 /** Horizontal session switcher — one tab per open session. */
 export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsProps): JSX.Element {
+  const { t } = useI18n()
   return (
     <div
       role="tablist"
-      aria-label="会话"
+      aria-label={t('common.sessions')}
       className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1"
     >
       {tabs.map((tab) => {
@@ -56,10 +58,10 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
                 <>
                   <span
                     aria-hidden
-                    title="有未保存修改"
+                    title={t('common.unsavedChanges')}
                     className="size-1.5 shrink-0 rounded-full bg-diff-modified"
                   />
-                  <span className="sr-only">有未保存修改</span>
+                  <span className="sr-only">{t('common.unsavedChanges')}</span>
                 </>
               ) : null}
               {active ? (
@@ -68,7 +70,7 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
             </button>
             {onClose ? (
               <IconButton
-                label={`关闭 ${tab.title}`}
+                label={t('common.closeTitle', { title: tab.title })}
                 icon={<X aria-hidden className="size-3.5" />}
                 onClick={() => onClose(tab.id)}
                 className="mr-0.5"
