@@ -20,6 +20,9 @@ export const PLATFORM_CHANNELS = {
   deleteFile: 'platform:delete-file',
   temporaryDirectory: 'platform:temporary-directory',
   realpath: 'platform:realpath',
+  readUserSettings: 'platform:read-user-settings',
+  writeUserSettings: 'platform:write-user-settings',
+  systemLocale: 'platform:system-locale',
   /** main → renderer: one compare request collected from the launch source. */
   compareRequest: 'platform:compare-request',
   /** renderer → main: the subscriber is listening, deliver queued requests. */

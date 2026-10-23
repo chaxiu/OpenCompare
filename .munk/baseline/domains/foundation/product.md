@@ -13,6 +13,7 @@
 - **批量列目录能力（`PlatformPort.listDirectories(paths, options?)`）**：一次请求携带多个目录绝对路径，按输入顺序返回等长槽位 `DirectoryListing`（成功 `{ path, ok: true, entries }`，失败 `{ path, ok: false, reason }`）；单个目录不可列只失败该槽位、整批仍 resolve，`reason` 沿用「无法读取目录 <path>：…」中文措辞；句柄耗尽整批 reject。Electron 实现对整批所有目录的所有条目共用**一份全局有界 `stat` 预算**（`DEFAULT_STAT_CONCURRENCY = 16`，可注入 `lstatFile` / `statConcurrency` 观测），`/samples/**` 与真实路径共用同一通道；Web 内存实现按目录切片返回同语义槽位，`/samples/**` 同样可列。`listDirectory(path)` 保留并复用批量实现（`[path]` 单槽）。通道 `platform:list-directories` 登记在 `PLATFORM_CHANNELS`，preload 仅白名单转发；`PlatformPort` 表面新增以 `listDirectories` 为最新一项。并发窗口与句柄错误口径归 `io-concurrency` 域，本域不重复实现。
 - **取消能力 `PlatformPort.cancelOperation(operationId)`（平台缝）**：按 `operationId` 取消该次目录对比在平台层的在途工作（主进程销毁该摘要操作的全部在途读取流并阻止未启动文件开流，使对应 `digestFiles` **resolve 为 `{ cancelled: true }`**），未知 id 与重复调用 resolve 不抛。`DigestFilesOptions` 仅新增可选 `operationId`；通道 `platform:cancel-operation` 只登记在 `PLATFORM_CHANNELS` 单一来源，preload 仅白名单转发；`PlatformPort` 表面新增且仅新增 `cancelOperation`。Web 内存实现提供同签名能力：记录已取消 id（幂等），`digestFiles` 在操作已取消时返回与主进程同形态的 `{ cancelled: true }`，未取消时返回值不变。**取消错误不穿越 IPC**：`platform:digest-files` handler 内再兜一层，任何漏出的 `OperationCancelledError` 都转成结构化结果，取消绝不以 reject 穿过 `ipcMain.handle`；renderer 适配层（`src/renderer/src/platform/index.ts` 的 `unwrapDigestResult` / `digestFilesForComparison`）在**渲染进程内**抛回 `OperationCancelledError`，让核心既有 catch 分支照常工作。取消语义与流生命周期口径归 `directory` / `io-concurrency` / `content-digest` 域，本域只承载平台表面与两套实现一致性。
 - **列举与读文件的不可读项容错（`listDirectory` / `readTextFile`，横切契约归 `io-tolerance` 域）**：`lstat` 因 ENOENT / ELOOP / EACCES / ENOTDIR 失败时条目保留并标注 `broken` + 非空 `skippedReason`（`DirectoryEntry` 仅增可选字段）；根目录 `readdir` 失败仍 reject 但给出「无法读取目录 <path>：…」中文可读错误。`read-text-file` 对真实路径（含悬空链接 / 不可读文件）返回「无法读取文件 <path>：…」，经 IPC 不含 `Error invoking remote method` 前缀。该容错改造未新增 `PlatformPort` 方法、未改既有 channel。
+- **用户设置与系统语言能力（`PlatformPort.readUserSettings` / `writeUserSettings` / `systemLocale`，词典与首启解析归 `i18n` 域）**：`UserSettings` 只有 `language: 'zh' | 'en'` 一个字段（`Language` 同类型文件导出）；三个方法只新增这三项，通道名只登记在 `PLATFORM_CHANNELS`（`platform:read-user-settings` / `platform:write-user-settings` / `platform:system-locale`），preload 仅白名单转发并同步 bridge surface 清单测试。Electron：设置写入 `app.getPath('userData')` 下单个 JSON 文件，目录缺失先创建，**原子写**（同目录临时文件 + rename）；读取时文件缺失 / 损坏 JSON / 非对象 / 非法语言值一律解析为 `null` 且不 reject（启动不能因设置文件失败）；`systemLocale()` 原样返回 `app.getLocale()`（不改写、不截断）。Web：`localStorage` 单键 `opencompare.userSettings` 读写，`localStorage` 不可用 / 抛错时退化为**模块级内存**（同一运行期读回）；非法 JSON / 非法语言值读为 `null`；`systemLocale()` 取 `navigator.language`（缺失 `''`）。`src/shared/platform/settings.ts` 为两平台共享的解析单点（`isLanguage` / `parseUserSettings` / `parseUserSettingsJson` / `USER_SETTINGS_STORAGE_KEY`）。
 - 预装核心运行时依赖（diff / node-diff3 / papaparse / @tanstack/react-virtual / yaml / jsonc-parser / lucide-react）与开发测试依赖（vitest / @testing-library/react / eslint / typescript）。
 - 配齐单命令质量门禁：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate`（各自单条 argv；`cancel-gate` 对应 `pnpm test:cancel`，`perf-gate` 对应 `pnpm perf:gate`）。
 
@@ -34,6 +35,13 @@
 - **ac-cancel-web-parity**：Web 平台 `cancelOperation` 幂等（未知 id、重复调用均 resolve 不抛）；`digestFiles` 在操作已取消时**resolve 为 `{ cancelled: true }`**（与 Electron 实现形状相同，两平台可用同一 `Array.isArray` 判别），未取消时返回值与既有断言一致。
 - **ac-digest-structured-result**：`PlatformPort.digestFiles` 的返回类型为 `readonly FileDigest[] | { readonly cancelled: true }`；带 `operationId` 的调用在读取中途被 `cancelOperation` 后 **resolve** 为 `{ cancelled: true }`（`Array.isArray(result) === false`）而非 reject；未取消时 resolve 为与输入等长、顺序一致的 `FileDigest[]`。`src/shared/platform/types.ts` / `src/preload/index.ts` 的 cast 与 `src/shared/platform/channels.ts` 白名单同步到该契约，且不新增 IPC channel。
 - **ac-cancel-adapter-in-renderer**：Electron 与 Web 平台实现只交结构化结果；`OperationCancelledError` 仅由 renderer 适配层（`unwrapDigestResult` / `digestFilesForComparison`）在渲染进程内抛出，`src/core/**` 的取消控制流（`compare.ts` 取消路径、`digestContentCandidates` 分块写缓存时机、`scanDirectory` 不返回部分树）语义不变，取消错误绝不再跨 IPC。
+- **ac-port-surface**：`PlatformPort` 暴露三个新方法 `readUserSettings` / `writeUserSettings` / `systemLocale`；preload 桥接以 `PLATFORM_CHANNELS` 对应通道名调用 `ipcRenderer.invoke`（逐通道断言），既有 bridge surface 测试更新为新方法集合。
+- **ac-electron-roundtrip**：经真实 `ipcMain.handle` 注册后，`writeUserSettings({ language: 'en' })` 再调用读取（新的一次读取 / 新注册实例，临时 userData 目录）得到 `{ language: 'en' }`；写入产生且仅产生 userData 下单个 JSON 设置文件。
+- **ac-electron-corrupt**：设置文件为 `{not json`、`null`、`"text"`、`{"language":"de"}`、`{"language":3}` 时 `readUserSettings()` 返回 `null`，不抛。
+- **ac-electron-locale**：`systemLocale()` 原样返回 `app.getLocale()`（mock 为 `zh-Hant-TW` 时不改写、不截断）。
+- **ac-web-localstorage**：jsdom localStorage 可用时写入后由**另一个** port 实例读回同一 settings；写入只新增一个 OpenCompare 设置键，不产生其它 key。
+- **ac-web-invalid-json**：localStorage 中该键为非法 JSON 或非法语言值时读取返回 `null`，不抛。
+- **ac-web-memory-fallback**：`localStorage` 读写抛错时，同一 port 实例写入后读回同一 settings，且 `systemLocale()` 返回 `navigator.language`（缺省 `''`）。
 
 ## 非目标
 
@@ -55,6 +63,12 @@
 - **取消能力同样两套实现、同形态**：`cancelOperation` 在 Electron 与 Web 两条路径上幂等且**返回同一结构化取消形状**（`{ cancelled: true }`，来自 `@shared/platform/types` 的 `DigestFilesCancelled`）；`OperationCancelledError`（`@core/io`）只在 renderer 适配层出现，renderer 不引 `node:*`；新 channel 登记单一来源并随 preload 表面清单测试；不新增第二条进度推送通道。
 
 ## 最近交付证明
+
+- WI：`wi_ws_80cc30bb21c00dc3`（用户设置与系统语言平台通道，`kind: feature`）
+- 日期：2026-10-23
+- 结果：code_gates passed（`needSelfTest=false`，UI 自测跳过）。
+- 覆盖摘要：`src/shared/platform/types.ts` 新增 `Language = 'zh' | 'en'` / `UserSettings` 与 `PlatformPort.readUserSettings` / `writeUserSettings` / `systemLocale`（本轮表面仅新增这三项）；新增 `src/shared/platform/settings.ts` 共享解析（`isLanguage` / `parseUserSettings` / `parseUserSettingsJson` / `USER_SETTINGS_STORAGE_KEY = 'opencompare.userSettings'`）；`channels.ts` 仅新增三个通道名，preload 白名单转发并更新 surface 断言；Electron 侧 `userData` 下单 JSON 原子写（同目录临时文件 + rename，目录缺失先建），读取对缺失 / 坏 JSON / 非对象 / 非法语言值一律 `null` 不 reject，`systemLocale()` 原样返回 `app.getLocale()`；Web 侧 localStorage 单键读写 + 模块级内存回退，`systemLocale()` 取 `navigator.language`（缺省 `''`）。`electron-platform.test.ts` 增 roundtrip / 五类损坏 / locale 原样用例，`web-platform.test.ts` 增跨实例读回 / 非法 JSON / 内存回退用例。
+- 注：词典、`I18nProvider`、首启解析与测试辅助折叠在新增域 `domains/i18n`；本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例。设置存储不新增第二套配置文件，后续设置面板 WI 必须复用 `opencompare.userSettings` 单键与本组方法。
 
 - WI：`wi_ws_601ef56ae8fd93a4`（取消结构化返回、零日志噪声与零残留，`kind: fix`）
 - 日期：2026-10-22

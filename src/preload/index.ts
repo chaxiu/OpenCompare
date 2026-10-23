@@ -7,7 +7,8 @@ import type {
   DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
-  PlatformPort
+  PlatformPort,
+  UserSettings
 } from '@shared/platform/types'
 
 const platform: PlatformPort = {
@@ -51,6 +52,12 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
   realpath: (paths) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
+  readUserSettings: () =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
+  writeUserSettings: (settings) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+  systemLocale: () =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>,
   onCompareRequest: (listener) => {
     const forward = (_event: IpcRendererEvent, payload: CompareRequestPayload): void => {
       listener(payload)

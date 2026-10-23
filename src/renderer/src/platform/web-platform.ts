@@ -1,4 +1,8 @@
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
+import {
+  USER_SETTINGS_STORAGE_KEY,
+  parseUserSettingsJson
+} from '@shared/platform/settings'
 import type {
   DirectoryEntry,
   DirectoryListing,
@@ -6,7 +10,8 @@ import type {
   FileDialogFilter,
   PlatformPort,
   SaveFileOptions,
-  SelectFileOptions
+  SelectFileOptions,
+  UserSettings
 } from '@shared/platform/types'
 import { sha256Bytes } from '@core/directory/hash'
 
@@ -26,6 +31,46 @@ interface VirtualNode {
 
 const ROOT = '/memory'
 const SAMPLE_ROOT = '/samples'
+
+/**
+ * Last settings write of this runtime, used as the fallback when `localStorage`
+ * is missing or throws (private mode, blocked storage). It lives at module
+ * scope, so every port of the same run reads back the same record.
+ */
+let memorySettings: UserSettings | null = null
+
+function settingsStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    // Accessing `localStorage` itself may throw when storage is blocked.
+    return null
+  }
+}
+
+function readStoredSettings(): UserSettings | null {
+  const storage = settingsStorage()
+  if (storage !== null) {
+    try {
+      const raw = storage.getItem(USER_SETTINGS_STORAGE_KEY)
+      return raw === null ? null : parseUserSettingsJson(raw)
+    } catch {
+      // Unreadable storage falls through to the in-memory record.
+    }
+  }
+  return memorySettings
+}
+
+function writeStoredSettings(settings: UserSettings): void {
+  memorySettings = settings
+  const storage = settingsStorage()
+  if (storage === null) return
+  try {
+    storage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+  } catch {
+    // The in-memory record above is the same-run answer.
+  }
+}
 
 function isSamplePath(path: string): boolean {
   return path === SAMPLE_ROOT || path.startsWith(`${SAMPLE_ROOT}/`)
@@ -309,6 +354,12 @@ export function createWebPlatformPort(): PlatformPort {
     // The memory file system has no symbolic links, so every path is its own
     // real form. The contract is identical to the desktop runtime's.
     realpath: async (paths) => paths.map((path) => path),
+    // One fixed localStorage key, with a module-level in-memory fallback so a
+    // blocked storage API still reads back within this run.
+    readUserSettings: async () => readStoredSettings(),
+    writeUserSettings: async (settings) => writeStoredSettings(settings),
+    // The browser exposes no OS UI locale beyond the navigator's preference.
+    systemLocale: async () => (typeof navigator === 'undefined' ? '' : navigator.language),
     // The browser runtime has no launch source (`argv` / URL scheme), so the
     // stream is an inert stub with the very same signature as the desktop one.
     onCompareRequest: () => () => undefined,

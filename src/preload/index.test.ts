@@ -58,6 +58,9 @@ describe('preload bridge', () => {
         'deleteFile',
         'temporaryDirectory',
         'realpath',
+        'readUserSettings',
+        'writeUserSettings',
+        'systemLocale',
         'onCompareRequest',
         'compareRequestsReady',
         'perf'
@@ -74,6 +77,19 @@ describe('preload bridge', () => {
     await platform.cancelOperation('directory-1')
     expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.cancelOperation, 'directory-1')
     expect(PLATFORM_CHANNELS.cancelOperation).toBe('platform:cancel-operation')
+  })
+
+  it('forwards the settings channel and system locale over their whitelisted channels', async () => {
+    await platform.readUserSettings()
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.readUserSettings)
+
+    await platform.writeUserSettings({ language: 'en' })
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.writeUserSettings, {
+      language: 'en'
+    })
+
+    await platform.systemLocale()
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.systemLocale)
   })
 
   it('forwards the measurement config and round events over their channels', async () => {
