@@ -4,7 +4,8 @@ import {
   parseCompareArgv,
   parseCompareUrl,
   parseManualPaths,
-  resolveCompareRequest
+  resolveCompareRequest,
+  toDisplayPath
 } from './compareRequest'
 import type { CompareErrorCode, PathProbe } from './compareRequest'
 import type { PathProbeKind } from './platform/types'
@@ -454,6 +455,166 @@ describe('resolveCompareRequest', () => {
       expect(ERROR_CODES).toContain(result.error.code)
       expect(result.error.message.length).toBeGreaterThan(0)
       expect(result.error.message).toMatch(/[\u4e00-\u9fff]/)
+    }
+  })
+})
+
+describe('Windows absolute paths', () => {
+  it('treats drive-letter paths as absolute and rewrites separators', () => {
+    // ac-win-drive-absolute
+    expect(
+      parseManualPaths('C:\\path\\to\\file1', 'C:\\path\\to\\file2', { baseDir: 'C:\\path\\to' })
+    ).toEqual({
+      ok: true,
+      paths: { left: 'C:/path/to/file1', right: 'C:/path/to/file2' }
+    })
+  })
+
+  it('keeps a lowercase drive letter and accepts the forward-slash form', () => {
+    // ac-win-lowercase-drive
+    expect(parseManualPaths('c:/path/to/file2', 'C:\\a', { baseDir: 'C:\\path\\to' })).toEqual({
+      ok: true,
+      paths: { left: 'c:/path/to/file2', right: 'C:/a' }
+    })
+  })
+
+  it('keeps a drive root and never folds .. above it', () => {
+    // ac-win-drive-root
+    expect(parseManualPaths('C:\\', 'C:\\a', { baseDir: 'C:\\path\\to' })).toEqual({
+      ok: true,
+      paths: { left: 'C:/', right: 'C:/a' }
+    })
+    expect(parseManualPaths('..\\..\\x', 'C:\\a', { baseDir: 'C:\\' })).toEqual({
+      ok: true,
+      paths: { left: 'C:/x', right: 'C:/a' }
+    })
+  })
+
+  it('treats UNC paths as absolute and never folds above the share root', () => {
+    // ac-unc-absolute
+    expect(
+      parseManualPaths('\\\\server\\share\\dir\\a.txt', '\\\\server\\share\\dir\\b.txt', {
+        baseDir: 'C:\\path\\to'
+      })
+    ).toEqual({
+      ok: true,
+      paths: { left: '//server/share/dir/a.txt', right: '//server/share/dir/b.txt' }
+    })
+    expect(parseManualPaths('\\\\server\\share\\..\\c.txt', '\\\\server\\share\\d.txt')).toEqual({
+      ok: true,
+      paths: { left: '//server/share/c.txt', right: '//server/share/d.txt' }
+    })
+  })
+
+  it('normalises a Windows flag pair from argv', () => {
+    // ac-argv-windows-pair
+    expect(
+      parseCompareArgv(['--left', 'C:\\a', '--right', 'C:\\b'], { baseDir: 'C:\\path\\to' })
+    ).toEqual({ ok: true, paths: { left: 'C:/a', right: 'C:/b' } })
+  })
+
+  it('resolves a relative Windows path against a Windows baseDir', () => {
+    // ac-cwd-windows-mixed
+    const parsed = parseManualPaths('C:\\path\\to\\file1', 'sub\\file2', {
+      baseDir: 'C:\\path\\to'
+    })
+
+    expect(parsed).toEqual({
+      ok: true,
+      paths: { left: 'C:/path/to/file1', right: 'C:/path/to/sub/file2' }
+    })
+    if (parsed.ok) {
+      expect(parsed.paths.left).not.toBe('C:/path/to/C:/path/to/file1')
+      expect(parsed.paths.right).not.toBe('C:/path/to/C:/path/to/sub/file2')
+    }
+  })
+
+  it('normalises Windows paths handed over through the URL entry point', () => {
+    // ac-url-windows-encoded
+    expect(
+      parseCompareUrl(
+        'opencompare://compare?left=C%3A%5Cpath%5Cto%5Ca.txt&right=%5C%5Cserver%5Cshare%5Cb.txt',
+        { baseDir: 'C:\\cwd' }
+      )
+    ).toEqual({ ok: true, paths: { left: 'C:/path/to/a.txt', right: '//server/share/b.txt' } })
+  })
+
+  it('emits the canonical / form for every accepted Windows input', () => {
+    // ac-canonical-output-slash
+    const results = [
+      parseManualPaths('C:\\path\\to\\file1', 'c:/path/to/file2', { baseDir: 'C:\\path\\to' }),
+      parseManualPaths('\\\\server\\share\\dir\\a.txt', 'C:\\', { baseDir: 'C:\\' }),
+      parseCompareArgv(['--left', 'C:\\a\\..\\b', '--right', '\\\\server\\share\\c']),
+      parseCompareUrl('opencompare://compare?left=C%3A%5Ca&right=%5C%5Cserver%5Cshare%5Cb')
+    ]
+
+    for (const result of results) {
+      expect(result.ok).toBe(true)
+      if (!result.ok) continue
+      expect(result.paths.left).not.toContain('\\')
+      expect(result.paths.right).not.toContain('\\')
+    }
+  })
+
+  it('folds .. on both Windows and POSIX roots', () => {
+    // ac-fold-dotdot
+    expect(parseManualPaths('C:/a/../b', '/a/../../b', { baseDir: 'C:\\cwd' })).toEqual({
+      ok: true,
+      paths: { left: 'C:/b', right: '/b' }
+    })
+  })
+
+  it('renders the canonical form with the platform separator on request', () => {
+    // ac-display-per-platform
+    expect(toDisplayPath('C:/path/to/file1', 'win32')).toBe('C:\\path\\to\\file1')
+    expect(toDisplayPath('//server/share/dir/a.txt', 'win32')).toBe(
+      '\\\\server\\share\\dir\\a.txt'
+    )
+    expect(toDisplayPath('C:/', 'win32')).toBe('C:\\')
+    expect(toDisplayPath('C:/a', 'darwin')).toBe('C:/a')
+    expect(toDisplayPath('C:/a', 'linux')).toBe('C:/a')
+  })
+
+  it('echoes error paths with the separator of the caller platform', async () => {
+    // ac-error-echo-platform
+    const windows = await resolveCompareRequest(
+      { left: 'C:\\missing', right: 'C:\\b' },
+      { probe: staticProbe({}).probe, baseDir: 'C:\\', platform: 'win32' }
+    )
+
+    expect(windows.ok).toBe(false)
+    if (!windows.ok) {
+      expect(windows.error.code).toBe('NOT_FOUND')
+      expect(windows.error.message).toContain('C:\\missing')
+    }
+
+    const canonical = await resolveCompareRequest(
+      { left: 'C:\\missing', right: 'C:\\b' },
+      { probe: staticProbe({}).probe, baseDir: 'C:\\' }
+    )
+
+    expect(canonical.ok).toBe(false)
+    if (!canonical.ok) {
+      expect(canonical.error.code).toBe('NOT_FOUND')
+      expect(canonical.error.message).toContain('C:/missing')
+      expect(canonical.error.message).not.toContain('C:\\missing')
+    }
+  })
+
+  it('shares one normalizer across the manual and argv entry points', () => {
+    // ac-single-normalizer
+    const context = { baseDir: 'C:\\path\\to' }
+
+    expect(parseManualPaths('C:\\a', 'C:\\b', context)).toEqual(
+      parseCompareArgv(['--left', 'C:\\a', '--right', 'C:\\b'], context)
+    )
+
+    for (const name of ['../main/launch.ts', '../renderer/src/workbench/NewCompareDialog.tsx']) {
+      const source = readFileSync(new URL(name, import.meta.url), 'utf8')
+      expect(source).toMatch(/from '(?:@shared\/compareRequest|\.\.\/shared\/compareRequest)'/)
+      // No self-written separator rewriting or second normalizer: both entry
+      // points hand the raw strings to this module only.
+      expect(source).not.toContain('\\')
     }
   })
 })

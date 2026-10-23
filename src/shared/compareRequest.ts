@@ -60,6 +60,11 @@ export interface PathContext {
   readonly homeDir?: string
   /** Resolves relative paths; omitted → the path stays relative (only lexically folded). */
   readonly baseDir?: string
+  /**
+   * Echo platform (`'win32'`, `'darwin'`, `'linux'`); omitted → paths are
+   * echoed with `/` separators. Only affects error messages, never parsing.
+   */
+  readonly platform?: string
 }
 
 /** Minimal probe seam, backed by `PlatformPort.statPath`. */
@@ -125,26 +130,70 @@ function expandHome(value: string, homeDir: string | undefined): string {
 }
 
 function absolutize(value: string, baseDir: string | undefined): string {
-  if (value.startsWith('/')) return value
-  if (baseDir === undefined || baseDir === '') return value
-  return `${baseDir}/${value}`
+  const normalized = toPosixSeparators(value)
+  if (isAbsolutePath(normalized)) return normalized
+  if (baseDir === undefined || baseDir === '') return normalized
+  // The base is normalised with the same rules; its root keeps its only slash.
+  const base = toPosixSeparators(baseDir).replace(/\/+$/, '')
+  return base === '' ? `/${normalized}` : `${base}/${normalized}`
 }
 
-/** Lexical `.` / `..` folding; never touches the file system or the case. */
-function foldSegments(value: string): string {
-  const absolute = value.startsWith('/')
+/**
+ * Windows accepts both separators, so every `\` becomes the canonical `/`
+ * before anything is classified. The drive letter keeps its original case.
+ */
+function toPosixSeparators(value: string): string {
+  return value.replace(/\\/g, '/')
+}
+
+/**
+ * Absolute after separator normalisation: POSIX `/…`, UNC `//server/share…`
+ * and drive-letter `C:/…` (including `C:/`). Drive-relative `C:foo` is not
+ * absolute and is therefore resolved against `baseDir` like any other segment.
+ */
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:\//.test(value)
+}
+
+/**
+ * Splits a `/`-separated path into the immutable root (`/`, `C:/`,
+ * `//server/share`) and the remainder that `.` / `..` may fold.
+ */
+function splitPathRoot(value: string): { readonly root: string; readonly rest: string } {
+  if (value.startsWith('//')) {
+    const parts = value.slice(2).split('/')
+    const server = parts[0] ?? ''
+    if (server === '') return { root: '/', rest: value.slice(1) }
+    const share = parts[1] ?? ''
+    const rootParts = share === '' ? [server] : [server, share]
+    return { root: `//${rootParts.join('/')}`, rest: parts.slice(rootParts.length).join('/') }
+  }
+  const drive = /^([A-Za-z]):\//.exec(value)
+  if (drive !== null) return { root: `${drive[1]}:/`, rest: value.slice(3) }
+  if (value.startsWith('/')) return { root: '/', rest: value.slice(1) }
+  return { root: '', rest: value }
+}
+
+/**
+ * Lexical `.` / `..` folding; never touches the file system or the case.
+ * `..` never climbs above `/`, a drive root or a UNC share root.
+ */
+function foldPath(value: string): string {
+  const { root, rest } = splitPathRoot(value)
   const segments: string[] = []
-  for (const segment of value.split('/')) {
+  for (const segment of rest.split('/')) {
     if (segment === '' || segment === '.') continue
     if (segment === '..') {
       if (segments.length > 0 && segments[segments.length - 1] !== '..') segments.pop()
-      else if (!absolute) segments.push('..')
+      else if (root === '') segments.push('..')
       continue
     }
     segments.push(segment)
   }
-  const joined = segments.join('/')
-  return absolute ? `/${joined}` : joined
+  const body = segments.join('/')
+  if (root === '') return body
+  if (root.endsWith('/')) return `${root}${body}`
+  return body === '' ? root : `${root}/${body}`
 }
 
 /** Trims, strips paired quotes, expands `~`, resolves against `baseDir`, folds segments. */
@@ -152,8 +201,16 @@ function normalizePathValue(raw: string, context: PathContext): string | null {
   const trimmed = raw.trim()
   const unquoted = stripPairedQuotes(trimmed).trim()
   if (unquoted === '') return null
-  const folded = foldSegments(absolutize(expandHome(unquoted, context.homeDir), context.baseDir))
+  const folded = foldPath(absolutize(expandHome(unquoted, context.homeDir), context.baseDir))
   return folded === '' ? null : folded
+}
+
+/**
+ * Renders a canonical `/`-separated path the way the platform writes it.
+ * Off Windows the canonical form is already the display form.
+ */
+export function toDisplayPath(path: string, platform?: string): string {
+  return platform === 'win32' ? path.replace(/\//g, '\\') : path
 }
 
 /**
@@ -416,26 +473,37 @@ export async function resolveCompareRequest(
   const right = normalizePathValue(typeof paths.right === 'string' ? paths.right : '', context)
   if (right === null) return failure('EMPTY_PATH', emptyPathMessage('right'))
 
-  const leftProbe = await probeSide(left, context.probe)
-  if (!leftProbe.ok) return failure('ACCESS_DENIED', accessDeniedMessage('left', left))
-  const rightProbe = await probeSide(right, context.probe)
-  if (!rightProbe.ok) return failure('ACCESS_DENIED', accessDeniedMessage('right', right))
+  // Errors echo paths the way the caller's platform writes them; the request
+  // itself always keeps the canonical `/` form.
+  const display = (path: string): string => toDisplayPath(path, context.platform)
 
-  if (leftProbe.kind === 'missing') return failure('NOT_FOUND', notFoundMessage('left', left))
-  if (rightProbe.kind === 'missing') return failure('NOT_FOUND', notFoundMessage('right', right))
+  const leftProbe = await probeSide(left, context.probe)
+  if (!leftProbe.ok) return failure('ACCESS_DENIED', accessDeniedMessage('left', display(left)))
+  const rightProbe = await probeSide(right, context.probe)
+  if (!rightProbe.ok) return failure('ACCESS_DENIED', accessDeniedMessage('right', display(right)))
+
+  if (leftProbe.kind === 'missing') {
+    return failure('NOT_FOUND', notFoundMessage('left', display(left)))
+  }
+  if (rightProbe.kind === 'missing') {
+    return failure('NOT_FOUND', notFoundMessage('right', display(right)))
+  }
 
   const leftKind: CompareKind = leftProbe.kind === 'directory' ? 'directory' : 'file'
   const rightKind: CompareKind = rightProbe.kind === 'directory' ? 'directory' : 'file'
   if (leftKind !== rightKind) {
-    return failure('TYPE_MISMATCH', typeMismatchMessage(left, right, leftKind, rightKind))
+    return failure(
+      'TYPE_MISMATCH',
+      typeMismatchMessage(display(left), display(right), leftKind, rightKind)
+    )
   }
 
   if (leftKind === 'file') {
     if (!isSupportedComparisonFile(left)) {
-      return failure('UNSUPPORTED_FILE_TYPE', unsupportedFileMessage('left', left))
+      return failure('UNSUPPORTED_FILE_TYPE', unsupportedFileMessage('left', display(left)))
     }
     if (!isSupportedComparisonFile(right)) {
-      return failure('UNSUPPORTED_FILE_TYPE', unsupportedFileMessage('right', right))
+      return failure('UNSUPPORTED_FILE_TYPE', unsupportedFileMessage('right', display(right)))
     }
   }
 
