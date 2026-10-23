@@ -14,7 +14,7 @@ import type {
 } from '@core/directory/compare'
 import type { DrilldownTarget } from './fileKinds'
 import { baseName, classifyFile } from './fileKinds'
-import type { AdhocFilePair, DirectorySummary, WorkbenchSession } from './session'
+import type { AdhocFilePair, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
 
@@ -60,17 +60,6 @@ export function directoryViewKey(session: WorkbenchSession): string {
     : `${session.id}#${directoryComparisonKey(comparison)}`
 }
 
-/** The counts and skip totals a directory tab keeps while it is inactive. */
-export function summarizeComparison(comparison: DirectoryComparison): DirectorySummary {
-  return {
-    counts: { ...comparison.counts },
-    fileCount: comparison.fileCount,
-    leftSkipped: comparison.leftSkipped,
-    rightSkipped: comparison.rightSkipped,
-    skipped: comparison.skipped
-  }
-}
-
 /** Stats derived from a comparison's four-state counts. */
 function comparisonStats(
   counts: DirectoryComparison['counts']
@@ -85,8 +74,8 @@ function comparisonStats(
 
 /**
  * Attaches a freshly built comparison to one existing session, preserving its
- * identity (id, title, subtitle, sides). The first build and an activation
- * rebuild share this path, so liveness accounting can never be bypassed.
+ * identity (id, title, subtitle, sides). Every commit goes through here, so
+ * liveness accounting can never be bypassed.
  */
 export function attachDirectoryComparison(
   session: WorkbenchSession,
@@ -98,19 +87,7 @@ export function attachDirectoryComparison(
     ...session,
     composition: { ...comparison.counts, conflict: 0 },
     stats: comparisonStats(comparison.counts),
-    directory: comparison,
-    directorySummary: summarizeComparison(comparison)
-  }
-}
-
-/** Drops one session's comparison tree while keeping its restorable summary. */
-export function detachDirectoryComparison(session: WorkbenchSession): WorkbenchSession {
-  const comparison = session.directory
-  if (comparison === undefined) return session
-  return {
-    ...session,
-    directory: undefined,
-    directorySummary: session.directorySummary ?? summarizeComparison(comparison)
+    directory: comparison
   }
 }
 
@@ -135,7 +112,7 @@ export function createDirectorySession(
   )
 }
 
-/** Every root a session compares from, whether it holds the tree or only its summary. */
+/** Every root a session compares from: the tree's roots, or its declared sides. */
 function sessionRoots(session: WorkbenchSession): string[] {
   const roots: string[] = []
   if (session.directory !== undefined) {
@@ -151,8 +128,7 @@ function sessionRoots(session: WorkbenchSession): string[] {
 }
 
 /**
- * Releases one closed or replaced session's cache entries. A summary-only
- * session has no comparison, so its roots come from `sides`; both forms are
+ * Releases one closed or replaced session's cache entries. The roots are
  * canonicalised before the in-use comparison, so closing an alias tab never
  * evicts the real path's warm entries.
  */

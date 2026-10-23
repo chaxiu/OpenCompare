@@ -13,7 +13,8 @@
  *     active pair and the active tab closed, proving the retained-tab shape.
  *
  * Every run asserts ready peaks, per-round peaks, settle readings and the
- * post-GC liveness counts (`comparisons` / `rowModels` / `tabs`). Multi-tab runs
+ * post-GC liveness counts (`comparisons` / `rowModels` / `tabs`), where
+ * `comparisons` must equal that scene's tab count. Multi-tab runs
  * judge the instantaneous peak against the 2.25 GiB regression guardrail (the
  * profile target is reported as a notice); the settle and whole-app readings
  * stay hard lines. The dataset is always removed afterwards.
@@ -258,11 +259,10 @@ function assertMultisession(evidence) {
     if (hold.tabs !== hold.round) {
       throw new Error(`perf:gate multisession ${hold.label} tabs=${hold.tabs}（期望 ${hold.round}）。`)
     }
-    // Inactive tabs keep only their summary: one live comparison (the active
-    // one), never one per opened tab.
-    if (hold.comparisons !== 1) {
+    // Every open tab keeps its tree: one live comparison per tab.
+    if (hold.comparisons !== hold.round) {
       throw new Error(
-        `perf:gate multisession ${hold.label} comparisons=${hold.comparisons}（期望仅活动 1 份）。`
+        `perf:gate multisession ${hold.label} comparisons=${hold.comparisons}（期望 = tabs ${hold.round}）。`
       )
     }
   }
@@ -321,9 +321,9 @@ function assertRetained(evidence) {
         `perf:gate retained ${hold.label} tabs=${hold.tabs}（期望 ${expectedHoldTabs[index]}）。`
       )
     }
-    if (hold.comparisons !== 1) {
+    if (hold.comparisons !== expectedHoldTabs[index]) {
       throw new Error(
-        `perf:gate retained ${hold.label} comparisons=${hold.comparisons}（期望仅活动 1 份）。`
+        `perf:gate retained ${hold.label} comparisons=${hold.comparisons}（期望 = tabs ${expectedHoldTabs[index]}）。`
       )
     }
   })

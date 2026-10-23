@@ -242,20 +242,20 @@ describe('PerfRecorder', () => {
       recorder.hold({
         label: `round-${round}`,
         tabs: round,
-        comparisons: 1,
+        comparisons: round,
         rowModels: 2,
         gc: true
       })
     }
     setRenderer(500 * MB)
     recorder.settleStage('after-3-tabs', 3)
-    recorder.hold({ label: 'after-3-tabs', tabs: 3, comparisons: 1, rowModels: 2, gc: true })
+    recorder.hold({ label: 'after-3-tabs', tabs: 3, comparisons: 3, rowModels: 2, gc: true })
     setRenderer(510 * MB)
     recorder.settleStage('after-hot-upserts', 3)
-    recorder.hold({ label: 'after-hot-upserts', tabs: 3, comparisons: 1, rowModels: 2, gc: true })
+    recorder.hold({ label: 'after-hot-upserts', tabs: 3, comparisons: 3, rowModels: 2, gc: true })
     setRenderer(400 * MB)
     recorder.reclaim(2)
-    recorder.hold({ label: 'reclaim', tabs: 2, comparisons: 1, rowModels: 2, gc: true })
+    recorder.hold({ label: 'reclaim', tabs: 2, comparisons: 2, rowModels: 2, gc: true })
 
     const evidence = recorder.finalize()
     expect(evidence.mode).toBe('retained')

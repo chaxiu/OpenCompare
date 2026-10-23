@@ -239,8 +239,7 @@ describe('workbench shell', () => {
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /baseline ↔ candidate/ }))
 
-    // The tab was summary-only while inactive; activating it rebuilds the tree
-    // from the warm cache.
+    // The tab kept its tree while inactive; switching back remounts the view.
     await waitFor(() => expect(screen.getAllByText('deploy.yaml').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
     expect(await screen.findByText(`${DRILLDOWN_PREFIX}config/deploy.yaml`, {}, { timeout: 4000 })).toBeDefined()
@@ -426,7 +425,7 @@ describe('real file workbench', () => {
     expect(treeRowTitles()).toEqual(firstRows)
   })
 
-  it('keeps only the active tab materialised and rebuilds a summary tab on activation', async () => {
+  it('keeps 3 tabs resident and switches with zero scans or digests', async () => {
     rowBuilds.count = 0
     const base = createWebPlatformPort()
     const answers = [
@@ -439,9 +438,14 @@ describe('real file workbench', () => {
     ]
     let directoryCalls = 0
     let digestCalls = 0
+    let realpathCalls = 0
     const port: PlatformPort = {
       ...base,
       selectDirectory: async () => answers.shift() ?? null,
+      realpath: async (paths) => {
+        realpathCalls += 1
+        return base.realpath(paths)
+      },
       listDirectories: async (paths) => {
         directoryCalls += 1
         return base.listDirectories(paths)
@@ -453,7 +457,17 @@ describe('real file workbench', () => {
     }
 
     render(<Workbench platform={port} />)
-    for (let pair = 0; pair < 3; pair += 1) {
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    const firstTab = await screen.findByRole(
+      'tab',
+      { name: /baseline ↔ candidate/ },
+      { timeout: 4000 }
+    )
+    const firstRows = treeRowTitles()
+    const firstStatus = screen.getByRole('contentinfo').textContent
+    expect(firstRows.length).toBeGreaterThan(0)
+
+    for (let pair = 1; pair < 3; pair += 1) {
       fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
       await waitFor(() =>
         expect(
@@ -464,20 +478,81 @@ describe('real file workbench', () => {
 
     const tabs = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
     expect(tabs).toHaveLength(3)
-    // One mounted directory view builds one row model per side.
-    await waitFor(() => expect(rowBuilds.count).toBe(6))
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
 
-    const firstTab = tabs[0]
     const digestsBefore = digestCalls
     const scansBefore = directoryCalls
+    const realpathsBefore = realpathCalls
+    const buildsBefore = rowBuilds.count
     fireEvent.click(firstTab)
 
-    // The summary tab rebuilds from the warm cache: rows come back, no digest.
-    await waitFor(() => expect(rowBuilds.count).toBe(8))
+    // Switching tabs only remounts the active view: no scan, no digest, no realpath.
+    expect(directoryCalls).toBe(scansBefore)
     expect(digestCalls).toBe(digestsBefore)
-    expect(directoryCalls).toBeGreaterThan(scansBefore)
+    expect(realpathCalls).toBe(realpathsBefore)
+    expect(screen.queryByText(/正在从摘要缓存重建结果树/)).toBeNull()
     expect(firstTab.getAttribute('aria-selected')).toBe('true')
-    expect(screen.getAllByText('engine.ts').length).toBeGreaterThan(0)
+
+    await waitFor(() => expect(rowBuilds.count).toBe(buildsBefore + 2))
+    // The tab kept its whole comparison: identical rows and four-state counts.
+    expect(treeRowTitles()).toEqual(firstRows)
+    expect(screen.getByRole('contentinfo').textContent).toBe(firstStatus)
+    expect(directoryCalls).toBe(scansBefore)
+    expect(digestCalls).toBe(digestsBefore)
+  })
+
+  it('keeps filter, collapse, selection and scroll across a tab switch', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({
+          directories: [
+            DIRECTORY_SAMPLE_PATHS.left,
+            DIRECTORY_SAMPLE_PATHS.right,
+            DIRECTORY_SAMPLE_PATHS.right,
+            DIRECTORY_SAMPLE_PATHS.left
+          ]
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    const secondTab = await screen.findByRole(
+      'tab',
+      { name: /candidate ↔ baseline/ },
+      { timeout: 4000 }
+    )
+
+    // Put some real view state on the active (second) tab.
+    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '折叠 config' })[0])
+    const row = within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0]
+    fireEvent.click(row)
+    const leftBody = screen.getAllByRole('tree')[0].parentElement as HTMLElement
+    leftBody.scrollTop = 96
+    fireEvent.scroll(leftBody)
+
+    const sessionTabs = screen.getByRole('tablist', { name: '会话' })
+    fireEvent.click(within(sessionTabs).getAllByRole('tab')[0])
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
+    expect(within(sessionTabs).getAllByRole('tab')[0].getAttribute('aria-selected')).toBe('true')
+
+    fireEvent.click(secondTab)
+    await waitFor(() => expect(secondTab.getAttribute('aria-selected')).toBe('true'))
+
+    // Back on the second tab: every bit of its view state is still there.
+    expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
+    expect(within(screen.getAllByRole('tree')[0]).queryAllByText('deploy.yaml')).toHaveLength(0)
+    expect(within(screen.getAllByRole('tree')[1]).queryAllByText('deploy.yaml')).toHaveLength(0)
+    expect(
+      within(screen.getAllByRole('tree')[0])
+        .getAllByText('engine.ts')[0]
+        .closest('[role="treeitem"]')
+        ?.getAttribute('aria-selected')
+    ).toBe('true')
+    const restoredBody = screen.getAllByRole('tree')[0].parentElement as HTMLElement
+    expect(restoredBody.scrollTop).toBe(96)
   })
 
   it('reuses an alias root through the cache without folding its tab', async () => {
@@ -943,8 +1018,8 @@ describe('directory drilldown roundtrip', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
 
-    // The source directory tab was inactive while the drilldown was open, so it
-    // rebuilds its tree from the warm cache; its kept filter/scroll restore then.
+    // The source directory tab kept its tree while the drilldown was open; its
+    // kept filter/scroll restore as the view remounts.
     await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     // Back on the source directory session: nothing was reset by the roundtrip.
     expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()

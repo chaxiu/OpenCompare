@@ -6,7 +6,7 @@
  * `sessionStore` commit semantics — and only adds the measurement bookkeeping
  * the UI never needs: per-round digest accounting and a scalar report. The
  * caller owns the rendered shell, so the session list is committed exactly the
- * way `Workbench` commits it: only the active tab keeps its tree and no round
+ * way `Workbench` commits it: every open tab keeps its tree and no round
  * boundary ever drops a tab.
  */
 import type { DirectoryComparison, DirectoryDiffNode, ProgressReporter } from '@core/directory/compare'
@@ -19,16 +19,8 @@ import {
 } from '@shared/perf/verdict'
 import type { PerfMode, PerfPair, PerfRoundCounts, PerfRoundReport } from '@shared/perf/types'
 import type { WorkbenchSession } from '../workbench/session'
-import {
-  attachDirectoryComparison,
-  createDirectorySession,
-  releaseSessionTree
-} from '../workbench/directoryCompare'
-import {
-  closeSessions,
-  commitSessionTree,
-  retainActiveTree
-} from '../workbench/sessionStore'
+import { createDirectorySession, releaseSessionTree } from '../workbench/directoryCompare'
+import { closeSessions, commitSessionTree } from '../workbench/sessionStore'
 import { compareSides, directorySides } from '../workbench/snapshotOps'
 
 export interface PerfRoundInput {
@@ -95,7 +87,8 @@ function delay(ms: number): Promise<void> {
  *  - `upsert`: one tab re-compared in place.
  *  - `multisession`: one new tab per pair (tabs 1 → 2 → 3).
  *  - `retained`: one tab per pair, then `hotRounds` in-place upserts on the
- *    active pair, then the active tab is closed and its neighbour rebuilt.
+ *    active pair, then the active tab is closed and the session lands on its
+ *    neighbour.
  */
 export async function runPerfRounds(
   platform: PlatformPort,
@@ -177,31 +170,18 @@ export async function runPerfRounds(
     await hooks.onSettleStage?.(SETTLE_STAGE_AFTER_HOT, sessions.length)
 
     /**
-     * Closes the active tab and reactivates its neighbour. Kept as its own
-     * function so the closed session (and its tree) is off the async frame
-     * before the settle wait; the post-GC reclaim reading must only see the
-     * landing tab.
+     * Closes the active tab and lands on its neighbour. Kept as its own function
+     * so the closed session (and its tree) is off the async frame before the
+     * settle wait; the post-GC reclaim reading must only see the landing tab.
      */
     async function closeActiveTab(): Promise<void> {
       const closing = sessions.find((session) => session.id === activeId) ?? null
       if (closing === null) return
       const remaining = closeSessions(sessions, closing.id)
       releaseSessionTree(cache, closing, remaining)
-      const landingId = remaining[remaining.length - 1]?.id ?? null
-      sessions = retainActiveTree(remaining, landingId)
-      activeId = landingId
+      sessions = remaining
+      activeId = remaining[remaining.length - 1]?.id ?? null
       await hooks.onCommit?.(sessions, activeId)
-
-      // The landing tab was summary-only; a real UI reactivates it, so the
-      // harness rebuilds through the same warm cache before sampling reclaim.
-      const landing = sessions.find((session) => session.id === landingId)
-      if (landing?.sides !== undefined) {
-        const comparison = await compareSides(platform, landing.sides, cache)
-        sessions = sessions.map((session) =>
-          session.id === landing.id ? attachDirectoryComparison(session, comparison) : session
-        )
-        await hooks.onCommit?.(sessions, activeId)
-      }
     }
 
     await closeActiveTab()

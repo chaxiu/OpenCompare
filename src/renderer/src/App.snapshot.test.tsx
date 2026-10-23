@@ -133,7 +133,7 @@ describe('snapshot workbench integration', () => {
         name: /baseline ↔ remote-prod/
       })
     )
-    // The snapshot tab was inactive (summary-only); activation rebuilds its tree.
+    // The snapshot tab kept its tree while inactive; switching back remounts it.
     await waitFor(() => expect(screen.getAllByText('report.csv').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
     expect(

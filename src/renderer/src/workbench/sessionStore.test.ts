@@ -7,7 +7,6 @@ import {
   commitUpsert,
   closeSessions,
   replaceSessions,
-  retainActiveTree,
   upsertSessions
 } from './sessionStore'
 import { directorySides } from './snapshotOps'
@@ -79,76 +78,48 @@ describe('session list semantics', () => {
   })
 })
 
-describe('retaining only the active tree', () => {
-  it('keeps the active comparison and reduces every other tab to its summary', () => {
-    const a = session('/a', '/b')
-    const c = session('/c', '/d')
-    const file: WorkbenchSession = {
-      id: 'file:x',
-      scene: 'code',
-      title: 'x',
-      subtitle: 'x',
-      columns: 2,
-      stats: []
-    }
-
-    const next = retainActiveTree([a, c, file], c.id)
-
-    expect(next.map((item) => item.id)).toEqual([a.id, c.id, file.id])
-    expect(next[0]).not.toBe(a)
-    expect(next[0].directory).toBeUndefined()
-    expect(next[0].directorySummary?.fileCount).toBe(a.directory?.fileCount)
-    expect(next[0].directorySummary?.counts).toEqual(a.directory?.counts)
-    expect(next[0].sides).toBe(a.sides)
-    expect(next[1]).toBe(c)
-    expect(next[2]).toBe(file)
-  })
-
-  it('returns an already-summary tab unchanged', () => {
-    const a = session('/a', '/b')
-    const c = session('/c', '/d')
-    const once = retainActiveTree([a, c], c.id)
-    expect(retainActiveTree(once, c.id)).toEqual(once)
-    expect(retainActiveTree(once, c.id)[0]).toBe(once[0])
-  })
-})
-
 describe('commitSessionTree', () => {
-  it('never drops a tab and keeps only the committed tree resident', () => {
+  it('keeps every tab resident and appends without touching earlier sessions', () => {
     const cache = createComparisonCache()
     const a = session('/a', '/b')
     const c = session('/c', '/d')
-    const next = commitSessionTree(cache, [a], c)
+    const second = commitSessionTree(cache, [a], c)
 
-    expect(next.map((item) => item.id)).toEqual([a.id, c.id])
-    expect(next[0].directory).toBeUndefined()
-    expect(next[1].directory).toBeDefined()
+    expect(second.map((item) => item.id)).toEqual([a.id, c.id])
+    expect(second[0]).toBe(a)
+
+    const third = commitSessionTree(cache, second, session('/e', '/f'))
+
+    expect(third.map((item) => item.id)).toEqual([a.id, c.id, session('/e', '/f').id])
+    // Committing a third tab never detaches the two that came before: same
+    // session objects, same comparison trees.
+    expect(third[0]).toBe(a)
+    expect(third[1]).toBe(c)
+    for (const resident of third) expect(resident.directory).toBeDefined()
   })
 
-  it('replaces a tab in place and releases the summary roots it owned', () => {
+  it('replaces a tab in place and releases the roots it no longer compares', () => {
     const cache = createComparisonCache()
-    cache.set('/c/z.txt', entry)
-    cache.set('/d/w.txt', entry)
+    cache.set('/a/x.txt', entry)
+    cache.set('/b/y.txt', entry)
     const first = session('/a', '/b')
-    const summary = retainActiveTree([first, session('/c', '/d')], first.id)[1]
     const replacement = session('/e', '/f')
 
-    const next = commitSessionTree(cache, [summary], replacement, { replaceId: summary.id })
+    const next = commitSessionTree(cache, [first], replacement, { replaceId: first.id })
 
     expect(next).toHaveLength(1)
-    expect(next[0].id).toBe(summary.id)
+    expect(next[0].id).toBe(first.id)
     expect(next[0].directory).toBeDefined()
-    // The replaced summary had no tree, so its roots come from `sides`.
-    expect(cache.hashes.has('/c/z.txt')).toBe(false)
-    expect(cache.hashes.has('/d/w.txt')).toBe(false)
+    expect(cache.hashes.has('/a/x.txt')).toBe(false)
+    expect(cache.hashes.has('/b/y.txt')).toBe(false)
   })
 
-  it('releases a summary-only session without touching another tab root', () => {
+  it('releases an alias tab canonically without touching another tab root', () => {
     const cache = createComparisonCache()
     cache.aliasRoot('/alias/left', '/real/left')
     cache.set('/real/left/a.txt', entry)
     cache.set('/real/left/b.txt', entry)
-    const closed = retainActiveTree([session('/alias/left', '/alias/right')], null)[0]
+    const closed = session('/alias/left', '/alias/right')
     const open = session('/real/left', '/real/right')
 
     releaseSessionTree(cache, closed, [open])
