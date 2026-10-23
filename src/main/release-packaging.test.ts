@@ -51,10 +51,21 @@ const ghostMergeTargetTag = 'v0.2.4'
 // assertions below can never match their own source text.
 const pendingWord = ['待', '发布'].join('')
 
-// The newest public release. It is a published fact, so this anchor stays put
-// while the current version anchor (derived from package.json) moves ahead of it.
-const latestPublishedTag = 'v0.2.5'
-const publishedTags = ['v0.2.0', 'v0.2.1', 'v0.2.2', 'v0.2.4', latestPublishedTag]
+// The newest public release. It is a published fact, so this anchor is pinned
+// explicitly; the current version anchor stays derived from package.json and the
+// two are expected to be equal while the just-shipped version is the latest one.
+const latestPublishedTag = 'v0.2.6'
+// The previous public release. Pinned on its own so flipping the newest anchor
+// never retargets the history assertions below.
+const previousPublishedTag = 'v0.2.5'
+const publishedTags = [
+  'v0.2.0',
+  'v0.2.1',
+  'v0.2.2',
+  'v0.2.4',
+  previousPublishedTag,
+  latestPublishedTag
+]
 const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
 
 const documentPaths = (): string[] => {
@@ -145,17 +156,23 @@ const previousReleaseNotes = existsSync(previousReleaseNotesPath)
   ? readFileSync(previousReleaseNotesPath, 'utf8')
   : ''
 
-// v0.2.4 shipped; its notes stay byte-identical while the current version is
-// pending, so the assertions that describe v0.2.4 content read it directly.
+// v0.2.4 shipped; its notes stay byte-identical as history.
 const historicalNotesV024Path = join(repoRoot, 'docs/release-notes/v0.2.4.md')
 const historicalNotesV024 = existsSync(historicalNotesV024Path)
   ? readFileSync(historicalNotesV024Path, 'utf8')
   : ''
 
 // The newest shipped release notes; this anchor moves with the published tag.
-const lastReleasedNotesPath = join(repoRoot, 'docs/release-notes/v0.2.5.md')
+const lastReleasedNotesPath = join(repoRoot, `docs/release-notes/${latestPublishedTag}.md`)
 const lastReleasedNotes = existsSync(lastReleasedNotesPath)
   ? readFileSync(lastReleasedNotesPath, 'utf8')
+  : ''
+
+// v0.2.5 shipped before the current version: its notes stay byte-identical, so
+// the assertions that describe v0.2.5 content read this explicit path.
+const historicalNotesV025Path = join(repoRoot, 'docs/release-notes/v0.2.5.md')
+const historicalNotesV025 = existsSync(historicalNotesV025Path)
+  ? readFileSync(historicalNotesV025Path, 'utf8')
   : ''
 
 // v0.2.2 is explicit published history: its notes are still covered even after
@@ -537,9 +554,9 @@ describe('release version gate', () => {
     expect(changelog).toContain(`## ${currentTag}`)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(readme).toContain(`当前发布状态：${currentTag} ${pendingWord}`)
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
     expect(readme).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
-    expect(latestPublishedTag).not.toBe(currentTag)
+    expect(latestPublishedTag).toBe(currentTag)
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
@@ -997,15 +1014,16 @@ describe('release signing credentials checklist', () => {
     expect(readme).toMatch(/fail-closed/)
   })
 
-  it('reports the current tag as pending and links the latest public release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} ${pendingWord}`)
+  it('reports the current tag as published and links the latest public release', () => {
+    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
     expect(readme).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
     expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain(`${currentTag} 已发布`)
-    expect(readme).not.toContain(`当前发布状态：${latestPublishedTag}`)
-    expect(readme).not.toContain(`${latestPublishedTag} ${pendingWord}`)
+    expect(readme).not.toContain(pendingWord)
+    // The newest public release is the current tag; older tags are history only.
+    expect(readme).toContain(`当前发布状态：${latestPublishedTag} 已发布`)
+    expect(readme).not.toContain(`当前发布状态：${previousPublishedTag}`)
     expect(readme).not.toContain('当前发布状态：v0.2.4')
-    // v0.2.5 is the newest public release; v0.2.4 and v0.2.2 are published history.
+    // v0.2.6 is the newest public release; v0.2.5/v0.2.4/v0.2.2 are published history.
     expect(readme).toContain(`releases/tag/${latestPublishedTag}`)
     expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(readme).toContain('releases/tag/v0.2.2')
@@ -1017,15 +1035,15 @@ describe('release signing credentials checklist', () => {
     expect(readme).not.toMatch(/发布状态：冻结/)
   })
 
-  it('reports the signing doc status as pending for the current tag', () => {
-    expect(signingDoc).toContain(`当前状态：${currentTag} ${pendingWord}`)
+  it('reports the signing doc status as published for the current tag', () => {
+    expect(signingDoc).toContain(`当前状态：${currentTag} 已发布`)
     expect(signingDoc).toContain(`正式版发布姿态（${currentTag}）`)
     expect(signingDoc).toContain(`docs/release-notes/${currentTag}.md`)
     expect(signingDoc).toContain(`docs/release-evidence/${latestPublishedTag}.md`)
-    expect(signingDoc).not.toContain(`${currentTag} 已发布`)
+    expect(signingDoc).not.toContain(pendingWord)
     // The re-issue entry keeps the current tag as its dispatch default.
     expect(signingDoc).toContain(`默认 \`${currentTag}\``)
-    expect(signingDoc).not.toContain(`当前状态：${latestPublishedTag}`)
+    expect(signingDoc).not.toContain(`当前状态：${previousPublishedTag}`)
     expect(signingDoc).not.toContain('当前状态：v0.2.4')
     expect(signingDoc).not.toContain('当前状态：v0.2.2')
   })
@@ -1086,7 +1104,9 @@ describe('release notes changelog', () => {
 
   it('orders the current, v0.2.5, v0.2.4, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
     const current = changelog.indexOf(`## ${currentTag}`)
-    const lastReleased = changelog.indexOf(`## ${latestPublishedTag}`)
+    // Both anchors are explicit: the newest tag and its predecessor are pinned
+    // literals, not derived from one another.
+    const lastReleased = changelog.indexOf(`## ${previousPublishedTag}`)
     const released = changelog.indexOf('## v0.2.4')
     const previousEntry = changelog.indexOf('## v0.2.2')
     const superseded = changelog.indexOf('## v0.2.0')
@@ -1101,7 +1121,7 @@ describe('release notes changelog', () => {
 
   it('documents the Windows absolute-path fix in the current changelog entry', () => {
     const start = changelog.indexOf(`## ${currentTag}`)
-    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    const end = changelog.indexOf(`## ${previousPublishedTag}`)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const section = changelog.slice(start, end)
@@ -1126,7 +1146,7 @@ describe('release notes changelog', () => {
   })
 
   it('keeps the v0.2.5 fixes in the released changelog entry as history', () => {
-    const start = changelog.indexOf(`## ${latestPublishedTag}`)
+    const start = changelog.indexOf(`## ${previousPublishedTag}`)
     const end = changelog.indexOf('## v0.2.4')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1167,7 +1187,7 @@ describe('release notes changelog', () => {
   it('drops the never-published entry and adds no fake version heading', () => {
     expect(changelog).not.toMatch(new RegExp(`^## ${ghostTag}`, 'm'))
     const start = changelog.indexOf(`## ${currentTag}`)
-    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    const end = changelog.indexOf(`## ${previousPublishedTag}`)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
@@ -1237,7 +1257,9 @@ describe('release notes changelog', () => {
 
   it('anchors the newest published release notes at the shipped tag', () => {
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
-    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
+    // The newest published notes are the current release notes while the
+    // just-shipped tag is the latest public release.
+    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
   })
 
@@ -1294,6 +1316,8 @@ describe('release notes changelog', () => {
   })
 
   it('keeps the v0.2.5 release notes as released history', () => {
+    expect(existsSync(historicalNotesV025Path)).toBe(true)
+    expect(firstHeading(historicalNotesV025)).toContain(previousPublishedTag)
     for (const phrase of [
       '不跟随符号链接',
       '已跳过：左 X / 右 Y',
@@ -1305,11 +1329,11 @@ describe('release notes changelog', () => {
       'docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json',
       'docs/symlink-no-follow.md'
     ]) {
-      expect(lastReleasedNotes).toContain(phrase)
+      expect(historicalNotesV025).toContain(phrase)
     }
-    expect(lastReleasedNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
-    expect(lastReleasedNotes).not.toMatch(/[0-9a-f]{64}/)
-    expect(lastReleasedNotes).not.toContain('已知未修')
+    expect(historicalNotesV025).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(historicalNotesV025).not.toMatch(/[0-9a-f]{64}/)
+    expect(historicalNotesV025).not.toContain('已知未修')
   })
 
   it('keeps the v0.2.0 release notes as history', () => {
@@ -1341,7 +1365,7 @@ describe('release document consistency', () => {
     expect(existsSync(join(repoRoot, ghostEvidencePath))).toBe(false)
   })
 
-  it('links only published tags or the current pending tag', () => {
+  it('links only published tags or the current tag', () => {
     const allowed = new Set([...publishedTags, currentTag])
     const offenders: string[] = []
     for (const path of documentPaths()) {
@@ -1355,16 +1379,16 @@ describe('release document consistency', () => {
     expect(offenders).toEqual([])
   })
 
-  it('keeps the pending status and the signing copy on README line 5', () => {
+  it('keeps the published status and the signing copy on README line 5', () => {
     const statusLine = readme.split(/\r?\n/)[4] ?? ''
-    expect(statusLine).toContain(`当前发布状态：${currentTag} ${pendingWord}`)
+    expect(statusLine).toContain(`当前发布状态：${currentTag} 已发布`)
     expect(statusLine).toContain(
       `最新公开 Release 为 [${latestPublishedTag}](https://github.com/chaxiu/OpenCompare/releases/tag/${latestPublishedTag})`
     )
     expect(statusLine).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(statusLine).not.toContain(`${currentTag} 已发布`)
-    expect(statusLine).not.toContain(`当前发布状态：${latestPublishedTag}`)
-    expect(statusLine).not.toContain(`${latestPublishedTag} ${pendingWord}`)
+    expect(statusLine).toContain(`当前发布状态：${latestPublishedTag} 已发布`)
+    expect(statusLine).not.toContain(pendingWord)
+    expect(statusLine).not.toContain(`当前发布状态：${previousPublishedTag}`)
     expect(statusLine).not.toContain('最新公开 Release 为 [v0.2.2]')
     expect(statusLine).not.toContain(ghostNotesPath)
     expect(statusLine).toContain('Developer ID 签名 + Apple 公证')
@@ -1375,7 +1399,7 @@ describe('release document consistency', () => {
     }
   })
 
-  it('lists the pending, published, never-published and previous versions in the download table', () => {
+  it('lists the latest, previous, older, never-published and historical versions in the download table', () => {
     const start = readme.indexOf('## 版本与下载')
     const end = readme.indexOf('## 核心能力')
     expect(start).toBeGreaterThan(-1)
@@ -1386,32 +1410,34 @@ describe('release document consistency', () => {
       .filter((line) => line.startsWith('|'))
     const rowIndex = (prefix: string): number =>
       rows.findIndex((row) => row.startsWith(prefix))
-    const currentRow = rows.find((row) => row.startsWith(`| ${currentTag}`))
-    const latestRow = rows.find((row) => row.startsWith(`| [${latestPublishedTag}]`))
-    const previousRow = rows.find((row) => row.startsWith('| [v0.2.4]'))
+    const currentRow = rows.find((row) => row.startsWith(`| [${currentTag}]`))
+    const previousRow = rows.find((row) => row.startsWith(`| [${previousPublishedTag}]`))
+    const olderRow = rows.find((row) => row.startsWith('| [v0.2.4]'))
     const ghostRow = rows.find((row) => row.startsWith(`| ${ghostTag}`))
     const oldRow = rows.find((row) => row.startsWith('| [v0.2.2]'))
-    // Newest first: pending → latest public → previous → ghost → old.
-    expect(rowIndex(`| ${currentTag}`)).toBeGreaterThan(-1)
-    expect(rowIndex(`| [${latestPublishedTag}]`)).toBeGreaterThan(
-      rowIndex(`| ${currentTag}`)
+    // Newest first: current (latest public) → previous → v0.2.4 → ghost → old.
+    expect(rowIndex(`| [${currentTag}]`)).toBeGreaterThan(-1)
+    expect(rowIndex(`| [${previousPublishedTag}]`)).toBeGreaterThan(
+      rowIndex(`| [${currentTag}]`)
     )
-    expect(rowIndex('| [v0.2.4]')).toBeGreaterThan(rowIndex(`| [${latestPublishedTag}]`))
+    expect(rowIndex('| [v0.2.4]')).toBeGreaterThan(rowIndex(`| [${previousPublishedTag}]`))
     expect(rowIndex(`| ${ghostTag}`)).toBeGreaterThan(rowIndex('| [v0.2.4]'))
     expect(rowIndex('| [v0.2.2]')).toBeGreaterThan(rowIndex(`| ${ghostTag}`))
     expect(currentRow).toBeDefined()
-    expect(currentRow).toContain(pendingWord)
+    expect(currentRow).toContain('已发布（最新公开 Release）')
+    expect(currentRow).toContain(`releases/tag/${latestPublishedTag}`)
     expect(currentRow).toContain(`docs/release-notes/${currentTag}.md`)
     expect(currentRow).toContain('盘符 / 盘根 / UNC')
-    expect(currentRow).not.toContain('releases/tag/')
-    expect(latestRow).toBeDefined()
-    expect(latestRow).toContain('已发布（最新公开 Release）')
-    expect(latestRow).toContain(`releases/tag/${latestPublishedTag}`)
-    expect(latestRow).toContain(`docs/release-notes/${latestPublishedTag}.md`)
-    expect(latestRow).toContain('多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径')
+    expect(currentRow).not.toContain(pendingWord)
     expect(previousRow).toBeDefined()
     expect(previousRow).toContain('已发布（上一版）')
-    expect(previousRow).toContain('releases/tag/v0.2.4')
+    expect(previousRow).toContain(`releases/tag/${previousPublishedTag}`)
+    expect(previousRow).toContain('多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径')
+    expect(olderRow).toBeDefined()
+    expect(olderRow).toContain('已发布')
+    expect(olderRow).not.toContain('上一版')
+    expect(olderRow).not.toContain('最新公开 Release')
+    expect(olderRow).toContain('releases/tag/v0.2.4')
     expect(ghostRow).toBeDefined()
     expect(ghostRow).toContain('未发布')
     // The ghost row is a historical fact: it stays merged into v0.2.4.
@@ -1436,9 +1462,27 @@ describe('release document consistency', () => {
     const cancel = lines.find((line) => line.includes('ECANCELED'))
     expect(memory).toBeDefined()
     expect(cancel).toBeDefined()
+    // The two v0.2.5 fixes keep their original attribution.
     for (const line of [memory, cancel]) {
-      expect(line).toContain(`已在 ${latestPublishedTag} 修复`)
+      expect(line).toContain(`已在 ${previousPublishedTag} 修复`)
     }
+
+    // Issue #3 (Windows four absolute-path entry points) is fixed in the newest tag.
+    const windows = lines.find((line) => line.includes('issues/3'))
+    expect(windows).toBeDefined()
+    for (const phrase of [
+      `已在 ${latestPublishedTag} 修复`,
+      'C:\\',
+      'CLI',
+      '单实例',
+      '手工输入',
+      'opencompare://',
+      '39890047849',
+      'src/shared/compareRequest.test.ts'
+    ]) {
+      expect(windows).toContain(phrase)
+    }
+    expect(windows).not.toContain(`已在 ${previousPublishedTag} 修复`)
     expect(memory).toContain('docs/perf/large-directory-memory.md')
     expect(memory).toContain(
       'docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json'
@@ -1497,6 +1541,175 @@ describe('release document consistency', () => {
     }
     // The current notes carry no leftover unfixed item.
     expect(releaseNotes).not.toContain('已知未修')
+  })
+})
+
+// The published README claims the newest tag and links its release assets; these
+// anchors are release-time facts and are asserted against package.json below.
+const readmeStatusLine = (): string => readme.split(/\r?\n/)[4] ?? ''
+
+const README_ASSET_PREFIX = `releases/download/${latestPublishedTag}/`
+
+// The v0.2.6 published-asset digests are release-time facts; pinning them here
+// makes a fabricated or hand-edited evidence record fail `pnpm test`.
+const releaseEvidencePath = join(repoRoot, `docs/release-evidence/${latestPublishedTag}.md`)
+const releaseEvidence = existsSync(releaseEvidencePath)
+  ? readFileSync(releaseEvidencePath, 'utf8')
+  : ''
+
+const publishedEvidenceAssets: Array<[name: string, sha256: string]> = [
+  [
+    'OpenCompare-0.2.6-arm64.dmg',
+    '5d58b832891d64cc552a913750eb3a073d81e42622bd8a0ef2b2dc5d45d0a60c'
+  ],
+  [
+    'OpenCompare-0.2.6-arm64.dmg.blockmap',
+    '3e715e4d1fa0f7566c51b5945d7d0cb6c8cd3dd535816f301c46bf89f0f91289'
+  ],
+  [
+    'OpenCompare-0.2.6-arm64-mac.zip',
+    '2b21766410ae6dcee83e61e297bff9dcfe942c0f886958286ed3bceee3eaa609'
+  ],
+  [
+    'OpenCompare-0.2.6-arm64-mac.zip.blockmap',
+    '0c4667d2b19f0f0e85662aba3c425c4776fe0f0ed49bda038237fe3c5c86261d'
+  ],
+  [
+    'OpenCompare-Setup-0.2.6.exe',
+    '9bef79c243aef99331e76f0436eaefa9c714d3b5fa5f37d60f807a4abbd4aed7'
+  ],
+  [
+    'OpenCompare-Setup-0.2.6.exe.blockmap',
+    '326f1d21f6a12305588ffbbc3aec9b36423a108f0c2ad035fea2a5767c254c3f'
+  ],
+  [
+    'OpenCompare-0.2.6.AppImage',
+    'ddbfa3796a2a96213da0f451033e2ae6ff07215e004094862bcc62b25be7b8cd'
+  ],
+  [
+    'opencompare_0.2.6_amd64.deb',
+    '6bfb9052f55b22fd23db10e63d8560e1c915a190bf38c89f4f90ba1c61427426'
+  ],
+  ['latest.yml', '8d163aee20df63fecfd8734ca2c9ae80007ae857b05c80f3125afbd30b75cb4e'],
+  ['latest-mac.yml', '9243e0232f3f4aea2420d9b57be8116ec81e24dabd75b40d29e06b1c219c99db'],
+  ['latest-linux.yml', '1813ac1516f98e0da4018e2fcd171db58e06dd76a39faeeb47b156d71c686878']
+]
+
+describe('published README release anchors', () => {
+  it('declares the same published version in the README status line, the release anchor and package.json', () => {
+    const statusLine = readmeStatusLine()
+    const declared = /当前发布状态：(v\d+\.\d+\.\d+) 已发布/.exec(statusLine)?.[1] ?? ''
+    const latest = /最新公开 Release 为 \[(v\d+\.\d+\.\d+)\]/.exec(statusLine)?.[1] ?? ''
+    expect(declared, 'README status line must declare a published version').not.toBe('')
+    expect(latest, 'README status line must link the latest public release').not.toBe('')
+    expect(declared).toBe(latestPublishedTag)
+    expect(latest).toBe(latestPublishedTag)
+    expect(latestPublishedTag).toBe(`v${pkg.version}`)
+  })
+
+  it('links only space-free asset names under the published tag', () => {
+    const matches = [
+      ...readme.matchAll(
+        new RegExp(`${README_ASSET_PREFIX.replaceAll('/', '\\/')}([^)\\s]+)`, 'g')
+      )
+    ].map((match) => match[1])
+    expect(matches.length).toBeGreaterThanOrEqual(5)
+    const basenames = matches.map((value) => value.split('/').pop() ?? '')
+    for (const name of basenames) {
+      expect(name).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
+    }
+    for (const expected of [
+      `OpenCompare-${pkg.version}-arm64.dmg`,
+      `OpenCompare-${pkg.version}-arm64-mac.zip`,
+      `OpenCompare-Setup-${pkg.version}.exe`,
+      `OpenCompare-${pkg.version}.AppImage`,
+      `opencompare_${pkg.version}_amd64.deb`
+    ]) {
+      expect(basenames).toContain(expected)
+    }
+    expect(readme).not.toContain(`OpenCompare.Setup.${pkg.version}.exe`)
+    expect(readme).not.toContain(`OpenCompare Setup ${pkg.version}.exe`)
+  })
+})
+
+describe('v0.2.6 verified release evidence record', () => {
+  it('exists, is non-empty and declares the verified run identity', () => {
+    expect(existsSync(releaseEvidencePath)).toBe(true)
+    expect(releaseEvidence.trim().length).toBeGreaterThan(0)
+    expect(releaseEvidence).toMatch(/^status:\s*verified$/m)
+    for (const marker of [
+      'a0517102f90d769f71661cdf2f7bec43327b5d61',
+      '30967cd1e8fd521fa517588b2a7ac503305797e5',
+      '421396682',
+      '2026-10-23T02:44:51Z',
+      'draft=false',
+      'prerelease=false',
+      '39890773909',
+      '39890047849',
+      'pnpm test src/shared/compareRequest.test.ts',
+      'releases/latest',
+      '已知遗留'
+    ]) {
+      expect(releaseEvidence).toContain(marker)
+    }
+    expect(releaseEvidence).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+  })
+
+  it('lists all five release CI jobs as successful for the tagged commit', () => {
+    const rows = releaseEvidence.split(/\r?\n/).filter((line) => line.startsWith('| '))
+    for (const job of [
+      'Quality gates',
+      'Package win',
+      'Package linux',
+      'Package mac',
+      'Publish the GitHub Release'
+    ]) {
+      const row = rows.find((line) => line.startsWith(`| ${job} |`))
+      expect(row, `missing job row ${job}`).toBeDefined()
+      expect(row).toContain('success')
+    }
+    expect(releaseEvidence).toContain(
+      'headSha `30967cd1e8fd521fa517588b2a7ac503305797e5`'
+    )
+  })
+
+  it('pins every published asset name, sha256 and public url', () => {
+    expect(publishedEvidenceAssets).toHaveLength(11)
+    for (const [name, sha] of publishedEvidenceAssets) {
+      expect(releaseEvidence).toContain(`\`${name}\``)
+      expect(releaseEvidence).toContain(sha)
+      expect(releaseEvidence).toContain(
+        `https://github.com/chaxiu/OpenCompare/releases/download/${latestPublishedTag}/${name}`
+      )
+    }
+    for (const marker of [
+      'version: 0.2.6',
+      'path: OpenCompare-Setup-0.2.6.exe',
+      '102,945,648'
+    ]) {
+      expect(releaseEvidence).toContain(marker)
+    }
+  })
+
+  it('records the uniqueness, latest gate and notarization markers', () => {
+    for (const marker of [
+      'releases for v0.2.6: 1 (drafts: 0, prereleases: 0)',
+      'latest published release: v0.2.6 (this tag: v0.2.6)',
+      '`releases/latest` = `v0.2.6`',
+      '04-notarization-macos.txt',
+      'valid on disk',
+      'satisfies its Designated Requirement',
+      'The validate action worked!',
+      'accepted',
+      'source=Notarized Developer ID',
+      'TeamIdentifier=3X4J53U6RY',
+      'CDHash=3ee9d42220e5c02f061098a330fe90847c35f951'
+    ]) {
+      expect(releaseEvidence).toContain(marker)
+    }
+    // The dmg container boundary is recorded instead of being glossed over.
+    expect(releaseEvidence).toContain('dmg 容器文件本身')
+    expect(releaseEvidence).toContain('exit 65')
   })
 })
 
