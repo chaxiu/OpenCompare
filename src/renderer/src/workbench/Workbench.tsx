@@ -42,6 +42,7 @@ import { StructuredView } from '@renderer/views/StructuredView'
 import {
   createDirectorySession,
   createDrilldownSession,
+  directoryViewKey,
   openFilePairSession,
   releaseDirectoryComparison,
   resolveDirectoryReturn
@@ -57,6 +58,7 @@ import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
 import { NewCompareDialog } from './NewCompareDialog'
 import type { CompareOpenOutcome } from './NewCompareDialog'
+import { closeSessions, replaceSessions, upsertSessions } from './sessionStore'
 import {
   compareSides,
   describeSnapshotContentError,
@@ -336,7 +338,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     if (index < 0) return
 
     const closing = sessions[index]
-    const remaining = sessions.filter((session) => session.id !== id)
+    const remaining = closeSessions(sessions, id)
     // The comparison (whole tree + row counts) is dropped with the session; the
     // cache entries under its roots go too, so a closed tab leaves nothing big.
     releaseDirectorySession(closing, remaining)
@@ -507,17 +509,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     const previous = sessions.find((item) => item.id === session.id)
     if (previous !== undefined) {
       // A re-compare replaces the old comparison object; the new one (and any
-      // other tab on the same roots) keeps the cache warm.
-      releaseDirectorySession(previous, [
-        ...sessions.filter((item) => item.id !== session.id),
-        session
-      ])
+      // other tab on the same roots) keeps the cache warm. The list semantics
+      // live in `sessionStore`, shared verbatim with the memory harness.
+      releaseDirectorySession(previous, upsertSessions(sessions, session))
     }
-    setSessions((current) =>
-      current.some((item) => item.id === session.id)
-        ? current.map((item) => (item.id === session.id ? session : item))
-        : [...current, session]
-    )
+    setSessions((current) => upsertSessions(current, session))
     setActiveId(session.id)
   }
 
@@ -529,12 +525,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   function replaceSession(id: string, session: WorkbenchSession): void {
     const previous = sessions.find((item) => item.id === id)
     if (previous !== undefined) {
-      releaseDirectorySession(previous, [
-        ...sessions.filter((item) => item.id !== id),
-        { ...session, id }
-      ])
+      releaseDirectorySession(previous, replaceSessions(sessions, id, session))
     }
-    setSessions((current) => current.map((item) => (item.id === id ? { ...session, id } : item)))
+    setSessions((current) => replaceSessions(current, id, session))
     setActiveId(id)
   }
 
@@ -997,6 +990,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         const treeState = directoryStates[session.id] ?? EMPTY_DIRECTORY_STATE
         return (
           <DirectoryView
+            key={directoryViewKey(session)}
             sessionId={session.id}
             comparison={comparison}
             filter={treeState.filter}

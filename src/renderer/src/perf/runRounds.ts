@@ -2,37 +2,40 @@
  * Renderer-side round orchestration for the directory memory harness.
  *
  * It deliberately reuses the workbench's own path — `compareSides` (scan →
- * `platform.digestFiles` → compare) plus `createDirectorySession` — and only
- * adds the measurement bookkeeping the UI never needs: one fresh session object
- * per round, real digest accounting and a per-round report. Sampling and
- * evidence writing stay in the main process.
+ * `platform.digestFiles` → compare), `createDirectorySession` and the
+ * `sessionStore` commit semantics — and only adds the measurement bookkeeping
+ * the UI never needs: per-round digest accounting and a scalar report. The
+ * caller owns the rendered shell, so the session list is committed exactly the
+ * way `Workbench.upsertSession` commits it; nothing releases a session before a
+ * round boundary any more.
  */
 import type { DirectoryComparison, DirectoryDiffNode, ProgressReporter } from '@core/directory/compare'
 import type { ComparisonCache } from '@core/directory/compare'
 import { createComparisonCache } from '@core/directory/compare'
 import type { PlatformPort } from '@shared/platform/types'
-import type { PerfRoundCounts, PerfRoundReport } from '@shared/perf/types'
+import type { PerfMode, PerfPair, PerfRoundCounts, PerfRoundReport } from '@shared/perf/types'
 import type { WorkbenchSession } from '../workbench/session'
-import { createDirectorySession, directorySessionId } from '../workbench/directoryCompare'
+import { createDirectorySession } from '../workbench/directoryCompare'
+import { commitUpsert } from '../workbench/sessionStore'
 import { compareSides, directorySides } from '../workbench/snapshotOps'
 
 export interface PerfRoundInput {
-  readonly left: string
-  readonly right: string
+  readonly mode: PerfMode
+  readonly pairs: readonly PerfPair[]
   readonly rounds: number
 }
 
 export interface PerfRoundHooks {
   /** Called before the round starts (after the boundary sample is taken). */
   readonly onRoundStart?: (round: number, startedAt: string) => void | Promise<void>
-  /** Called after the fresh session is built and before the post-round sample. */
-  readonly onSession?: (session: WorkbenchSession) => void
   /**
-   * Called right before the previous round's session reference is dropped —
-   * always before the next `onRoundStart`, so a holder (the runner's React
-   * state) never keeps the previous round's tree alive across the boundary.
+   * Commits this round's session list to the shell and resolves once the new
+   * tree is on screen, so the post-round sample never sees the previous tree.
    */
-  readonly onReleaseSession?: (sessionId: string) => void
+  readonly onCommit?: (
+    next: readonly WorkbenchSession[],
+    activeId: string
+  ) => void | Promise<void>
   readonly onRoundEnd?: (report: PerfRoundReport) => void | Promise<void>
   readonly onProgress?: ProgressReporter
   /** Injectable clock in milliseconds; defaults to `Date.now`. */
@@ -60,35 +63,26 @@ function countTree(node: DirectoryDiffNode): TreeCounts {
   return { files, dirs }
 }
 
-function roundSessionId(baseId: string, round: number): string {
-  return `${baseId}#round-${round}`
-}
-
 /**
  * Runs `rounds` full comparisons in this renderer process. The comparison cache
  * is created once, exactly like `Workbench` keeps one cache across sessions, so
- * a hit round honestly reports zero hashed files. Every round builds a new
- * session object (never mutating the previous one) and reports its real digest
- * totals.
+ * a same-pair re-compare honestly reports zero hashed files. The session list is
+ * carried across rounds: `upsert` replaces the single tab in place, while
+ * `multisession` appends one tab per pair (1 → 2 → 3).
  */
 export async function runPerfRounds(
   platform: PlatformPort,
   input: PerfRoundInput,
   hooks: PerfRoundHooks = {}
 ): Promise<readonly PerfRoundReport[]> {
-  const sides = directorySides(input.left, input.right)
-  const baseId = directorySessionId(input.left, input.right)
   const cache: ComparisonCache = createComparisonCache()
   const now = hooks.now ?? (() => Date.now())
   const reports: PerfRoundReport[] = []
-  /** Only the round in flight; the previous one is released at the boundary. */
-  const held: { session: WorkbenchSession | null } = { session: null }
+  let sessions: readonly WorkbenchSession[] = []
 
   for (let round = 1; round <= input.rounds; round += 1) {
-    if (held.session !== null) {
-      hooks.onReleaseSession?.(held.session.id)
-      held.session = null
-    }
+    const pair = input.mode === 'upsert' ? input.pairs[0] : input.pairs[round - 1]
+    const sides = directorySides(pair.left, pair.right)
     const startedAt = new Date(now()).toISOString()
     await hooks.onRoundStart?.(round, startedAt)
     const startMs = now()
@@ -107,16 +101,11 @@ export async function runPerfRounds(
       hashedFiles: digestStats.files,
       bytesToHash: digestStats.bytes
     }
-    // Same session builder as the UI, but scoped to the round: replacing a new
-    // object each time is what the harness must prove, while the base id keeps
-    // the usual `directory:<left> ↔ <right>` form.
+    // Same session builder and commit semantics as the UI; the previous tab
+    // object is replaced, never explicitly released before the boundary.
     const session = createDirectorySession(comparison, sides)
-    const roundSession: WorkbenchSession = {
-      ...session,
-      id: roundSessionId(baseId, round)
-    }
-    hooks.onSession?.(roundSession)
-    held.session = roundSession
+    sessions = commitUpsert(cache, sessions, session)
+    await hooks.onCommit?.(sessions, session.id)
 
     const endedAt = new Date(now()).toISOString()
     const report: PerfRoundReport = {
@@ -124,7 +113,8 @@ export async function runPerfRounds(
       startedAt,
       endedAt,
       wallMs: Math.max(0, now() - startMs),
-      sessionId: roundSession.id,
+      sessionId: session.id,
+      tabs: sessions.length,
       counts
     }
     reports.push(report)

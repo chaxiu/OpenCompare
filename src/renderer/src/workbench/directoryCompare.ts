@@ -6,6 +6,7 @@
  */
 import type { TextSample } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
+import { trackLive } from '@shared/perf/liveness'
 import type {
   ComparisonCache,
   DirectoryComparison,
@@ -25,12 +26,50 @@ export function directorySessionId(leftRoot: string, rightRoot: string): string 
   return `directory:${leftRoot} ↔ ${rightRoot}`
 }
 
+/**
+ * Monotonic revision per comparison object, used as part of the view key.
+ *
+ * The key is what makes a re-compare a *mount*, not an update: React drops the
+ * old `DirectoryView` / `TreeView` subtree (and its virtualiser closures) at
+ * commit time, so the previous comparison tree and row models stop being
+ * reachable without waiting for a GC. The map is weak: it never extends the
+ * lifetime of a comparison nobody holds any more.
+ */
+const comparisonRevisions = new WeakMap<DirectoryComparison, number>()
+let nextComparisonRevision = 1
+
+export function directoryComparisonKey(comparison: DirectoryComparison): string {
+  let revision = comparisonRevisions.get(comparison)
+  if (revision === undefined) {
+    revision = nextComparisonRevision
+    nextComparisonRevision += 1
+    comparisonRevisions.set(comparison, revision)
+  }
+  return `c${revision}`
+}
+
+/**
+ * Key of the directory view showing one session. A re-compare keeps the tab id
+ * but changes the comparison, so the view (and its row models) remounts; a tab
+ * switch changes both.
+ */
+export function directoryViewKey(session: WorkbenchSession): string {
+  const comparison = session.directory
+  return comparison === undefined
+    ? session.id
+    : `${session.id}#${directoryComparisonKey(comparison)}`
+}
+
 /** Builds the directory session whose stats and inputs come from the runtime comparison. */
 export function createDirectorySession(
   comparison: DirectoryComparison,
   sides: ComparisonSides
 ): WorkbenchSession {
   const { same, added, removed, modified } = comparison.counts
+  // Register at creation, outside render, so the measurement can attribute a
+  // live comparison to the session that owns it; disabled runs pay one check.
+  trackLive('comparison', comparison)
+  directoryComparisonKey(comparison)
 
   return {
     id: directorySessionId(comparison.leftRoot, comparison.rightRoot),

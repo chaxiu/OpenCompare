@@ -10,24 +10,41 @@ pnpm perf:dir \
   --left /Users/zhutao/Cursor/DawnChat \
   --right /Users/zhutao/Cursor/ZenMind \
   --rounds 3 \
+  --settle 20000 \
   --out docs/perf/evidence/dawnchat-zenmind-$(date +%Y%m%d-%H%M%S).json
 ```
 
 - `pnpm perf:dir` 先执行 `electron-vite build`，再启动真实 Electron 应用（真实主进程 +
   真实 renderer）；轮次编排在渲染进程里走 UI 同一条 `compareSides` → `scanDirectory` →
-  `compareDirectories` → `platform.digestFiles` → `createDirectorySession` 路径。
+  `compareDirectories` → `platform.digestFiles` → `createDirectorySession` → `commitUpsert`
+  路径，并**渲染与工作台相同的 `SessionTabs` + `DirectoryView`**（含虚拟列表与行模型）。
 - 每次调用都在**同一个应用实例/同一个 renderer 进程**内连续跑完 N 轮；采样与证据落盘由主
   进程完成。
 - 显式开关：`perf:dir` 包装脚本会带上 `--perf-harness` 并设置 `OPENCOMPARE_PERF=1`。只有
   **两者同时存在**才进入测量模式；普通启动（包括普通的 `--left/--right` 对比）零行为变化，
-  不采样、不写证据。
-- 必填：`--left`、`--right`、`--out`。可选：`--rounds`（默认 3）、`--interval`（周期采样
-  毫秒，默认 1000，上限 2000）、`--profile`（`real` / `gate`，默认 `real`）、
+  不采样、不写证据、不暴露 `globalThis.gc`。
+- 必填：`--left`、`--right`（均可重复，按出现顺序配对，两侧数量必须相等）、`--out`。
+- 可选：`--mode`（`upsert` / `multisession`，默认 `upsert`；旧命令行不带 `--mode` 仍按
+  `upsert` 解释）、`--rounds`（默认 3；`multisession` 下必须等于对数，否则按对数取值）、
+  `--settle`（末轮后静置毫秒数，默认 20000，上限 60000，`0` 只供单测）、`--interval`
+  （周期采样毫秒，默认 1000，上限 2000）、`--profile`（`real` / `gate`，默认 `real`）、
   `--fail-on-violation`。
-- 缺少必填参数、未知参数、`--rounds` 非正整数、根目录不存在或不可读时，进程以非零退出，
-  stderr 指明具体参数或路径，并且不会写出“成功”证据文件。
+- 缺少必填参数、未知参数、`--rounds` 非正整数、`--left`/`--right` 数量不一致、`upsert`
+  给多对 / `multisession` 只给一对、根目录不存在或不可读时，进程以非零退出，stderr 指明
+  具体参数或路径，并且不会写出“成功”证据文件。
 - 运行失败（renderer 崩溃、窗口提前关闭、超时）仍会写出带 `error` 且 `verdict.ok=false` 的
   部分证据，退出码非零。
+
+### 1.1 两种持有模式
+
+| 模式 | 命令行 | tab 语义 | 用途 |
+| --- | --- | --- | --- |
+| `upsert` | 1 对根，`--rounds N` | tab 恒为 1；同 id 原位替换 | 同会话反复「重新对比」 |
+| `multisession` | ≥2 对根，每对 1 轮 | tab 依次 1 → 2 → 3 | 多个目录对比 tab 并存 |
+
+两种模式都复用 `workbench/sessionStore.ts` 的 `upsertSessions` / `commitUpsert`，
+`Workbench.upsertSession` 与 harness 逐字同义；**运行期不存在「轮次开始前释放上一轮会话」的
+路径**（旧 harness 的 `onReleaseSession` 已删除）。因此 harness 测到的就是真实 UI 的持有量。
 
 ## 2. 门禁命令
 
@@ -37,10 +54,23 @@ pnpm perf:gate
 
 - 在系统临时目录生成真实落盘数据集（运行结束即删除）：每侧 6,000 个文件、总内容
   ≥100 MiB、`d0/.../d4` 五层嵌套、每 50 个文件一处“同大小不同内容”、左右各含指向文件 /
-  目录 / 悬空目标的符号链接。不使用 `src/shared/fixtures/` 或 `/samples`。
-- 用 `gate` 档跑 3 轮真实哈希；证据 `roots` 指向本次临时目录。
-- 单次运行（含 `electron-vite build`）目标 ≤ 3 分钟；进程超时或阈值不通过均以非零退出，
-  输出被违反的阈值 id。
+  目录 / 悬空目标的符号链接，另加 `links/left → left` 作为第三对根。不使用
+  `src/shared/fixtures/` 或 `/samples`。
+- 同一数据集上跑**两次** harness（`gate` 档，`--settle 5000`，超时 300 s）：
+  1. `upsert`：1 对根 5 轮。断言 tab 恒 1、`sessionId` 恒为 `directory:<L> ↔ <R>`、
+     每轮 hold `comparisons=1` / `rowModels≤2` / `gc=true`、每轮 `roundPeak` 与 `settle` 在
+     gate 档内、判定绿；并断言第 1 轮 `hashedFiles>0`、第 2–5 轮 `hashedFiles=0`（缓存未被
+     修复路径打穿）。
+  2. `multisession`：3 对根（`L↔R`、`R↔L`、`links/left↔R`）各 1 轮。断言 tab 依次
+     `1/2/3`、hold `comparisons` 与 `tabs` 依次 `1/2/3`、`rowModels≤2`、`gc=true`、峰值与
+     settle 在 gate 档内、判定绿。
+- 两次运行的证据都要求「周期采样条数 ≥ floor(wallMs/interval)−1」、`roots` 指向本次临时
+  目录、不含内置样本路径。任一断言失败或 `--fail-on-violation` 违规即非零退出，输出被违反
+  的阈值 / 结构 id（`hold-comparisons`、`hold-row-models`、`hold-tabs`、`hold-unmeasured`、
+  `renderer-round-peak`、`renderer-settle`……）。
+- 单次运行（含 `electron-vite build`，两次 harness）目标 ≤ 3 分钟。
+- 需要留档时设置 `PERF_GATE_EVIDENCE_DIR=<仓库外目录>`，门禁会把两份证据复制为
+  `perf-gate-<时间戳>-<mode>.json`（只复制，不改变判定与退出码）。
 - `.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`。
 
 还有一条更轻的门禁，只断言**缓存规模与多轮不增长**，不启动 Electron：
@@ -66,19 +96,26 @@ pnpm test:memory
 档位上限集中在 `perf/profiles.json`，判定函数单点实现于
 `src/shared/perf/verdict.ts`，真实档与门禁档共用：
 
-| 档位 | renderer 峰值 | app 总峰值 | 第 3 轮 renderer 增量 |
-| --- | --- | --- | --- |
-| `real` | ≤ 1.5 GiB (1610612736 B) | ≤ 2.5 GiB (2684354560 B) | ≤ min(100 MiB, max(30% × Δ1, 25 MiB)) |
-| `gate` | ≤ 1.0 GiB (1073741824 B) | ≤ 2.0 GiB (2147483648 B) | 同上 |
+| 档位 | renderer ready 峰值 | app 总峰值 | +settle 静置 renderer | 第 3 轮 renderer 增量 |
+| --- | --- | --- | --- | --- |
+| `real` | ≤ 1.5 GiB (1610612736 B) | ≤ 2.5 GiB (2684354560 B) | ≤ 1300 MiB (1363148800 B) | ≤ min(100 MiB, max(30% × Δ1, 25 MiB)) |
+| `gate` | ≤ 1.0 GiB (1073741824 B) | ≤ 2.0 GiB (2147483648 B) | ≤ 1.0 GiB (1073741824 B) | 同上 |
 
 - `Δ1` = 第 1 轮 post-round renderer RSS − 启动后基线 renderer RSS。
-- `Δ3` = 第 3 轮 post-round renderer RSS − 第 2 轮 post-round renderer RSS。
-- 实际生效的增量阈值写入 `verdict.appliedThresholds.appliedRoundDeltaBytes`；任一峰值或
-  `Δ3` 超限时 `verdict.ok=false`，`violations` 列出 `renderer-peak` / `app-total-peak` /
-  `round-delta`。
+- `Δ3` = 第 3 轮 post-round renderer RSS − 第 2 轮 post-round renderer RSS；**只对
+  `upsert` 模式生效**。`multisession` 每轮多一个真实 tab，增长是应有状态，不套该规则。
+- `renderer-round-peak`：任一轮窗口内 renderer 采样峰值（`rounds[].roundPeak`）超过
+  `rendererPeakBytes`。
+- `renderer-settle`：末轮后 `--settle` 静置值（`settle.renderer`）超过 `settleRendererBytes`；
+  `settle-missing` 表示整轮没有产生静置采样。
+- 实际生效的增量阈值写入 `verdict.appliedThresholds.appliedRoundDeltaBytes`；任一峰值 /
+  静置 / 结构断言超限时 `verdict.ok=false`，`violations` 列出对应 id。
 - 采样缺失、为 0 或拿不到 renderer/main 进程号时记为 `invalid-sample`，无论是否带
   `--fail-on-violation` 都以非零退出。
 - 带 `--fail-on-violation` 且证据违规时退出码非零，证据文件仍然完整写出。
+- **结构断言**（`holds[]`，强制 GC 后计数）：`upsert` 每轮（含 settle）`comparisons=1`、
+  `tabs=1`；`multisession` 第 i 轮（含 settle 归到末轮）`comparisons=i`、`tabs=i`；任一
+  读数 `rowModels>2` 或 `gc=false` 都判红。
 - 阈值调整必须同时改 `perf/profiles.json` 并在证据/提交说明里解释，不允许为了变绿放宽。
 
 ## 4. 证据字段与口径
@@ -87,23 +124,27 @@ pnpm test:memory
 
 | 字段 | 含义 |
 | --- | --- |
-| `schema` | 固定 `opencompare.perf.directory/v1` |
+| `schema` | 固定 `opencompare.perf.directory/v1`（本轮为加法扩展，字段只增不改） |
 | `generatedAt` | 证据生成时间（ISO-8601） |
 | `appPid` | 唯一应用实例的主进程 PID；所有轮次都在它里面完成 |
 | `commit.sha` / `commit.dirty` | 运行目录的 `git rev-parse HEAD` / `git status --porcelain` 是否非空 |
-| `roots.left` / `roots.right` | 实际测量的两个根目录 |
+| `mode` | `upsert` 或 `multisession` |
+| `pairs[]` | 本次运行的 `left` / `right` 根，按命令行顺序 |
+| `roots.left` / `roots.right` | 第一对根（兼容旧字段），多对时以 `pairs` 为准 |
 | `profile` | 使用的档位（`real` / `gate`） |
-| `sampling.intervalMs` | 周期采样间隔，默认 1000 |
+| `sampling.intervalMs` / `sampling.settleMs` | 周期采样间隔与末轮静置等待 |
 | `memoryDefinition` | RSS 口径字符串（见下） |
 | `counts.files` / `counts.dirs` | 最后一轮对比树中的文件/目录节点数（按相对路径取并集） |
 | `counts.hashedFiles` / `counts.bytesToHash` | 所有轮次里 `platform.digestFiles` **实际成功哈希**的文件数与字节数之和；命中缓存而零哈希的轮次如实累加 0 |
-| `rounds[]` | 每轮 `index / startedAt / endedAt / wallMs / sessionId / counts / rendererRss / appTotalRss / rendererPid` |
+| `rounds[]` | 每轮 `index / startedAt / endedAt / wallMs / sessionId / tabs / counts / rendererRss / roundPeak / appTotalRss / rendererPid` |
 | `totalWallMs` | 第一轮开始到最后一轮结束的总墙钟 |
 | `env` | `os`=`os.release()`、`arch`、`cpuModel`/`cpuCount`=`os.cpus()`、`totalMemBytes`=`os.totalmem()`、`node`、`electron`，均为运行期真实探针 |
 | `samples[]` | `label / phase / round / at / rss{renderer,main,appTotal} / pids{renderer,main}` |
-| `peaks` | 所有采样中的 renderer / main / appTotal 最大值 |
+| `peaks` | ready/round/periodic 采样中的 renderer / main / appTotal 最大值（**不含** `settle`） |
+| `settle` / `settleAt` | 末轮后静置结束时的单次 RSS 读数与时间；`null` 表示本次没有静置采样 |
+| `holds[]` | 强制 GC 后的结构登记：`label / round / tabs / comparisons / rowModels / gc` |
 | `roundDeltas[]` | 每轮相对上一轮 post-round 的 renderer / appTotal 增量（第 1 轮相对启动基线） |
-| `verdict` | `ok` / `violations[]` / `appliedThresholds` |
+| `verdict` | `ok` / `violations[]` / `appliedThresholds`（含 `settleRendererBytes`） |
 | `error` | 仅当测量本身失败时存在，此时 `verdict.ok=false` |
 
 RSS 口径（同时写入证据 `memoryDefinition`）：
@@ -118,8 +159,9 @@ RSS 口径（同时写入证据 `memoryDefinition`）：
 - `startup` / `startup-baseline`：窗口与 renderer 就绪后的启动基线；
 - `boundary` / `round-<n>-start`、`round-<n>-end`：轮次边界；
 - `pre-round` / `round-<n>-pre`：每轮扫描开始前；
-- `post-round` / `round-<n>-post`：每轮会话构造完成后；
-- `periodic` / `periodic-r<n>-*`：运行期按 `sampling.intervalMs` 的周期采样。
+- `post-round` / `round-<n>-post`：每轮会话构造完成、新树已上屏后；
+- `periodic` / `periodic-r<n>-*`：运行期按 `sampling.intervalMs` 的周期采样；
+- `settle` / `settle`：末轮后等待 `sampling.settleMs`、强制 GC 之后的一次读数。
 
 每轮至少各有 1 条 `pre-round` 与 `post-round`，轮次边界成对出现；某轮 `wallMs` 越长，其周期
 采样条数相应覆盖 `floor(wallMs / interval) - 1` 以上。
@@ -157,9 +199,112 @@ RSS 口径（同时写入证据 `memoryDefinition`）：
   重新对比同一对目录时新会话仍持有同一批根，因此缓存保持温暖。
 - 淘汰只影响「是否重哈希」：被淘汰的条目在下一轮回落到真实读取 / 真实摘要，四态 `counts`
   与每个节点 `status` 不变（`pnpm test:memory` 的 `maxEntries: 1` 用例即此断言）。
-- 行模型仍只在激活的 `DirectoryView` 内构建（`buildDirectoryRowModel` 只对屏幕上的会话
-  调用）；测量 harness 在每轮 `onRoundStart` 之前显式释放上一轮会话，`PerfRoundReport`
-  只保留标量计数。
+- **历史盲区（已修）**：旧 harness 在每轮 `onRoundStart` 之前显式释放上一轮会话，且只渲染一行
+  文字、不建任何视图，所以它**从未覆盖真实 UI 的持有路径**（React fiber props / 虚拟列表
+  闭包）。旧口径下的“峰值”只反映扫描 / 分类 / 缓存，不反映屏幕上真实持有的结果树与行模型；
+  本次之后不得再用旧口径解释 UI 峰值。行模型仍只在激活的 `DirectoryView` 内构建
+  （`buildDirectoryRowModel` 只对屏幕上的会话调用），`PerfRoundReport` 只保留标量计数。
+
+### 5.3 真实 UI 持有路径的释放（本轮修复）
+
+旧实现下真实 UI 的三条持有链（诊断报告 §9）已按提交路径消除：
+
+1. **`DirectoryView` 视图 key**：`directoryViewKey(session)` = 会话 id + comparison 单调
+   修订号（`directoryComparisonKey`，`WeakMap` 登记、不延长寿命）。同 tab 重新对比
+   （`upsertSession`）、同步后 `replaceSession`、切 tab 都会换 key，React 在**提交阶段**
+   卸载旧 `DirectoryView` / `TreeView` 子树与旧 `useVirtualizer` 实例，旧 comparison 与旧
+   行模型随之不可达，不依赖 GC 时机。
+2. **会话列表语义单点**：`workbench/sessionStore.ts` 的 `upsertSessions` / `replaceSessions` /
+   `closeSessions` / `commitUpsert` 同时被 `Workbench` 与 perf harness 使用；替换时仍按
+   「新会话仍使用同一批根」保留热缓存（`hashedFiles=0`）。
+3. **实测结构**：`holds[]` 在每轮结束与 settle 后强制 GC 两次再计数。修复后
+   `upsert` 每轮恒 `comparisons=1 / rowModels=2 / tabs=1`；`multisession` 为
+   `1→2→3` 份 comparison 且仅激活 tab 的 2 份行模型。修复前同类测量为 5 轮后仍持 3 份
+   comparison / 4 份 row model（诊断报告附录 B）。
+
+> 强制 GC 需要 renderer 内的 `globalThis.gc`。harness 启动时（且仅在
+> `--perf-harness` + `OPENCOMPARE_PERF=1` 下）于 app ready 前安装
+> `--js-flags=--expose-gc`；若该能力不可用，`holds[].gc=false` 直接判 `hold-unmeasured`
+> 红，绝不静默跳过。普通启动不加该开关。
+>
+> **红路径自证（不恒绿）**：`src/renderer/src/perf/perfShell.test.tsx` 同时跑「带 key」与
+> 「不带 key」两条渲染路径，后者断言旧 comparison / 旧 `rows` 仍可达；`verdict.test.ts`
+> 断言 `holds.comparisons=2` / `rowModels>2` / `gc=false` 必红。命令级复现：临时删掉
+> `PerfRunner` 里 `key={directoryViewKey(active)}` 后执行 `pnpm perf:gate`，本次实测退出码 1，
+> `perf: violations -> hold-row-models, hold-comparisons`。
+
+### 5.4 双列口径：ready 峰值 vs +settle 静置
+
+**禁止只给单一内存数字**。两者独立判定：
+
+| 列 | 证据字段 | 含义 | 判定 |
+| --- | --- | --- | --- |
+| ready 峰值 | `rounds[].roundPeak`（逐轮窗口峰值）、`peaks.renderer` | 新树已上屏、未强制 GC | ≤ 档位 `rendererPeakBytes` |
+| +settle 静置 | `settle.renderer` | 末轮后等待 `--settle`（默认 20 s）再强制 GC | ≤ 档位 `settleRendererBytes` |
+
+`peaks` 明确排除 `settle` 采样，避免把静置值混进峰值；`roundPeak` 取该轮窗口内所有采样
+（boundary / pre / post / periodic）的 renderer 最大值。`gate` 档的静置上限等于其峰值上限
+（数据集小，结构断言的“牙齿”在 `holds`），`real` 档为 1300 MiB。
+
+### 5.5 本次实测（harness，2026-10-23）
+
+环境：macOS arm64，Electron 37.10.3，工作区为本次改动（`electron-vite build` 产物，非
+签名打包产物）。目录对 `/Users/zhutao/Cursor/DawnChat` ↔ `/Users/zhutao/Cursor/ZenMind`
+（752,479 文件 / 97,565 目录，只读）。
+
+**(a) `pnpm perf:gate`（gate 档，单次运行两个模式）通过**
+（证据：`/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/perf-evidence-113057fa/perf-gate-2026-10-23T05-13-07-782Z-upsert.json`
+与 `…-multisession.json`）：
+
+| 模式 | 轮次 tabs | ready 峰值（B） | 逐轮 roundPeak（B） | settle（B） | holds（comparisons/rowModels） |
+| --- | --- | ---: | --- | ---: | --- |
+| `upsert` 5 轮 | 1/1/1/1/1 | 180,371,456 | 146,456,576 / 165,642,240 / 173,703,168 / 178,110,464 / 180,371,456 | 179,060,736 | 1/2 × 6（含 settle） |
+| `multisession` 3 会话 | 1/2/3 | 195,346,432 | 146,259,968 / 166,019,072 / 195,346,432 | 194,281,472 | 1/2、2/2、3/2、3/2 |
+
+**(b) 真实两目录 `upsert` 5 轮（`real` 档，`--settle 20000`）通过**
+（证据：`/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/perf-evidence-113057fa/dawnchat-zenmind-upsert-5rounds.json`）：
+
+| 轮次 | 墙钟 ms | hashedFiles | ready 峰值 (B) | +20 s 静置（末轮后单次） |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 21,426 | 76,604 | 724,795,392 | — |
+| 2 | 8,029 | 0 | 1,300,283,392 | — |
+| 3 | 8,570 | 0 | 1,355,038,720 | — |
+| 4 | 8,574 | 0 | 1,359,626,240 | — |
+| 5 | 8,527 | 0 | 1,392,099,328 | 739,819,520 |
+
+- 峰值：renderer `1,392,099,328` B（1,327.6 MiB，上限 1,610,612,736 B）；app 总
+  `1,868,824,576` B（1,782.3 MiB，上限 2,684,354,560 B）；`settle.renderer` 705.5 MiB
+  （上限 1,363,148,800 B）。
+- `holds`：6 次读数（round-1…5 + settle）全部 `comparisons=1 / rowModels=2 / tabs=1 /
+  gc=true`。
+- 热轮 8.0–8.6 s、`hashedFiles=0`，未回到 ~20 s；`verdict.ok=true`。
+- 对照诊断报告（修复前）：同为 5 轮 upsert 的 ready 峰值 701 / 1321 / 1680 / 1708 / 1726
+  MiB、+20 s 静置 1244–1275 MiB、静置仍持 3 份 comparison + 4 份 row model。修复后第 3–5 轮
+  不再越线，静置回落约 504–570 MiB，持有份数回到 1 份。
+
+**(c) 真实两目录 `multisession` 3 会话（`real` 档）如实记录为部分越线**
+（证据：`/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/perf-evidence-113057fa/dawnchat-zenmind-multisession.json`）：
+
+| 轮次 | tabs | 墙钟 ms | hashedFiles | ready 峰值 (B) |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 1 | 19,958 | 76,604 | 775,045,120 |
+| 2 | 2 | 8,324 | 0 | 1,288,372,224 |
+| 3 | 3 | 14,858 | 38,302 | 1,618,231,296 |
+
+- `holds`：`1/2`、`2/2`、`3/2`、settle `3/2`，`gc=true`——3 份 comparison 是 3 个真实 tab
+  的应有状态，行模型仍只有激活 tab 的 2 份（修复前为 4 份）。
+- `settle.renderer = 1,266,008,064` B（1,207.4 MiB，≤1300 MiB），app 总峰值
+  `2,154,020,864` B（≤2.5 GiB）。
+- **ready 峰值 `1,618,231,296` B 超过 `real` 档 `1,610,612,736` B 7,618,560 B（7.3 MiB，
+  0.47%）**，`verdict.violations = ["renderer-peak", "renderer-round-peak"]`。第 3 轮
+  还额外哈希 38,302 个文件（第三对根是 `links/left` 别名，路径前缀不同 → 不能复用缓存），
+  该轮的扫描/哈希临时对象是峰值的主要增量；静置后回落到 1,207 MiB。剩余持有为 3 份**应有**
+  并发 comparison + 1 份激活 tab 行模型，未发现新的历史残留链。该数字按
+  `ac-honest-if-still-over` 如实记录，不放宽档位、不缩缓存。
+
+> 打包 app + 原样 CDP 脚本（`repeat.mjs` / `multisession.mjs`）的 L3 复测由产品负责人在
+> Ops 阶段执行，证据落仓库外；上表 (b)(c) 是同一 renderer 代码在 `perf:dir` 口径下的实测，
+> 不替代也不改写 L3 结论。
 
 ## 6. 已归档的真实取证
 
