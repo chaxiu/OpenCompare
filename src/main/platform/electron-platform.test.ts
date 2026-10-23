@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   compareDirectories,
   createComparisonCache,
@@ -32,7 +32,8 @@ import type {
   DirectoryListing,
   FileDigest,
   PathProbeKind,
-  PlatformPort
+  PlatformPort,
+  UserSettings
 } from '@shared/platform/types'
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import {
@@ -47,16 +48,22 @@ import {
 import type { DigestReadStream, ListableStat } from './electron-platform'
 import { OperationCancelledError } from '@core/io'
 
-const { handlers, dialogs } = vi.hoisted(() => ({
+const { handlers, dialogs, appState } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   dialogs: {
     open: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     save: vi.fn(async () => ({ canceled: true, filePath: undefined as string | undefined }))
-  }
+  },
+  // The settings file lives under `userData`; every test points that at its own
+  // scratch directory instead of the real user profile.
+  appState: { userData: '', locale: 'en-US' }
 }))
 
 vi.mock('electron', () => ({
-  app: { getPath: () => tmpdir() },
+  app: {
+    getPath: (name: string) => (name === 'userData' ? appState.userData : tmpdir()),
+    getLocale: () => appState.locale
+  },
   dialog: {
     showOpenDialog: (...args: unknown[]) => dialogs.open(...(args as [])),
     showSaveDialog: (...args: unknown[]) => dialogs.save(...(args as []))
@@ -110,7 +117,12 @@ const platform: PlatformPort = {
   ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
   temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
-  realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>
+  realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
+  readUserSettings: () =>
+    invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
+  writeUserSettings: (settings) =>
+    invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+  systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>
 }
 
 const roots: string[] = []
@@ -127,6 +139,11 @@ async function stamp(path: string, ms: number): Promise<void> {
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
+
+beforeEach(async () => {
+  appState.userData = await scratchRoot()
+  appState.locale = 'en-US'
 })
 
 beforeAll(() => registerPlatformIpc())
@@ -1305,5 +1322,42 @@ describe('digest cancellation', () => {
     expect(retried.counts).toEqual(baseline.counts)
     expect(retried.skipped).toBe(baseline.skipped)
     expect(activeDigestStreamCount()).toBe(0)
+  })
+})
+
+describe('electron user settings', () => {
+  const settingsFile = (): string => join(appState.userData, 'settings.json')
+
+  it('round-trips a write and read through the real IPC handlers', async () => {
+    await platform.writeUserSettings({ language: 'en' })
+
+    // A fresh registration reads the persisted record, exactly like a restart.
+    registerPlatformIpc()
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'en' })
+
+    // One document under userData, no leftover temporary file.
+    await expect(readdir(appState.userData)).resolves.toEqual(['settings.json'])
+    expect(JSON.parse(await readFile(settingsFile(), 'utf8'))).toEqual({ language: 'en' })
+  })
+
+  it('keeps only the language field of a stored record', async () => {
+    await writeFile(settingsFile(), '{"language":"zh","theme":"dark"}', 'utf8')
+
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh' })
+  })
+
+  it('reads a missing, corrupt or unsupported record as no record', async () => {
+    await expect(platform.readUserSettings()).resolves.toBeNull()
+
+    for (const text of ['{not json', 'null', '"text"', '{"language":"de"}', '{"language":3}']) {
+      await writeFile(settingsFile(), text, 'utf8')
+      await expect(platform.readUserSettings()).resolves.toBeNull()
+    }
+  })
+
+  it('returns app.getLocale() untouched', async () => {
+    appState.locale = 'zh-Hant-TW'
+
+    await expect(platform.systemLocale()).resolves.toBe('zh-Hant-TW')
   })
 })

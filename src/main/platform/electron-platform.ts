@@ -12,6 +12,7 @@ import {
   readdir,
   readlink,
   realpath,
+  rename,
   rm,
   stat,
   utimes,
@@ -19,13 +20,14 @@ import {
 } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import type { Dirent } from 'node:fs'
-import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { dirname, join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
 import { OperationCancelledError, mapWithLimit, toReadableIoError } from '@core/io'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
+import { parseUserSettings, parseUserSettingsJson } from '@shared/platform/settings'
 import type {
   DigestFilesOptions,
   DigestFilesResult,
@@ -35,7 +37,8 @@ import type {
   FileDigestSuccess,
   LinkTargetKind,
   ListDirectoriesOptions,
-  PathProbeKind
+  PathProbeKind,
+  UserSettings
 } from '@shared/platform/types'
 
 const SAMPLE_ROOT = '/samples'
@@ -649,6 +652,49 @@ async function resolveRealpaths(paths: readonly string[]): Promise<readonly stri
   )
 }
 
+/** Single settings file under `userData`; there is no second storage slot. */
+const USER_SETTINGS_FILE = 'settings.json'
+
+function userSettingsPath(): string {
+  return join(app.getPath('userData'), USER_SETTINGS_FILE)
+}
+
+/**
+ * Reads the persisted settings. Missing file, unreadable file, corrupt JSON and
+ * an unsupported language all read as "no record": a broken settings file must
+ * never make the app fail to start.
+ */
+async function readUserSettings(): Promise<UserSettings | null> {
+  try {
+    return parseUserSettingsJson(await readFile(userSettingsPath(), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Writes the settings atomically: a temporary file in the same directory is
+ * renamed over the target, so a crash mid-write leaves the previous record
+ * intact. Only a failed write rejects; nothing else is written.
+ */
+async function writeUserSettings(settings: UserSettings): Promise<void> {
+  const target = userSettingsPath()
+  const temporary = `${target}.${randomUUID()}.tmp`
+  await mkdir(dirname(target), { recursive: true })
+  try {
+    await writeFile(temporary, JSON.stringify(settings), 'utf8')
+    await rename(temporary, target)
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
+/** The OS locale exactly as Electron reports it; never truncated or remapped. */
+function systemLocale(): string {
+  return app.getLocale()
+}
+
 /** Hooks the launch bootstrap needs from the IPC layer. */
 export interface PlatformIpcOptions {
   /** Called when the renderer announces its launch-request subscription. */
@@ -750,4 +796,13 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   ipcMain.handle(PLATFORM_CHANNELS.realpath, (_event, paths: unknown) =>
     resolveRealpaths(parsePathArray(paths, 'path'))
   )
+  // Settings arrive over IPC, so the payload is validated before it is written;
+  // only this one write rejects, and a bad record never reaches the disk.
+  ipcMain.handle(PLATFORM_CHANNELS.readUserSettings, () => readUserSettings())
+  ipcMain.handle(PLATFORM_CHANNELS.writeUserSettings, (_event, settings: unknown) => {
+    const parsed = parseUserSettings(settings)
+    if (parsed === null) throw new TypeError('Expected user settings with a supported language.')
+    return writeUserSettings(parsed)
+  })
+  ipcMain.handle(PLATFORM_CHANNELS.systemLocale, () => systemLocale())
 }

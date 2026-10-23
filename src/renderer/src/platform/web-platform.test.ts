@@ -281,3 +281,44 @@ describe('web launch request parity', () => {
     await expect(platform.compareRequestsReady?.()).resolves.toBeUndefined()
   })
 })
+
+describe('web user settings', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('persists through the single localStorage key and reads back from another port', async () => {
+    const first = createWebPlatformPort()
+    await first.writeUserSettings({ language: 'en' })
+
+    const second = createWebPlatformPort()
+    await expect(second.readUserSettings()).resolves.toEqual({ language: 'en' })
+    expect(localStorage.length).toBe(1)
+    expect(localStorage.key(0)).toBe('opencompare.userSettings')
+  })
+
+  it('reads a missing, corrupt or unsupported record as no record', async () => {
+    const platform = createWebPlatformPort()
+    await expect(platform.readUserSettings()).resolves.toBeNull()
+
+    for (const raw of ['{not json', 'null', '"text"', '{"language":"de"}', '{"language":3}']) {
+      localStorage.setItem('opencompare.userSettings', raw)
+      await expect(platform.readUserSettings()).resolves.toBeNull()
+    }
+  })
+
+  it('falls back to the in-memory record when localStorage throws', async () => {
+    const platform = createWebPlatformPort()
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage blocked')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage blocked')
+    })
+
+    await platform.writeUserSettings({ language: 'zh' })
+
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh' })
+    await expect(platform.systemLocale()).resolves.toBe(navigator.language)
+  })
+})

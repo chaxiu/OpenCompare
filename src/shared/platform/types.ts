@@ -11,6 +11,18 @@ import type { PerfBridge } from '../perf/types'
 
 export type PlatformKind = 'electron' | 'web'
 
+/** UI languages the renderer dictionary ships. English is the default. */
+export type Language = 'zh' | 'en'
+
+/**
+ * The user's persisted preferences. Read at startup, written only when the user
+ * picks a language; `language` is the single field and unknown fields are
+ * ignored on read.
+ */
+export interface UserSettings {
+  readonly language: Language
+}
+
 /** What a symbolic link resolves to, without the scan ever entering it. */
 export type LinkTargetKind = 'file' | 'directory' | 'missing'
 
@@ -212,6 +224,16 @@ export interface PlatformPort {
    * canonicalise digest-cache keys, never to alter a session's identity.
    */
   realpath(paths: readonly string[]): Promise<readonly string[]>
+  /**
+   * The persisted user settings, or `null` when nothing usable is stored. A
+   * missing, corrupt or invalid record is reported as `null` instead of
+   * rejecting: startup must never fail on a settings file.
+   */
+  readUserSettings(): Promise<UserSettings | null>
+  /** Persists the settings through the runtime's single storage slot. */
+  writeUserSettings(settings: UserSettings): Promise<void>
+  /** The OS UI locale (`zh-CN`, `en-US`, …); `''` when the runtime has none. */
+  systemLocale(): Promise<string>
   /**
    * Subscribes to compare requests collected from the launch source (launch
    * arguments or an `opencompare://` link). Optional: a runtime without a launch
