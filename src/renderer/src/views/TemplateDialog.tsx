@@ -3,7 +3,9 @@ import { LoaderCircle } from 'lucide-react'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { formatBytes } from '@renderer/components/utils'
+import { useI18n } from '@renderer/i18n/context'
 import type { TemplatePreview } from '@renderer/workbench/directoryOps'
+import { countKey } from './directoryCopy'
 
 function SectionTitle({
   title,
@@ -14,10 +16,15 @@ function SectionTitle({
   readonly count: number
   readonly tone: string
 }): JSX.Element {
+  const { t } = useI18n()
   return (
     <div className="flex items-center gap-2">
       <span className={tone}>{title}</span>
-      <span className="tabular font-mono text-2xs text-content-muted">{count} 个</span>
+      <span className="tabular font-mono text-2xs text-content-muted">
+        {t(countKey('directory.template.count.one', 'directory.template.count.other', count), {
+          count
+        })}
+      </span>
     </div>
   )
 }
@@ -41,15 +48,17 @@ export function TemplateDialog({
   onCancel,
   onConfirm
 }: TemplateDialogProps): JSX.Element {
+  const { t } = useI18n()
   const { result, templateRoot, incomingRoot, targetRoot } = preview
 
   return (
     <Dialog
-      title="模板归位映射预览"
+      title={t('directory.template.title')}
       description={
         <>
-          模板 A：<span className="font-mono">{templateRoot}</span> · 散乱树 B：
-          <span className="font-mono">{incomingRoot}</span> · 输出根：
+          {t('directory.template.label.template')}
+          <span className="font-mono">{templateRoot}</span> · {t('directory.template.label.incoming')}
+          <span className="font-mono">{incomingRoot}</span> · {t('directory.template.label.output')}
           <span className="font-mono">{targetRoot}</span>
         </>
       }
@@ -57,7 +66,7 @@ export function TemplateDialog({
       footer={
         <>
           <ToolbarButton variant="ghost" onClick={onCancel} disabled={busy}>
-            取消
+            {t('common.cancel')}
           </ToolbarButton>
           <ToolbarButton
             variant="primary"
@@ -65,14 +74,18 @@ export function TemplateDialog({
             disabled={busy || result.matched.length === 0}
           >
             {busy ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
-            {busy ? '正在归位…' : '确认提取归位'}
+            {busy ? t('directory.template.placing') : t('directory.template.place')}
           </ToolbarButton>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <section>
-          <SectionTitle title="已匹配" count={result.matched.length} tone="text-diff-added" />
+          <SectionTitle
+            title={t('directory.template.section.matched')}
+            count={result.matched.length}
+            tone="text-diff-added"
+          />
           {result.matched.length > 0 ? (
             <ul className="mt-1 rounded-sm border border-line-subtle">
               {result.matched.map((item) => (
@@ -100,12 +113,16 @@ export function TemplateDialog({
               ))}
             </ul>
           ) : (
-            <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+            <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
           )}
         </section>
 
         <section>
-          <SectionTitle title="缺失槽位" count={result.missing.length} tone="text-diff-removed" />
+          <SectionTitle
+            title={t('directory.template.section.missing')}
+            count={result.missing.length}
+            tone="text-diff-removed"
+          />
           {result.missing.length > 0 ? (
             <ul className="mt-1 rounded-sm border border-line-subtle">
               {result.missing.map((item) => (
@@ -118,12 +135,16 @@ export function TemplateDialog({
               ))}
             </ul>
           ) : (
-            <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+            <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
           )}
         </section>
 
         <section>
-          <SectionTitle title="冲突项" count={result.conflicts.length} tone="text-diff-conflict" />
+          <SectionTitle
+            title={t('directory.template.section.conflicts')}
+            count={result.conflicts.length}
+            tone="text-diff-conflict"
+          />
           {result.conflicts.length > 0 ? (
             <ul className="mt-1 rounded-sm border border-line-subtle">
               {result.conflicts.map((item) => (
@@ -132,7 +153,11 @@ export function TemplateDialog({
                     {item.relativePath}
                   </span>
                   <span className="ml-2 text-2xs text-content-muted">
-                    {item.reason === 'ambiguous' ? '同名多候选' : '同名内容不同'}
+                    {t(
+                      item.reason === 'ambiguous'
+                        ? 'directory.template.reason.ambiguous'
+                        : 'directory.template.reason.contentMismatch'
+                    )}
                   </span>
                   <span className="mt-0.5 block truncate font-mono text-2xs text-content-muted">
                     {item.candidates.map((candidate) => candidate.path).join(' · ')}
@@ -141,12 +166,16 @@ export function TemplateDialog({
               ))}
             </ul>
           ) : (
-            <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+            <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
           )}
         </section>
 
         <section>
-          <SectionTitle title="B 未使用文件" count={result.unused.length} tone="text-content-muted" />
+          <SectionTitle
+            title={t('directory.template.section.unused')}
+            count={result.unused.length}
+            tone="text-content-muted"
+          />
           {result.unused.length > 0 ? (
             <ul className="mt-1 rounded-sm border border-line-subtle">
               {result.unused.map((item) => (
@@ -159,7 +188,7 @@ export function TemplateDialog({
               ))}
             </ul>
           ) : (
-            <p className="px-2 py-1 text-2xs text-content-muted">无</p>
+            <p className="px-2 py-1 text-2xs text-content-muted">{t('directory.none')}</p>
           )}
         </section>
       </div>

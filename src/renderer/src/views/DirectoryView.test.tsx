@@ -25,6 +25,7 @@ import type { DirectoryEntry } from '@shared/platform/types'
 import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { zh } from '@renderer/i18n/messages'
 import { DirectoryView } from './DirectoryView'
+import { FILTER_LABEL_KEYS } from './directoryCopy'
 
 vi.mock('@core/directory/filter', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@core/directory/filter')>()
@@ -397,6 +398,11 @@ function elementCount(): number {
   return document.querySelectorAll('*').length
 }
 
+/** Collapsed-directory toggle name, resolved from the zh dictionary. */
+function expandLabel(name: string): string {
+  return zh['directory.tree.expand'].replace('{name}', name)
+}
+
 /* ------------------------------------------------------------------ */
 /* Suite                                                               */
 /* ------------------------------------------------------------------ */
@@ -518,7 +524,7 @@ describe('DirectoryView windowed tree', () => {
       'big/big-00000.txt'
     )
 
-    fireEvent.click(within(collapsedLeft).getByRole('button', { name: '展开 big' }))
+    fireEvent.click(within(collapsedLeft).getByRole('button', { name: expandLabel('big') }))
 
     const [left, right] = trees()
     expect(renderedRows(left).length).toBeLessThanOrEqual(80)
@@ -569,19 +575,11 @@ describe('DirectoryView windowed tree', () => {
 
   it('switches the five filters onto their own row prefix', () => {
     render(<Harness comparison={fixture.comparison} initial={INITIAL_STATE} />)
-    const labels: Record<DirectoryFilter, string> = {
-      all: '全部',
-      differences: '仅差异',
-      'left-only': '左独有',
-      'right-only': '右独有',
-      same: '相同'
-    }
-
     for (const filter of DIRECTORY_FILTERS) {
       const [left, right] = trees()
       scrollTo(left, 0)
       scrollTo(right, 0)
-      fireEvent.click(screen.getByRole('tab', { name: labels[filter] }))
+      fireEvent.click(screen.getByRole('tab', { name: zh[FILTER_LABEL_KEYS[filter]] }))
 
       const leftModel = buildDirectoryRowModel(fixture.comparison.root, filter, 'left', [])
       const rightModel = buildDirectoryRowModel(fixture.comparison.root, filter, 'right', [])
@@ -641,8 +639,8 @@ describe('DirectoryView windowed tree', () => {
       <Harness comparison={modifiedOnly} initial={{ ...INITIAL_STATE, filter: 'same' }} />
     )
     expect(screen.queryAllByRole('tree')).toHaveLength(0)
-    expect(screen.getByText('当前过滤下左目录没有条目。')).toBeDefined()
-    expect(screen.getByText('当前过滤下右目录没有条目。')).toBeDefined()
+    expect(screen.getByText(zh['directory.empty.left'])).toBeDefined()
+    expect(screen.getByText(zh['directory.empty.right'])).toBeDefined()
   })
 
   it('restores filter, collapse, selection and scroll after a drilldown remount', () => {
@@ -692,7 +690,11 @@ describe('DirectoryView windowed tree', () => {
     const [restoredLeft, restoredRight] = trees()
     expect(Math.abs(scrollerOf(restoredLeft).scrollTop - 4800)).toBeLessThanOrEqual(1)
     expect(Math.abs(scrollerOf(restoredRight).scrollTop - 4800)).toBeLessThanOrEqual(1)
-    expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
+    expect(
+      screen
+        .getByRole('tab', { name: zh[FILTER_LABEL_KEYS.differences] })
+        .getAttribute('aria-selected')
+    ).toBe('true')
     const restoredSelected = screen
       .getAllByRole('treeitem')
       .filter((row) => row.getAttribute('aria-selected') === 'true')
@@ -715,12 +717,12 @@ describe('DirectoryView windowed tree', () => {
         initial={{ ...INITIAL_STATE, collapsed: ['big', 'g0'] }}
       />
     )
-    fireEvent.click(within(trees()[0]).getByRole('button', { name: '展开 g0' }))
-    fireEvent.click(within(trees()[0]).getByRole('button', { name: '展开 big' }))
+    fireEvent.click(within(trees()[0]).getByRole('button', { name: expandLabel('g0') }))
+    fireEvent.click(within(trees()[0]).getByRole('button', { name: expandLabel('big') }))
     scrollTo(trees()[0], 20_000)
-    fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
+    fireEvent.click(screen.getByRole('tab', { name: zh[FILTER_LABEL_KEYS.differences] }))
     scrollTo(trees()[0], 0)
-    fireEvent.click(screen.getByRole('tab', { name: '左独有' }))
+    fireEvent.click(screen.getByRole('tab', { name: zh[FILTER_LABEL_KEYS['left-only']] }))
     fireEvent.click(within(trees()[0]).getAllByRole('treeitem')[0])
 
     expect(vi.mocked(filterDirectoryTree)).not.toHaveBeenCalled()
