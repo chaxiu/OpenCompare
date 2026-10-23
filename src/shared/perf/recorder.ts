@@ -9,6 +9,9 @@ import type { PerfProcessMetric } from './rss'
 import type {
   PerfEvidence,
   PerfEvidenceEnv,
+  PerfHoldSample,
+  PerfMode,
+  PerfPair,
   PerfProfileName,
   PerfRoundDelta,
   PerfRoundReport,
@@ -21,11 +24,14 @@ import { PERF_MEMORY_DEFINITION } from './types'
 import { evaluatePerf } from './verdict'
 
 export interface PerfRecorderInit {
+  readonly mode: PerfMode
+  readonly pairs: readonly PerfPair[]
   readonly left: string
   readonly right: string
   readonly profile: PerfProfileName
   readonly thresholds: PerfThresholds
   readonly intervalMs: number
+  readonly settleMs: number
   readonly appPid: number
   readonly commit: PerfEvidence['commit']
   readonly env: PerfEvidenceEnv
@@ -44,6 +50,9 @@ export class PerfRecorder {
   private readonly init: PerfRecorderInit
   private readonly samples: PerfSample[] = []
   private readonly rounds: RoundState[] = []
+  private readonly holds: PerfHoldSample[] = []
+  private settleRss: PerfRss | null = null
+  private settleAt: string | null = null
   private currentRound = 0
   private startupTaken = false
   private finished = false
@@ -95,15 +104,41 @@ export class PerfRecorder {
     }
     const post = this.sample(`round-${report.index}-post`, 'post-round', report.index)
     this.sample(`round-${report.index}-end`, 'boundary', report.index)
+    // The ready peak of a round is the largest renderer reading seen inside
+    // its own window, not just the post-round sample.
+    let roundPeak = post.rss.renderer
+    for (const sample of this.samples) {
+      if (sample.round !== report.index || sample.phase === 'settle') continue
+      roundPeak = Math.max(roundPeak, sample.rss.renderer)
+    }
     this.rounds.push({
       report: {
         ...report,
         rendererRss: post.rss.renderer,
         appTotalRss: post.rss.appTotal,
-        rendererPid: post.pids.renderer
+        rendererPid: post.pids.renderer,
+        roundPeak
       },
       postRss: post.rss
     })
+  }
+
+  /** One post-GC liveness reading, attributed to the round in progress. */
+  hold(sample: {
+    readonly label: string
+    readonly tabs: number
+    readonly comparisons: number
+    readonly rowModels: number
+    readonly gc: boolean
+  }): void {
+    this.holds.push({ ...sample, round: this.currentRound })
+  }
+
+  /** The single post-settle reading; kept out of the round/periodic peak series. */
+  settle(): void {
+    const sample = this.sample('settle', 'settle', this.currentRound)
+    this.settleRss = sample.rss
+    this.settleAt = sample.at
   }
 
   /** One fixed-interval background sample, attributed to the round in progress. */
@@ -117,6 +152,8 @@ export class PerfRecorder {
     let main = 0
     let appTotal = 0
     for (const sample of this.samples) {
+      // The settle reading has its own column and never inflates the peaks.
+      if (sample.phase === 'settle') continue
       renderer = Math.max(renderer, sample.rss.renderer)
       main = Math.max(main, sample.rss.main)
       appTotal = Math.max(appTotal, sample.rss.appTotal)
@@ -178,7 +215,13 @@ export class PerfRecorder {
       peaks,
       roundDeltas,
       invalidSamples,
-      harnessError: input.error !== undefined
+      harnessError: input.error !== undefined,
+      mode: this.init.mode,
+      settle: this.settleRss,
+      roundPeaks: this.rounds.map(
+        (round) => round.report.roundPeak ?? round.report.rendererRss ?? 0
+      ),
+      holds: this.holds
     })
 
     const first = this.rounds[0]?.report
@@ -193,9 +236,11 @@ export class PerfRecorder {
       generatedAt: this.now().toISOString(),
       appPid: this.init.appPid,
       commit: this.init.commit,
+      mode: this.init.mode,
+      pairs: [...this.init.pairs],
       roots: { left: this.init.left, right: this.init.right },
       profile: this.init.profile,
-      sampling: { intervalMs: this.init.intervalMs },
+      sampling: { intervalMs: this.init.intervalMs, settleMs: this.init.settleMs },
       memoryDefinition: PERF_MEMORY_DEFINITION,
       counts: this.totals(),
       rounds: this.rounds.map((round) => round.report),
@@ -203,6 +248,9 @@ export class PerfRecorder {
       env: this.init.env,
       samples: [...this.samples],
       peaks,
+      settle: this.settleRss,
+      settleAt: this.settleAt,
+      holds: [...this.holds],
       roundDeltas,
       verdict,
       ...(input.error === undefined ? {} : { error: input.error })

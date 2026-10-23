@@ -3,6 +3,8 @@ import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/com
 import { createComparisonCache } from '@core/directory/compare'
 import {
   createDrilldownSession,
+  directoryComparisonKey,
+  directoryViewKey,
   releaseDirectoryComparison,
   resolveDirectoryReturn
 } from './directoryCompare'
@@ -100,6 +102,27 @@ function comparisonOf(leftRoot: string, rightRoot: string): DirectoryComparison 
 function comparedSession(id: string, leftRoot: string, rightRoot: string): WorkbenchSession {
   return { ...directorySession(id), directory: comparisonOf(leftRoot, rightRoot) }
 }
+
+describe('directory view key', () => {
+  it('is stable for one comparison and changes for a re-compared object', () => {
+    const first = comparisonOf('/left', '/right')
+    const second = comparisonOf('/left', '/right')
+    expect(directoryComparisonKey(first)).toBe(directoryComparisonKey(first))
+    expect(directoryComparisonKey(first)).not.toBe(directoryComparisonKey(second))
+  })
+
+  it('remounts the view on a same-tab re-compare and on a tab switch', () => {
+    const session = comparedSession('directory:left ↔ right', '/left', '/right')
+    const sameComparison = { ...session }
+    expect(directoryViewKey(sameComparison)).toBe(directoryViewKey(session))
+
+    const recompared = { ...session, directory: comparisonOf('/left', '/right') }
+    expect(directoryViewKey(recompared)).not.toBe(directoryViewKey(session))
+
+    const otherTab = { ...session, id: 'directory:other ↔ right' }
+    expect(directoryViewKey(otherTab)).not.toBe(directoryViewKey(session))
+  })
+})
 
 describe('releaseDirectoryComparison', () => {
   const entry = { size: 1, modifiedMs: 0, hash: 'a'.repeat(64) }

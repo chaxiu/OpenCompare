@@ -90,6 +90,8 @@ function isPerfRendererEvent(value: unknown): value is PerfRendererEvent {
     type === 'ready' ||
     type === 'round-start' ||
     type === 'round-end' ||
+    type === 'hold' ||
+    type === 'settle' ||
     type === 'complete' ||
     type === 'failed'
   )
@@ -118,11 +120,14 @@ export async function runPerfHarness(deps: PerfHarnessDeps): Promise<void> {
   }
 
   const recorder = new PerfRecorder({
+    mode: config.mode,
+    pairs: config.pairs,
     left: config.left,
     right: config.right,
     profile: config.profile,
     thresholds,
     intervalMs: config.intervalMs,
+    settleMs: config.settleMs,
     appPid: process.pid,
     commit: collectCommit(deps.cwd),
     env: collectEnv(),
@@ -178,6 +183,12 @@ export async function runPerfHarness(deps: PerfHarnessDeps): Promise<void> {
         break
       case 'round-end':
         recorder.endRound(event.report)
+        break
+      case 'hold':
+        recorder.hold(event)
+        break
+      case 'settle':
+        recorder.settle()
         break
       case 'complete':
         void finalize()

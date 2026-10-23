@@ -11,6 +11,7 @@ import {
   Upload
 } from 'lucide-react'
 import type { SampleComposition } from '@shared/fixtures'
+import { trackLive } from '@shared/perf/liveness'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
@@ -159,14 +160,17 @@ export function DirectoryView({
     const file = files?.[0]
     if (file) onImportSnapshot(side, file)
   }
-  const leftRows = useMemo(
-    () => buildDirectoryRowModel(comparison.root, filter, 'left', collapsedPaths),
-    [comparison, filter, collapsedPaths]
-  )
-  const rightRows = useMemo(
-    () => buildDirectoryRowModel(comparison.root, filter, 'right', collapsedPaths),
-    [comparison, filter, collapsedPaths]
-  )
+  const leftRows = useMemo(() => {
+    const model = buildDirectoryRowModel(comparison.root, filter, 'left', collapsedPaths)
+    // Measurement-only registration; inert outside a harness run.
+    trackLive('rowModel', model)
+    return model
+  }, [comparison, filter, collapsedPaths])
+  const rightRows = useMemo(() => {
+    const model = buildDirectoryRowModel(comparison.root, filter, 'right', collapsedPaths)
+    trackLive('rowModel', model)
+    return model
+  }, [comparison, filter, collapsedPaths])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">

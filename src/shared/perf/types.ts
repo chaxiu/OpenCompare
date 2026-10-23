@@ -7,12 +7,27 @@
  */
 export type PerfProfileName = 'real' | 'gate'
 
+/**
+ * Holding mode of a measurement run. `upsert` re-compares one pair in the same
+ * tab (what a re-compare in the UI does); `multisession` appends one tab per
+ * pair, so 3 pairs land at 1 → 2 → 3 tabs.
+ */
+export type PerfMode = 'upsert' | 'multisession'
+
+/** One left/right root pair of a run. */
+export interface PerfPair {
+  readonly left: string
+  readonly right: string
+}
+
 /** One profile's hard limits, loaded from `perf/profiles.json`. */
 export interface PerfThresholds {
   /** Renderer RSS peak ceiling in bytes. */
   readonly rendererPeakBytes: number
   /** Whole-app RSS peak ceiling in bytes (all processes). */
   readonly appTotalPeakBytes: number
+  /** Renderer RSS ceiling of the post-settle sample in bytes. */
+  readonly settleRendererBytes: number
   /** Absolute ceiling of the 3rd-round renderer increment in bytes. */
   readonly roundDeltaMaxBytes: number
   /** Fraction of the first-round increment the 3rd-round increment may use. */
@@ -25,9 +40,14 @@ export type PerfProfiles = Readonly<Record<PerfProfileName, PerfThresholds>>
 
 /** Fully validated harness configuration, derived from argv + environment. */
 export interface PerfHarnessConfig {
+  readonly mode: PerfMode
+  readonly pairs: readonly PerfPair[]
+  /** First pair's roots, kept for the evidence `roots` object. */
   readonly left: string
   readonly right: string
   readonly rounds: number
+  /** Wait after the last round before the single settle sample. */
+  readonly settleMs: number
   readonly intervalMs: number
   readonly out: string
   readonly profile: PerfProfileName
@@ -50,9 +70,16 @@ export interface PerfProcessIds {
 /**
  * Where in the run a sample was taken. `startup` is the post-launch baseline,
  * `boundary` marks the round boundary bookkeeping samples, `periodic` is the
- * fixed-interval background series.
+ * fixed-interval background series, and `settle` is the single post-settle
+ * reading (kept out of the peak series).
  */
-export type PerfSamplePhase = 'startup' | 'boundary' | 'pre-round' | 'post-round' | 'periodic'
+export type PerfSamplePhase =
+  | 'startup'
+  | 'boundary'
+  | 'pre-round'
+  | 'post-round'
+  | 'periodic'
+  | 'settle'
 
 export interface PerfSample {
   /** Distinguishable label, e.g. `round-2-pre` or `startup-baseline`. */
@@ -84,11 +111,15 @@ export interface PerfRoundReport {
   readonly startedAt: string
   readonly endedAt: string
   readonly wallMs: number
-  /** Session id of the round; each round builds a fresh directory session. */
+  /** Session id of the round; `upsert` keeps it stable across rounds. */
   readonly sessionId: string
+  /** Open tabs after this round's commit (1 for `upsert`, 1→2→3 for `multisession`). */
+  readonly tabs: number
   readonly counts: PerfRoundCounts
   /** Renderer RSS measured right after the round. */
   readonly rendererRss?: number
+  /** Largest renderer RSS observed inside this round's sampling window. */
+  readonly roundPeak?: number
   readonly appTotalRss?: number
   /** Renderer PID observed for this round. */
   readonly rendererPid?: number | null
@@ -105,6 +136,7 @@ export interface PerfAppliedThresholds {
   readonly profile: PerfProfileName
   readonly rendererPeakBytes: number
   readonly appTotalPeakBytes: number
+  readonly settleRendererBytes: number
   readonly roundDeltaMaxBytes: number
   readonly roundDeltaRatio: number
   readonly roundDeltaFloorBytes: number
@@ -131,15 +163,36 @@ export interface PerfEvidenceEnv {
   readonly electron: string
 }
 
+/**
+ * One post-GC liveness reading reported by the renderer. `gc === false` means
+ * the forced collection could not run, which the verdict treats as unmeasured
+ * rather than as a pass.
+ */
+export interface PerfHoldSample {
+  /** `round-1` … `round-N`, or `settle` for the reading after the settle wait. */
+  readonly label: string
+  /** Round the reading belongs to (the last round for `settle`). */
+  readonly round: number
+  /** Open tabs at that moment. */
+  readonly tabs: number
+  /** `DirectoryComparison` objects still reachable after GC. */
+  readonly comparisons: number
+  /** `DirectoryRowModel` objects still reachable after GC. */
+  readonly rowModels: number
+  readonly gc: boolean
+}
+
 export interface PerfEvidence {
   readonly schema: 'opencompare.perf.directory/v1'
   readonly generatedAt: string
   /** PID of the single app instance every round ran in. */
   readonly appPid: number
   readonly commit: { readonly sha: string; readonly dirty: boolean }
+  readonly mode: PerfMode
+  readonly pairs: readonly PerfPair[]
   readonly roots: { readonly left: string; readonly right: string }
   readonly profile: PerfProfileName
-  readonly sampling: { readonly intervalMs: number }
+  readonly sampling: { readonly intervalMs: number; readonly settleMs: number }
   /** Human-readable RSS definition written into every evidence file. */
   readonly memoryDefinition: string
   readonly counts: PerfRoundCounts
@@ -147,7 +200,12 @@ export interface PerfEvidence {
   readonly totalWallMs: number
   readonly env: PerfEvidenceEnv
   readonly samples: readonly PerfSample[]
+  /** Peak of the ready/round/periodic series; the settle reading is separate. */
   readonly peaks: PerfRss
+  /** Post-settle reading; `null` when the run never produced one. */
+  readonly settle: PerfRss | null
+  readonly settleAt: string | null
+  readonly holds: readonly PerfHoldSample[]
   readonly roundDeltas: readonly PerfRoundDelta[]
   readonly verdict: PerfVerdict
   /** Present only when the harness itself failed; `verdict.ok` is then false. */
@@ -166,6 +224,15 @@ export type PerfRendererEvent =
   | { readonly type: 'ready' }
   | { readonly type: 'round-start'; readonly round: number }
   | { readonly type: 'round-end'; readonly report: PerfRoundReport }
+  | {
+      readonly type: 'hold'
+      readonly label: string
+      readonly tabs: number
+      readonly comparisons: number
+      readonly rowModels: number
+      readonly gc: boolean
+    }
+  | { readonly type: 'settle' }
   | { readonly type: 'complete' }
   | { readonly type: 'failed'; readonly message: string }
 

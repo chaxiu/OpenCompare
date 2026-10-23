@@ -138,6 +138,10 @@ function startNormalApp(): void {
 // normal `--left/--right` launch can never enter it.
 const perfHarnessActive = isPerfHarnessActive(process.argv, process.env)
 if (perfHarnessActive) {
+  // The harness asserts post-GC live object counts; only measurement runs get
+  // `globalThis.gc`, and the switch has to be installed before app ready so the
+  // renderer processes inherit it. A normal launch never exposes it.
+  app.commandLine.appendSwitch('js-flags', '--expose-gc')
   void app.whenReady().then(() =>
     runPerfHarness({
       argv: process.argv,
