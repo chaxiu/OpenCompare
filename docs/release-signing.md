@@ -2,7 +2,7 @@
 
 OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application 签名** 与 **Apple 公证（Notarization）**，否则 Gatekeeper 会拦截、无法作为合规正式版分发。相关配置已接线，但**凭据必须由人类录入**，AI 不获取、不录入、不在本地执行公证。缺凭据时 CI 显式失败（fail-closed），**绝不产出、上传或公开未签名裸包**。
 
-> **当前状态：v0.2.6 待发布。** 最新公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5>，发布证据见 `docs/release-evidence/v0.2.5.md`。公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
+> **当前状态：v0.2.6 已发布。** 最新公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6>，发布证据见 `docs/release-evidence/v0.2.6.md`；v0.2.5 的发布证据作为历史保留在 `docs/release-evidence/v0.2.5.md`。公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
 >
 > **凭据录入：** Developer ID 证书与 App Store Connect API Key 由人类按标准协助机制录入 **GitHub CI Secrets**（只进 Secrets，禁止写入仓库、构建脚本或日志）；6 项 Secret 齐备后推送 `v*` 标签即可由 CI 产出签名 + 公证的包。
 
@@ -44,6 +44,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 ## 三、正式版发布姿态（v0.2.6）
 
 - 发布已解冻：正式版经 **Developer ID 签名 + Apple 公证** 流程产出，由 `v*` tag 触发的 CI 发布为每个版本唯一的公开 Release（详见 `README.md` 的「发布流程」）。v0.2.0 从未公开发布，v0.2.1 以修正后的发布门测试首发，用户可见变化与 v0.2.0 相同。
+- v0.2.6 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6>，11 件资产；CI run `39890773909` 五 job（`Quality gates` / `Package win` / `Package linux` / `Package mac` / `Publish the GitHub Release`）全 success，签名与公证的实测原文见 `docs/release-evidence/v0.2.6.md`。macOS 公证由 CI 执行，实际结果以那次 CI 为准；公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接，不在研发侧写成已通过。
 - v0.2.5 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5>，11 件资产、签名与公证的实测原文见 `docs/release-evidence/v0.2.5.md`。公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接并回填该文件第六节；第六节目前仍是就绪条件，不在研发侧写成已通过。
 - 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。6 项 Secret 清单与录入方式见上文第一节。
 - 本版发布说明见 `docs/release-notes/v0.2.6.md`。
@@ -70,7 +71,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 仅 tag 可达提交的 diff 若删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`），即使 `git cherry` 判为 `-` 也非零退出。
 - 祖先门只做只读 git 查询，不创建、移动、删除任何 tag / ref，不 push，也不调用 `gh release` 写操作。
 
-**补发用法（不改 tag、不升版本）**：v0.2.5 已发布；v0.2.6 待发布，发布或补发时从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.6`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
+**补发用法（不改 tag、不升版本）**：`v0.2.6` 已发布；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.6`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
 
 ## 六、打包后硬校验（CI，上传前）
 

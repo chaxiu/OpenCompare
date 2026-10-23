@@ -2,7 +2,7 @@
 
 对标的 **Beyond Compare 5 Pro** 的现代跨平台桌面对比与三向合并工具。基于 Electron + React 19 + TypeScript，一套代码同时构建桌面应用与浏览器预览。
 
-> ✅ **当前发布状态：v0.2.6 待发布；最新公开 Release 为 [v0.2.5](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5)。** v0.2.6 修复 Windows 绝对路径在四个入口（CLI 参数、单实例接管、手工输入、`opencompare://`）被拼到 cwd / baseDir 的问题，盘符 / 盘根 / UNC 输入按原样解析，见 [`docs/release-notes/v0.2.6.md`](docs/release-notes/v0.2.6.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
+> ✅ **当前发布状态：v0.2.6 已发布；最新公开 Release 为 [v0.2.6](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6)。** v0.2.6 修复 Windows 绝对路径在四个入口（CLI 参数、单实例接管、手工输入、`opencompare://`）被拼到 cwd / baseDir 的问题，盘符 / 盘根 / UNC 输入按原样解析，见 [`docs/release-notes/v0.2.6.md`](docs/release-notes/v0.2.6.md)。macOS 安装包（`.dmg` / `.zip`）经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 GitHub Actions 发布为每个版本唯一的公开 Release。公证走 **App Store Connect API Key 模式**，6 项凭据（`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_TEAM_ID` / `APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`）由人类按标准协助机制录入 GitHub Secrets（只进 CI Secrets，不入库）；任一缺失时 macOS 打包显式失败（fail-closed），绝不产出未签名裸包。签名 + 公证在发版时由 CI 执行，实际结果以 tag 触发的那次 CI 为准。凭据清单见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 对开发者与运维团队最常用的四类对比，OpenCompare 内置了可直接试跑的完整样本，并支持打开/保存本地真实文件：
 
@@ -10,11 +10,13 @@
 
 | 版本 | 状态 | 说明 |
 | --- | --- | --- |
-| v0.2.6 | 待发布 | Windows 绝对路径四入口修复（盘符 / 盘根 / UNC），见[发布说明](docs/release-notes/v0.2.6.md) |
-| [v0.2.5](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5) | 已发布（最新公开 Release） | 多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径，见[发布说明](docs/release-notes/v0.2.5.md) |
-| [v0.2.4](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4) | 已发布（上一版） | 承接 v0.2.3 未发布内容，并合入目录对比批量扫描、进度与取消、窗口化目录树等修复，见[发布说明](docs/release-notes/v0.2.4.md) |
+| [v0.2.6](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6) | 已发布（最新公开 Release） | Windows 绝对路径四入口修复（盘符 / 盘根 / UNC），见[发布说明](docs/release-notes/v0.2.6.md) |
+| [v0.2.5](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5) | 已发布（上一版） | 多轮内存收敛、取消零日志噪声、符号链接「不跟随」计数口径，见[发布说明](docs/release-notes/v0.2.5.md) |
+| [v0.2.4](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4) | 已发布 | 承接 v0.2.3 未发布内容，并合入目录对比批量扫描、进度与取消、窗口化目录树等修复，见[发布说明](docs/release-notes/v0.2.4.md) |
 | v0.2.3 | 未发布，内容并入 v0.2.4 | 从未打 tag、从未公开 Release；用户可见改动全部见 v0.2.4 |
 | [v0.2.2](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2) | 已发布 | 大目录对比 EMFILE 修复 |
+
+下载 v0.2.6：[公开下载页](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6) · macOS [dmg](https://github.com/chaxiu/OpenCompare/releases/download/v0.2.6/OpenCompare-0.2.6-arm64.dmg) / [zip](https://github.com/chaxiu/OpenCompare/releases/download/v0.2.6/OpenCompare-0.2.6-arm64-mac.zip) · Windows [OpenCompare-Setup-0.2.6.exe](https://github.com/chaxiu/OpenCompare/releases/download/v0.2.6/OpenCompare-Setup-0.2.6.exe) · Linux [AppImage](https://github.com/chaxiu/OpenCompare/releases/download/v0.2.6/OpenCompare-0.2.6.AppImage) / [deb](https://github.com/chaxiu/OpenCompare/releases/download/v0.2.6/opencompare_0.2.6_amd64.deb)
 
 ## 核心能力
 
@@ -85,6 +87,7 @@ src/shared/     跨进程共享类型、PlatformPort 契约、IPC channel 白名
 
 ## 已知问题
 
+- **Windows 绝对路径在四个入口被拼到 cwd / baseDir（Issue #3）**：v0.2.5 及更早版本在 Windows 上经 CLI 冷启动（`--left` / `--right`）、单实例接管（应用已运行时再次启动）、新建对比手工输入、`opencompare://` 链接传入 `C:\…` 这类绝对路径时，路径会被拼到 cwd / baseDir 后面（Issue 原文症状：`C:\path\to\file1` 被解成 `C:\path\to\/C:\path\to\/file2`，文件名被吞）。**已在 v0.2.6 修复**：四个入口一律按绝对路径解析，盘符 / 盘根 / UNC 输入按原样解析，`..` 不越过盘根 / 共享根。回归由 [`src/shared/compareRequest.test.ts`](src/shared/compareRequest.test.ts) 的盘符 / 盘根 / UNC 六例覆盖，`windows-latest` run [`39890047849`](https://github.com/chaxiu/OpenCompare/actions/runs/39890047849) 为 46 tests passed；详见 [Issue #3](https://github.com/chaxiu/OpenCompare/issues/3)。
 - **悬空符号链接 / 不可读项会让目录对比整体失败**：v0.2.2 及更早版本在真实工程目录含悬空符号链接或不可读项时，目录列举、扫描、对比与快照构建会整体失败。当前版本已修复：悬空链接作为一条普通链接条目照常参与比较；只有 EACCES / ELOOP 等真正不可读的条目或目录才被跳过，并按左、右两侧分列计入「已跳过」计数，对比照常完成。
 - **符号链接口径：不跟随符号链接**：目录扫描不进入链接目标目录，链接自身作为一条叶条目参与 `same / added / removed / modified`；悬空链接同样参与比较，仅不可读条目按左右分列计入跳过。计数、下钻与快照影响见 [`docs/symlink-no-follow.md`](docs/symlink-no-follow.md)。
 - **大目录对比可能耗尽文件句柄（EMFILE）**：v0.2.1 及更早版本拖入含数千个文件的真实文件夹时，目录内容读取会一次性并发打开全部文件，可能报 `platform:read-text-file EMFILE` 并中断对比。当前版本已修复：目录内容读取与目录条目元数据查询改为默认 8 路的有界并发，文件句柄耗尽时经工作台既有提示就地展示「文件句柄耗尽（EMFILE）」的可读错误，不再崩溃窗口。
