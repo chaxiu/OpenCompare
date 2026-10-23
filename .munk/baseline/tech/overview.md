@@ -25,8 +25,13 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 - 结构断言：perf 模式在 app ready 前装 `--js-flags=--expose-gc`（普通启动不加）；每轮与 settle 后强制 GC 两次，`shared/perf/liveness.ts` 的 `WeakRef` 登记表数 `comparisons` / `rowModels`，`holds[]` 随证据落盘；`gc=false` 判 `hold-unmeasured` 红。`holds.comparisons` 对所有模式要求 **仅活动 1 份**，`tabs` 按场景（upsert 1、multisession 1/2/3、retained 1/2/3/3/3、reclaim 2）。
 - 判定单点：`src/shared/perf/verdict.ts` + `perf/profiles.json`（六项数值未改）。`settleRendererBytes`（real 1,363,148,800 B / gate 1,073,741,824 B）与 `renderer-round-peak` / `renderer-settle` / `settle-missing` / `hold-*` 继续有效；多 tab 场景（multisession / retained）的瞬时 ready 峰值降级为护栏 `TRANSIENT_PEAK_GUARDRAIL_BYTES = 2_415_919_104`（超 profile 目标只进 `notices[]`），`settle` / `settleStages` / `appTotal` / `reclaim`（`RECLAIM_RENDERER_BYTES = 1_153_433_600`，关 1 tab）/ 热轮 `hashedFiles=0` / 静置抬升 ≤100 MiB / `renderer-restart` 仍为硬线；`upsert` 的 profile 峰值硬线不变，`round-delta` 仅对 `upsert` 生效。
 - 证据：`schema: opencompare.perf.directory/v1` 加法扩展（`mode` / `pairs` / `hotRounds` / `rounds[].tabs` / `rounds[].roundPeak` / `rounds[].rendererPid` / `settle` / `settleStages` / `reclaim` / `holds` / `verdict.notices`），原子写、< 5 MB。
-- 门禁：`pnpm perf:gate` 单次生成数据集（含第三对根 `links/left` 目录符号链接）并跑三次 harness（upsert 5 轮 + multisession 3 会话 + retained 3 tab/2 热轮，`--settle 5000`，`RUN_TIMEOUT_MS=300_000`），断言峰值（多 tab 用 2.25 GiB 护栏）/ settle / settleStages / reclaim / appTotal / holds / tabs / 热轮 `hashedFiles=0` / 别名轮 `hashedFiles=0`；`pnpm test:memory` 继续守缓存双上限 / 跨轮不增长 / 释放 / 结果不变。
+- 条件门禁（`.munk/code-gates.perf.json`，不进默认矩阵）：`pnpm perf:gate` 单次生成数据集（含第三对根 `links/left` 目录符号链接）并跑三次 harness（upsert 5 轮 + multisession 3 会话 + retained 3 tab/2 热轮，`--settle 5000`，`RUN_TIMEOUT_MS=300_000`），断言峰值（多 tab 用 2.25 GiB 护栏）/ settle / settleStages / reclaim / appTotal / holds / tabs / 热轮 `hashedFiles=0` / 别名轮 `hashedFiles=0`；`pnpm test:memory` 继续守缓存双上限 / 跨轮不增长 / 释放 / 结果不变。仅在 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染 / 取消路径时调用，或作为里程碑 `x.y.0` 的独立验收任务跑一次。
 
 ## 质量门禁
 
-`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate` / `memory-gate`（见 `.munk/code-gates.json`）。`perf-gate` 真实启动 Electron，无 GUI 会话或超时会红。
+默认矩阵 9 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
+`test-compare-request` / `cancel-gate` / `memory-gate`（见 `.munk/code-gates.json`），全部为纯单测
+或构建门禁。重采样 `pnpm perf:gate` **不在默认矩阵**，只作为条件 profile 放在
+`.munk/code-gates.perf.json`（Host 不自动执行）：仅在 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染
+/ 取消路径时调用，或作为里程碑 `x.y.0` 的独立验收任务跑一次；同一 commit 只采样一次，重跑须在
+digest 写明上一轮作废原因与两轮差异。`perf-gate` 真实启动 Electron，无 GUI 会话或超时会红。
