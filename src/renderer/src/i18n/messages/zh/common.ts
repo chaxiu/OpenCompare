@@ -10,6 +10,7 @@ export const common = {
   'common.retry': '重试',
   'common.dismiss': '忽略',
   'common.loading': '正在加载…',
+  'common.splitPane.divider': '调整分栏宽度',
   'common.error.title': '出了点问题',
   'common.error.unknown': '未知错误',
   'common.itemCount': '{count} 项',

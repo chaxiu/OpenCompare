@@ -12,7 +12,7 @@ export interface SegmentedControlProps<T extends string> {
   readonly options: readonly SegmentOption<T>[]
   readonly value: T
   readonly onChange: (value: T) => void
-  /** Accessible name of the group, e.g. `视图切换`. */
+  /** Accessible name of the group, e.g. `Switch view`. */
   readonly label: string
 }
 

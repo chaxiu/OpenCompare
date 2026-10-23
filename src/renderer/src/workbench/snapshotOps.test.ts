@@ -13,14 +13,14 @@ import { sha256Hex } from '@core/directory/hash'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import {
   compareSides,
-  describeSnapshotContentError,
-  describeSnapshotImportError,
   directorySides,
   exportSideSnapshot,
   findSnapshotMount,
   parseSnapshotText,
   readSideFile,
   remoteSnapshotSides,
+  snapshotContentFailure,
+  snapshotImportFailure,
   snapshotMountPath,
   snapshotSide,
   withSide
@@ -151,7 +151,7 @@ describe('snapshotOps comparison', () => {
     }
     expect(caught).toBeInstanceOf(SnapshotFormatError)
     expect((caught as SnapshotFormatError).code).toBe('invalid-schema')
-    expect(describeSnapshotImportError(caught)).toContain('opencompare.snapshot/v1')
+    expect(snapshotImportFailure(caught)).toEqual({ code: 'invalid-schema' })
   })
 
   it('reads directory paths from the platform and snapshot paths from the mount', async () => {
@@ -198,7 +198,10 @@ describe('snapshotOps comparison', () => {
       caught = error
     }
     expect((caught as SnapshotContentError).code).toBe('content-not-inlined')
-    expect(describeSnapshotContentError(caught, 'src/notes.ts')).toContain('未内联')
+    expect(snapshotContentFailure(caught)).toEqual({
+      code: 'content-not-inlined',
+      path: 'src/notes.ts'
+    })
   })
 
   it('re-serializes a mounted snapshot unchanged', async () => {

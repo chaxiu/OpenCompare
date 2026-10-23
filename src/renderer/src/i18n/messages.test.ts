@@ -50,6 +50,60 @@ const PAIRS: Record<string, [Record<string, string>, Record<string, string>]> = 
   settings: [zhSettings, enSettings]
 }
 
+/**
+ * Label fragments the layout renders immediately before or after a monospace
+ * path, so their one boundary space is part of the sentence, not stray input.
+ */
+const INLINE_COPY_KEYS = new Set([
+  'directory.sync.targetRoot',
+  'directory.sync.materialize',
+  'directory.sync.total.one',
+  'directory.sync.total.other',
+  'directory.template.label.template',
+  'directory.template.label.incoming',
+  'directory.template.label.output'
+])
+
+/** Canonical American-English forms of the product's core concepts. */
+const GLOSSARY = [
+  'comparison',
+  'difference',
+  'conflict',
+  'snapshot',
+  'sync',
+  'template',
+  'key column',
+  'session'
+] as const
+
+/** Spelling and case variants the English dictionary must never carry. */
+const BANNED_VARIANTS = [
+  'Synchronisation',
+  'Snap shot',
+  'Comparision',
+  'Cancelation',
+  'colour',
+  'behaviour'
+] as const
+
+/** Change blocks and change counts always say difference(s), never diff. */
+const DIFFERENCE_ONLY_KEYS = [
+  'shell.stat.differences',
+  'files.code.prevDifference',
+  'files.code.nextDifference',
+  'files.code.blocks',
+  'directory.filter.differences',
+  'files.csv.filter.differences'
+] as const
+
+/** Diff is only a view / mode name. */
+const DIFF_VIEW_KEYS = ['shell.view.code', 'files.code.mode.diff'] as const
+
+function glossaryPattern(term: string): RegExp {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
+  return new RegExp(`\\b${escaped}(?:s|es)?\\b`, 'i')
+}
+
 function placeholders(value: string): string[] {
   return [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1] ?? '').sort()
 }
@@ -108,6 +162,49 @@ describe('dictionary values', () => {
     for (const [key, value] of Object.entries(zhValues)) {
       if (/^\{(\w+)\}$/.test(value.trim()) || LATIN_ONLY_KEYS.has(key)) continue
       expect(value, key).toMatch(/\p{Script=Han}/u)
+    }
+  })
+
+  it('ships clean English copy without placeholders, Han text or stray whitespace', () => {
+    for (const [key, value] of Object.entries(enValues)) {
+      expect(value.trim(), key).not.toBe('')
+      expect(value, key).not.toMatch(/TODO|未翻译/)
+      expect(value, key).not.toMatch(/\p{Script=Han}/u)
+      expect(value.includes('  '), key).toBe(false)
+      if (INLINE_COPY_KEYS.has(key)) {
+        // Exactly one boundary space on one side only; never on both.
+        expect(value.startsWith(' ') && value.endsWith(' '), key).toBe(false)
+        expect(value.startsWith('  ') || value.endsWith('  '), key).toBe(false)
+        expect(value.trim(), key).not.toBe('')
+      } else {
+        expect(value, key).toBe(value.trim())
+      }
+    }
+  })
+})
+
+describe('English glossary', () => {
+  it('uses every canonical core-concept word form at least once', () => {
+    const all = Object.values(enValues).join('\n')
+    for (const term of GLOSSARY) {
+      expect(glossaryPattern(term).test(all), term).toBe(true)
+    }
+  })
+
+  it('never carries a banned spelling or case variant', () => {
+    const all = Object.values(enValues).join('\n')
+    for (const variant of BANNED_VARIANTS) {
+      expect(all.toLowerCase(), variant).not.toContain(variant.toLowerCase())
+    }
+  })
+
+  it('uses difference(s) for change blocks and diff only as a view or mode name', () => {
+    for (const key of DIFFERENCE_ONLY_KEYS) {
+      expect(enValues[key], key).toMatch(/difference/i)
+      expect(enValues[key], key).not.toMatch(/\bdiff(s|ed|ing)?\b/i)
+    }
+    for (const key of DIFF_VIEW_KEYS) {
+      expect(enValues[key], key).toMatch(/\bdiff\b/i)
     }
   })
 })

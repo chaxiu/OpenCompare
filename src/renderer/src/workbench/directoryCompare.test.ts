@@ -5,6 +5,7 @@ import { setLivenessEnabled, livenessCounts } from '@shared/perf/liveness'
 import {
   attachDirectoryComparison,
   createDrilldownSession,
+  createFilePairSession,
   directoryComparisonKey,
   directoryViewKey,
   releaseDirectoryComparison,
@@ -142,6 +143,33 @@ describe('attaching a comparison', () => {
       expect(livenessCounts().comparisons).toBe(1)
     } finally {
       setLivenessEnabled(false)
+    }
+  })
+})
+
+describe('session stats', () => {
+  it('carries stable stat ids instead of visible copy', () => {
+    const comparison = comparisonOf('/left', '/right')
+    const attached = attachDirectoryComparison(directorySession('directory:left ↔ right'), comparison)
+    expect(attached.stats.map((stat) => stat.label)).toEqual([
+      'sourceFiles',
+      'targetFiles',
+      'differences'
+    ])
+    expect(attached.stats.map((stat) => stat.value)).toEqual([0, 0, 0])
+
+    const pair = createFilePairSession(
+      'file:a.txt',
+      'a.txt',
+      TARGET,
+      { path: '/left/a.txt', text: 'a\nb' },
+      { path: '/right/a.txt', text: 'a\nb\nc' }
+    )
+    expect(pair.stats.map((stat) => stat.label)).toEqual(['linesLeft', 'linesRight'])
+    expect(pair.stats.map((stat) => stat.value)).toEqual([2, 3])
+
+    for (const stat of [...attached.stats, ...pair.stats]) {
+      expect(stat.label).not.toMatch(/\p{Script=Han}/u)
     }
   })
 })
