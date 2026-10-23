@@ -392,7 +392,9 @@ describe('language switch', () => {
     )
     expect(within(afterTabs).getByTitle('Unsaved changes')).toBeDefined()
 
-    expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Differences only' }).getAttribute('aria-selected')).toBe(
+      'true'
+    )
     expect(
       within(screen.getAllByRole('tree')[0])
         .getAllByText('engine.ts')[0]
