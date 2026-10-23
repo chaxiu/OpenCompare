@@ -74,7 +74,12 @@ const documentPaths = (): string[] => {
     .map((entry) => String(entry))
     .filter((entry) => entry.endsWith('.md'))
     .map((entry) => join(docsRoot, entry))
-  return [join(repoRoot, 'README.md'), join(repoRoot, 'CHANGELOG.md'), ...docs]
+  return [
+    join(repoRoot, 'README.md'),
+    join(repoRoot, 'README.zh-CN.md'),
+    join(repoRoot, 'CHANGELOG.md'),
+    ...docs
+  ]
 }
 
 const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
@@ -142,7 +147,10 @@ const ancestryGateScript = gateStep('Preflight v0.1.2 ancestry')?.run ?? ''
 
 const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md'), 'utf8')
 
-const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
+// README.md is the English default and README.zh-CN.md is its Chinese mirror.
+// Shared release facts are asserted against both so neither can drift alone.
+const readmeEn = readFileSync(join(repoRoot, 'README.md'), 'utf8')
+const readmeZh = readFileSync(join(repoRoot, 'README.zh-CN.md'), 'utf8')
 
 const symlinkDoc = readFileSync(join(repoRoot, 'docs/symlink-no-follow.md'), 'utf8')
 
@@ -554,10 +562,13 @@ describe('release version gate', () => {
     expect(changelog).toContain(`## ${currentTag}`)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(readme).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
+    expect(readmeZh).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readmeZh).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
     expect(latestPublishedTag).toBe(currentTag)
-    expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(readmeZh).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(readmeEn).toContain(`Release status: ${currentTag} is published`)
+    expect(readmeEn).toContain(`newest public release is [${latestPublishedTag}]`)
+    expect(readmeEn).toContain(`docs/release-notes/${currentTag}.md`)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 
@@ -1007,32 +1018,43 @@ describe('release signing credentials checklist', () => {
     }
   })
 
-  it('lists the six secrets and fail-closed behavior in the README', () => {
-    for (const secret of signingSecrets) {
-      expect(readme).toContain(secret)
+  it('lists the six secrets and fail-closed behavior in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      for (const secret of signingSecrets) {
+        expect(doc).toContain(secret)
+      }
+      expect(doc).toMatch(/fail-closed/)
     }
-    expect(readme).toMatch(/fail-closed/)
   })
 
   it('reports the current tag as published and links the latest public release', () => {
-    expect(readme).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(readme).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
-    expect(readme).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(readme).not.toContain(pendingWord)
+    expect(readmeZh).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(readmeZh).toContain(`最新公开 Release 为 [${latestPublishedTag}]`)
+    expect(readmeZh).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(readmeZh).not.toContain(pendingWord)
     // The newest public release is the current tag; older tags are history only.
-    expect(readme).toContain(`当前发布状态：${latestPublishedTag} 已发布`)
-    expect(readme).not.toContain(`当前发布状态：${previousPublishedTag}`)
-    expect(readme).not.toContain('当前发布状态：v0.2.4')
+    expect(readmeZh).toContain(`当前发布状态：${latestPublishedTag} 已发布`)
+    expect(readmeZh).not.toContain(`当前发布状态：${previousPublishedTag}`)
+    expect(readmeZh).not.toContain('当前发布状态：v0.2.4')
     // v0.2.6 is the newest public release; v0.2.5/v0.2.4/v0.2.2 are published history.
-    expect(readme).toContain(`releases/tag/${latestPublishedTag}`)
-    expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
-    expect(readme).toContain('releases/tag/v0.2.2')
-    expect(readme).not.toContain('当前发布状态：v0.2.2')
-    expect(readme).not.toContain('最新公开 Release 为 [v0.2.1]')
-    expect(readme).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
-    expect(readme).not.toMatch(/正式版 v0\.2\.0/)
-    expect(readme).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
-    expect(readme).not.toMatch(/发布状态：冻结/)
+    expect(readmeZh).toContain(`releases/tag/${latestPublishedTag}`)
+    expect(readmeZh).not.toContain('最新公开 Release 为 [v0.2.2]')
+    expect(readmeZh).toContain('releases/tag/v0.2.2')
+    expect(readmeZh).not.toContain('当前发布状态：v0.2.2')
+    expect(readmeZh).not.toContain('最新公开 Release 为 [v0.2.1]')
+    expect(readmeZh).not.toMatch(/最新公开 Release 为 v0\.1\.2/)
+    expect(readmeZh).not.toMatch(/正式版 v0\.2\.0/)
+    expect(readmeZh).not.toMatch(/当前发布状态：正式版 v0\.1\.2/)
+    expect(readmeZh).not.toMatch(/发布状态：冻结/)
+
+    // The English default states the same release facts, including the newest tag.
+    expect(readmeEn).toContain(`Release status: ${latestPublishedTag} is published`)
+    expect(readmeEn).toContain(`newest public release is [${latestPublishedTag}]`)
+    expect(readmeEn).toContain(`releases/tag/${latestPublishedTag}`)
+    expect(readmeEn).toContain('releases/tag/v0.2.2')
+    expect(readmeEn).not.toContain(`Release status: ${previousPublishedTag} is published`)
+    expect(readmeEn).not.toContain('newest public release is [v0.2.2]')
+    expect(readmeEn).not.toMatch(/Release status: (?:draft|pending)/i)
   })
 
   it('reports the signing doc status as published for the current tag', () => {
@@ -1048,20 +1070,33 @@ describe('release signing credentials checklist', () => {
     expect(signingDoc).not.toContain('当前状态：v0.2.2')
   })
 
-  it('attributes the dangling-link bug to v0.2.2 and earlier in the README', () => {
-    const issues = readme.slice(readme.indexOf('## 已知问题'))
+  it('attributes the dangling-link bug to v0.2.2 and earlier in both READMEs', () => {
+    const issues = readmeZh.slice(readmeZh.indexOf('## 已知问题'))
     expect(issues).toContain('v0.2.2 及更早')
     expect(issues).toContain('悬空符号链接')
     expect(issues).toContain('不可读项')
     expect(issues).toContain('已跳过')
     expect(issues).toContain('当前版本已修复')
+
+    const englishIssues = readmeEn.slice(readmeEn.indexOf('## Known issues'))
+    expect(englishIssues).toContain('v0.2.2 and earlier')
+    expect(englishIssues).toContain('dangling symlink')
+    expect(englishIssues).toContain('unreadable')
+    expect(englishIssues).toContain('skipped')
+    expect(englishIssues).toContain('current version is fixed')
   })
 
   it('documents the no-follow symlink policy and drops the contradictory copy', () => {
-    const issues = readme.slice(readme.indexOf('## 已知问题'))
+    const issues = readmeZh.slice(readmeZh.indexOf('## 已知问题'))
     expect(issues).toContain('不跟随符号链接')
     expect(issues).not.toContain('符号链接计数放大')
-    expect(readme).not.toMatch(/悬空符号链接[^\n]*跳过并计数/)
+    expect(readmeZh).not.toMatch(/悬空符号链接[^\n]*跳过并计数/)
+
+    const englishIssues = readmeEn.slice(readmeEn.indexOf('## Known issues'))
+    expect(englishIssues).toContain('no-follow')
+    expect(englishIssues).toContain('never enters a link target directory')
+    expect(englishIssues).toContain('leaf entry')
+    expect(readmeEn).not.toMatch(/symlink[^\n]*count inflation/i)
     for (const phrase of [
       '不进入链接指向的任何目录',
       '链接自身作为一条叶条目',
@@ -1076,18 +1111,29 @@ describe('release signing credentials checklist', () => {
     }
   })
 
-  it('attributes the file-handle bug to v0.2.1 and earlier in the README', () => {
-    const issues = readme.slice(readme.indexOf('## 已知问题'))
+  it('attributes the file-handle bug to v0.2.1 and earlier in both READMEs', () => {
+    const issues = readmeZh.slice(readmeZh.indexOf('## 已知问题'))
     expect(issues).toContain('v0.2.1 及更早')
     expect(issues).toContain('当前版本已修复')
     expect(issues).toContain('8 路')
     expect(issues).toContain('有界并发')
     expect(issues).toContain('文件句柄耗尽')
+
+    const englishIssues = readmeEn.slice(readmeEn.indexOf('## Known issues'))
+    expect(englishIssues).toContain('v0.2.1 and earlier')
+    expect(englishIssues).toContain('current version is fixed')
+    expect(englishIssues).toContain('bounded concurrency of 8')
+    expect(englishIssues).toContain('file handles exhausted')
   })
 
-  it('keeps the README workflow_dispatch default in sync with the workflow', () => {
-    const flow = readme.slice(readme.indexOf('## 发布流程'), readme.indexOf('## 项目结构'))
-    expect(flow).toContain(`默认 \`${currentTag}\``)
+  it('keeps the workflow_dispatch default in sync with the workflow in both READMEs', () => {
+    const zhFlow = readmeZh.slice(readmeZh.indexOf('## 发布流程'), readmeZh.indexOf('## 项目结构'))
+    expect(zhFlow).toContain(`默认 \`${currentTag}\``)
+    const enFlow = readmeEn.slice(
+      readmeEn.indexOf('## Release process'),
+      readmeEn.indexOf('## Project structure')
+    )
+    expect(enFlow).toContain(`defaults to \`${currentTag}\``)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
   })
 })
@@ -1379,32 +1425,47 @@ describe('release document consistency', () => {
     expect(offenders).toEqual([])
   })
 
-  it('keeps the published status and the signing copy on README line 5', () => {
-    const statusLine = readme.split(/\r?\n/)[4] ?? ''
-    expect(statusLine).toContain(`当前发布状态：${currentTag} 已发布`)
-    expect(statusLine).toContain(
+  it('keeps the published status and the signing copy on line 5 of both READMEs', () => {
+    const zhStatus = readmeZh.split(/\r?\n/)[4] ?? ''
+    expect(zhStatus).toContain(`当前发布状态：${currentTag} 已发布`)
+    expect(zhStatus).toContain(
       `最新公开 Release 为 [${latestPublishedTag}](https://github.com/chaxiu/OpenCompare/releases/tag/${latestPublishedTag})`
     )
-    expect(statusLine).toContain(`docs/release-notes/${currentTag}.md`)
-    expect(statusLine).toContain(`当前发布状态：${latestPublishedTag} 已发布`)
-    expect(statusLine).not.toContain(pendingWord)
-    expect(statusLine).not.toContain(`当前发布状态：${previousPublishedTag}`)
-    expect(statusLine).not.toContain('最新公开 Release 为 [v0.2.2]')
-    expect(statusLine).not.toContain(ghostNotesPath)
-    expect(statusLine).toContain('Developer ID 签名 + Apple 公证')
-    expect(statusLine).toContain('fail-closed')
-    expect(statusLine).toContain('App Store Connect API Key')
+    expect(zhStatus).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(zhStatus).not.toContain(pendingWord)
+    expect(zhStatus).not.toContain(`当前发布状态：${previousPublishedTag}`)
+    expect(zhStatus).not.toContain('最新公开 Release 为 [v0.2.2]')
+    expect(zhStatus).not.toContain(ghostNotesPath)
+    expect(zhStatus).toContain('Developer ID 签名 + Apple 公证')
+    expect(zhStatus).toContain('fail-closed')
+    expect(zhStatus).toContain('App Store Connect API Key')
     for (const secret of signingSecrets) {
-      expect(statusLine).toContain(secret)
+      expect(zhStatus).toContain(secret)
+    }
+
+    const enStatus = readmeEn.split(/\r?\n/)[4] ?? ''
+    expect(enStatus).toContain(`Release status: ${currentTag} is published`)
+    expect(enStatus).toContain(
+      `newest public release is [${latestPublishedTag}](https://github.com/chaxiu/OpenCompare/releases/tag/${latestPublishedTag})`
+    )
+    expect(enStatus).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(enStatus).not.toContain(`Release status: ${previousPublishedTag}`)
+    expect(enStatus).not.toContain('newest public release is [v0.2.2]')
+    expect(enStatus).not.toContain(ghostNotesPath)
+    expect(enStatus).toContain('Developer ID signing + Apple notarization')
+    expect(enStatus).toContain('fail-closed')
+    expect(enStatus).toContain('App Store Connect API Key')
+    for (const secret of signingSecrets) {
+      expect(enStatus).toContain(secret)
     }
   })
 
   it('lists the latest, previous, older, never-published and historical versions in the download table', () => {
-    const start = readme.indexOf('## 版本与下载')
-    const end = readme.indexOf('## 核心能力')
+    const start = readmeZh.indexOf('## 版本与下载')
+    const end = readmeZh.indexOf('## 核心能力')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
-    const rows = readme
+    const rows = readmeZh
       .slice(start, end)
       .split(/\r?\n/)
       .filter((line) => line.startsWith('|'))
@@ -1449,12 +1510,53 @@ describe('release document consistency', () => {
     expect(oldRow).not.toContain('最新公开 Release')
     expect(oldRow).toContain('releases/tag/v0.2.2')
     expect(rows.filter((row) => row.includes('最新公开 Release'))).toHaveLength(1)
-    expect(readme).not.toContain('最新公开 Release 为 [v0.2.2]')
-    expect(readme).not.toContain(`最新公开 Release 为 [${ghostTag}]`)
+    expect(readmeZh).not.toContain('最新公开 Release 为 [v0.2.2]')
+    expect(readmeZh).not.toContain(`最新公开 Release 为 [${ghostTag}]`)
+  })
+
+  it('mirrors the release table in the English default README', () => {
+    const start = readmeEn.indexOf('## Releases')
+    const end = readmeEn.indexOf('## Features')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const rows = readmeEn
+      .slice(start, end)
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('|'))
+    const rowIndex = (prefix: string): number =>
+      rows.findIndex((row) => row.startsWith(prefix))
+    const currentRow = rows.find((row) => row.startsWith(`| [${currentTag}]`))
+    const previousRow = rows.find((row) => row.startsWith(`| [${previousPublishedTag}]`))
+    const olderRow = rows.find((row) => row.startsWith('| [v0.2.4]'))
+    const ghostRow = rows.find((row) => row.startsWith(`| ${ghostTag}`))
+    const oldRow = rows.find((row) => row.startsWith('| [v0.2.2]'))
+    expect(rowIndex(`| [${currentTag}]`)).toBeGreaterThan(-1)
+    expect(rowIndex(`| [${previousPublishedTag}]`)).toBeGreaterThan(
+      rowIndex(`| [${currentTag}]`)
+    )
+    expect(rowIndex('| [v0.2.4]')).toBeGreaterThan(rowIndex(`| [${previousPublishedTag}]`))
+    expect(rowIndex(`| ${ghostTag}`)).toBeGreaterThan(rowIndex('| [v0.2.4]'))
+    expect(rowIndex('| [v0.2.2]')).toBeGreaterThan(rowIndex(`| ${ghostTag}`))
+    expect(currentRow).toContain('Published (newest public release)')
+    expect(currentRow).toContain(`releases/tag/${latestPublishedTag}`)
+    expect(currentRow).toContain(`docs/release-notes/${currentTag}.md`)
+    expect(currentRow).toContain('drive letters / drive roots / UNC')
+    expect(previousRow).toContain('Published (previous)')
+    expect(previousRow).toContain(`releases/tag/${previousPublishedTag}`)
+    expect(olderRow).toContain('Published')
+    expect(olderRow).not.toContain('previous')
+    expect(olderRow).toContain('releases/tag/v0.2.4')
+    expect(ghostRow).toContain('Never published')
+    expect(ghostRow).toContain(`merged into ${ghostMergeTargetTag}`)
+    expect(ghostRow).not.toContain(ghostReleaseLink)
+    expect(oldRow).toContain('Published')
+    expect(oldRow).toContain('releases/tag/v0.2.2')
+    expect(rows.filter((row) => row.includes('newest public release'))).toHaveLength(1)
+    expect(readmeEn).not.toContain('newest public release is [v0.2.2]')
   })
 
   it('records zero unfixed known issues and both v0.2.5 fix attributions', () => {
-    const issues = readme.slice(readme.indexOf('## 已知问题'))
+    const issues = readmeZh.slice(readmeZh.indexOf('## 已知问题'))
     const lines = issues.split(/\r?\n/).filter((line) => line.startsWith('- '))
     expect(lines.filter((line) => line.includes('已知未修'))).toHaveLength(0)
 
@@ -1516,6 +1618,56 @@ describe('release document consistency', () => {
       expect(issues).toContain(phrase)
     }
     expect(issues).not.toContain('符号链接计数放大')
+
+    // The English default keeps the same five fixes with the same attributions.
+    const englishIssues = readmeEn.slice(readmeEn.indexOf('## Known issues'))
+    const englishLines = englishIssues
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('- '))
+    const englishMemory = englishLines.find((line) => line.includes('Memory growth'))
+    const englishCancel = englishLines.find((line) => line.includes('ECANCELED'))
+    const englishWindows = englishLines.find((line) => line.includes('issues/3'))
+    expect(englishMemory).toBeDefined()
+    expect(englishCancel).toBeDefined()
+    expect(englishWindows).toBeDefined()
+    for (const line of [englishMemory, englishCancel]) {
+      expect(line).toContain(`Fixed in ${previousPublishedTag}`)
+    }
+    for (const phrase of [
+      `Fixed in ${latestPublishedTag}`,
+      'C:\\',
+      'CLI',
+      'single-instance',
+      'manual path entry',
+      'opencompare://',
+      '39890047849',
+      'src/shared/compareRequest.test.ts'
+    ]) {
+      expect(englishWindows).toContain(phrase)
+    }
+    expect(englishWindows).not.toContain(`Fixed in ${previousPublishedTag}`)
+    expect(englishMemory).toContain('docs/perf/large-directory-memory.md')
+    expect(englishCancel).toContain('pnpm test:cancel')
+    for (const number of ['1,960,394,752', '1,257,750,528', '71,286,784']) {
+      expect(englishMemory).toContain(number)
+    }
+    for (const marker of [
+      'zero `Error occurred in handler`',
+      'zero `OperationCancelledError`',
+      'zero `ECANCELED`'
+    ]) {
+      expect(englishCancel).toContain(marker)
+    }
+    for (const phrase of [
+      'v0.2.2 and earlier',
+      'v0.2.1 and earlier',
+      'bounded concurrency of 8',
+      'file handles exhausted',
+      'no-follow',
+      'skipped'
+    ]) {
+      expect(englishIssues).toContain(phrase)
+    }
   })
 
   it('keeps the unsolved known issues in the v0.2.4 release notes as history', () => {
@@ -1546,7 +1698,7 @@ describe('release document consistency', () => {
 
 // The published README claims the newest tag and links its release assets; these
 // anchors are release-time facts and are asserted against package.json below.
-const readmeStatusLine = (): string => readme.split(/\r?\n/)[4] ?? ''
+const readmeStatusLine = (markdown: string): string => markdown.split(/\r?\n/)[4] ?? ''
 
 const README_ASSET_PREFIX = `releases/download/${latestPublishedTag}/`
 
@@ -1596,39 +1748,266 @@ const publishedEvidenceAssets: Array<[name: string, sha256: string]> = [
 ]
 
 describe('published README release anchors', () => {
-  it('declares the same published version in the README status line, the release anchor and package.json', () => {
-    const statusLine = readmeStatusLine()
-    const declared = /当前发布状态：(v\d+\.\d+\.\d+) 已发布/.exec(statusLine)?.[1] ?? ''
-    const latest = /最新公开 Release 为 \[(v\d+\.\d+\.\d+)\]/.exec(statusLine)?.[1] ?? ''
-    expect(declared, 'README status line must declare a published version').not.toBe('')
-    expect(latest, 'README status line must link the latest public release').not.toBe('')
-    expect(declared).toBe(latestPublishedTag)
-    expect(latest).toBe(latestPublishedTag)
+  it('declares the same published version in both README status lines, the release anchor and package.json', () => {
+    const zhStatus = readmeStatusLine(readmeZh)
+    const enStatus = readmeStatusLine(readmeEn)
+    const zhDeclared = /当前发布状态：(v\d+\.\d+\.\d+) 已发布/.exec(zhStatus)?.[1] ?? ''
+    const zhLatest = /最新公开 Release 为 \[(v\d+\.\d+\.\d+)\]/.exec(zhStatus)?.[1] ?? ''
+    const enDeclared = /Release status: (v\d+\.\d+\.\d+) is published/.exec(enStatus)?.[1] ?? ''
+    const enLatest = /newest public release is \[(v\d+\.\d+\.\d+)\]/.exec(enStatus)?.[1] ?? ''
+    for (const declared of [zhDeclared, enDeclared]) {
+      expect(declared, 'README status line must declare a published version').not.toBe('')
+    }
+    for (const latest of [zhLatest, enLatest]) {
+      expect(latest, 'README status line must link the latest public release').not.toBe('')
+    }
+    expect(zhDeclared).toBe(latestPublishedTag)
+    expect(enDeclared).toBe(latestPublishedTag)
+    expect(zhLatest).toBe(latestPublishedTag)
+    expect(enLatest).toBe(latestPublishedTag)
     expect(latestPublishedTag).toBe(`v${pkg.version}`)
   })
 
-  it('links only space-free asset names under the published tag', () => {
-    const matches = [
-      ...readme.matchAll(
-        new RegExp(`${README_ASSET_PREFIX.replaceAll('/', '\\/')}([^)\\s]+)`, 'g')
-      )
-    ].map((match) => match[1])
-    expect(matches.length).toBeGreaterThanOrEqual(5)
-    const basenames = matches.map((value) => value.split('/').pop() ?? '')
-    for (const name of basenames) {
-      expect(name).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
+  it('links only space-free asset names under the published tag in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      const matches = [
+        ...doc.matchAll(
+          new RegExp(`${README_ASSET_PREFIX.replaceAll('/', '\\/')}([^)\\s]+)`, 'g')
+        )
+      ].map((match) => match[1])
+      expect(matches.length).toBeGreaterThanOrEqual(5)
+      const basenames = matches.map((value) => value.split('/').pop() ?? '')
+      for (const name of basenames) {
+        expect(name).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
+      }
+      for (const expected of [
+        `OpenCompare-${pkg.version}-arm64.dmg`,
+        `OpenCompare-${pkg.version}-arm64-mac.zip`,
+        `OpenCompare-Setup-${pkg.version}.exe`,
+        `OpenCompare-${pkg.version}.AppImage`,
+        `opencompare_${pkg.version}_amd64.deb`
+      ]) {
+        expect(basenames).toContain(expected)
+      }
+      expect(doc).not.toContain(`OpenCompare.Setup.${pkg.version}.exe`)
+      expect(doc).not.toContain(`OpenCompare Setup ${pkg.version}.exe`)
     }
-    for (const expected of [
-      `OpenCompare-${pkg.version}-arm64.dmg`,
-      `OpenCompare-${pkg.version}-arm64-mac.zip`,
-      `OpenCompare-Setup-${pkg.version}.exe`,
-      `OpenCompare-${pkg.version}.AppImage`,
-      `opencompare_${pkg.version}_amd64.deb`
+  })
+})
+
+const readmeLines = (markdown: string): string[] => markdown.split(/\r?\n/)
+const normalizeDashes = (markdown: string): string => markdown.replaceAll('–', '-')
+const stripLanguageSwitch = (markdown: string): string =>
+  readmeLines(markdown)
+    .filter(
+      (line) => !line.includes('README.zh-CN.md') && !line.includes('[English](./README.md)')
+    )
+    .join('\n')
+
+describe('bilingual README parity', () => {
+  it('ships an English default with no Han characters outside the language switch', () => {
+    expect(readmeEn.trim().length).toBeGreaterThan(0)
+    expect(readmeLines(readmeEn)[0]).toBe('# OpenCompare')
+    expect(stripLanguageSwitch(readmeEn)).not.toMatch(/\p{Script=Han}/u)
+    for (const heading of ['## 已知问题', '## 核心能力', '## 版本与下载']) {
+      expect(readmeEn).not.toContain(heading)
+    }
+  })
+
+  it('ships a Chinese mirror with the six required section headings', () => {
+    expect(readmeZh.trim().length).toBeGreaterThan(0)
+    expect(readmeLines(readmeZh)[0]).toBe('# OpenCompare')
+    for (const heading of [
+      '## 版本与下载',
+      '## 安装与首次启动',
+      '## 支持平台',
+      '## 已知问题',
+      '## 发布流程',
+      '## 项目结构'
     ]) {
-      expect(basenames).toContain(expected)
+      expect(readmeZh).toContain(heading)
     }
-    expect(readme).not.toContain(`OpenCompare.Setup.${pkg.version}.exe`)
-    expect(readme).not.toContain(`OpenCompare Setup ${pkg.version}.exe`)
+  })
+
+  it('cross-links the two versions in the first ten lines', () => {
+    expect(readmeLines(readmeEn).slice(0, 10).join('\n')).toContain(
+      '[简体中文](./README.zh-CN.md)'
+    )
+    expect(readmeLines(readmeZh).slice(0, 10).join('\n')).toContain('[English](./README.md)')
+    for (const path of ['README.md', 'README.zh-CN.md']) {
+      expect(existsSync(join(repoRoot, path))).toBe(true)
+      expect(readFileSync(join(repoRoot, path), 'utf8').trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps title, language switch and status block on the same first five lines', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      const lines = readmeLines(doc)
+      expect(lines[0]).toBe('# OpenCompare')
+      expect((lines[1] ?? '').trim()).toBe('')
+      expect(lines[2]).toContain('README.')
+      expect((lines[3] ?? '').trim()).toBe('')
+      expect(lines[4]).toMatch(/^> ✅ \*\*(?:Release status:|当前发布状态：)/)
+    }
+  })
+
+  it('documents the current four-entry absolute-path fix in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      for (const fact of [
+        currentTag,
+        'opencompare://',
+        '--left',
+        '--right',
+        'UNC',
+        `docs/release-notes/${currentTag}.md`
+      ]) {
+        expect(doc).toContain(fact)
+      }
+      expect(doc).toContain('CLI')
+    }
+    expect(readmeEn).toContain('single-instance')
+    expect(readmeZh).toContain('单实例')
+    expect(readmeEn).toContain('manual path entry')
+    expect(readmeZh).toContain('手工输入')
+  })
+
+  it('documents installation and first launch in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      expect(doc).toContain('.dmg')
+      expect(doc).toContain('Applications')
+      expect(doc).toContain(`OpenCompare-Setup-${pkg.version}.exe`)
+      expect(doc).toContain('chmod +x')
+      expect(doc).toContain('.AppImage')
+      expect(doc).toContain('.deb')
+    }
+    expect(readmeEn).toContain('**First launch**')
+    expect(readmeEn).toContain('built-in samples')
+    expect(readmeZh).toContain('**首次启动**')
+    expect(readmeZh).toContain('内置样本')
+  })
+
+  it('lists only the published platforms in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      expect(doc).toContain('macOS arm64')
+      expect(doc).toContain('Developer ID')
+      expect(doc).toContain('`.exe`')
+      expect(doc).toContain('AppImage')
+      expect(doc).toContain('deb')
+      expect(doc).not.toMatch(/\bIntel\b/)
+      expect(doc).not.toMatch(/Windows arm64/i)
+      expect(doc).not.toMatch(/Linux arm64/i)
+    }
+  })
+
+  it('links archived memory evidence and separates cold, warm, settle and L3 methodology', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      expect(doc).toContain('docs/perf/upsert-memory-diagnosis-2026-10-23.md')
+      expect(doc).toContain('docs/perf/large-directory-memory.md')
+      for (const measured of [
+        '76,604',
+        '11,105,870,346',
+        '21.6',
+        '22.5',
+        '8.5',
+        '10.0',
+        'hashedFiles=0'
+      ]) {
+        expect(doc).toContain(measured)
+      }
+      const normalized = normalizeDashes(doc)
+      for (const range of ['1.9-2.0 GiB', '1.6-1.9 GiB', '2.15-2.5 GiB']) {
+        expect(normalized).toContain(range)
+      }
+      expect(doc).toContain('L3')
+      expect(doc).toContain('+20 s')
+      expect(doc).not.toContain('1536')
+      expect(doc).not.toMatch(/MUST[^\n]*(?:MiB|GiB)/)
+    }
+    expect(readmeEn).toContain('**Cold run**')
+    expect(readmeEn).toContain('**Warm run**')
+    expect(readmeZh).toContain('**冷跑**')
+    expect(readmeZh).toContain('**热跑**')
+  })
+
+  it('keeps TODO markers and delivery schedules out of both READMEs and the metadata doc', () => {
+    const metadataDoc = readFileSync(join(repoRoot, 'docs/repo-metadata.md'), 'utf8')
+    for (const doc of [readmeEn, readmeZh, metadataDoc]) {
+      expect(doc).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+      expect(doc).not.toContain('待补')
+      expect(doc).not.toContain('预计')
+      expect(doc.toLowerCase()).not.toContain('roadmap')
+    }
+  })
+
+  it('links the Kill Paid Apps 001 alternative in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      expect(doc).toContain('https://github.com/munk-sh/kill-paid-apps')
+      expect(doc).toContain('001')
+      expect(doc).toContain('Beyond Compare 5 Pro')
+    }
+  })
+
+  it('keeps the shared current-tag facts and version-derived assets in both READMEs', () => {
+    for (const doc of [readmeEn, readmeZh]) {
+      expect(doc).toContain(currentTag)
+      expect(doc).toContain(`docs/release-notes/${currentTag}.md`)
+      expect(doc).toContain('opencompare://')
+      expect(doc).toContain('UNC')
+      expect(doc).toContain('docs/perf/upsert-memory-diagnosis-2026-10-23.md')
+      expect(doc).toContain('https://github.com/munk-sh/kill-paid-apps')
+      for (const asset of [
+        `OpenCompare-${pkg.version}-arm64.dmg`,
+        `OpenCompare-Setup-${pkg.version}.exe`,
+        `OpenCompare-${pkg.version}.AppImage`,
+        `opencompare_${pkg.version}_amd64.deb`
+      ]) {
+        expect(doc).toContain(asset)
+      }
+    }
+  })
+
+  it('ships English repository metadata with a paste-ready gh command', () => {
+    const path = join(repoRoot, 'docs/repo-metadata.md')
+    expect(existsSync(path)).toBe(true)
+    const doc = readFileSync(path, 'utf8')
+    expect(doc.trim().length).toBeGreaterThan(0)
+    const description = /## Description\n\n```text\n([\s\S]*?)\n```/.exec(doc)?.[1] ?? ''
+    expect(description.trim().length).toBeGreaterThan(0)
+    expect(description.trim().length).toBeLessThanOrEqual(350)
+    expect(description).not.toMatch(/\p{Script=Han}/u)
+
+    const topicsSection = doc.slice(doc.indexOf('## Topics'), doc.indexOf('## Command'))
+    const topics = [...topicsSection.matchAll(/`([^`]+)`/g)].map((match) => match[1])
+    expect(topics.length).toBeGreaterThanOrEqual(1)
+    expect(topics.length).toBeLessThanOrEqual(20)
+    expect(new Set(topics).size).toBe(topics.length)
+    for (const topic of topics) {
+      expect(topic).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+    }
+
+    const commandSection = doc.slice(doc.indexOf('## Command'))
+    expect(commandSection).toContain('gh repo edit chaxiu/OpenCompare')
+    expect(commandSection).toContain('--description')
+    for (const topic of topics) {
+      expect(commandSection).toContain(`--add-topic ${topic}`)
+    }
+    expect(doc).not.toMatch(/\bgh[op]_[A-Za-z0-9]+/)
+    expect(doc.toLowerCase()).not.toContain('token')
+    expect(doc.toLowerCase()).not.toContain('secret')
+  })
+
+  it('marks repository metadata as the independent last step and failure-tolerant', () => {
+    const doc = readFileSync(join(repoRoot, 'docs/repo-metadata.md'), 'utf8')
+    expect(doc.toLowerCase()).toContain('independent last step')
+    expect(doc.toLowerCase()).toContain('quality gates')
+    expect(doc.toLowerCase()).toContain('raw stderr')
+    expect(doc.toLowerCase()).toContain('do not block')
+  })
+
+  it('scans both READMEs as release documents', () => {
+    const paths = documentPaths().map((path) => relative(repoRoot, path))
+    expect(paths).toContain('README.md')
+    expect(paths).toContain('README.zh-CN.md')
   })
 })
 
@@ -2199,11 +2578,16 @@ describe('release hardening documentation', () => {
     expect(signingDoc).toContain('唯一公开')
   })
 
-  it('keeps the README release flow in sync', () => {
-    const flow = readme.slice(readme.indexOf('## 发布流程'), readme.indexOf('## 项目结构'))
-    expect(flow).toContain('codesign --verify --deep --strict')
-    expect(flow).toContain('xcrun stapler validate')
-    expect(flow).toContain('spctl -a -vv')
+  it('keeps the release flow in sync in both READMEs', () => {
+    const flows = [
+      readmeZh.slice(readmeZh.indexOf('## 发布流程'), readmeZh.indexOf('## 项目结构')),
+      readmeEn.slice(readmeEn.indexOf('## Release process'), readmeEn.indexOf('## Project structure'))
+    ]
+    for (const flow of flows) {
+      expect(flow).toContain('codesign --verify --deep --strict')
+      expect(flow).toContain('xcrun stapler validate')
+      expect(flow).toContain('spctl -a -vv')
+    }
   })
 })
 
