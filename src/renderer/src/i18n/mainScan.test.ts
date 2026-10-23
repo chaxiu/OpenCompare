@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { scanHardcodedChinese } from '@shared/i18n/scanHardcodedChinese'
@@ -96,5 +96,12 @@ describe('main-chain Chinese scan', () => {
         entry.path
       ).toBe(false)
     }
+  })
+
+  it('declares the English default on the renderer root html element', () => {
+    const html = readFileSync(join(ROOT, 'src/renderer/index.html'), 'utf8')
+
+    expect(html).not.toContain('zh-CN')
+    expect(html).toMatch(/<html lang="en">/)
   })
 })

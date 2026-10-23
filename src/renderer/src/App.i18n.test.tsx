@@ -105,6 +105,22 @@ describe('start-up language', () => {
     expect(screen.getByText('Comparison and three-way merge workbench')).toBeDefined()
   })
 
+  it('marks the default English first screen as en on <html>', async () => {
+    installPlatform(withLocale('en-US'))
+    render(<App />)
+
+    await screen.findByRole('heading', { name: EMPTY_EN })
+    expect(document.documentElement.lang).toBe('en')
+  })
+
+  it('marks the Chinese first screen as zh-CN on <html>', async () => {
+    installPlatform(withLocale('zh-CN'))
+    render(<App />)
+
+    await screen.findByRole('heading', { name: EMPTY_ZH })
+    expect(document.documentElement.lang).toBe('zh-CN')
+  })
+
   it('shows the Chinese first screen for a zh system locale', async () => {
     installPlatform(withLocale('zh-Hant'))
     render(<App />)
