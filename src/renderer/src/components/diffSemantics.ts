@@ -1,4 +1,5 @@
 import type { DiffStatus } from '@shared/fixtures'
+import type { MessageKey } from '@renderer/i18n/messages'
 
 /** The diff-semantic vocabulary in display order. */
 export const DIFF_STATUSES: readonly DiffStatus[] = [
@@ -9,13 +10,13 @@ export const DIFF_STATUSES: readonly DiffStatus[] = [
   'conflict'
 ]
 
-/** Chinese labels for the diff-semantic vocabulary. */
-export const DIFF_LABELS: Record<DiffStatus, string> = {
-  same: '相同',
-  added: '新增',
-  removed: '删除',
-  modified: '修改',
-  conflict: '冲突'
+/** Dictionary keys of the diff-semantic vocabulary, resolved at render time. */
+export const DIFF_LABEL_KEYS: Record<DiffStatus, MessageKey> = {
+  same: 'common.diff.same',
+  added: 'common.diff.added',
+  removed: 'common.diff.removed',
+  modified: 'common.diff.modified',
+  conflict: 'common.diff.conflict'
 }
 
 export const DIFF_DOT_CLASSES: Record<DiffStatus, string> = {

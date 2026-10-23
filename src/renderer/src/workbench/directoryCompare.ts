@@ -12,11 +12,35 @@ import type {
   DirectoryComparison,
   DirectoryDiffNode
 } from '@core/directory/compare'
-import type { DrilldownTarget } from './fileKinds'
+import type { DrilldownTarget, FileKind } from './fileKinds'
 import { baseName, classifyFile } from './fileKinds'
+import { missingSidePath } from './sessionDisplay'
 import type { AdhocFilePair, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
+
+/** Known file-pair failures the shell localizes from a stable code. */
+export type FilePairErrorCode = 'unsupported-type' | 'mixed-family'
+
+export interface FilePairErrorParams {
+  readonly name?: string
+  readonly left?: string
+  readonly right?: string
+  readonly leftKind?: FileKind
+  readonly rightKind?: FileKind
+}
+
+/** A file-pair rejection that carries a stable code and its parameters. */
+export class FilePairError extends Error {
+  constructor(
+    readonly code: FilePairErrorCode,
+    readonly params: FilePairErrorParams,
+    message: string
+  ) {
+    super(message)
+    this.name = 'FilePairError'
+  }
+}
 
 /**
  * Stable id of one directory comparison, derived from the two roots so that
@@ -235,8 +259,8 @@ export function createDrilldownSession(
       `file:${parentId}::${node.relativePath}`,
       node.name,
       target,
-      { path: node.leftPath ?? `${node.relativePath}（左不存在）`, text: leftText },
-      { path: node.rightPath ?? `${node.relativePath}（右不存在）`, text: rightText }
+      { path: node.leftPath ?? missingSidePath(node.relativePath, 'left'), text: leftText },
+      { path: node.rightPath ?? missingSidePath(node.relativePath, 'right'), text: rightText }
     ),
     parentDirectoryId: parentId
   }
@@ -268,7 +292,11 @@ function requireComparableFile(path: string): { readonly target: DrilldownTarget
   const name = baseName(path)
   const target = classifyFile(name)
   if (target === null) {
-    throw new Error(`暂不支持对比 ${name}（仅支持代码 / 文本 · CSV / TSV · JSON / YAML）。`)
+    throw new FilePairError(
+      'unsupported-type',
+      { name },
+      `暂不支持对比 ${name}（仅支持代码 / 文本 · CSV / TSV · JSON / YAML）。`
+    )
   }
   return { target }
 }
@@ -289,7 +317,14 @@ export async function openFilePairSession(
   // One session renders one file family, so a mixed pair (e.g. JSON ↔ YAML) is
   // rejected instead of silently picking a side's format.
   if (left.target.label !== right.target.label) {
-    throw new Error(
+    throw new FilePairError(
+      'mixed-family',
+      {
+        left: baseName(leftPath),
+        right: baseName(rightPath),
+        leftKind: left.target.label,
+        rightKind: right.target.label
+      },
       `两侧文件类型不一致（${baseName(leftPath)} 是 ${left.target.label}，${baseName(rightPath)} 是 ${right.target.label}），请选择同类文件。`
     )
   }

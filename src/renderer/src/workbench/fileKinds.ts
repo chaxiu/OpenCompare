@@ -18,10 +18,13 @@ import {
 
 export type DrilldownKind = 'code' | 'csv' | 'structured'
 
+/** Stable file-family identity; the display name comes from the dictionary. */
+export type FileKind = 'code' | 'csv' | 'tsv' | 'json' | 'yaml'
+
 export interface DrilldownTarget {
   readonly kind: DrilldownKind
-  /** Human label for the drilldown session subtitle. */
-  readonly label: string
+  /** Stable family identity, resolved to a display name at render time. */
+  readonly label: FileKind
   readonly delimiter?: string
   readonly format?: 'json' | 'yaml'
 }
@@ -42,16 +45,16 @@ export function baseName(path: string): string {
 export function classifyFile(name: string): DrilldownTarget | null {
   const extension = extensionOf(name)
 
-  if (CSV_FILE_EXTENSIONS.has(extension)) return { kind: 'csv', label: 'CSV', delimiter: ',' }
-  if (TSV_FILE_EXTENSIONS.has(extension)) return { kind: 'csv', label: 'TSV', delimiter: '\t' }
+  if (CSV_FILE_EXTENSIONS.has(extension)) return { kind: 'csv', label: 'csv', delimiter: ',' }
+  if (TSV_FILE_EXTENSIONS.has(extension)) return { kind: 'csv', label: 'tsv', delimiter: '\t' }
   if (JSON_FILE_EXTENSIONS.has(extension)) {
-    return { kind: 'structured', label: 'JSON', format: 'json' }
+    return { kind: 'structured', label: 'json', format: 'json' }
   }
   if (YAML_FILE_EXTENSIONS.has(extension)) {
-    return { kind: 'structured', label: 'YAML', format: 'yaml' }
+    return { kind: 'structured', label: 'yaml', format: 'yaml' }
   }
   if (extension === '' || TEXT_FILE_EXTENSIONS.has(extension)) {
-    return { kind: 'code', label: '代码 / 文本' }
+    return { kind: 'code', label: 'code' }
   }
 
   return null

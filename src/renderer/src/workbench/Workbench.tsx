@@ -33,6 +33,9 @@ import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
 import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
 import { cx, formatBytes } from '@renderer/components/utils'
+import { useI18n } from '@renderer/i18n/context'
+import type { Translate } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 import { CodeView } from '@renderer/views/CodeView'
 import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
@@ -43,6 +46,7 @@ import {
   createDirectorySession,
   createDrilldownSession,
   directoryViewKey,
+  FilePairError,
   openFilePairSession,
   releaseSessionTree,
   resolveDirectoryReturn
@@ -56,6 +60,11 @@ import {
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
+import {
+  describeSession,
+  fileKindMessageKey,
+  renderSessionText
+} from './sessionDisplay'
 import { NewCompareDialog } from './NewCompareDialog'
 import type { CompareOpenOutcome } from './NewCompareDialog'
 import { commitSessionTree, closeSessions } from './sessionStore'
@@ -129,15 +138,31 @@ interface ActiveDirectoryOperation {
   readonly controller: AbortController
 }
 
-const VIEW_OPTIONS: readonly { value: SceneId; label: string; icon: JSX.Element }[] = [
-  { value: 'directory', label: '目录对比', icon: <FolderTree aria-hidden className="size-3.5" /> },
+const VIEW_OPTIONS: readonly {
+  value: SceneId
+  labelKey: MessageKey
+  icon: JSX.Element
+}[] = [
+  {
+    value: 'directory',
+    labelKey: 'shell.view.directory',
+    icon: <FolderTree aria-hidden className="size-3.5" />
+  },
   {
     value: 'code',
-    label: '代码 Diff & 3-Way',
+    labelKey: 'shell.view.code',
     icon: <FileCode2 aria-hidden className="size-3.5" />
   },
-  { value: 'csv', label: 'CSV 主键对比', icon: <Table2 aria-hidden className="size-3.5" /> },
-  { value: 'structured', label: 'JSON / YAML', icon: <Braces aria-hidden className="size-3.5" /> }
+  {
+    value: 'csv',
+    labelKey: 'shell.view.csv',
+    icon: <Table2 aria-hidden className="size-3.5" />
+  },
+  {
+    value: 'structured',
+    labelKey: 'shell.view.structured',
+    icon: <Braces aria-hidden className="size-3.5" />
+  }
 ]
 
 const MENU_SCENES: Record<string, SceneId> = {
@@ -151,28 +176,47 @@ const MENU_SCENES: Record<string, SceneId> = {
  * The auxiliary sample library, explicitly marked as a demo: the workbench's
  * primary entry is opening real files / folders or dropping real paths.
  */
-const SAMPLE_MENU: readonly DropdownItem[] = [
-  {
-    id: 'load-all',
-    label: '加载全部演示样本',
-    description: '一次打开四个演示场景会话',
-    icon: <Sparkles aria-hidden className="size-3.5" />
-  },
-  {
-    id: 'load-directory',
-    label: '目录对比',
-    description: '演示：双目录差异 + 状态过滤'
-  },
-  { id: 'load-code', label: '代码 Diff & 3-Way Merge', description: '演示：双栏 Diff + 多冲突块' },
-  { id: 'load-csv', label: 'CSV 主键对比', description: '演示：1,240 行乱序主键对账' },
-  { id: 'load-structured', label: 'JSON / YAML 语义对比', description: '演示：键序打乱 + 深层变更' },
-  {
-    id: 'simulate-failure',
-    label: '演示：样本读取失败',
-    description: '基线自检用：查看错误态与重试',
-    danger: true
-  }
-]
+/** Smallest possible plural switch: one vs. everything else. */
+function countKey(one: MessageKey, other: MessageKey, count: number): MessageKey {
+  return count === 1 ? one : other
+}
+
+function sampleMenu(t: Translate): readonly DropdownItem[] {
+  return [
+    {
+      id: 'load-all',
+      label: t('shell.sampleMenu.all.label'),
+      description: t('shell.sampleMenu.all.description'),
+      icon: <Sparkles aria-hidden className="size-3.5" />
+    },
+    {
+      id: 'load-directory',
+      label: t('shell.sampleMenu.directory.label'),
+      description: t('shell.sampleMenu.directory.description')
+    },
+    {
+      id: 'load-code',
+      label: t('shell.sampleMenu.code.label'),
+      description: t('shell.sampleMenu.code.description')
+    },
+    {
+      id: 'load-csv',
+      label: t('shell.sampleMenu.csv.label'),
+      description: t('shell.sampleMenu.csv.description')
+    },
+    {
+      id: 'load-structured',
+      label: t('shell.sampleMenu.structured.label'),
+      description: t('shell.sampleMenu.structured.description')
+    },
+    {
+      id: 'simulate-failure',
+      label: t('shell.sampleMenu.failure.label'),
+      description: t('shell.sampleMenu.failure.description'),
+      danger: true
+    }
+  ]
+}
 
 /** Drops one session's shell cache entry without mutating the record. */
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -205,8 +249,30 @@ async function isDirectoryPath(platform: PlatformPort, path: string): Promise<bo
   }
 }
 
+/**
+ * Localizes the two known file-pair failures; every other rejection keeps its
+ * original message as the diagnostic detail.
+ */
+function filePairErrorMessage(cause: unknown, t: Translate): string {
+  if (cause instanceof FilePairError) {
+    if (cause.code === 'unsupported-type') {
+      return t('shell.file.error.unsupported', { name: cause.params.name ?? '' })
+    }
+    return t('shell.file.error.mixed', {
+      left: cause.params.left ?? '',
+      right: cause.params.right ?? '',
+      leftKind:
+        cause.params.leftKind === undefined ? '' : t(fileKindMessageKey(cause.params.leftKind)),
+      rightKind:
+        cause.params.rightKind === undefined ? '' : t(fileKindMessageKey(cause.params.rightKind))
+    })
+  }
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
 export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
+  const { t } = useI18n()
   const [status, setStatus] = useState<WorkbenchStatus>('empty')
   const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -427,19 +493,19 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     })
   }
 
-  /** 「返回上级目录视图」: prefer the source session, fall back with a notice. */
+  /** Back to the source directory view when it is still open. */
   function backToDirectory(sourceId: string): void {
     const destination = resolveDirectoryReturn(sessions, sourceId)
     if (!destination) {
-      report('来源目录会话已不可用，当前也没有其他目录对比会话可返回。')
+      report(t('shell.notice.returnUnavailable'))
       return
     }
     if (destination.fallback) {
       const fallback = sessions.find((session) => session.id === destination.id)
-      report(
-        `来源目录会话已不可用，已返回可用的目录对比：${fallback?.title ?? destination.id}。`,
-        'info'
-      )
+      const title = fallback
+        ? renderSessionText(describeSession(fallback).title, t)
+        : destination.id
+      report(t('shell.notice.returnFallback', { title }), 'info')
     }
     selectSession(destination.id)
   }
@@ -533,7 +599,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     next: ComparisonSides,
     onError?: (message: string) => void
   ): Promise<boolean> {
-    // Dismiss 「新建对比」 before the scan starts: its modal overlay would
+    // Dismiss the new-comparison dialog before the scan starts: its modal overlay would
     // otherwise sit on top of the shell progress bar and its cancel button for
     // the whole run. Path validation already happened, so only a build failure
     // can still surface, and that one goes to the workbench notice.
@@ -572,7 +638,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       // report what was left out instead of turning it into an error.
       if (comparison.leftSkipped + comparison.rightSkipped > 0) {
         report(
-          `已跳过：左 ${comparison.leftSkipped} / 右 ${comparison.rightSkipped}`,
+          t('shell.notice.skipped', {
+            left: comparison.leftSkipped,
+            right: comparison.rightSkipped
+          }),
           'info'
         )
       }
@@ -580,7 +649,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     } catch (cause) {
       // Cancellation never commits a session; the shell keeps what it had.
       if (isOperationCancelled(cause)) {
-        report('已取消本次目录对比，工作台保持取消前的状态。', 'info')
+        report(t('shell.notice.cancelled'), 'info')
         return false
       }
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -626,7 +695,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       setStatus('ready')
       return true
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
+      const message = filePairErrorMessage(cause, t)
       if (onError) onError(message)
       else report(message)
       return false
@@ -649,20 +718,20 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     return openFilePair(request.left, request.right, onError)
   }
 
-  /** 「打开文件」: left file then right file, no sample involved. */
+  /** Open file: left file then right file, no sample involved. */
   async function pickFilePair(onError?: (message: string) => void): Promise<boolean> {
     const reusable = pendingLeft?.kind === 'file' ? pendingLeft.path : null
-    const leftPath = reusable ?? (await platform.selectFile({ title: '选择左侧文件' }))
+    const leftPath = reusable ?? (await platform.selectFile({ title: t('shell.picker.leftFile') }))
     if (leftPath === null) return false
 
-    const rightPath = await platform.selectFile({ title: '选择右侧文件' })
+    const rightPath = await platform.selectFile({ title: t('shell.picker.rightFile') })
     if (rightPath === null) return false
 
     setPendingLeft(null)
     return openFilePair(leftPath, rightPath, onError)
   }
 
-  /** 「打开文件夹」: left directory then right directory, no sample involved. */
+  /** Open folder: left directory then right directory, no sample involved. */
   async function pickDirectoryPair(onError?: (message: string) => void): Promise<boolean> {
     const reusable = pendingLeft?.kind === 'directory' ? pendingLeft.path : null
     const leftPath = reusable ?? (await platform.selectDirectory())
@@ -675,7 +744,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     return runSidesCompare(directorySides(leftPath, rightPath), onError)
   }
 
-  /** Dialog「打开文件」: pickers feed the same pair builder, errors stay inline. */
+  /** The dialog's open-file action feeds the same pair builder. */
   async function pickFilesFromDialog(): Promise<CompareOpenOutcome> {
     const feedback = { message: null as string | null }
     const opened = await pickFilePair((message) => {
@@ -684,7 +753,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     return opened ? { ok: true } : { ok: false, error: feedback.message }
   }
 
-  /** Dialog「打开文件夹」: same picker flow as the toolbar action. */
+  /** The dialog's open-folder action uses the same picker flow as the toolbar. */
   async function pickDirectoriesFromDialog(): Promise<CompareOpenOutcome> {
     const feedback = { message: null as string | null }
     const opened = await pickDirectoryPair((message) => {
@@ -712,7 +781,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     const paths = resolved.filter((path) => path.length > 0)
 
     if (paths.length === 0) {
-      report('未能从拖入项解析出真实路径，请改用「打开文件 / 打开文件夹」。')
+      report(t('shell.notice.dropUnresolved'))
       return
     }
 
@@ -720,14 +789,17 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const directory = await isDirectoryPath(platform, paths[0])
       setPendingLeft({ path: paths[0], kind: directory ? 'directory' : 'file' })
       report(
-        `已把 ${paths[0]} 作为左侧基准，请继续选择右侧对应的${directory ? '文件夹' : '文件'}。`,
+        t('shell.notice.dropSingle', {
+          path: paths[0],
+          kind: t(directory ? 'common.kind.folder' : 'common.kind.file')
+        }),
         'info'
       )
       return
     }
 
     if (paths.length !== 2) {
-      report(`当前只支持一次拖入两个同类路径（两个文件或两个文件夹），本次拖入了 ${paths.length} 个。`)
+      report(t('shell.notice.dropMany', { count: paths.length }))
       return
     }
 
@@ -736,7 +808,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       isDirectoryPath(platform, paths[1])
     ])
     if (leftDirectory !== rightDirectory) {
-      report('拖入的两项一个是文件、一个是文件夹，无法建立对比；请拖入两个同类路径。')
+      report(t('shell.notice.dropMixed'))
       return
     }
 
@@ -774,7 +846,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     // A link to a directory is a leaf under the no-follow policy: never read a
     // "body" for it (which would fail) and never turn it into a file session.
     if (node.linkTargetKind === 'directory') {
-      report(`「${node.name}」是符号链接且指向目录，按不跟随口径不下钻内容。`, 'info')
+      report(t('shell.notice.symlinkDirectory', { name: node.name }), 'info')
       return
     }
 
@@ -784,7 +856,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
     const target = classifyFile(node.name)
     if (target === null) {
-      report(`暂不支持把 ${node.name} 下钻到文件对比（仅代码 / 文本 · CSV / TSV · JSON / YAML）。`)
+      report(t('shell.notice.unsupportedDrilldown', { name: node.name }))
       return
     }
 
@@ -813,14 +885,30 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     try {
       const exported = await exportSideSnapshot(platform, current[side])
       const path = await platform.saveFile({
-        title: '导出目录快照',
+        title: t('shell.picker.exportSnapshot'),
         defaultPath: snapshotFileName(exported.snapshot.name),
         filters: [SNAPSHOT_FILE_FILTER],
         content: exported.text
       })
       if (path === null) return
       report(
-        `已导出到 ${path}（${exported.entryCount} 个文件${exported.skipped > 0 ? `，跳过 ${exported.skipped} 个不可读项` : ''}）。`,
+        exported.skipped > 0
+          ? t(
+              countKey(
+                'shell.notice.exportedWithSkipped.one',
+                'shell.notice.exportedWithSkipped.other',
+                exported.entryCount
+              ),
+              { path, count: exported.entryCount, skipped: exported.skipped }
+            )
+          : t(
+              countKey(
+                'shell.notice.exported.one',
+                'shell.notice.exported.other',
+                exported.entryCount
+              ),
+              { path, count: exported.entryCount }
+            ),
         'info'
       )
     } catch (cause) {
@@ -842,7 +930,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const next = withSide(current, side, snapshotSide(side, snapshot))
       const comparison = await compareSides(platform, next, cache.current)
       upsertSession(createDirectorySession(comparison, next))
-      report(`已挂载快照 ${snapshot.name} 到${side === 'left' ? '左' : '右'}栏。`, 'info')
+      report(
+        t('shell.notice.snapshotMounted', {
+          name: snapshot.name,
+          side: t(side === 'left' ? 'shell.side.left' : 'shell.side.right')
+        }),
+        'info'
+      )
     } catch (cause) {
       report(describeSnapshotImportError(cause))
     } finally {
@@ -886,7 +980,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       )
       setSyncPreview(null)
       setNotice(
-        `同步完成：新增拷贝 ${result.copied} · 覆盖 ${result.updated} · 删除 ${result.deleted}。`
+        t('shell.notice.syncComplete', {
+          copied: result.copied,
+          updated: result.updated,
+          deleted: result.deleted
+        })
       )
       setNoticeTone('info')
     } catch (cause) {
@@ -932,7 +1030,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const result = await applyTemplateExtract(platform, preview)
       setTemplatePreview(null)
       setNotice(
-        `模板归位完成：写入 ${result.extracted} 个文件；复核已写入槽位 已匹配 ${result.verifiedMatched} · 缺失 ${result.verifiedMissing} · 冲突 ${result.verifiedConflicts}。`
+        t('shell.notice.templateComplete', {
+          extracted: result.extracted,
+          matched: result.verifiedMatched,
+          missing: result.verifiedMissing,
+          conflicts: result.verifiedConflicts
+        })
       )
       setNoticeTone('info')
     } catch (cause) {
@@ -958,12 +1061,17 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             size="sm"
             icon={<ArrowLeft aria-hidden className="size-3.5" />}
             onClick={() => backToDirectory(sourceId)}
-            title="返回发起本次下钻的目录对比会话"
+            title={t('shell.notice.returnTitle')}
           >
-            返回上级目录视图
+            {t('shell.notice.returnAction')}
           </ToolbarButton>
-          <span className="truncate text-2xs text-content-muted" title={source?.subtitle}>
-            来源目录对比：{source ? source.title : sourceId}
+          <span
+            className="truncate text-2xs text-content-muted"
+            title={source ? renderSessionText(describeSession(source).subtitle, t) : undefined}
+          >
+            {t('shell.notice.sourceDirectory', {
+              title: source ? renderSessionText(describeSession(source).title, t) : sourceId
+            })}
           </span>
         </div>
         {body}
@@ -1095,14 +1203,15 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           </span>
           <div className="leading-tight">
             <h1 className="text-sm font-semibold tracking-tight">OpenCompare</h1>
-            <p className="text-2xs text-content-muted">对比与三向合并工作台</p>
+            <p className="text-2xs text-content-muted">{t('shell.header.brandSubtitle')}</p>
           </div>
         </div>
 
         <SegmentedControl
-          label="视图切换"
+          label={t('shell.viewSwitcher.label')}
           options={VIEW_OPTIONS.map((option) => ({
             ...option,
+            label: t(option.labelKey),
             disabled: sessions.length === 0
           }))}
           value={active?.scene ?? 'directory'}
@@ -1115,9 +1224,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             icon={<GitCompare aria-hidden className="size-3.5" />}
             onClick={() => setCompareDialogOpen(true)}
             disabled={directoryBusy}
-            title="输入或粘贴左右两个真实路径，免系统弹窗建立对比（Cmd/Ctrl+N）"
+            title={t('shell.toolbar.newCompareTitle')}
           >
-            新建对比
+            {t('shell.toolbar.newCompare')}
           </ToolbarButton>
           {/* With a session on screen the empty-state CTAs are gone, so the
               toolbar keeps both real-open actions one click away. */}
@@ -1127,17 +1236,17 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
                 icon={<FileCode2 aria-hidden className="size-3.5" />}
                 onClick={() => void pickFilePair()}
                 disabled={directoryBusy}
-                title="依次选择左右两个真实文件开始对比"
+                title={t('shell.toolbar.openFileTitle')}
               >
-                打开文件
+                {t('shell.toolbar.openFile')}
               </ToolbarButton>
               <ToolbarButton
                 icon={<FolderOpen aria-hidden className="size-3.5" />}
                 onClick={() => void pickDirectoryPair()}
                 disabled={directoryBusy}
-                title="依次选择左右两个真实文件夹开始对比"
+                title={t('shell.toolbar.openFolderTitle')}
               >
-                打开文件夹
+                {t('shell.toolbar.openFolder')}
               </ToolbarButton>
             </>
           )}
@@ -1145,15 +1254,15 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             icon={<Sparkles aria-hidden className="size-3.5" />}
             onClick={() => void load()}
             disabled={status === 'loading'}
-            title="内置演示样本（辅助入口，可跳过）：不影响打开真实文件 / 文件夹与拖入路径"
+            title={t('shell.toolbar.loadSamplesTitle')}
           >
-            加载演示样本
+            {t('shell.toolbar.loadSamples')}
           </ToolbarButton>
           <DropdownMenu
-            label="演示样本"
-            menuLabel="演示样本库"
+            label={t('shell.toolbar.samples')}
+            menuLabel={t('shell.toolbar.samplesMenu')}
             icon={<Layers aria-hidden className="size-3.5" />}
-            items={SAMPLE_MENU}
+            items={sampleMenu(t)}
             onSelect={handleMenuSelect}
           />
         </div>
@@ -1162,13 +1271,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       {status === 'ready' && sessions.length > 0 ? (
         <div className="flex h-9 shrink-0 items-center border-b border-line-subtle bg-surface-base pr-2">
           <SessionTabs
-            tabs={sessions.map((session) => ({
-              id: session.id,
-              title: session.title,
-              subtitle: session.subtitle,
-              icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon,
-              dirty: session.dirty ?? false
-            }))}
+            tabs={sessions.map((session) => {
+              const display = describeSession(session)
+              return {
+                id: session.id,
+                title: renderSessionText(display.title, t),
+                subtitle: renderSessionText(display.subtitle, t),
+                icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon,
+                dirty: session.dirty ?? false
+              }
+            })}
             activeId={activeId}
             onSelect={selectSession}
             onClose={requestCloseSession}
@@ -1193,20 +1305,38 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       {directoryProgress ? (
         <div
           role="status"
-          aria-label="目录对比进度"
+          aria-label={t('shell.progress.label')}
           aria-live="polite"
           className="flex shrink-0 items-center gap-3 border-b border-line-subtle bg-surface-sunken px-3 py-1 text-2xs"
         >
           <span className="shrink-0 font-medium text-content-primary">
-            {directoryProgress.phase === 'scan' ? '正在扫描目录' : '正在校验内容'}
+            {t(
+              directoryProgress.phase === 'scan'
+                ? 'shell.progress.scanning'
+                : 'shell.progress.digesting'
+            )}
           </span>
           <span aria-hidden className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-surface-hover">
             <span className="block h-full w-1/2 animate-pulse rounded-full bg-accent" />
           </span>
           <span className="shrink-0 text-content-secondary">
             {directoryProgress.phase === 'scan'
-              ? `已扫描 ${directoryProgress.files} 个文件`
-              : `已校验 ${directoryProgress.phaseFiles} 个文件`}
+              ? t(
+                  countKey(
+                    'shell.progress.scanned.one',
+                    'shell.progress.scanned.other',
+                    directoryProgress.files
+                  ),
+                  { count: directoryProgress.files }
+                )
+              : t(
+                  countKey(
+                    'shell.progress.verified.one',
+                    'shell.progress.verified.other',
+                    directoryProgress.phaseFiles
+                  ),
+                  { count: directoryProgress.phaseFiles }
+                )}
           </span>
           {directoryProgress.phase === 'digest' ? (
             <>
@@ -1214,22 +1344,29 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               {/* The phase increment above is this run's progress; this is the
                   whole pipeline, so the number never drops at the hand-over. */}
               <span className="shrink-0 text-content-secondary">
-                累计 {directoryProgress.files} 个文件
+                {t(
+                  countKey(
+                    'shell.progress.cumulative.one',
+                    'shell.progress.cumulative.other',
+                    directoryProgress.files
+                  ),
+                  { count: directoryProgress.files }
+                )}
               </span>
             </>
           ) : null}
           <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
           <span className="shrink-0 text-content-muted">
-            已处理 {formatBytes(directoryProgress.bytes)}
+            {t('shell.progress.processed', { size: formatBytes(directoryProgress.bytes) })}
           </span>
           <ToolbarButton
             size="sm"
             className="ml-auto"
             onClick={cancelDirectoryCompare}
             disabled={directoryProgress.cancelling}
-            title="停止本次目录对比并保持当前工作台状态"
+            title={t('shell.progress.cancelTitle')}
           >
-            取消
+            {t('shell.progress.cancel')}
           </ToolbarButton>
         </div>
       ) : null}
@@ -1238,8 +1375,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         {status === 'empty' ? (
           <StateView
             icon={<GitCompare aria-hidden className="size-5" />}
-            title="打开真实文件或文件夹开始对比"
-            description="在「新建对比」中直接输入或粘贴左右两个真实路径，全程不弹系统对话框；也可以经系统选择器依次选择两侧，或直接把两个真实路径拖入窗口。对比直接读取本机文件系统，无需加载任何样本。"
+            title={t('shell.empty.title')}
+            description={t('shell.empty.description')}
             action={
               <>
                 <ToolbarButton
@@ -1248,33 +1385,33 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
                   onClick={() => setCompareDialogOpen(true)}
                   disabled={directoryBusy}
                 >
-                  新建对比
+                  {t('shell.toolbar.newCompare')}
                 </ToolbarButton>
                 <ToolbarButton
                   icon={<FileCode2 aria-hidden className="size-3.5" />}
                   onClick={() => void pickFilePair()}
                   disabled={directoryBusy}
                 >
-                  打开文件
+                  {t('shell.toolbar.openFile')}
                 </ToolbarButton>
                 <ToolbarButton
                   icon={<FolderOpen aria-hidden className="size-3.5" />}
                   onClick={() => void pickDirectoryPair()}
                   disabled={directoryBusy}
                 >
-                  打开文件夹
+                  {t('shell.toolbar.openFolder')}
                 </ToolbarButton>
               </>
             }
-            hint="拖入 2 个同类路径（两个文件或两个文件夹）可直接开始；内置演示样本仅供体验，可在顶栏随时加载或完全跳过。"
+            hint={t('shell.empty.hint')}
           />
         ) : null}
 
         {status === 'loading' ? (
           <StateView
             icon={<LoaderCircle aria-hidden className="size-5 animate-spin" />}
-            title="正在载入样本…"
-            description="读取内置样本库，扫描内置样本目录并按大小 / 修改时间 / 内容哈希完成对比，同时解析 CSV / TSV 表格。"
+            title={t('shell.loading.title')}
+            description={t('shell.loading.description')}
           />
         ) : null}
 
@@ -1282,18 +1419,18 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <StateView
             tone="danger"
             icon={<AlertTriangle aria-hidden className="size-5" />}
-            title="样本库读取失败"
-            description={error ?? '读取内置样本时发生未知错误。'}
+            title={t('shell.error.title')}
+            description={error ?? t('shell.error.unknown')}
             action={
               <ToolbarButton
                 variant="danger"
                 icon={<RefreshCw aria-hidden className="size-3.5" />}
                 onClick={() => void load()}
               >
-                重试
+                {t('common.retry')}
               </ToolbarButton>
             }
-            hint="样本库随应用内置，可直接重试。"
+            hint={t('shell.error.hint')}
           />
         ) : null}
 
@@ -1312,28 +1449,30 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
       {closeTarget ? (
         <Dialog
-          title="关闭含未保存修改的会话？"
-          description={`会话「${closeTarget.title}」还有未保存修改，关闭后这些修改会丢失。`}
+          title={t('shell.closeUnsaved.title')}
+          description={t('shell.closeUnsaved.description', {
+            title: renderSessionText(describeSession(closeTarget).title, t)
+          })}
           onClose={() => setCloseTarget(null)}
           footer={
             <>
-              <ToolbarButton onClick={() => setCloseTarget(null)}>继续编辑</ToolbarButton>
+              <ToolbarButton onClick={() => setCloseTarget(null)}>
+                {t('shell.closeUnsaved.continue')}
+              </ToolbarButton>
               <ToolbarButton variant="danger" onClick={() => closeSession(closeTarget.id)}>
-                放弃修改并关闭
+                {t('shell.closeUnsaved.discard')}
               </ToolbarButton>
             </>
           }
         >
-          <p className="text-2xs text-content-secondary">
-            需要保留修改时，请先「继续编辑」，在该会话内用「保存左文件 / 保存右文件」写回磁盘后再关闭。
-          </p>
+          <p className="text-2xs text-content-secondary">{t('shell.closeUnsaved.body')}</p>
         </Dialog>
       ) : null}
 
       <StatusBar>
-        <StatusEntry label="会话" value={active ? active.id : '—'} />
+        <StatusEntry label={t('shell.status.session')} value={active ? active.id : '—'} />
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <StatusEntry label="运行平台" value={platform.kind} />
+        <StatusEntry label={t('shell.status.platform')} value={platform.kind} />
         {legend ? (
           <>
             <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
@@ -1342,12 +1481,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         ) : null}
         {active ? (
           <span className="ml-auto flex shrink-0 items-center gap-3">
-            {active.stats.map((stat) => (
+            {describeSession(active).stats.map((stat) => (
               <StatusEntry
-                key={stat.label}
-                label={stat.label}
+                key={stat.key}
+                label={t(stat.key)}
                 value={
-                  active.scene === 'code' && stat.label === '冲突块' && activeMerge
+                  active.scene === 'code' && stat.key === 'shell.stat.conflicts' && activeMerge
                     ? activeMerge.unresolved
                     : stat.value
                 }

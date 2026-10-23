@@ -22,6 +22,7 @@ const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:mock')
 const revokeObjectURL = vi.fn<(url: string) => void>(() => undefined)
 
 beforeEach(() => {
+  localStorage.setItem('opencompare.userSettings', JSON.stringify({ language: 'zh' }))
   URL.createObjectURL = createObjectURL
   URL.revokeObjectURL = revokeObjectURL
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
@@ -54,6 +55,7 @@ afterAll(() => {
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
   vi.restoreAllMocks()
   createObjectURL.mockClear()
   revokeObjectURL.mockClear()
@@ -62,7 +64,9 @@ afterEach(() => {
 /** Loads the sample library and waits for the directory session to be ready. */
 async function loadWorkbench(): Promise<void> {
   render(<App />)
-  fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+  fireEvent.click(
+    await screen.findByRole('button', { name: '加载演示样本' })
+  )
   await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 }
 

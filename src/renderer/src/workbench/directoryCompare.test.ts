@@ -13,7 +13,7 @@ import {
 import type { DrilldownTarget } from './fileKinds'
 import type { WorkbenchSession } from './session'
 
-const TARGET: DrilldownTarget = { kind: 'code', label: '代码 / 文本' }
+const TARGET: DrilldownTarget = { kind: 'code', label: 'code' }
 
 function fileNode(relativePath: string): DirectoryDiffNode {
   const name = relativePath.slice(relativePath.lastIndexOf('/') + 1)

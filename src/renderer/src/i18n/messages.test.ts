@@ -18,6 +18,15 @@ const zhValues: Readonly<Record<string, string>> = zh
 const enValues: Readonly<Record<string, string>> = en
 const MESSAGES_DIR = join(process.cwd(), 'src/renderer/src/i18n/messages')
 
+/** Product-accurate acrostics that stay Latin-script in Chinese too. */
+const LATIN_ONLY_KEYS = new Set([
+  'common.fileKind.csv',
+  'common.fileKind.tsv',
+  'common.fileKind.json',
+  'common.fileKind.yaml',
+  'shell.view.structured'
+])
+
 const PAIRS: Record<string, [Record<string, string>, Record<string, string>]> = {
   common: [zhCommon, enCommon],
   shell: [zhShell, enShell],
@@ -82,7 +91,7 @@ describe('dictionary values', () => {
 
   it('keeps Chinese wording in the zh dictionary instead of copied English', () => {
     for (const [key, value] of Object.entries(zhValues)) {
-      if (/^\{(\w+)\}$/.test(value.trim())) continue
+      if (/^\{(\w+)\}$/.test(value.trim()) || LATIN_ONLY_KEYS.has(key)) continue
       expect(value, key).toMatch(/\p{Script=Han}/u)
     }
   })

@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import type { DiffStatus } from '@shared/fixtures'
-import { DIFF_BADGE_CLASSES, DIFF_DOT_CLASSES, DIFF_LABELS } from './diffSemantics'
+import { useI18n } from '@renderer/i18n/context'
+import { DIFF_BADGE_CLASSES, DIFF_DOT_CLASSES, DIFF_LABEL_KEYS } from './diffSemantics'
 import { cx } from './utils'
 
 export function DiffDot({
@@ -25,6 +26,7 @@ export function DiffBadge({
   readonly status: DiffStatus
   readonly className?: string
 }): JSX.Element {
+  const { t } = useI18n()
   return (
     <span
       className={cx(
@@ -33,7 +35,7 @@ export function DiffBadge({
         className
       )}
     >
-      {DIFF_LABELS[status]}
+      {t(DIFF_LABEL_KEYS[status])}
     </span>
   )
 }

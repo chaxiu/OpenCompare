@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { JSX, ReactNode, RefObject } from 'react'
 import { X } from 'lucide-react'
+import { useI18n } from '@renderer/i18n/context'
 import { IconButton } from './Button'
 
 export interface DialogProps {
@@ -27,6 +28,7 @@ export function Dialog({
   initialFocusRef,
   children
 }: DialogProps): JSX.Element {
+  const { t } = useI18n()
   const panel = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export function Dialog({
         <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line-subtle bg-surface-overlay px-3">
           <h2 className="truncate text-xs font-semibold text-content-primary">{title}</h2>
           <IconButton
-            label="关闭"
+            label={t('common.close')}
             icon={<X aria-hidden className="size-3.5" />}
             onClick={onClose}
             className="ml-auto"
