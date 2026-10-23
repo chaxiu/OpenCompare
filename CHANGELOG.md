@@ -2,6 +2,22 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## v0.2.7
+
+本版是面向用户的两项变化：桌面端界面支持中英双语，README 精简为 9 节双语门面。对比算法、目录扫描、快照格式与发布模型均未改动。
+
+### 新增
+
+- **桌面端 UI 中英双语**：首次启动按系统语言决定界面语言（`zh*` 区域显示中文，其余区域包括无法识别的情况显示英文）；可在设置内切换语言并持久化，切换后整窗即时生效，不丢当前会话状态、不重新扫描目录、无需重启应用。
+
+### 改进
+
+- **README 精简为 9 节双语门面**：发布流程、macOS 签名与公证细节、内存实测数字移入 `docs/` 下的专文，README 只保留下载安装、核心能力、快速上手、环境要求、项目结构、已知问题、证据与文档、Kill Paid Apps 001 平替与许可 9 节；中英两版保持同构镜像，Known issues 只保留尚未修复的问题。
+
+### 升级方式
+
+下载 v0.2.7 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `OpenCompare-Setup-0.2.7.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+
 ## v0.2.6
 
 本版修复 Windows 绝对路径在四个入口被拼到当前工作目录 / baseDir 的问题：CLI 参数、单实例接管、手工输入与 `opencompare://` 链接。不新增功能，macOS / Linux 行为不变。

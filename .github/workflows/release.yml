@@ -14,7 +14,7 @@ on:
       tag:
         description: 'Existing release tag to build (vMAJOR.MINOR.PATCH)'
         required: true
-        default: 'v0.2.6'
+        default: 'v0.2.7'
         type: string
 
 permissions:

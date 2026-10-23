@@ -71,7 +71,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 仅 tag 可达提交的 diff 若删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`），即使 `git cherry` 判为 `-` 也非零退出。
 - 祖先门只做只读 git 查询，不创建、移动、删除任何 tag / ref，不 push，也不调用 `gh release` 写操作。
 
-**补发用法（不改 tag、不升版本）**：`v0.2.6` 已发布；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.6`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
+**补发用法（不改 tag、不升版本）**：`v0.2.6` 已发布；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.7`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
 
 ## 六、打包后硬校验（CI，上传前）
 
