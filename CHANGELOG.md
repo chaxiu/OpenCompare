@@ -2,6 +2,19 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## v0.2.6
+
+本版修复 Windows 绝对路径在四个入口被拼到当前工作目录 / baseDir 的问题：CLI 参数、单实例接管、手工输入与 `opencompare://` 链接。不新增功能，macOS / Linux 行为不变。
+
+### 修复
+
+- **Windows 绝对路径四入口不再被拼到 cwd / baseDir**：`C:\…` 盘符路径、盘根（`C:\`）与 UNC（`\\server\share`）输入在 CLI 参数、单实例接管、手工输入、`opencompare://` 四个入口都按绝对路径解析，不再被拼到当前工作目录或 baseDir；`..` 不越过盘根 / 共享根，成功结果统一以 `/` 输出，`win32` 错误回显保留 `\`。
+- 修复已合入 `main`：合并提交 `0cc0914f3aebea9649d76be80fd3592a95bcdd87`（修复提交 `54029c8`）；GitHub Actions `windows-latest` job run `39888946270` 对同一 sha 的结论为 `success`。
+
+### 升级方式
+
+下载 v0.2.6 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `OpenCompare-Setup-0.2.6.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+
 ## v0.2.5
 
 本版收口大目录反复对比的三处退化：同进程多轮内存收敛、取消不再产生日志噪声、符号链接计数口径写死为「不跟随」。不新增功能。
