@@ -71,7 +71,13 @@ pnpm perf:gate
 - 单次运行（含 `electron-vite build`，两次 harness）目标 ≤ 3 分钟。
 - 需要留档时设置 `PERF_GATE_EVIDENCE_DIR=<仓库外目录>`，门禁会把两份证据复制为
   `perf-gate-<时间戳>-<mode>.json`（只复制，不改变判定与退出码）。
-- `.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`。
+- 该命令**不在默认门禁矩阵**里：`.munk/code-gates.json` 只保留 9 项纯单测 / 构建门禁，
+  `pnpm perf:gate` 属于条件 profile `.munk/code-gates.perf.json`（Host 不会自动执行该文件）。
+  三条采样纪律：
+  1. **条件触发**：只有 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染 / 取消路径时才调用；
+  2. **里程碑一次**：或作为里程碑 `x.y.0` 的独立验收任务跑一次，不随每个工作项重复；
+  3. **同 commit 只采一次**：同一被测对象在同一 commit 只采样一次，重跑须在 digest 写明上一轮
+     作废原因与两轮差异。
 
 还有一条更轻的门禁，只断言**缓存规模与多轮不增长**，不启动 Electron：
 

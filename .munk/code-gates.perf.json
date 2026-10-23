@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "Conditional perf profile for OpenCompare — NOT part of the default code_gates matrix. Run pnpm perf:gate only when the diff touches scan / hash / cache / IPC / tree rendering / cancel paths, or once as the standalone acceptance task for milestone x.y.0. Sampling discipline: sample the same subject at the same commit only once; any rerun must state in the digest why the previous run was invalidated and the difference between the two runs. Host never executes this file automatically.",
+  "gates": [
+    {
+      "id": "perf-gate",
+      "cwd": ".",
+      "command": "pnpm perf:gate"
+    }
+  ]
+}

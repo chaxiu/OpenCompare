@@ -43,11 +43,6 @@
       "command": "pnpm test:cancel"
     },
     {
-      "id": "perf-gate",
-      "cwd": ".",
-      "command": "pnpm perf:gate"
-    },
-    {
       "id": "memory-gate",
       "cwd": ".",
       "command": "pnpm test:memory"

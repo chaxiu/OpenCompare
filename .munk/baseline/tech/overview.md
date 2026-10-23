@@ -24,8 +24,13 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 - 结构断言：perf 模式在 app ready 前装 `--js-flags=--expose-gc`（普通启动不加）；每轮与 settle 后强制 GC 两次，`shared/perf/liveness.ts` 的 `WeakRef` 登记表数 `comparisons` / `rowModels`，`holds[]` 随证据落盘；`gc=false` 判 `hold-unmeasured` 红。
 - 判定单点：`src/shared/perf/verdict.ts` + `perf/profiles.json`。本轮新增 `settleRendererBytes`（real 1,363,148,800 B / gate 1,073,741,824 B）与 `renderer-round-peak` / `renderer-settle` / `settle-missing` / `hold-comparisons` / `hold-row-models` / `hold-tabs` / `hold-unmeasured`；既有峰值与增量上限只增不松，`round-delta` 仅对 `upsert` 生效。
 - 证据：`schema: opencompare.perf.directory/v1` 加法扩展（`mode` / `pairs` / `rounds[].tabs` / `rounds[].roundPeak` / `settle` / `holds`），原子写、< 5 MB。
-- 门禁：`pnpm perf:gate` 单次生成数据集（含第三对根 `links/left`）并跑两次 harness（upsert 5 轮 + multisession 3 会话，`--settle 5000`，`RUN_TIMEOUT_MS=300_000`），断言峰值、settle、holds 与热轮 `hashedFiles=0`；`pnpm test:memory` 继续守缓存双上限 / 跨轮不增长 / 释放 / 结果不变。
+- 条件门禁（`.munk/code-gates.perf.json`，不进默认矩阵）：`pnpm perf:gate` 单次生成数据集（含第三对根 `links/left`）并跑两次 harness（upsert 5 轮 + multisession 3 会话，`--settle 5000`，`RUN_TIMEOUT_MS=300_000`），断言峰值、settle、holds 与热轮 `hashedFiles=0`；`pnpm test:memory` 继续守缓存双上限 / 跨轮不增长 / 释放 / 结果不变。
 
 ## 质量门禁
 
-`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate` / `memory-gate`（见 `.munk/code-gates.json`）。`perf-gate` 真实启动 Electron，无 GUI 会话或超时会红。
+默认矩阵 9 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
+`test-compare-request` / `cancel-gate` / `memory-gate`（见 `.munk/code-gates.json`），全部为纯单测
+或构建门禁。重采样 `pnpm perf:gate` **不在默认矩阵**，只作为条件 profile 放在
+`.munk/code-gates.perf.json`（Host 不自动执行）：仅在 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染
+/ 取消路径时调用，或作为里程碑 `x.y.0` 的独立验收任务跑一次；同一 commit 只采样一次，重跑须在
+digest 写明上一轮作废原因与两轮差异。`perf-gate` 真实启动 Electron，无 GUI 会话或超时会红。
