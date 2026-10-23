@@ -266,6 +266,64 @@ describe('comparison cache bounds', () => {
     expect([...cache.hashes.keys()].sort()).toEqual(['/A', '/D', '/E'])
   })
 
+  it('shares keys only under registered alias roots and evicts through them', () => {
+    const cache = createComparisonCache()
+    cache.set('/real/left/a.txt', entry())
+
+    // Unregistered paths stay their own key: the old behaviour is unchanged.
+    expect(cache.canonicalPath('/alias/left/a.txt')).toBe('/alias/left/a.txt')
+    expect(cache.get('/alias/left/a.txt')).toBeUndefined()
+
+    cache.aliasRoot('/alias/left', '/real/left')
+    expect(cache.canonicalPath('/alias/left/a.txt')).toBe('/real/left/a.txt')
+    expect(cache.canonicalPath('/alias/left')).toBe('/real/left')
+    expect(cache.canonicalPath('/alias/leftover/a.txt')).toBe('/alias/leftover/a.txt')
+    expect(cache.get('/alias/left/a.txt')).toBeDefined()
+
+    // Eviction takes the alias base and drops the canonical entries.
+    expect(cache.evictUnderRoots(['/alias/left'])).toBe(1)
+    expect(cache.hashes.size).toBe(0)
+  })
+
+  it('reuses digests for the same tree reached through an alias root', async () => {
+    const tree = {
+      real: {
+        left: { 'a.txt': { text: 'alpha' }, nested: { 'b.txt': { text: 'bravo' } } },
+        right: { 'a.txt': { text: 'alphA' }, nested: { 'b.txt': { text: 'bravo' } } }
+      },
+      // Same bytes and metadata behind a symlinked root prefix.
+      alias: {
+        left: { 'a.txt': { text: 'alpha' }, nested: { 'b.txt': { text: 'bravo' } } },
+        right: { 'a.txt': { text: 'alphA' }, nested: { 'b.txt': { text: 'bravo' } } }
+      }
+    }
+    const fs = createFakeFs(tree)
+    let hashed = 0
+    const digestFiles: DigestFiles = async (paths) => {
+      hashed += paths.length
+      return fs.digestFiles(paths)
+    }
+    const cache = createComparisonCache()
+    const real = await compareDirectories('/real/left', '/real/right', fs.list, fs.readTextFile, cache, undefined, {
+      digestFiles
+    })
+    const coldHashes = hashed
+    const coldEntries = cache.stats.entries
+    expect(coldHashes).toBeGreaterThan(0)
+
+    cache.aliasRoot('/alias/left', '/real/left')
+    cache.aliasRoot('/alias/right', '/real/right')
+    const alias = await compareDirectories('/alias/left', '/alias/right', fs.list, fs.readTextFile, cache, undefined, {
+      digestFiles
+    })
+
+    // The alias pass reads nothing and adds no second key space.
+    expect(hashed).toBe(coldHashes)
+    expect(cache.stats.entries).toBe(coldEntries)
+    expect(alias.counts).toEqual(real.counts)
+    expect(cache.stats.hits).toBeGreaterThan(0)
+  })
+
   it('counts hits, misses and evictions and lets the estimate fall again', () => {
     const cache = createComparisonCache({ maxEntries: 2 })
     cache.set('/a', entry())

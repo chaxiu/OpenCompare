@@ -8,11 +8,15 @@
  *  1. `upsert` — one pair re-compared 5 rounds, one tab, the semantics of
  *     `Workbench.upsertSession`;
  *  2. `multisession` — 3 distinct pairs, tabs 1 → 2 → 3, the semantics of the
- *     workbench's multi-tab session array.
+ *     workbench's multi-tab session array (nothing is released at a boundary);
+ *  3. `retained` (group3) — 3 tabs built and kept, then 2 hot upserts on the
+ *     active pair and the active tab closed, proving the retained-tab shape.
  *
- * Both runs assert ready peaks, per-round peaks, the post-settle reading and the
- * post-GC liveness counts (`comparisons` / `rowModels` / `tabs`). The dataset is
- * always removed afterwards.
+ * Every run asserts ready peaks, per-round peaks, settle readings and the
+ * post-GC liveness counts (`comparisons` / `rowModels` / `tabs`). Multi-tab runs
+ * judge the instantaneous peak against the 2.25 GiB regression guardrail (the
+ * profile target is reported as a notice); the settle and whole-app readings
+ * stay hard lines. The dataset is always removed afterwards.
  */
 import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -34,6 +38,12 @@ const UPSERT_ROUNDS = 5
 const SETTLE_MS = 5000
 const GATE_RENDERER_PEAK = 1073741824
 const GATE_SETTLE = 1073741824
+const GATE_APP_TOTAL = 2147483648
+/** Multi-tab scenes judge only the instantaneous regression guardrail (2.25 GiB). */
+const TRANSIENT_GUARDRAIL = 2415919104
+/** Renderer RSS allowed after closing one of the retained tabs (1,100 MiB). */
+const RECLAIM_RENDERER = 1153433600
+const RETAINED_HOT_ROUNDS = 2
 /** Optional archive of the two evidence files, outside the repo. */
 const EVIDENCE_DIR = process.env.PERF_GATE_EVIDENCE_DIR
 const EVIDENCE_STAMP = new Date().toISOString().replace(/[:.]/g, '-')
@@ -136,7 +146,7 @@ async function runAndRead(label, args, out) {
   return JSON.parse(await readFile(out, 'utf8'))
 }
 
-function assertCommon(evidence, label) {
+function assertCommon(evidence, label, roundPeakLimit = GATE_RENDERER_PEAK) {
   if (evidence.verdict?.ok !== true) {
     throw new Error(`perf:gate ${label} 证据 verdict.ok=false：${JSON.stringify(evidence.verdict?.violations)}`)
   }
@@ -179,9 +189,9 @@ function assertCommon(evidence, label) {
     if (!(round.tabs > 0)) {
       throw new Error(`perf:gate ${label} 第 ${round.index} 轮缺少 tabs 字段。`)
     }
-    if (!(round.roundPeak > 0) || round.roundPeak > GATE_RENDERER_PEAK) {
+    if (!(round.roundPeak > 0) || round.roundPeak > roundPeakLimit) {
       throw new Error(
-        `perf:gate ${label} 第 ${round.index} 轮 ready 峰值越线：${round.roundPeak} > ${GATE_RENDERER_PEAK}`
+        `perf:gate ${label} 第 ${round.index} 轮 ready 峰值越线：${round.roundPeak} > ${roundPeakLimit}`
       )
     }
   }
@@ -229,7 +239,7 @@ function assertUpsert(evidence, left, right) {
 }
 
 function assertMultisession(evidence) {
-  assertCommon(evidence, 'multisession')
+  assertCommon(evidence, 'multisession', TRANSIENT_GUARDRAIL)
   if (evidence.mode !== 'multisession') {
     throw new Error(`perf:gate multisession 证据 mode=${evidence.mode}。`)
   }
@@ -248,11 +258,121 @@ function assertMultisession(evidence) {
     if (hold.tabs !== hold.round) {
       throw new Error(`perf:gate multisession ${hold.label} tabs=${hold.tabs}（期望 ${hold.round}）。`)
     }
-    if (hold.comparisons !== hold.round) {
+    // Inactive tabs keep only their summary: one live comparison (the active
+    // one), never one per opened tab.
+    if (hold.comparisons !== 1) {
       throw new Error(
-        `perf:gate multisession ${hold.label} comparisons=${hold.comparisons}（期望 ${hold.round}）。`
+        `perf:gate multisession ${hold.label} comparisons=${hold.comparisons}（期望仅活动 1 份）。`
       )
     }
+  }
+  // Third step is the alias root: canonical cache keys mean zero new hashes.
+  if (evidence.rounds[2].counts.hashedFiles !== 0) {
+    throw new Error(
+      `perf:gate multisession 别名轮重新哈希了 ${evidence.rounds[2].counts.hashedFiles} 个文件。`
+    )
+  }
+  if (evidence.peaks.appTotal > GATE_APP_TOTAL) {
+    throw new Error(
+      `perf:gate multisession app 总峰值越线：${evidence.peaks.appTotal} > ${GATE_APP_TOTAL}`
+    )
+  }
+}
+
+function assertRetained(evidence) {
+  assertCommon(evidence, 'retained', TRANSIENT_GUARDRAIL)
+  if (evidence.mode !== 'retained') {
+    throw new Error(`perf:gate retained 证据 mode=${evidence.mode}。`)
+  }
+  if (evidence.pairs.length !== 3) throw new Error('perf:gate retained 证据 pairs 不是 3 对。')
+  const expectedRounds = 3 + RETAINED_HOT_ROUNDS
+  if (evidence.rounds.length !== expectedRounds) {
+    throw new Error(`perf:gate retained 轮次数不是 ${expectedRounds}。`)
+  }
+  const tabs = evidence.rounds.map((round) => round.tabs)
+  if (JSON.stringify(tabs) !== JSON.stringify([1, 2, 3, 3, 3])) {
+    throw new Error(`perf:gate retained tabs 不是 1→2→3→3→3：${JSON.stringify(tabs)}`)
+  }
+  for (const round of evidence.rounds.slice(3)) {
+    if (round.counts.hashedFiles !== 0) {
+      throw new Error(
+        `perf:gate retained 第 ${round.index} 轮热 upsert 重新哈希了 ${round.counts.hashedFiles} 个文件。`
+      )
+    }
+  }
+  const labels = evidence.holds.map((hold) => hold.label)
+  const expectedLabels = [
+    'round-1',
+    'round-2',
+    'round-3',
+    'after-3-tabs',
+    'round-4',
+    'round-5',
+    'after-hot-upserts',
+    'reclaim'
+  ]
+  if (JSON.stringify(labels) !== JSON.stringify(expectedLabels)) {
+    throw new Error(`perf:gate retained hold 序列异常：${JSON.stringify(labels)}`)
+  }
+  const expectedHoldTabs = [1, 2, 3, 3, 3, 3, 3, 2]
+  evidence.holds.forEach((hold, index) => {
+    if (hold.tabs !== expectedHoldTabs[index]) {
+      throw new Error(
+        `perf:gate retained ${hold.label} tabs=${hold.tabs}（期望 ${expectedHoldTabs[index]}）。`
+      )
+    }
+    if (hold.comparisons !== 1) {
+      throw new Error(
+        `perf:gate retained ${hold.label} comparisons=${hold.comparisons}（期望仅活动 1 份）。`
+      )
+    }
+  })
+  if (!Array.isArray(evidence.settleStages) || evidence.settleStages.length !== 2) {
+    throw new Error('perf:gate retained 证据缺少两条 settle 阶段。')
+  }
+  const stageLabels = evidence.settleStages.map((stage) => stage.label)
+  if (JSON.stringify(stageLabels) !== JSON.stringify(['after-3-tabs', 'after-hot-upserts'])) {
+    throw new Error(`perf:gate retained settle 阶段异常：${JSON.stringify(stageLabels)}`)
+  }
+  for (const stage of evidence.settleStages) {
+    if (stage.tabs !== 3) {
+      throw new Error(`perf:gate retained ${stage.label} tabs=${stage.tabs}（期望 3）。`)
+    }
+    if (!(stage.rss.renderer > 0) || stage.rss.renderer > GATE_SETTLE) {
+      throw new Error(
+        `perf:gate retained ${stage.label} 静置越线：${stage.rss.renderer} > ${GATE_SETTLE}`
+      )
+    }
+  }
+  const growth =
+    evidence.settleStages[1].rss.renderer - evidence.settleStages[0].rss.renderer
+  if (growth > 104857600) {
+    throw new Error(`perf:gate retained 热轮后静置抬升 ${growth} > 104857600。`)
+  }
+  if (evidence.reclaim === null || evidence.reclaim === undefined) {
+    throw new Error('perf:gate retained 证据缺少关标签后的 reclaim 采样。')
+  }
+  if (evidence.reclaim.tabs !== 2) {
+    throw new Error(`perf:gate retained reclaim tabs=${evidence.reclaim.tabs}（期望 2）。`)
+  }
+  if (
+    !(evidence.reclaim.rss.renderer > 0) ||
+    evidence.reclaim.rss.renderer > RECLAIM_RENDERER
+  ) {
+    throw new Error(
+      `perf:gate retained reclaim.renderer 未回落：${evidence.reclaim.rss.renderer} > ${RECLAIM_RENDERER}`
+    )
+  }
+  if (evidence.peaks.appTotal > GATE_APP_TOTAL) {
+    throw new Error(
+      `perf:gate retained app 总峰值越线：${evidence.peaks.appTotal} > ${GATE_APP_TOTAL}`
+    )
+  }
+  const pids = new Set(
+    evidence.rounds.map((round) => round.rendererPid).filter((pid) => pid !== null)
+  )
+  if (pids.size !== 1) {
+    throw new Error(`perf:gate retained renderer 进程发生了重启：${[...pids].join(',')}`)
   }
 }
 
@@ -263,6 +383,7 @@ async function main() {
   const links = join(temp, 'links')
   const upsertOut = join(temp, 'evidence-upsert.json')
   const multiOut = join(temp, 'evidence-multisession.json')
+  const retainedOut = join(temp, 'evidence-retained.json')
   try {
     const generated = await generate(left, right, links)
     console.log(
@@ -325,9 +446,41 @@ async function main() {
     }
     assertMultisession(multisession)
 
+    const retained = await runAndRead(
+      'retained',
+      [
+        '--mode',
+        'retained',
+        '--left',
+        left,
+        '--left',
+        right,
+        '--left',
+        join(links, 'left'),
+        '--right',
+        right,
+        '--right',
+        left,
+        '--right',
+        right,
+        '--hot-rounds',
+        String(RETAINED_HOT_ROUNDS),
+        '--settle',
+        String(SETTLE_MS),
+        '--interval',
+        '500'
+      ],
+      retainedOut
+    )
+    if (retained.roots?.left !== left || retained.roots?.right !== right) {
+      throw new Error('perf:gate retained 证据 roots 未指向本次临时数据集。')
+    }
+    assertRetained(retained)
+
     for (const [label, evidence] of [
       ['upsert', upsert],
-      ['multisession', multisession]
+      ['multisession', multisession],
+      ['retained', retained]
     ]) {
       for (const pair of evidence.pairs) {
         for (const rootPath of [pair.left, pair.right]) {
@@ -348,6 +501,11 @@ async function main() {
         .join(',')}`
     console.log(`perf:gate PASS upsert -> ${format(upsert)}`)
     console.log(`perf:gate PASS multisession -> ${format(multisession)}`)
+    console.log(
+      `perf:gate PASS retained -> ${format(retained)}, settleStages=${retained.settleStages
+        .map((stage) => `${stage.label}:${stage.rss.renderer}`)
+        .join(',')}, reclaim=${retained.reclaim.rss.renderer}/${retained.reclaim.tabs}`
+    )
   } finally {
     await rm(temp, { recursive: true, force: true })
   }

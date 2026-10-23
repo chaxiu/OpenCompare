@@ -11,6 +11,7 @@ import {
   readFile,
   readdir,
   readlink,
+  realpath,
   rm,
   stat,
   utimes,
@@ -146,7 +147,7 @@ function parseText(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
-function parsePathArray(value: unknown, subject: 'file' | 'directory'): string[] {
+function parsePathArray(value: unknown, subject: 'file' | 'directory' | 'path'): string[] {
   if (!Array.isArray(value)) throw new TypeError(`Expected an array of ${subject} paths.`)
   return value.map((path) => assertPath(path))
 }
@@ -630,6 +631,24 @@ async function temporaryDirectory(): Promise<string> {
   return root
 }
 
+/**
+ * Real form of each path, in input order. The sample mount has no on-disk
+ * counterpart and every unreadable path falls back to its input, so the answer
+ * is always the same length as the request.
+ */
+async function resolveRealpaths(paths: readonly string[]): Promise<readonly string[]> {
+  return Promise.all(
+    paths.map(async (path) => {
+      if (isSamplePath(path)) return path
+      try {
+        return await realpath(path)
+      } catch {
+        return path
+      }
+    })
+  )
+}
+
 /** Hooks the launch bootstrap needs from the IPC layer. */
 export interface PlatformIpcOptions {
   /** Called when the renderer announces its launch-request subscription. */
@@ -728,4 +747,7 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     rm(assertWritable(assertPath(path)))
   )
   ipcMain.handle(PLATFORM_CHANNELS.temporaryDirectory, () => temporaryDirectory())
+  ipcMain.handle(PLATFORM_CHANNELS.realpath, (_event, paths: unknown) =>
+    resolveRealpaths(parsePathArray(paths, 'path'))
+  )
 }

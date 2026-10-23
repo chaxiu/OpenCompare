@@ -13,11 +13,13 @@ import type {
   PerfMode,
   PerfPair,
   PerfProfileName,
+  PerfReclaim,
   PerfRoundDelta,
   PerfRoundReport,
   PerfRss,
   PerfSample,
   PerfSamplePhase,
+  PerfSettleStage,
   PerfThresholds
 } from './types'
 import { PERF_MEMORY_DEFINITION } from './types'
@@ -26,6 +28,8 @@ import { evaluatePerf } from './verdict'
 export interface PerfRecorderInit {
   readonly mode: PerfMode
   readonly pairs: readonly PerfPair[]
+  /** In-place hot upserts after the tabs are built (`0` outside `retained`). */
+  readonly hotRounds: number
   readonly left: string
   readonly right: string
   readonly profile: PerfProfileName
@@ -51,6 +55,8 @@ export class PerfRecorder {
   private readonly samples: PerfSample[] = []
   private readonly rounds: RoundState[] = []
   private readonly holds: PerfHoldSample[] = []
+  private readonly settleStages: PerfSettleStage[] = []
+  private reclaimReading: PerfReclaim | null = null
   private settleRss: PerfRss | null = null
   private settleAt: string | null = null
   private currentRound = 0
@@ -141,6 +147,23 @@ export class PerfRecorder {
     this.settleAt = sample.at
   }
 
+  /**
+   * One named settle stage of a `retained` run. The last stage also becomes the
+   * evidence's `settle` reading, so the old single-settle consumers keep working.
+   */
+  settleStage(label: string, tabs: number): void {
+    const sample = this.sample(`settle-${label}`, 'settle', this.currentRound)
+    this.settleStages.push({ label, rss: sample.rss, at: sample.at, tabs })
+    this.settleRss = sample.rss
+    this.settleAt = sample.at
+  }
+
+  /** The post-close reading of a `retained` run. */
+  reclaim(tabs: number): void {
+    const sample = this.sample('reclaim', 'settle', this.currentRound)
+    this.reclaimReading = { tabs, rss: sample.rss, at: sample.at }
+  }
+
   /** One fixed-interval background sample, attributed to the round in progress. */
   periodic(): void {
     if (!this.startupTaken || this.finished) return
@@ -221,6 +244,14 @@ export class PerfRecorder {
       roundPeaks: this.rounds.map(
         (round) => round.report.roundPeak ?? round.report.rendererRss ?? 0
       ),
+      roundHashedFiles: this.rounds.map((round) => round.report.counts.hashedFiles),
+      rendererPids: this.rounds.map((round) => round.report.rendererPid ?? null),
+      settleStages: this.settleStages,
+      reclaim: this.reclaimReading,
+      retained:
+        this.init.mode === 'retained'
+          ? { pairs: this.init.pairs.length, hotRounds: this.init.hotRounds }
+          : undefined,
       holds: this.holds
     })
 
@@ -250,6 +281,8 @@ export class PerfRecorder {
       peaks,
       settle: this.settleRss,
       settleAt: this.settleAt,
+      ...(this.init.mode === 'retained' ? { settleStages: [...this.settleStages] } : {}),
+      ...(this.init.mode === 'retained' ? { reclaim: this.reclaimReading } : {}),
       holds: [...this.holds],
       roundDeltas,
       verdict,

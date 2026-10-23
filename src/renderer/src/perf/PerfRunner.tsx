@@ -72,7 +72,7 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
   /** Latest committed list; the async round loop must not read stale state. */
   const sessionsRef = useRef<readonly WorkbenchSession[]>([])
 
-  const commit = useCallback(async (next: readonly WorkbenchSession[], id: string) => {
+  const commit = useCallback(async (next: readonly WorkbenchSession[], id: string | null) => {
     // Force the commit so the post-round sample and the liveness reading both
     // observe the new tree, not a pending update.
     flushSync(() => {
@@ -140,13 +140,25 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
             setStatus(
               `第 ${progress.phase === 'scan' ? '扫描' : '哈希'}阶段：${progress.files} 个文件 / ${progress.bytes} 字节`
             )
+          },
+          onSettleStage: async (label, tabs) => {
+            setStatus(`静置 ${Math.round(config.settleMs / 1000)}s 后采样 ${label}…`)
+            await publishHold(perf, label)
+            await perf.event({ type: 'settle-stage', label, tabs })
+          },
+          onReclaim: async (tabs) => {
+            setStatus(`关闭活动标签后采样回收（${tabs} 个标签）…`)
+            await publishHold(perf, 'reclaim')
+            await perf.event({ type: 'reclaim', tabs })
           }
         })
 
-        setStatus(`等待 ${Math.round(config.settleMs / 1000)}s 静置后采样…`)
-        await delay(config.settleMs)
-        await publishHold(perf, 'settle')
-        await perf.event({ type: 'settle' })
+        if (config.mode !== 'retained') {
+          setStatus(`等待 ${Math.round(config.settleMs / 1000)}s 静置后采样…`)
+          await delay(config.settleMs)
+          await publishHold(perf, 'settle')
+          await perf.event({ type: 'settle' })
+        }
         await perf.event({ type: 'complete' })
         setStatus(`测量完成：${reports.length} 轮，主进程正在写出证据。`)
       } catch (cause) {

@@ -5,7 +5,7 @@ import { runPerfRounds } from './runRounds'
 
 async function seededPlatform() {
   const platform = createWebPlatformPort()
-  for (const root of ['left', 'right', 'other-left', 'other-right']) {
+  for (const root of ['left', 'right', 'other-left', 'other-right', 'third-left', 'third-right']) {
     await platform.ensureDirectory(`/memory/${root}`)
   }
   await platform.writeTextFile('/memory/left/a.txt', 'alpha', 1000)
@@ -14,13 +14,15 @@ async function seededPlatform() {
   await platform.writeTextFile('/memory/right/b.txt', 'bravO', 1000)
   await platform.writeTextFile('/memory/other-left/c.txt', 'charlie', 1000)
   await platform.writeTextFile('/memory/other-right/c.txt', 'charlie', 1000)
+  await platform.writeTextFile('/memory/third-left/d.txt', 'delta', 1000)
+  await platform.writeTextFile('/memory/third-right/d.txt', 'delta', 1000)
   return platform
 }
 
 describe('runPerfRounds', () => {
   it('upserts the same session for every round and never releases the previous one', async () => {
     const platform = await seededPlatform()
-    const commits: Array<{ sessions: readonly WorkbenchSession[]; activeId: string }> = []
+    const commits: Array<{ sessions: readonly WorkbenchSession[]; activeId: string | null }> = []
     const started: number[] = []
 
     const reports = await runPerfRounds(
@@ -82,6 +84,59 @@ describe('runPerfRounds', () => {
     expect(counts).toEqual([1, 2])
     expect(reports.map((report) => report.tabs)).toEqual([1, 2])
     expect(new Set(reports.map((report) => report.sessionId)).size).toBe(2)
+  })
+
+  it('retains 3 tabs across hot rounds and rebuilds the landing tab after a close', async () => {
+    const platform = await seededPlatform()
+    const commits: Array<readonly WorkbenchSession[]> = []
+    const stages: Array<{ label: string; tabs: number }> = []
+    let reclaimTabs = -1
+
+    const reports = await runPerfRounds(
+      platform,
+      {
+        mode: 'retained',
+        pairs: [
+          { left: '/memory/left', right: '/memory/right' },
+          { left: '/memory/other-left', right: '/memory/other-right' },
+          { left: '/memory/third-left', right: '/memory/third-right' }
+        ],
+        rounds: 3,
+        hotRounds: 2,
+        settleMs: 0
+      },
+      {
+        onCommit: (sessions) => {
+          commits.push(sessions)
+        },
+        onSettleStage: (label, tabs) => {
+          stages.push({ label, tabs })
+        },
+        onReclaim: (tabs) => {
+          reclaimTabs = tabs
+        }
+      }
+    )
+
+    expect(reports.map((report) => report.tabs)).toEqual([1, 2, 3, 3, 3])
+    expect(reports).toHaveLength(5)
+    for (const report of reports.slice(3)) {
+      expect(report.counts.hashedFiles).toBe(0)
+    }
+    // No commit ever keeps more than the active tree resident.
+    for (const sessions of commits) {
+      expect(
+        sessions.filter((session) => session.directory !== undefined).length
+      ).toBeLessThanOrEqual(1)
+    }
+    expect(stages).toEqual([
+      { label: 'after-3-tabs', tabs: 3 },
+      { label: 'after-hot-upserts', tabs: 3 }
+    ])
+    expect(reclaimTabs).toBe(2)
+    // The landing tab was rebuilt from the warm cache: still 2 tabs, one tree.
+    expect(commits[commits.length - 1].map((session) => session.id).length).toBe(2)
+    expect(commits[commits.length - 1].filter((session) => session.directory !== undefined)).toHaveLength(1)
   })
 
   it('reports each round wall clock and ISO boundaries', async () => {

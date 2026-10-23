@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath as fsRealpath,
   rm,
   stat,
   symlink,
@@ -108,7 +109,8 @@ const platform: PlatformPort = {
   statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
   ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
-  temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>
+  temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
+  realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>
 }
 
 const roots: string[] = []
@@ -128,6 +130,24 @@ afterEach(async () => {
 })
 
 beforeAll(() => registerPlatformIpc())
+
+describe('realpath capability', () => {
+  it('resolves a symlinked root, keeps the sample mount and falls back per path', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'real-tree')
+    await mkdir(target, { recursive: true })
+    const link = join(root, 'alias-tree')
+    await symlink(target, link)
+    const missing = join(root, 'missing-tree')
+
+    const resolved = await platform.realpath([link, missing, '/samples/csv'])
+
+    expect(resolved[0]).toBe(await fsRealpath(target))
+    expect(resolved[1]).toBe(missing)
+    expect(resolved[2]).toBe('/samples/csv')
+    expect(resolved).toHaveLength(3)
+  })
+})
 
 describe('electron real-directory sync', () => {
   it('writes through the IPC handlers, clears the differences and is idempotent', async () => {

@@ -206,6 +206,13 @@ export interface PlatformPort {
   /** Writable scratch root for materialising read-only trees (per runtime). */
   temporaryDirectory(): Promise<string>
   /**
+   * Resolves each path's real form (symbolic links followed), in input order.
+   * A path that cannot be resolved is returned unchanged, so the caller can
+   * always pair the answer with its input. The renderer uses it only to
+   * canonicalise digest-cache keys, never to alter a session's identity.
+   */
+  realpath(paths: readonly string[]): Promise<readonly string[]>
+  /**
    * Subscribes to compare requests collected from the launch source (launch
    * arguments or an `opencompare://` link). Optional: a runtime without a launch
    * source omits it and the workbench treats it as "no injection". The returned

@@ -40,11 +40,12 @@ import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
 import {
+  attachDirectoryComparison,
   createDirectorySession,
   createDrilldownSession,
   directoryViewKey,
   openFilePairSession,
-  releaseDirectoryComparison,
+  releaseSessionTree,
   resolveDirectoryReturn
 } from './directoryCompare'
 import {
@@ -58,7 +59,7 @@ import { classifyFile } from './fileKinds'
 import { loadSampleSessions } from './loadSampleSessions'
 import { NewCompareDialog } from './NewCompareDialog'
 import type { CompareOpenOutcome } from './NewCompareDialog'
-import { closeSessions, replaceSessions, upsertSessions } from './sessionStore'
+import { commitSessionTree, closeSessions, retainActiveTree } from './sessionStore'
 import {
   compareSides,
   describeSnapshotContentError,
@@ -219,6 +220,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryStates, setDirectoryStates] = useState<Record<string, DirectoryViewState>>({})
   const [directoryScroll, setDirectoryScroll] = useState<Record<string, DirectoryScroll>>({})
+  /** Readable failure of an inactive tab's tree rebuild, keyed by session id. */
+  const [restoreFailures, setRestoreFailures] = useState<Record<string, string>>({})
   const [pendingLeft, setPendingLeft] = useState<PendingLeft | null>(null)
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
@@ -227,6 +230,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [compareDialogOpen, setCompareDialogOpen] = useState(false)
   const cache = useRef(createComparisonCache())
   const opSequence = useRef(0)
+  /** Latest active id, readable by an async rebuild that started before a switch. */
+  const activeIdRef = useRef<string | null>(null)
+  /** Monotonic sequence + controller of the tree rebuild currently in flight. */
+  const restoreSequence = useRef(0)
+  const restoreOperation = useRef<AbortController | null>(null)
   /** The directory comparison that can still be cancelled, if one is running. */
   const activeDirectoryOperation = useRef<ActiveDirectoryOperation | null>(null)
   /** Latest launch-request handler; the subscription itself is installed once. */
@@ -320,16 +328,74 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }, [])
 
   /**
-   * Explicitly releases a session's directory comparison: its roots' digest
-   * entries leave the shared cache unless some open session still uses them.
-   * Close, re-compare and sync refresh all go through here — never GC timing.
+   * Rebuilds one inactive directory tab's tree from the warm digest cache. It
+   * only scans (nothing is hashed again) and commits the new comparison onto
+   * the session it belongs to; a tab switch during the rebuild aborts it, so a
+   * second reachable tree can never appear.
    */
-  function releaseDirectorySession(
-    previous: WorkbenchSession,
-    openSessions: readonly WorkbenchSession[]
-  ): void {
-    if (previous.directory === undefined) return
-    releaseDirectoryComparison(cache.current, previous.directory, openSessions)
+  async function restoreDirectoryTree(
+    session: WorkbenchSession,
+    sequence: number,
+    controller: AbortController
+  ): Promise<void> {
+    const sessionSides = session.sides
+    if (sessionSides === undefined) return
+    try {
+      const comparison = await compareSides(platform, sessionSides, cache.current, {
+        signal: controller.signal
+      })
+      if (sequence !== restoreSequence.current || activeIdRef.current !== session.id) return
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === session.id ? attachDirectoryComparison(item, comparison) : item
+        )
+      )
+      setRestoreFailures((current) => withoutKey(current, session.id))
+    } catch (cause) {
+      if (sequence !== restoreSequence.current || activeIdRef.current !== session.id) return
+      if (isOperationCancelled(cause)) return
+      setRestoreFailures((current) => ({
+        ...current,
+        [session.id]: cause instanceof Error ? cause.message : String(cause)
+      }))
+    }
+  }
+
+  /**
+   * The one activation path: tab click, scene switch, drilldown return and a
+   * close that lands on a neighbour all end here. Active id and tree retention
+   * are committed in the same event, so the peak window never keeps the old
+   * tab's tree alongside the newly active one.
+   */
+  function activateIn(next: readonly WorkbenchSession[], id: string | null): void {
+    restoreSequence.current += 1
+    restoreOperation.current?.abort()
+    restoreOperation.current = null
+    activeIdRef.current = id
+    setActiveId(id)
+    setSessions(retainActiveTree(next, id))
+
+    const target = next.find((session) => session.id === id)
+    if (
+      target !== undefined &&
+      target.scene === 'directory' &&
+      target.directory === undefined &&
+      target.sides !== undefined
+    ) {
+      const sequence = restoreSequence.current
+      const controller = new AbortController()
+      restoreOperation.current = controller
+      void restoreDirectoryTree(target, sequence, controller)
+    }
+  }
+
+  function selectSession(id: string | null): void {
+    activateIn(sessions, id)
+  }
+
+  /** Retries a failed rebuild for one summary-only directory tab. */
+  function retryRestore(session: WorkbenchSession): void {
+    activateIn(sessions, session.id)
   }
 
   /** Closes one session, landing on its neighbour and cleaning shell caches. */
@@ -341,14 +407,14 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     const remaining = closeSessions(sessions, id)
     // The comparison (whole tree + row counts) is dropped with the session; the
     // cache entries under its roots go too, so a closed tab leaves nothing big.
-    releaseDirectorySession(closing, remaining)
-    if (activeId === id) {
-      // Prefer the next tab; the previous one is the fallback at the right edge.
-      setActiveId((remaining[index] ?? remaining[index - 1])?.id ?? null)
-    }
-    setSessions(remaining)
+    // A summary-only session releases from its `sides` roots.
+    releaseSessionTree(cache.current, closing, remaining)
+    const nextActiveId =
+      activeId === id ? ((remaining[index] ?? remaining[index - 1])?.id ?? null) : activeId
+    activateIn(remaining, nextActiveId)
     setDirectoryStates((current) => withoutKey(current, id))
     setDirectoryScroll((current) => withoutKey(current, id))
+    setRestoreFailures((current) => withoutKey(current, id))
     setCodeMerge((current) => withoutKey(current, id))
     setCsvAlign((current) => (current?.sessionId === id ? null : current))
     setCloseTarget(null)
@@ -446,7 +512,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         'info'
       )
     }
-    setActiveId(destination.id)
+    selectSession(destination.id)
   }
 
   async function load(options?: {
@@ -458,19 +524,24 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     try {
       const loaded = await loadSampleSessions(platform, { ...options, cache: cache.current })
       // Samples are auxiliary: with sessions already open they are merged in by
-      // id, so the real sessions, their order and the active one survive.
-      setSessions((current) => {
-        if (current.length === 0) return loaded
-        const merged = current.map(
-          (session) => loaded.find((sample) => sample.id === session.id) ?? session
-        )
-        return [...merged, ...loaded.filter((sample) => !current.some((s) => s.id === sample.id))]
-      })
-      setActiveId((current) =>
-        current !== null && sessions.some((session) => session.id === current)
-          ? current
-          : (loaded[0]?.id ?? null)
-      )
+      // id, so the real sessions, their order and the active one survive. Only
+      // the session that ends up active keeps its tree; the rest are summaries.
+      const merged =
+        sessions.length === 0
+          ? loaded
+          : [
+              ...sessions.map(
+                (session) => loaded.find((sample) => sample.id === session.id) ?? session
+              ),
+              ...loaded.filter((sample) => !sessions.some((s) => s.id === sample.id))
+            ]
+      const nextActiveId =
+        activeId !== null && merged.some((session) => session.id === activeId)
+          ? activeId
+          : (merged[0]?.id ?? null)
+      setSessions(retainActiveTree(merged, nextActiveId))
+      setActiveId(nextActiveId)
+      activeIdRef.current = nextActiveId
       setStatus('ready')
     } catch (cause) {
       if (sessions.length > 0) {
@@ -481,6 +552,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       }
       setSessions([])
       setActiveId(null)
+      activeIdRef.current = null
       setError(cause instanceof Error ? cause.message : String(cause))
       setStatus('error')
     }
@@ -488,7 +560,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   function selectScene(scene: SceneId): void {
     const target = sessions.find((session) => session.scene === scene)
-    if (target) setActiveId(target.id)
+    if (target) selectSession(target.id)
   }
 
   function handleMenuSelect(id: string): void {
@@ -506,15 +578,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   /** Upserts a session, preserving the tab order it already had. */
   function upsertSession(session: WorkbenchSession): void {
-    const previous = sessions.find((item) => item.id === session.id)
-    if (previous !== undefined) {
-      // A re-compare replaces the old comparison object; the new one (and any
-      // other tab on the same roots) keeps the cache warm. The list semantics
-      // live in `sessionStore`, shared verbatim with the memory harness.
-      releaseDirectorySession(previous, upsertSessions(sessions, session))
-    }
-    setSessions((current) => upsertSessions(current, session))
-    setActiveId(session.id)
+    // A re-compare replaces the old comparison object; the new one (and any
+    // other tab on the same roots) keeps the cache warm. The list semantics
+    // live in `sessionStore`, shared verbatim with the memory harness.
+    activateIn(commitSessionTree(cache.current, sessions, session), session.id)
   }
 
   /**
@@ -523,12 +590,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
    * keeps the identity it was opened with instead of leaving a stale one behind.
    */
   function replaceSession(id: string, session: WorkbenchSession): void {
-    const previous = sessions.find((item) => item.id === id)
-    if (previous !== undefined) {
-      releaseDirectorySession(previous, replaceSessions(sessions, id, session))
-    }
-    setSessions((current) => replaceSessions(current, id, session))
-    setActiveId(id)
+    activateIn(commitSessionTree(cache.current, sessions, session, { replaceId: id }), id)
   }
 
   /**
@@ -986,7 +1048,38 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       case 'directory': {
         const comparison = session.directory
         const sessionSides = session.sides
-        if (!comparison || !sessionSides) return null
+        if (!comparison || !sessionSides) {
+          // A summary-only tab rebuilds its tree from the warm digest cache the
+          // moment it becomes active; the workspace keeps its layout.
+          const failure = restoreFailures[session.id]
+          return (
+            <StateView
+              tone={failure === undefined ? 'neutral' : 'danger'}
+              icon={
+                failure === undefined ? (
+                  <LoaderCircle aria-hidden className="size-5 animate-spin" />
+                ) : (
+                  <AlertTriangle aria-hidden className="size-5" />
+                )
+              }
+              title={failure === undefined ? '正在从摘要缓存重建结果树…' : '目录会话恢复失败'}
+              description={
+                failure ??
+                '该标签只保留四态摘要，切回时按需扫描两侧目录并复用已有摘要，不会重新读取或哈希文件。'
+              }
+              action={
+                failure === undefined ? undefined : (
+                  <ToolbarButton
+                    icon={<RefreshCw aria-hidden className="size-3.5" />}
+                    onClick={() => retryRestore(session)}
+                  >
+                    重试
+                  </ToolbarButton>
+                )
+              }
+            />
+          )
+        }
         const treeState = directoryStates[session.id] ?? EMPTY_DIRECTORY_STATE
         return (
           <DirectoryView
@@ -1180,7 +1273,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               dirty: session.dirty ?? false
             }))}
             activeId={activeId}
-            onSelect={setActiveId}
+            onSelect={selectSession}
             onClose={requestCloseSession}
           />
         </div>

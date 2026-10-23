@@ -57,6 +57,7 @@ describe('preload bridge', () => {
         'ensureDirectory',
         'deleteFile',
         'temporaryDirectory',
+        'realpath',
         'onCompareRequest',
         'compareRequestsReady',
         'perf'

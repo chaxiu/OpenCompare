@@ -6,25 +6,26 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 
 - `src/main/`：Electron 主进程（窗口、IPC、真实文件系统、perf 采样与证据落盘）。
 - `src/preload/`：`contextBridge` 白名单桥。
-- `src/renderer/`：React 19 UI；所有平台能力经 `PlatformPort`，不直接 import Electron。
+- `src/renderer/`：React 19 UI；所有平台能力经 `PlatformPort`，不直接 import Electron。`PlatformPort` 含只读批量 `realpath(paths)`（channel `platform:realpath`；electron 失败逐项回退输入、`/samples` 原样、web 恒等），用于别名根摘要缓存键归一。
 - `src/core/`：纯算法与领域模型，零 Electron / DOM，可被 vitest 直接单测。
 - `src/shared/`：跨进程类型、`PlatformPort`、fixtures、perf 契约。
 
 ## 会话与视图生命周期（渲染侧）
 
-- 会话列表语义单点在 `src/renderer/src/workbench/sessionStore.ts`：`upsertSessions`（同 id 原位替换、新 id 追加）/ `replaceSessions`（沿用调用方 id）/ `closeSessions` / `commitUpsert`（upsert + 按根释放摘要缓存）。`Workbench` 与 perf harness 共用，禁止各自演化。
+- 会话列表语义单点在 `src/renderer/src/workbench/sessionStore.ts`：`upsertSessions`（同 id 原位替换、新 id 追加）/ `replaceSessions`（沿用调用方 id）/ `closeSessions` / `retainActiveTree`（非活动目录 tab 摘成摘要）/ `commitSessionTree`（upsert 或原位替换 + 按根释放 + 只留提交 tab 的树；`commitUpsert` 为薄封装）。`Workbench` 与 perf harness 共用，禁止各自演化。
+- 只有**活动**目录 tab 持完整 `DirectoryComparison`；非活动 tab 只留 `directorySummary{counts,fileCount,leftSkipped,rightSkipped,skipped}`。`Workbench.activateIn` 在同一事件内切 `activeId` 与摘树（tab 点击 / scene / 下钻返回 / 关 tab 落点），目标 tab 只有摘要时用 `compareSides` **走热缓存重建**（`AbortController` + 序号防竞态，只扫描不重新哈希；失败 `restoreFailures` 可重试）。过滤 / 折叠 / 选中 / 滚动仍由 shell 按 session id 持有。
 - 目录视图的 `key = 会话 id + comparison 修订号`（`directoryViewKey` / `directoryComparisonKey`，`WeakMap` 登记、不延长寿命）。同 tab 重新对比、`replaceSession`、切 tab 都在**提交阶段**换 key → 旧 `DirectoryView` / `TreeView` / `useVirtualizer` 子树卸载，旧 comparison 与旧 row model 不再经 fiber props / `ref` 回调 / 虚拟列表闭包可达。释放不靠 `useEffect` 延迟清理或 GC 时机。
 - 过滤 / 折叠 / 选中 / 滚动位置仍由 shell（`directoryStates` / `directoryScroll`）持有并在重挂后恢复；视图重挂只重置 `DirectoryView` 局部 `direction` / `mode`（与下钻返回重挂一致）。
-- 摘要缓存仍是 renderer 单例（`Workbench` 的 `useRef`），双上限（200,000 条 / 128 MiB 估算）与 LRU / 按根释放不变；释放只影响是否重哈希，不影响四态。
+- 摘要缓存仍是 renderer 单例（`Workbench` 的 `useRef`），双上限（200,000 条 / 128 MiB 估算）与 LRU / 按根释放不变；键经 `comparisonCache.aliasRoot` / `canonicalPath` 按 realpath **只归一键空间**（`workbench/rootAliases.aliasSideRoots` 在 `compareSides` / `directoryOps.compareRoots` 比较前登记），会话 id / 标题 / 显示路径 / 证据 roots 仍用用户输入，别名不折叠 tab。释放只影响是否重哈希，不影响四态。
 
 ## 性能测量与门禁（`pnpm perf:dir` / `pnpm perf:gate`）
 
-- harness 渲染真实 `SessionTabs` + `DirectoryView`，会话列表走 `sessionStore`；`--mode upsert`（同 session id、tab 恒 1）/ `--mode multisession`（逐轮追加、tab 1→2→3），可重复 `--left/--right` 配对，`--settle <ms>`（默认 20 s、上限 60 s）。**不存在轮前释放路径**。
-- 采样：`startup` / `boundary` / `pre-round` / `post-round`（新树已上屏）/ `periodic` / `settle`；`peaks` 排除 settle，静置单独成列。
-- 结构断言：perf 模式在 app ready 前装 `--js-flags=--expose-gc`（普通启动不加）；每轮与 settle 后强制 GC 两次，`shared/perf/liveness.ts` 的 `WeakRef` 登记表数 `comparisons` / `rowModels`，`holds[]` 随证据落盘；`gc=false` 判 `hold-unmeasured` 红。
-- 判定单点：`src/shared/perf/verdict.ts` + `perf/profiles.json`。本轮新增 `settleRendererBytes`（real 1,363,148,800 B / gate 1,073,741,824 B）与 `renderer-round-peak` / `renderer-settle` / `settle-missing` / `hold-comparisons` / `hold-row-models` / `hold-tabs` / `hold-unmeasured`；既有峰值与增量上限只增不松，`round-delta` 仅对 `upsert` 生效。
-- 证据：`schema: opencompare.perf.directory/v1` 加法扩展（`mode` / `pairs` / `rounds[].tabs` / `rounds[].roundPeak` / `settle` / `holds`），原子写、< 5 MB。
-- 门禁：`pnpm perf:gate` 单次生成数据集（含第三对根 `links/left`）并跑两次 harness（upsert 5 轮 + multisession 3 会话，`--settle 5000`，`RUN_TIMEOUT_MS=300_000`），断言峰值、settle、holds 与热轮 `hashedFiles=0`；`pnpm test:memory` 继续守缓存双上限 / 跨轮不增长 / 释放 / 结果不变。
+- harness 渲染真实 `SessionTabs` + `DirectoryView`，会话列表走 `sessionStore`；`--mode upsert`（同 session id、tab 恒 1）/ `--mode multisession`（逐轮追加、tab 1→2→3）/ `--mode retained`（建 3 tab 并保留 → `--hot-rounds` 轮活动 tab 热 upsert（默认 2）→ 关活动 tab 并热缓存重建落点），可重复 `--left/--right` 配对，`--settle <ms>`（默认 20 s、上限 60 s）。**不存在轮前释放路径**；`--hot-rounds` 仅 `retained` 可用。
+- 采样：`startup` / `boundary` / `pre-round` / `post-round`（新树已上屏）/ `periodic` / `settle`；`retained` 另有具名静置阶段 `settleStages[{label: after-3-tabs | after-hot-upserts, rss, at, tabs}]` 与关 tab 后的 `reclaim{tabs,rss,at}`。`peaks` 排除 settle，静置单独成列。
+- 结构断言：perf 模式在 app ready 前装 `--js-flags=--expose-gc`（普通启动不加）；每轮与 settle 后强制 GC 两次，`shared/perf/liveness.ts` 的 `WeakRef` 登记表数 `comparisons` / `rowModels`，`holds[]` 随证据落盘；`gc=false` 判 `hold-unmeasured` 红。`holds.comparisons` 对所有模式要求 **仅活动 1 份**，`tabs` 按场景（upsert 1、multisession 1/2/3、retained 1/2/3/3/3、reclaim 2）。
+- 判定单点：`src/shared/perf/verdict.ts` + `perf/profiles.json`（六项数值未改）。`settleRendererBytes`（real 1,363,148,800 B / gate 1,073,741,824 B）与 `renderer-round-peak` / `renderer-settle` / `settle-missing` / `hold-*` 继续有效；多 tab 场景（multisession / retained）的瞬时 ready 峰值降级为护栏 `TRANSIENT_PEAK_GUARDRAIL_BYTES = 2_415_919_104`（超 profile 目标只进 `notices[]`），`settle` / `settleStages` / `appTotal` / `reclaim`（`RECLAIM_RENDERER_BYTES = 1_153_433_600`，关 1 tab）/ 热轮 `hashedFiles=0` / 静置抬升 ≤100 MiB / `renderer-restart` 仍为硬线；`upsert` 的 profile 峰值硬线不变，`round-delta` 仅对 `upsert` 生效。
+- 证据：`schema: opencompare.perf.directory/v1` 加法扩展（`mode` / `pairs` / `hotRounds` / `rounds[].tabs` / `rounds[].roundPeak` / `rounds[].rendererPid` / `settle` / `settleStages` / `reclaim` / `holds` / `verdict.notices`），原子写、< 5 MB。
+- 门禁：`pnpm perf:gate` 单次生成数据集（含第三对根 `links/left` 目录符号链接）并跑三次 harness（upsert 5 轮 + multisession 3 会话 + retained 3 tab/2 热轮，`--settle 5000`，`RUN_TIMEOUT_MS=300_000`），断言峰值（多 tab 用 2.25 GiB 护栏）/ settle / settleStages / reclaim / appTotal / holds / tabs / 热轮 `hashedFiles=0` / 别名轮 `hashedFiles=0`；`pnpm test:memory` 继续守缓存双上限 / 跨轮不增长 / 释放 / 结果不变。
 
 ## 质量门禁
 
