@@ -20,30 +20,32 @@ import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { StateView } from '@renderer/components/StateView'
 import { cx } from '@renderer/components/utils'
+import { useI18n } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 import { classifyFile } from '@renderer/workbench/fileKinds'
 import { STRUCTURED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair } from '@renderer/workbench/session'
 
-const FORMAT_OPTIONS = [
-  { value: 'json', label: 'JSON' },
-  { value: 'yaml', label: 'YAML' }
-] as const
-
-const FILTER_OPTIONS: readonly { readonly value: StructuredFilter; readonly label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'added', label: '新增' },
-  { value: 'removed', label: '删除' },
-  { value: 'modified', label: '修改' },
-  { value: 'typeChanged', label: '类型变更' },
-  { value: 'same', label: '相同' }
+const FORMAT_OPTIONS: readonly { readonly value: StructuredFormat; readonly key: MessageKey }[] = [
+  { value: 'json', key: 'files.structured.format.json' },
+  { value: 'yaml', key: 'files.structured.format.yaml' }
 ]
 
-const STATUS_LABELS: Record<StructuredStatus, string> = {
-  added: '新增',
-  removed: '删除',
-  modified: '修改',
-  typeChanged: '类型变更',
-  same: '相同'
+const FILTER_OPTIONS: readonly { readonly value: StructuredFilter; readonly key: MessageKey }[] = [
+  { value: 'all', key: 'files.structured.filter.all' },
+  { value: 'added', key: 'common.diff.added' },
+  { value: 'removed', key: 'common.diff.removed' },
+  { value: 'modified', key: 'common.diff.modified' },
+  { value: 'typeChanged', key: 'files.structured.status.typeChanged' },
+  { value: 'same', key: 'common.diff.same' }
+]
+
+const STATUS_LABELS: Record<StructuredStatus, MessageKey> = {
+  added: 'common.diff.added',
+  removed: 'common.diff.removed',
+  modified: 'common.diff.modified',
+  typeChanged: 'files.structured.status.typeChanged',
+  same: 'common.diff.same'
 }
 
 /**
@@ -67,6 +69,7 @@ const VALUE_CLASSES: Record<StructuredStatus, string> = {
 }
 
 function StatusBadge({ status }: { readonly status: StructuredStatus }): JSX.Element {
+  const { t } = useI18n()
   return (
     <span
       className={cx(
@@ -74,7 +77,7 @@ function StatusBadge({ status }: { readonly status: StructuredStatus }): JSX.Ele
         DIFF_BADGE_CLASSES[STATUS_TONES[status]]
       )}
     >
-      {STATUS_LABELS[status]}
+      {t(STATUS_LABELS[status])}
     </span>
   )
 }
@@ -85,13 +88,18 @@ function StatusCounts({
 }: {
   readonly counts: Readonly<Record<StructuredStatus, number>>
 }): JSX.Element {
+  const { t } = useI18n()
   return (
-    <span role="group" aria-label="结构化计数" className="flex flex-wrap items-center gap-3">
+    <span
+      role="group"
+      aria-label={t('files.structured.countsLabel')}
+      className="flex flex-wrap items-center gap-3"
+    >
       {STRUCTURED_STATUSES.map((status) => (
         <span key={status} className="flex shrink-0 items-center gap-1 whitespace-nowrap text-2xs">
           <DiffDot status={STATUS_TONES[status]} />
           <span className="tabular font-mono text-content-secondary">{counts[status]}</span>
-          <span className="text-content-muted">{STATUS_LABELS[status]}</span>
+          <span className="text-content-muted">{t(STATUS_LABELS[status])}</span>
         </span>
       ))}
     </span>
@@ -160,6 +168,7 @@ export function StructuredView({
   readonly format?: StructuredFormat
   readonly platform: PlatformPort
 }): JSX.Element {
+  const { t } = useI18n()
   const [selected, setSelected] = useState<StructuredFormat>('json')
   const [filter, setFilter] = useState<StructuredFilter>('all')
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
@@ -196,7 +205,7 @@ export function StructuredView({
     try {
       const picked = await pickTextFile(
         platform,
-        side === 'left' ? '打开左侧 JSON / YAML 文件' : '打开右侧 JSON / YAML 文件',
+        t(side === 'left' ? 'files.structured.openLeftTitle' : 'files.structured.openRightTitle'),
         [STRUCTURED_FILE_FILTER]
       )
       if (picked === null) return
@@ -207,7 +216,7 @@ export function StructuredView({
       const nextFormat = classifyFile(picked.path)?.format ?? effective
       setOpened({ pair: next, format: nextFormat })
       if (!adhoc) setSelected(nextFormat)
-      setNotice({ text: `已打开 ${picked.path}`, tone: 'ok' })
+      setNotice({ text: t('files.notice.opened', { path: picked.path }), tone: 'ok' })
     } catch (cause) {
       setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
     }
@@ -218,8 +227,8 @@ export function StructuredView({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
         <StateView
           icon={<Braces aria-hidden className="size-5" />}
-          title="无可对比的结构化数据"
-          description="请从样本库载入 JSON / YAML 场景，或从目录对比下钻一个 JSON / YAML 文件。"
+          title={t('files.structured.emptyTitle')}
+          description={t('files.structured.emptyDescription')}
         />
       </div>
     )
@@ -230,13 +239,16 @@ export function StructuredView({
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         {adhoc ? (
           <span className="text-2xs text-content-muted">
-            本地文件 · {effective.toUpperCase()} 原文 · 语义归一化对比
+            {t('files.structured.drilldown', { format: effective.toUpperCase() })}
           </span>
         ) : (
           <>
             <SegmentedControl
-              label="结构化格式"
-              options={FORMAT_OPTIONS}
+              label={t('files.structured.formatLabel')}
+              options={FORMAT_OPTIONS.map((option) => ({
+                value: option.value,
+                label: t(option.key)
+              }))}
               value={selected}
               onChange={(value) => {
                 setSelected(value)
@@ -244,14 +256,17 @@ export function StructuredView({
               }}
             />
             <span className="hidden text-2xs text-content-muted md:inline">
-              键序与注释 / 缩进噪音已忽略 · 按 JSON Pointer 节点路径比对
+              {t('files.structured.sampleHint')}
             </span>
           </>
         )}
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <SegmentedControl
-          label="状态过滤"
-          options={FILTER_OPTIONS}
+          label={t('files.structured.filterLabel')}
+          options={FILTER_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.key)
+          }))}
           value={filter}
           onChange={setFilter}
         />
@@ -261,14 +276,14 @@ export function StructuredView({
           icon={<FolderOpen aria-hidden className="size-3.5" />}
           onClick={() => void open('left')}
         >
-          打开左文件
+          {t('files.action.openLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
           icon={<FolderOpen aria-hidden className="size-3.5" />}
           onClick={() => void open('right')}
         >
-          打开右文件
+          {t('files.action.openRight')}
         </ToolbarButton>
         {notice ? (
           <span
@@ -284,7 +299,7 @@ export function StructuredView({
         <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-line-subtle bg-surface-sunken px-2 py-1">
           <StatusCounts counts={comparison.diff.counts} />
           <span className="ml-auto text-2xs text-content-muted">
-            共 {comparison.diff.entries.length} 个节点 · 计数为运行时对比结果
+            {t('files.structured.nodeCount', { count: comparison.diff.entries.length })}
           </span>
         </div>
       ) : null}
@@ -293,11 +308,14 @@ export function StructuredView({
         panes={[
           <Panel
             key="changes"
-            title="节点路径变更"
+            title={t('files.structured.changes')}
             subtitle={
               comparison.error
-                ? '解析失败'
-                : `显示 ${visible.length} / ${comparison.diff?.entries.length ?? 0}`
+                ? t('files.structured.parseFailed')
+                : t('files.structured.showing', {
+                    visible: visible.length,
+                    total: comparison.diff?.entries.length ?? 0
+                  })
             }
           >
             {comparison.error ? (
@@ -305,14 +323,14 @@ export function StructuredView({
                 <StateView
                   tone="danger"
                   icon={<AlertTriangle aria-hidden className="size-5" />}
-                  title="结构化解析失败"
+                  title={t('files.structured.errorTitle')}
                   description={comparison.error}
-                  hint="仅本会话受影响：可修正输入后重新下钻，或切换到其他会话。"
+                  hint={t('files.structured.errorHint')}
                 />
               </div>
             ) : visible.length === 0 ? (
               <p className="p-3 text-2xs text-content-muted">
-                当前过滤条件下没有节点。切回「全部」可查看完整变更列表。
+                {t('files.structured.emptyFiltered')}
               </p>
             ) : (
               <div className="min-w-max">
@@ -322,10 +340,18 @@ export function StructuredView({
               </div>
             )}
           </Panel>,
-          <Panel key="left" title={source.left.path} subtitle="左原文">
+          <Panel
+            key="left"
+            title={source.left.path}
+            subtitle={t('files.structured.sourceLeft')}
+          >
             <CodeBlock text={source.left.text} />
           </Panel>,
-          <Panel key="right" title={source.right.path} subtitle="右原文">
+          <Panel
+            key="right"
+            title={source.right.path}
+            subtitle={t('files.structured.sourceRight')}
+          >
             <CodeBlock text={source.right.text} />
           </Panel>
         ]}

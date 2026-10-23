@@ -1,11 +1,26 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { JSX } from 'react'
 import type { CodeSceneFixture } from '@shared/fixtures'
-import type { PlatformPort } from '@shared/platform/types'
+import type { Language, PlatformPort } from '@shared/platform/types'
+import { I18nProvider } from '@renderer/i18n/I18nProvider'
+import { useI18n } from '@renderer/i18n/context'
+import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
+import { TEXT_FILE_FILTER } from '@renderer/workbench/fileIO'
 import { CodeView } from './CodeView'
 import type { CodeMergeState } from './CodeView'
+
+/** Test-only probe: switches the provider language from inside the tree. */
+function LanguageSwitch({ to }: { readonly to: Language }): JSX.Element {
+  const { setLanguage } = useI18n()
+  return (
+    <button type="button" onClick={() => setLanguage(to)}>
+      switch-language
+    </button>
+  )
+}
 
 // Saving also triggers a browser download; jsdom must not try to navigate.
 beforeEach(() => {
@@ -244,3 +259,260 @@ describe('in-place save and dirty marker', () => {
   })
 })
 
+
+const TWO_BLOCK_PAIR = {
+  left: { path: '/memory/left.ts', text: 'alpha\nbeta\nleft-only\n' },
+  right: { path: '/memory/right.ts', text: 'right-only\nbeta\ngamma\n' }
+}
+
+describe('unsaved side labels', () => {
+  it('names exactly the dirty sides in Chinese', () => {
+    render(<CodeView pair={TWO_BLOCK_PAIR} platform={createWebPlatformPort()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '覆写到左' }))
+    expect(screen.getByText('未保存：左')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    expect(screen.getByText('未保存：右')).toBeDefined()
+
+    // The remaining block is copied back to the left, so both sides diverge now.
+    fireEvent.click(screen.getByRole('button', { name: '覆写到左' }))
+    expect(screen.getByText('未保存：左、右')).toBeDefined()
+  })
+
+  it('names exactly the dirty sides in English', () => {
+    renderWithI18n(
+      <CodeView pair={TWO_BLOCK_PAIR} platform={createWebPlatformPort()} />,
+      'en'
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to left' }))
+    expect(screen.getByText('Unsaved: left')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to right' }))
+    expect(screen.getByText('Unsaved: right')).toBeDefined()
+    expect(screen.getByText('Modified (unsaved)')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to left' }))
+    expect(screen.getByText('Unsaved: both')).toBeDefined()
+  })
+})
+
+describe('English diff copy', () => {
+  it('renders the toolbar, panel subtitles and picker titles in English', () => {
+    const selectFile = vi.fn(async () => null)
+    const port: PlatformPort = { ...createWebPlatformPort(), selectFile }
+    const { container } = renderWithI18n(
+      <CodeView fixture={FIXTURE} defaultMode="diff" platform={port} />,
+      'en'
+    )
+
+    expect(screen.getByRole('button', { name: 'Previous difference' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Next difference' })).toBeDefined()
+    expect(screen.getByText('Difference blocks')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Overwrite to right' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Overwrite to left' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeDefined()
+    expect(screen.getByText('left')).toBeDefined()
+    expect(screen.getByText('right')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open left file' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open right file' })).toBeDefined()
+
+    const saveLeft = screen.getByRole('button', { name: 'Save left file' })
+    expect(saveLeft.getAttribute('title')).toBe(
+      'Write the left edits back to their disk path in place (no save dialog)'
+    )
+    expect(screen.getByRole('button', { name: 'Save right file' }).getAttribute('title')).toBe(
+      'Write the right edits back to their disk path in place (no save dialog)'
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open left file' }))
+    expect(selectFile).toHaveBeenCalledWith({ title: 'Open left local file', filters: [TEXT_FILE_FILTER] })
+    expect(screen.getByText('1/2')).toBeDefined()
+    expect(container.textContent).not.toMatch(/\p{Script=Han}/u)
+  })
+
+  it('keeps the Chinese picker title for the left side', () => {
+    const selectFile = vi.fn(async () => null)
+    render(
+      <CodeView
+        fixture={FIXTURE}
+        defaultMode="diff"
+        platform={{ ...createWebPlatformPort(), selectFile }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    expect(selectFile).toHaveBeenCalledWith({
+      title: '打开左侧本地文件',
+      filters: [TEXT_FILE_FILTER]
+    })
+  })
+
+  it('reports the write-back notice in English and keeps raw failures', async () => {
+    const base = createWebPlatformPort()
+    const writes: { path: string; content: string }[] = []
+    const port: PlatformPort = {
+      ...base,
+      writeTextFile: async (path, content, modifiedMs) => {
+        writes.push({ path, content })
+        await base.writeTextFile(path, content, modifiedMs)
+      }
+    }
+    renderWithI18n(<CodeView pair={TWO_BLOCK_PAIR} platform={port} />, 'en')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to right' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save right file' }))
+
+    expect(await screen.findByText('Wrote back /memory/right.ts')).toBeDefined()
+    expect(writes).toHaveLength(1)
+
+    // A rejected write keeps the platform message verbatim in English too, so
+    // both dictionaries show the exact same raw detail.
+    cleanup()
+    renderWithI18n(
+      <CodeView fixture={FIXTURE} defaultMode="diff" platform={createWebPlatformPort()} />,
+      'en'
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to right' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save right file' }))
+    expect(await screen.findByText(/不能写入/)).toBeDefined()
+  })
+})
+
+describe('English merge copy', () => {
+  it('renders the conflict navigation and resolution copy in English', () => {
+    const { container } = renderWithI18n(
+      <CodeView fixture={FIXTURE} defaultMode="merge" platform={platform} />,
+      'en'
+    )
+
+    expect(screen.getByRole('button', { name: 'Previous conflict' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Next conflict' })).toBeDefined()
+    expect(screen.getByText('Pending conflicts')).toBeDefined()
+    expect(screen.getByText('2/2')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open base' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open ours' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open theirs' })).toBeDefined()
+    expect(screen.getByText('Merge result preview')).toBeDefined()
+    expect(screen.getByText('Conflict 1')).toBeDefined()
+    expect(screen.getAllByText('Unresolved')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Accept Ours' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Accept Theirs' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Accept Both' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Accept Base' }).length).toBeGreaterThan(0)
+    expect((screen.getByRole('button', { name: 'Copy' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: 'Export merged text' }) as HTMLButtonElement).disabled
+    ).toBe(true)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept Both' })[0])
+    expect(screen.getByText('1/2')).toBeDefined()
+    expect(screen.getByText('Accepted ours + theirs')).toBeDefined()
+    // The per-block buttons follow the recorded resolution.
+    const conflictRow = screen.getByText('Conflict 1').closest('div') as HTMLElement
+    expect(
+      within(conflictRow).getByRole('button', { name: 'Accept Both' }).className
+    ).toContain('bg-accent')
+    expect(container.textContent).not.toMatch(/\p{Script=Han}/u)
+  })
+
+  it('shows the English empty conflict list once the merge is clean', async () => {
+    renderWithI18n(<CodeView fixture={FIXTURE} defaultMode="merge" platform={platform} />, 'en')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open ours' }))
+    chooseFile('ours.ts', FIXTURE.merge.base.text)
+
+    expect(await screen.findByText('No conflict blocks.')).toBeDefined()
+    expect(screen.getByText('All conflicts resolved')).toBeDefined()
+  })
+
+  it('localizes copy, export and side-picker actions', async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    })
+    const saveFile = vi.fn(async () => '/tmp/out.txt')
+    const selectFile = vi.fn(async () => null)
+    const port: PlatformPort = { ...createWebPlatformPort(), saveFile, selectFile }
+    renderWithI18n(<CodeView fixture={FIXTURE} defaultMode="merge" platform={port} />, 'en')
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept Both' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Next conflict' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept Ours' })[0])
+    expect(screen.getByText('0/2')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    expect(await screen.findByText('Copied to clipboard')).toBeDefined()
+    expect(writeText).toHaveBeenCalledTimes(1)
+
+    // A rejected clipboard write falls back to the English failure hint.
+    writeText.mockRejectedValueOnce(new Error('denied'))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    expect(await screen.findByText('Copy failed, select the preview text manually')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export merged text' }))
+    expect(await screen.findByText('Saved to /tmp/out.txt')).toBeDefined()
+    expect(saveFile).toHaveBeenCalledWith(expect.objectContaining({ title: 'Save merged result' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open ours' }))
+    expect(selectFile).toHaveBeenCalledWith({
+      title: 'Open ours local file',
+      filters: [TEXT_FILE_FILTER]
+    })
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+})
+
+describe('language switch keeps code state', () => {
+  it('keeps diff edits, block count and dirty markers', () => {
+    const base = createWebPlatformPort()
+    const writeTextFile = vi.fn(base.writeTextFile)
+    const readTextFile = vi.fn(base.readTextFile)
+    render(
+      <I18nProvider initialLanguage="zh">
+        <CodeView pair={TWO_BLOCK_PAIR} platform={{ ...base, writeTextFile, readTextFile }} />
+        <LanguageSwitch to="en" />
+      </I18nProvider>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    expect(screen.getByText('1/1')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch-language' }))
+
+    expect(screen.getByText('Unsaved: right')).toBeDefined()
+    expect(screen.getByText('Modified (unsaved)')).toBeDefined()
+    expect(screen.getByText('1/1')).toBeDefined()
+    expect(
+      (screen.getByRole('button', { name: 'Save right file' }) as HTMLButtonElement).disabled
+    ).toBe(false)
+    expect(
+      (screen.getByRole('button', { name: 'Save left file' }) as HTMLButtonElement).disabled
+    ).toBe(true)
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(readTextFile).not.toHaveBeenCalled()
+  })
+
+  it('keeps merge acceptances and the pending conflict count', () => {
+    render(
+      <I18nProvider initialLanguage="zh">
+        <CodeView fixture={FIXTURE} defaultMode="merge" platform={platform} />
+        <LanguageSwitch to="en" />
+      </I18nProvider>
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept Both' })[0])
+    expect(screen.getByText('待决冲突')).toBeDefined()
+    expect(screen.getByText('1/2')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch-language' }))
+
+    expect(screen.getByText('Pending conflicts')).toBeDefined()
+    expect(screen.getByText('1/2')).toBeDefined()
+    expect(screen.getByText('Accepted ours + theirs')).toBeDefined()
+  })
+})

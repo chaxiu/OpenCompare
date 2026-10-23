@@ -11,6 +11,8 @@ import { DiffDot } from '@renderer/components/DiffBadge'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { cx } from '@renderer/components/utils'
+import { useI18n } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 import { classifyFile } from '@renderer/workbench/fileKinds'
 import { DELIMITED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import { parseCsvTable } from '@renderer/workbench/session'
@@ -24,13 +26,13 @@ export interface CsvAlignState {
 
 type CsvRowFilter = 'all' | 'differences' | 'added' | 'removed' | 'modified' | 'same'
 
-const FILTER_OPTIONS: readonly { readonly value: CsvRowFilter; readonly label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'differences', label: '仅差异' },
-  { value: 'added', label: '新增' },
-  { value: 'removed', label: '删除' },
-  { value: 'modified', label: '修改' },
-  { value: 'same', label: '相同' }
+const FILTER_OPTIONS: readonly { readonly value: CsvRowFilter; readonly key: MessageKey }[] = [
+  { value: 'all', key: 'files.csv.filter.all' },
+  { value: 'differences', key: 'files.csv.filter.differences' },
+  { value: 'added', key: 'common.diff.added' },
+  { value: 'removed', key: 'common.diff.removed' },
+  { value: 'modified', key: 'common.diff.modified' },
+  { value: 'same', key: 'common.diff.same' }
 ]
 
 const ROW_TONE: Record<CsvAlignedRow['status'], string> = {
@@ -90,6 +92,7 @@ function CsvAlignedTable({
   readonly columns: readonly CsvColumnRef[]
   readonly rows: readonly CsvAlignedRow[]
 }): JSX.Element {
+  const { t } = useI18n()
   const scrollRef = useRef<HTMLDivElement>(null)
   // TanStack Virtual's returned functions are intentionally not memoizable.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -125,7 +128,9 @@ function CsvAlignedTable({
                 {column.name}
                 {column.presence !== 'both' ? (
                   <span className="ml-1 font-normal text-content-muted">
-                    {column.presence === 'left' ? '仅左' : '仅右'}
+                    {column.presence === 'left'
+                      ? t('files.csv.presenceLeft')
+                      : t('files.csv.presenceRight')}
                   </span>
                 ) : null}
               </th>
@@ -203,6 +208,7 @@ export function CsvView({
   readonly platform: PlatformPort
   readonly onAlignStateChange?: (state: CsvAlignState) => void
 }): JSX.Element {
+  const { t } = useI18n()
   // Opening a local file swaps one side; the parsed tables follow it, so the
   // alignment is always recomputed from the current bodies.
   const [leftSide, setLeftSide] = useState<CsvSample>(left)
@@ -241,7 +247,7 @@ export function CsvView({
     try {
       const picked = await pickTextFile(
         platform,
-        side === 'left' ? '打开左侧 CSV / TSV 文件' : '打开右侧 CSV / TSV 文件',
+        t(side === 'left' ? 'files.csv.openLeftTitle' : 'files.csv.openRightTitle'),
         [DELIMITED_FILE_FILTER]
       )
       if (picked === null) return
@@ -256,25 +262,35 @@ export function CsvView({
       setCurrentTables(next)
       // A new pair may not share the previous keys; re-pick from the new columns.
       setKeyColumns(initialKeys(defaultKeyColumns, commonCsvColumns(next.left, next.right)))
-      setNotice({ text: `已打开 ${picked.path}`, tone: 'ok' })
+      setNotice({ text: t('files.notice.opened', { path: picked.path }), tone: 'ok' })
     } catch (cause) {
       setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
     }
   }
 
   const duplicateHint = align.duplicateKeys
-    .map((entry) => `${entry.key.join(' + ')}（左 ${entry.left} · 右 ${entry.right}）`)
+    .map((entry) =>
+      t('files.csv.duplicateHint', {
+        key: entry.key.join(' + '),
+        left: entry.left,
+        right: entry.right
+      })
+    )
     .join('\n')
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
       <div
         role="toolbar"
-        aria-label="CSV 对齐工具"
+        aria-label={t('files.csv.tools')}
         className="flex shrink-0 flex-wrap items-center gap-2"
       >
-        <span className="text-2xs text-content-muted">主键列</span>
-        <div role="group" aria-label="主键列选择" className="flex flex-wrap items-center gap-1">
+        <span className="text-2xs text-content-muted">{t('files.csv.keyColumns')}</span>
+        <div
+          role="group"
+          aria-label={t('files.csv.keyColumnsGroup')}
+          className="flex flex-wrap items-center gap-1"
+        >
           {candidates.map((name) => {
             const active = keyColumns.includes(name)
             return (
@@ -299,8 +315,11 @@ export function CsvView({
 
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <SegmentedControl
-          label="状态过滤"
-          options={FILTER_OPTIONS}
+          label={t('files.csv.filterLabel')}
+          options={FILTER_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.key)
+          }))}
           value={filter}
           onChange={setFilter}
         />
@@ -317,15 +336,18 @@ export function CsvView({
           {align.duplicateKeys.length > 0 ? (
             <span
               className="flex items-center gap-1 text-diff-modified"
-              aria-label="重复主键"
+              aria-label={t('files.csv.duplicates')}
               title={duplicateHint}
             >
               <AlertTriangle aria-hidden className="size-3" />
-              重复主键 {align.duplicateKeys.length}
+              {t('files.csv.duplicateCount', { count: align.duplicateKeys.length })}
             </span>
           ) : null}
           <span className="tabular font-mono text-content-secondary">
-            {`${visible.length.toLocaleString('en-US')} / ${align.rows.length.toLocaleString('en-US')} 行`}
+            {t('files.csv.rows', {
+              visible: visible.length.toLocaleString('en-US'),
+              total: align.rows.length.toLocaleString('en-US')
+            })}
           </span>
           <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
           <ToolbarButton
@@ -333,29 +355,32 @@ export function CsvView({
             icon={<FolderOpen aria-hidden className="size-3.5" />}
             onClick={() => void open('left')}
           >
-            打开左文件
+            {t('files.action.openLeft')}
           </ToolbarButton>
           <ToolbarButton
             size="sm"
             icon={<FolderOpen aria-hidden className="size-3.5" />}
             onClick={() => void open('right')}
           >
-            打开右文件
+            {t('files.action.openRight')}
           </ToolbarButton>
         </span>
       </div>
 
       <Panel
         title={`${basename(leftSide.path)} ↔ ${basename(rightSide.path)}`}
-        subtitle={`对齐 ${align.rows.length.toLocaleString('en-US')} 行 · 主键 ${keyColumns.join(' + ') || '未选择'}`}
+        subtitle={t('files.csv.aligned', {
+          rows: align.rows.length.toLocaleString('en-US'),
+          keys: keyColumns.join(' + ') || t('files.csv.keysNone')
+        })}
       >
         {align.columns.length === 0 ? (
-          <p className="p-3 text-2xs text-content-muted">
-            未选择主键列，无法按主键对齐行。请在工具栏勾选至少一列共有列。
-          </p>
+          <p className="p-3 text-2xs text-content-muted">{t('files.csv.emptyNoKeys')}</p>
         ) : visible.length === 0 ? (
           <p className="p-3 text-2xs text-content-muted">
-            {align.rows.length === 0 ? '当前主键下没有可对齐的行。' : '当前过滤条件下没有行。'}
+            {align.rows.length === 0
+              ? t('files.csv.emptyNoRows')
+              : t('files.csv.emptyFiltered')}
           </p>
         ) : (
           <CsvAlignedTable columns={align.columns} rows={visible} />

@@ -210,7 +210,7 @@ describe('English shell copy', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
     await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
 
-    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to right' }))
     const tablist = screen.getByRole('tablist', { name: 'Sessions' })
     expect(within(tablist).getByTitle('Unsaved changes')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Close engine.ts' })).toBeDefined()
@@ -286,7 +286,7 @@ describe('English shell copy', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Open file' }))
     await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
-    fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Overwrite to right' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Close engine.ts' }))
     const prompt = screen.getByRole('dialog', { name: 'Close a session with unsaved changes?' })
