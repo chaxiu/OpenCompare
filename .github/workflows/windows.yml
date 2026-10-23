@@ -1,0 +1,30 @@
+name: Windows
+
+# The shared compare-request contract owns Windows-only rules (drive letters,
+# drive roots, UNC shares) that a Linux runner cannot exercise. This job runs
+# the same test file on a real Windows runner so a regression fails the build.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare-request:
+    name: compare-request paths
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test src/shared/compareRequest.test.ts

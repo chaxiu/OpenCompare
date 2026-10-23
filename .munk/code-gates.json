@@ -33,6 +33,11 @@
       "command": "pnpm test"
     },
     {
+      "id": "test-compare-request",
+      "cwd": ".",
+      "command": "pnpm test src/shared/compareRequest.test.ts"
+    },
+    {
       "id": "cancel-gate",
       "cwd": ".",
       "command": "pnpm test:cancel"
