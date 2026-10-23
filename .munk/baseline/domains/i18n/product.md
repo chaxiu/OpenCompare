@@ -1,6 +1,6 @@
 # Domain: i18n
 
-renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider` / `useI18n()` 语言上下文、首启语言解析的纯函数与只读 loader、两个测试辅助（`renderWithI18n`、中文硬编码扫描器），以及**应用外壳接入**——`App` 启动解析 + Provider 挂载、工作台壳层 / 新建对比 / 共享展示组件的可见文案、会话标题·副标题·统计标签的渲染期解析。平台侧设置读写与系统语言通道（`readUserSettings` / `writeUserSettings` / `systemLocale`）归 `foundation` 域，本域只消费其契约；**目录对比视图面**（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx` + 共享键映射 `views/directoryCopy.ts`）已接入，代码 / CSV / 结构化视图面与设置面板的语言切换 UI 归后续 WI。
+renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider` / `useI18n()` 语言上下文、首启语言解析的纯函数与只读 loader、两个测试辅助（`renderWithI18n`、中文硬编码扫描器）、**应用外壳接入**——`App` 启动解析 + Provider 挂载、工作台壳层 / 新建对比 / 共享展示组件的可见文案、会话标题·副标题·统计标签的渲染期解析、**目录对比视图面接入**——`DirectoryView` / `TreeView` / 同步与模板对话框的可见文案与共享键映射 `views/directoryCopy.ts`，以及**设置面板与语言即时切换**——顶栏齿轮入口、`SettingsDialog`（唯一分区为语言）、自指语言标签 helper、串行写盘 / 失败就地提示、已显示通知条的渲染期重译。平台侧设置读写与系统语言通道（`readUserSettings` / `writeUserSettings` / `systemLocale`）归 `foundation` 域，本域只消费其契约；代码 / CSV / 结构化视图（`views/CodeView.tsx`、`CsvView.tsx`、`StructuredView.tsx`）的文案归「文件级视图双语化」WI。
 
 ## 范围
 
@@ -24,6 +24,11 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **模板归位对话框（`views/TemplateDialog.tsx`）**：标题、描述三段标签（`模板 A：` / `散乱树 B：` / `输出根：`）、四个分区标题（`已匹配` / `缺失槽位` / `冲突项` / `B 未使用文件`）、分区计数、空分组 `无`、冲突原因（`同名多候选` / `同名内容不同`）、取消 / 确认 / 进行中按钮文案全部走词典；候选路径仍以 ` · ` 连接，`result.matched.length === 0` 时确认按钮 `disabled`。
 - **目录面共享键映射（`views/directoryCopy.ts`，纯常量 / 纯函数、无 React / DOM）**：只导出 `FILTER_LABEL_KEYS: Record<DirectoryFilter, MessageKey>`、`SYNC_DIRECTION_KEYS: Record<SyncDirection, MessageKey>`、`SYNC_MODE_KEYS: Record<SyncMode, MessageKey>` 与 `countKey(one, other, count)`（仅 `count === 1` 取单数），由视图、两个对话框与测试共同引用，避免三处各写一份中文映射。
 - **本域词典面纪律（目录视图轮）**：只往既有 `directory` 表面成对加键（`messages/{zh,en}/directory.ts`），不新增表面文件、不改既有键与 `common` / `shell` 键；`zh/directory.ts` 与 `en/directory.ts` 键集相等、值 `trim()` 非空、同键占位符集合一致、en 无 `\p{Script=Han}`；既有 `directory.filter.label` / `filter.clear` / `tree.empty` / `action.refresh` / `summary.files` 五个键原样保留（不使用、不删除）；单复数只拆同步合计、同步分组、模板分区三处 `one` / `other`，zh 两条值相同。
+- **顶栏设置入口（`workbench/Workbench.tsx`）**：顶栏右侧动作群组最后一个位置常驻 `Settings` 齿轮 `IconButton`，可访问名 / `title` 取既有 `shell.settings.open`，键盘可聚焦；**任何 workbench 状态（空态、已打开会话、目录扫描进行中）都不接 `directoryBusy` 的 disabled**。点击以本地 `settingsOpen` state 打开面板，`onClose` 关闭后可再次打开。
+- **设置面板（`workbench/SettingsDialog.tsx`）**：复用既有 `Dialog`（标题 `settings.title`、头部关闭按钮 `common.close`）与 `SegmentedControl`，不新增模态原语、不做第二套表单样式。唯一分区：可见标签与分组可访问名都用既有 `settings.language`。两个选项顺序固定 `English`、`简体中文`（`SUPPORTED_LANGUAGES = ['en','zh']`），当前项 `aria-selected="true"`、另一项 `false`。props 至少 `platform` 与 `onClose`。
+- **自指语言标签（`src/renderer/src/i18n/languageLabel.ts`）**：`languageSelfLabel(language)` 读 `messages[target]['settings.language.name']`，语言名不随界面语言翻译；组件内不出现任何中文字面量，也不为标签新增词典键（会同时违反 en 零汉字与 zh 汉字约束）。
+- **切换时序与串行写盘**：`choose(next)` 先同步 `setLanguage(next)`（同一渲染批次整窗换文案），再把 `platform.writeUserSettings({ language: next })` 链到 `useRef` 的串行 promise 队列；写盘不阻塞 UI、不关面板、不显示 loading 文案，最后一次选择必然最后落盘（读回等于最后一次选择）。写盘失败**不回滚**语言、不重新 `readUserSettings`，只把原始 `cause.message` 存进本地 `saveError` state，渲染期用 `t('settings.saveError', { reason })` 生成面板内 `role="alert"`；下一次成功写盘清空该提示，关闭再打开不残留。语言状态唯一来源仍是 `I18nProvider`：不新增 Provider / context / 语言 state，不重载窗口，不把语言值用作 `Workbench` / 视图 / 对话框的 React `key`。
+- **通知条渲染期解析（`workbench/Workbench.tsx`）**：`Notice = { kind: 'copy'; key: MessageKey; params?: NoticeParams } | { kind: 'detail'; text: string }`，`copyNotice` / `detailNotice` 两个构造器；`params` 值可为 `string | number | { message: MessageKey }`（嵌套片段如文件 / 文件夹类型名），渲染时 `noticeText(notice, t)` 统一解析——所以**已显示中的通知条随切语言立即重译**。由非本地化模块（`snapshotOps` / `loadSampleSessions` / `src/core` / 主进程 / `openCompareRequest`）产出的原始错误 message 仍走 `detail` 原样展示（已知边界，不翻译）。`info` / `danger` 语气与清除时机不变。
 
 ## 验收
 
@@ -95,11 +100,23 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **ac-existing-tests-by-key**：`DirectoryView.test.tsx` 中不再出现 `全部/仅差异/左独有/右独有/相同` 与 `展开 {name}`/`折叠 {name}` 字面量（改为经 `zh[FILTER_LABEL_KEYS[...]]` / zh 键取值），`DirectoryView.test.tsx` 与 `TreeView.test.tsx` 全部断言仍通过。
 - **ac-translation-is-render-only**：同一比较结果分别以 zh 与 en 渲染 DirectoryView，两侧渲染出的行路径序列、`role="treeitem"` 数量、当前过滤 tab 的 `aria-selected`、折叠后不可见路径与 `onTogglePath`/`onSelectPath` 调用序列完全相同（本地化不改变行模型、过滤、展开与选中）。
 - **ac-en-smoke-no-han-directory**：en 下上述视图与两个对话框的指定表面（五个过滤项、十个按钮及其 `title`、两侧 `meta`、提示行、空态句、下钻说明、图例、两个对话框标题/描述标签/分组标题/按钮/空态句）文本 `\p{Script=Han}` 命中数为 0（路径、文件名、`Left → Right` 箭头等用户数据/符号除外）。
+- **ac-settings-entry**：空态、已打开会话、目录扫描进行中三种情况下，顶栏都有可访问名 `打开设置`（zh）/ `Open settings`（en）且未禁用的按钮；点击后出现可访问名 `设置` / `Settings` 的 `role="dialog"`；`Esc` 关闭后按钮仍在且可再次打开。
+- **ac-settings-options**：面板内恰好两个语言选项，顺序为 `English`、`简体中文`；在 zh 与 en 两种界面下这两个选项的可访问名完全相同；语言分组可访问名为 `语言` / `Language`；当前语言选项 `aria-selected="true"`、另一个为 `false`。
+- **ac-settings-copy**：zh 界面面板显示标题 `设置`、分区标签 `语言`、关闭按钮可访问名 `关闭`；en 界面为 `Settings` / `Language` / `Close`，且 en 面板可见文本在剔除 `简体中文` 这一自指标签后 `\p{Script=Han}` 计数为 0。
+- **ac-switch-instant**：en 界面打开面板点 `简体中文`（不等写盘 settle），顶栏副标题、视图切换四标签、会话标签条可访问名、状态栏标签、面板标题与分区标签在同一次点击后全部为中文，且无空文本 / 占位；再点 `English` 同样立即全部回英文。
+- **ac-switch-before-write**：`writeUserSettings` 返回永不 settle 的 promise 时，点击语言整窗已切到目标语言，`writeUserSettings` 恰被调用一次且参数为 `{ language: 目标 }`，`readUserSettings` 调用次数不增加。
+- **ac-write-order-last-wins**：连续切换 `简体中文` → `English`，`writeUserSettings` 收到参数序列 `['zh','en']`，第二次调用只在第一次 promise settle 之后发生；两次完成后经平台读回的记录为 `{ language: 'en' }`。
+- **ac-write-failure-no-rollback**：`writeUserSettings` 以 `EACCES: permission denied` reject 时，语言仍为目标语言、会话与标签不变、面板不关闭；面板内 `role="alert"` 文本为当前语言的 `settings.saveError` 且包含原始 reason；随后一次成功写盘后该提示消失；关闭再打开面板不出现旧失败提示。
+- **ac-switch-notice-live**：en 界面出现一条由词典生成的提示（如拖入单路径的 `Using … as the left baseline`）后打开设置切到中文，同一 `role="alert"` 文本立即变为对应中文、语气与参数（路径 / 数量）不变，且不产生额外平台调用。
+- **ac-switch-keeps-state**：目录会话已设置非 `all` 过滤、选中一行并改变两侧滚动偏移，另有一个未保存修改的代码会话时切换语言：会话数量 / id / 顺序 / 活动标签不变，过滤选中值、选中行路径、两侧 `scrollTop`、dirty 标记与未保存提示均不变。
+- **ac-switch-no-rework**：上述切换前后 `listDirectory` / `listDirectories` / `digestFiles` / `readTextFile` 调用次数完全相同；`onCompareRequest` 与 `compareRequestsReady` 各只调用一次（工作台未重挂载）。
+- **ac-persistence-restart**：在 en 界面切到中文后卸载，并以 `systemLocale = 'en-US'` 重新挂载 `App`：首屏仍为中文，且启动阶段 `writeUserSettings` 调用次数为 0（有记录以记录为准、系统语言不改写记录）。
+- **ac-settings-han-scan**：`scanHardcodedChinese` 扫描本项显式清单（`src/renderer/src/workbench/SettingsDialog.tsx`、`src/renderer/src/workbench/Workbench.tsx`、`i18n/languageLabel.ts`）命中数为 0（注释、`aria-label`、`title`、`data-testid` 不豁免）。
 
 ## 非目标
 
-- 不做设置面板 / 齿轮入口 / 语言切换 UI 与写盘（归「设置面板与即时切换」WI）；外壳接入 WI 只消费 `initialLanguage`，不做 `setLanguage` 交互。
-- 目录视图面（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx`、`views/directoryCopy.ts`）的文案已在「目录对比视图与同步/模板对话框双语化」轮接入；代码 / CSV / 结构化视图（`views/CodeView.tsx`、`CsvView.tsx`、`StructuredView.tsx`）及其测试的文案归「文件级视图双语化」WI，设置面板 / 齿轮入口 / 语言即时切换与写盘归「设置面板与即时切换」WI。
+- 不做设置面板的更多分区（主题 / 快捷键）、持久化草稿或批量保存、成功 toast（`settings.saved` 保持未使用）；不发成功提示不改 `settings.saved` 语义。
+- 目录视图面（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx`、`views/directoryCopy.ts`）的文案已在「目录对比视图与同步/模板对话框双语化」轮接入；设置面板 / 齿轮入口 / 语言即时切换与写盘已在「设置面板与即时切换」轮接入。代码 / CSV / 结构化视图（`views/CodeView.tsx`、`CsvView.tsx`、`StructuredView.tsx`）及其测试的文案归「文件级视图双语化」WI，切换后这些区域仍显示现状中文，属已知未完成面，不是本域回归。
 - 不改 `workbench/snapshotOps.ts`、`workbench/loadSampleSessions.ts`、`workbench/session.ts`、`workbench/fileIO.ts` 里的中文提示与注释（属目录 / 快照面与后续 WI）：它们产出的 message 作为**错误详情**原样展示，外壳文案由外壳接入 WI 本地化。
 - 不改 `src/core/**`、`src/main/**`、`src/preload/**`、`src/shared/compareRequest.ts`、`src/shared/platform/**` 的任何文案或行为。
 - 不改 `src/shared/fixtures/**` 的数据与 `FixtureSession` / `SessionStat` 类型语义（`SessionStat.label` 保留，但 `Workbench` 不再渲染它、也不再据它判断）；不把 fixture 中文改成英文。
@@ -108,6 +125,8 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - 不跑全主链路中文扫描（仅本范围显式清单）；收口扫描归收口 WI。
 - 不引入 i18next / react-intl 等第三方框架，不新增运行时依赖、不新增专用 code gate。
 - 不新建第二套存储：不写 electron-store、不加第二个 localStorage key、不新增配置文件（存储实现归 `foundation` 域）。
+- 不改词典结构：不新增第三种语言，不改 `en` / `zh` 键集对齐与自指标签约定；词条只能按各轮范围在既有五个表面成对扩充（外壳接入轮 `common` / `shell`，目录视图轮 `directory`），不改既有键语义；不改 `PlatformPort`、`main` / `preload` / `web-platform` 的存储实现。
+- 不改 `App.tsx` 的启动解析、无文字品牌帧与 Provider 挂载；不改 `loadInitialLanguage` / `resolveInitialLanguage` 语义；不做系统语言实时跟随或系统语言变化触发切换。
 - 不碰 `package.json#version`、`CHANGELOG.md`、发布工作流与发布证据、`README.md` / `AGENTS.md`；不发版、不打 tag、不 push。
 
 ## 实现约束
@@ -123,8 +142,12 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - 词典归属：跨表面共享键（差异语义、文件类型名、通用按钮、`Sessions`、`Close`、`Close {title}`）放 `common`，工作台壳与新建对比专属键放 `shell`；键名沿用命名空间点号（如 `shell.toolbar.newCompare`、`shell.progress.cancel`、`shell.session.sample.code.title`、`common.diff.conflict`、`common.fileKind.code`）。
 - `SessionStat.label` 字段保留（fixtures 与既有类型不动），但 `Workbench` 不再渲染、也不再据它判断分支；`DIFF_LABELS` 改为 `DIFF_LABEL_KEYS`，只同步改 `TreeView.test.tsx`、`DirectoryView.test.tsx` 两处断言取 zh 词典值。
 - 文件对的两类已知失败用带 `code` 的错误（`unsupported-type`、`mixed-family`）承载参数，`Workbench` 与 `NewCompareDialog` 按 code 取键，未知错误仍显示原始 message。
-- 扫描清单写成一个常量数组供测试直接遍历；新增 shell 文件必须同时加入清单，否则视为未覆盖。
-- 既有 `App.test.tsx` / `App.snapshot.test.tsx` 的适配方式：`beforeEach` 写入 `localStorage['opencompare.userSettings'] = '{"language":"zh"}'`（`afterEach` 清理），首屏断言改为 `await screen.findByRole(...)`；不得为通过测试把生产默认语言改成中文。`Workbench` 直连渲染的测试因无 Provider 回落 zh，不改断言。
+- 扫描清单写成一个常量数组供测试直接遍历；新增 shell 文件必须同时加入清单，否则视为未覆盖。当前清单为 `App.tsx`、`workbench/Workbench.tsx`、`workbench/SettingsDialog.tsx`、`workbench/NewCompareDialog.tsx`、`i18n/languageLabel.ts`、`workbench/sessionDisplay.ts`、`workbench/fileKinds.ts`、`components/Dialog.tsx`、`components/SessionTabs.tsx`、`components/StatusBar.tsx`、`components/DiffBadge.tsx`、`components/diffSemantics.ts`。
+- 设置面板写法：`SettingsDialog.tsx` 放 `workbench/`，props 至少 `platform` + `onClose`；语言选项标签只允许来自 `messages[target]['settings.language.name']`（可经 `languageSelfLabel`），禁止写 `'简体中文'` / `'English'` 字面量，也禁止为标签新增词典键；入口按钮放顶栏右侧群组最后一位且不接 `directoryBusy` 的 disabled。
+- 切换处理顺序固定：`setLanguage(next)` → 串行队列里 `platform.writeUserSettings({ language: next })`；面板只存失败 `reason` 字符串，文案在渲染期用 `t('settings.saveError', { reason })` 生成（失败提示本身也随语言切换）。写盘串行用 `useRef` 链式 promise，不需要 debounce / 取消；失败不得回滚语言、不得重新 `readUserSettings`。
+- 通知条状态用最小结构 `Notice`（`copy` 存 key + params，`detail` 存原文），`report` 接受该结构；词典文案在渲染期解析，原始错误 detail 原样输出。嵌套片段（文件 / 文件夹类型名等）在 `NoticeParams` 里用 `{ message: MessageKey }` 表达，渲染期再解析。
+- 不要给 `Workbench`、视图组件或设置对话框加语言相关的 `key`；切换只允许触发 context 消费组件重渲染。
+- 既有 `App.test.tsx` / `App.snapshot.test.tsx` 的适配方式：`beforeEach` 写入 `localStorage['opencompare.userSettings'] = '{"language":"zh"}'`（`afterEach` 清理），首屏断言改为 `await screen.findByRole(...)`；不得为通过测试把生产默认语言改成中文。`Workbench` 直连渲染的测试因无 Provider 回落 zh，不改断言。新增设置 / 切换测试以既有 `App.test.tsx` / `App.i18n.test.tsx` 写法为模板（预置 `opencompare.userSettings`、`await screen.findByRole(...)`、`renderWithI18n`、`countingPort`），测试环境 jsdom，`cleanup()` / `localStorage.clear()` 保持既有 `beforeEach` / `afterEach` 习惯。
 - renderer 仍不得 import Electron；不引入 `@core` 之外的新依赖、不引入 i18next / react-intl；新代码注释用英文（扫描不豁免注释）。
 - **目录视图轮接线纪律**：四个组件用 `useI18n()`；无 Provider 时既有 zh 回落保证 `DirectoryView.test.tsx` / `TreeView.test.tsx` 的 `render()` 调用方式不需要包 Provider 即可继续断言中文；不得把 `language` 用作组件或 `TreeView` 的 `key`，不得改 `DirectoryViewProps` 形状。`DIRECTORY_FILTERS` 顺序、`buildDirectoryRowModel` 入参、`trackLive('rowModel')` 注册、`useLayoutEffect` 滚动恢复、`selectedPath` / `collapsedPaths` 受控语义、隐藏 input 的 `accept` 与 `onChange` 重置逻辑、`Dialog` 的 `onClose` busy 行为、`deletePaths` 计算全部保持原样。
 - **目录视图轮测试写法**：en 场景统一用 `@renderer/i18n/testing` 的 `renderWithI18n(ui, 'en')`；zh 断言用 `zh[key]` 取值；扫描清单写成常量数组（四个页面文件 + `directoryCopy.ts` 全列），不得把 `.test.*` 加进扫描清单靠排除规则蒙混；en 无汉字断言按「指定表面文本」逐个元素校验，不对含随机临时目录名的整棵 DOM 做全量汉字扫描。`views/directoryI18n.test.tsx`（中英双语冒烟：DirectoryView + 两个对话框直接构造 `SyncPreview` / `TemplatePreview`）、`views/directoryScan.test.ts`（5 文件 0 命中 + 两个既有测试文件不再含被本地化字面量）为本轮回归钉板。
@@ -137,4 +160,4 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - 结果：code_gates passed（9 门禁，attempt 001；`needSelfTest=false`，UI 自测跳过）。
 - 覆盖摘要：`views/DirectoryView.tsx` 的过滤组 / 五档过滤项、十个工具栏按钮与其 `title`、`pickerAvailable` 门控的 Web 提示、两个隐藏快照 input 的 `aria-label`、左右 Panel 的 `meta` 来源标识、单侧空态句、`已跳过：左 {left} / 右 {right}` 提示行、下钻说明全部改渲染期取键（Panel `title` / `subtitle` 与树 `label` 仍为根名 / 真实路径）；`components/TreeView.tsx` 的展开 / 折叠 `aria-label` 走 `directory.tree.expand|collapse` 插值；`views/DirectorySyncDialog.tsx` 去掉了自带 `DIRECTION_LABELS` / `MODE_LABELS`，标题 / 描述片段 / 三个分组 / 分组计数 / 空分组 / 空计划 / 忙碌与确认取消 / 镜像删除 `aria-label` 全部取键，`incremental` 仍不渲染删除分组、`totalCount === 0` 仍 disabled；`views/TemplateDialog.tsx` 的标题、三段标签、四个分区、分区计数、空分组、两种冲突原因、忙碌与确认按钮取键，`matched.length === 0` 仍 disabled。新增纯常量 / 纯函数 `views/directoryCopy.ts`（`FILTER_LABEL_KEYS` / `SYNC_DIRECTION_KEYS` / `SYNC_MODE_KEYS` / `countKey(one, other, count)`，无 React / DOM），三处不再各写一份中文映射。词典只在 `directory` 表面成对扩充：5→78 键（新增 73，既有 5 键原样保留），zh 逐字沿用原界面、en 句子式措辞；单复数只在同步合计 / 同步分组 / 模板分区三处拆 `one` / `other`，zh 两条值相同。新增测试 `views/directoryI18n.test.tsx`（26 例：过滤顺序与逐字 zh、十个按钮 + title 双语、picker 门控、隐藏 input、Panel meta、用户数据不翻译、单侧空态、跳过行、下钻说明、图例、展开折叠不改变选中、中英行模型 / 过滤 / 折叠 / 回调序列全等、en 指定表面无汉字、两个对话框的分组 / 空计划 / 计数单复数 / 删除勾选与 `deletePaths` / 冲突原因、共享键映射完备）与 `views/directoryScan.test.ts`（5 文件 0 命中 + `DirectoryView.test.tsx` / `TreeView.test.tsx` 不再含过滤与展开折叠字面量）；`DirectoryView.test.tsx` 断言改取 `zh[FILTER_LABEL_KEYS[...]]` / zh 键，`App.i18n.test.tsx` 两处目录按钮 / 快照 input 断言从中文改为 en 实际文案（壳层测试现在渲染英文目录视图，属预期联动）。
 - 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例，未做 tech / design 手合。后续注意：① `App.i18n.test.tsx` 等壳层测试会随视图本地化被动改动，新增视图文案须同步排查壳层里按中文 selector 的断言；② `TreeView` 现在依赖 `useI18n()`，无 Provider 的渲染仍回落 zh，但新增树文案必须同时加 `directory` 成对键并进 `directoryScan` 清单；③ 代码 / CSV / 结构化视图与设置面板仍中文硬编码，收口扫描会命中，属预期；④ 设置面板 WI 必须复用 `opencompare.userSettings` 单键与 `setLanguage`，不得重挂载工作台。
-- 历史：外壳接入 WI `wi_ws_a0d69b96e026b9df`（2026-10-23，`App` 启动接线 + 工作台壳层 / 新建对比 / 共享组件文案 + `workbench/sessionDisplay.ts` 渲染期化；`common` 27 键 / `shell` 128 键）；底座 WI `wi_ws_80cc30bb21c00dc3`（2026-10-23，词典 / `I18nProvider` / `resolveInitialLanguage` + `loadInitialLanguage` / `renderWithI18n` / `scanHardcodedChinese`；平台设置与系统语言通道折叠在 `domains/foundation`）。
+- 历史：设置面板与语言即时切换 WI `wi_ws_8954785bd6a40566`（2026-10-24，齿轮入口 + `SettingsDialog` + `i18n/languageLabel.ts` + 串行写盘 / 失败就地提示 + 通知条 `Notice` 渲染期重译；`shellScan` 清单扩到 12 文件）；外壳接入 WI `wi_ws_a0d69b96e026b9df`（2026-10-23，`App` 启动接线 + 工作台壳层 / 新建对比 / 共享组件文案 + `workbench/sessionDisplay.ts` 渲染期化；`common` 27 键 / `shell` 128 键）；底座 WI `wi_ws_80cc30bb21c00dc3`（2026-10-23，词典 / `I18nProvider` / `resolveInitialLanguage` + `loadInitialLanguage` / `renderWithI18n` / `scanHardcodedChinese`；平台设置与系统语言通道折叠在 `domains/foundation`）。
