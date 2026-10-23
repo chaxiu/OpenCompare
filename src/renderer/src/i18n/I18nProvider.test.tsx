@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { JSX } from 'react'
 import { I18nProvider } from './I18nProvider'
 import { useI18n } from './context'
+import { htmlLang } from './htmlLang'
 import { interpolate } from './interpolate'
 import { renderWithI18n } from './testing'
 
@@ -19,6 +20,9 @@ function Probe(): JSX.Element {
       <span data-testid="missing">{t('common.itemCount')}</span>
       <button type="button" onClick={() => setLanguage('en')}>
         switch
+      </button>
+      <button type="button" onClick={() => setLanguage('zh')}>
+        switch to zh
       </button>
     </div>
   )
@@ -68,6 +72,33 @@ describe('I18nProvider', () => {
 
     // `common.itemCount` is `{count} 项`; no params means the placeholder stays.
     expect(screen.getByTestId('missing').textContent).toBe('{count} 项')
+  })
+})
+
+describe('document language', () => {
+  it('mirrors the mounted language onto <html lang>', () => {
+    renderWithI18n(<Probe />, 'en')
+    expect(document.documentElement.lang).toBe('en')
+
+    cleanup()
+    renderWithI18n(<Probe />, 'zh')
+    expect(document.documentElement.lang).toBe('zh-CN')
+  })
+
+  it('follows a switch to Chinese and back to English', () => {
+    renderWithI18n(<Probe />, 'en')
+    expect(document.documentElement.lang).toBe('en')
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch to zh' }))
+    expect(document.documentElement.lang).toBe('zh-CN')
+
+    fireEvent.click(screen.getByRole('button', { name: 'switch' }))
+    expect(document.documentElement.lang).toBe('en')
+  })
+
+  it('maps every interface language to one BCP 47 tag', () => {
+    expect(htmlLang('en')).toBe('en')
+    expect(htmlLang('zh')).toBe('zh-CN')
   })
 })
 
