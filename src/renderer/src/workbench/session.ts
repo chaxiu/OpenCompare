@@ -7,7 +7,7 @@
  */
 import Papa from 'papaparse'
 import type { CsvSample, FixtureSession, SampleComposition, TextSample } from '@shared/fixtures'
-import type { DirectoryComparison, FileDiffStatus } from '@core/directory/compare'
+import type { DirectoryComparison } from '@core/directory/compare'
 import type { ComparisonSides } from './snapshotOps'
 
 export interface CsvTable {
@@ -59,13 +59,10 @@ export interface WorkbenchSession extends FixtureSession {
   readonly tables?: CsvTables
   readonly adhoc?: AdhocFilePair
   /**
-   * The full comparison tree of a directory tab. Only the **active** directory
-   * tab carries it; an inactive tab keeps {@link directorySummary} and rebuilds
-   * the tree from the warm digest cache when it is activated again.
+   * The full comparison tree of a directory tab. Every open directory tab keeps
+   * its own tree, so switching tabs only changes which view is mounted.
    */
   readonly directory?: DirectoryComparison
-  /** What an inactive directory tab still needs to show and restore itself. */
-  readonly directorySummary?: DirectorySummary
   /**
    * True while any side of the session carries unsaved edits (a file pair whose
    * working text no longer matches what was loaded from disk). Reported by the
@@ -89,19 +86,6 @@ export interface WorkbenchSession extends FixtureSession {
    * side by side without their pickers, drilldowns and snapshots crossing over.
    */
   readonly sides?: ComparisonSides
-}
-
-/**
- * Everything an inactive directory tab must keep: the four-state counts and
- * the skipped totals. It deliberately excludes the result tree and row models,
- * which are rebuilt from the digest cache when the tab becomes active.
- */
-export interface DirectorySummary {
-  readonly counts: Readonly<Record<FileDiffStatus, number>>
-  readonly fileCount: number
-  readonly leftSkipped: number
-  readonly rightSkipped: number
-  readonly skipped: number
 }
 
 /** Parses one CSV/TSV side into a header plus data rows. */

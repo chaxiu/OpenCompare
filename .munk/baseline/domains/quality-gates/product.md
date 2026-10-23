@@ -18,6 +18,7 @@
 - **ac-perf-profile-single-argv**：该命令不含 `&&`、`||`、`|`、`;`，且不等于/不包含 `perf:dir`。
 - **ac-perf-profile-description**：该文件 `description` 为非空字符串，同时包含条件 profile 口径（不进默认 `code_gates`）、触发条件（diff 触及扫描/哈希/缓存/IPC/树渲染/取消路径，或里程碑 x.y.0 独立验收一次）、以及「同一 commit 只采样一次 + 重跑须在 digest 写明作废原因与两轮差异」三条采样纪律的关键表述。
 - **ac-pin-test-green**：`src/munk-gates.test.ts` 存在并被默认 `pnpm test` 收录，`pnpm test` 全绿；把任一默认矩阵条目改回/追加 `perf-gate` 时该测试失败（红）。
+- **ac-default-gates-green**：默认矩阵 9 项（install / lint / typecheck / build / build:web / test / test-compare-request / cancel-gate / memory-gate）在交付提交上全部 passed，`manifest.summary` 为「code_gates passed (9 gates)」且无 failedGateIds；该结论不替代条件 profile 的 `perf-gate`（后者按触发纪律单跑）。
 - **ac-unit-gates-kept**：默认矩阵中 `cancel-gate` 的 command 为 `pnpm test:cancel`、`memory-gate` 的 command 为 `pnpm test:memory`，二者均不被移出。
 - **ac-docs-perf-md**：`docs/perf/large-directory-memory.md` §2 不再出现「`.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`」的默认矩阵口径，改为指向 `.munk/code-gates.perf.json` 的条件 profile，并写明三条采样纪律（条件触发 / 里程碑一次 / 同 commit 只采一次且重跑需在 digest 说明）。
 - **ac-docs-tech-overview**：`.munk/baseline/tech/overview.md` 门禁清单一节写为默认 9 项 + 条件 profile，且不再声称默认矩阵含 `perf-gate`。
@@ -46,6 +47,7 @@
 
 ## 最近交付证明
 
+- 顺带复验（WI `wi_intake_d3f44d9dbbaabcb1`，2026-10-23）：默认 9 项矩阵在该 WI 交付提交前的 worktree 上 attempt 001 全 passed（`manifest.summary = code_gates passed (9 gates, attempt 001)`，无 failedGateIds）；矩阵形状 / profile / 钉板测试零改动，`perf-gate` 仍只在条件 profile，交付时另按条件纪律单跑一次。
 - WI：`wi_intake_80a5cc89fbb49c4f`（门禁分层：perf-gate 移出默认矩阵 + 条件 profile + 回归钉板，`kind: chore/gates`）
 - 日期：2026-10-23
 - 结果：code_gates passed（9 gates，attempt 001 全绿；本轮 `needSelfTest=false`，UI 自测跳过）。**新建本域**，未改任何历史域记录。

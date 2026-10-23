@@ -136,7 +136,7 @@ describe('evaluatePerf', () => {
     expect(verdict.violations).toContain(VIOLATION_HOLD_TABS)
   })
 
-  it('accepts the multisession retained-tab shape and rejects one comparison per tab', () => {
+  it('accepts one comparison per open tab and rejects a detached (summary) tab', () => {
     const green = evaluatePerf({
       profile: 'real',
       thresholds: real,
@@ -144,14 +144,9 @@ describe('evaluatePerf', () => {
       roundDeltas: deltas(400 * MB, 300 * MB, 200 * MB),
       mode: 'multisession',
       settle: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB },
-      holds: [
-        hold(1, 1),
-        hold(2, 1),
-        hold(3, 1),
-        { ...hold(3, 1), label: 'settle' }
-      ]
+      holds: [hold(1, 1), hold(2, 2), hold(3, 3), { ...hold(3, 3), label: 'settle' }]
     })
-    // Every inactive tab is summary-only, so one live comparison is the norm.
+    // Every tab keeps its own tree, so the comparison count tracks the tabs.
     expect(green.ok).toBe(true)
 
     const red = evaluatePerf({
@@ -161,8 +156,10 @@ describe('evaluatePerf', () => {
       roundDeltas: deltas(400 * MB, 300 * MB, 200 * MB),
       mode: 'multisession',
       settle: { renderer: 1200 * MB, main: 300 * MB, appTotal: 1800 * MB },
-      holds: [hold(1, 1), hold(2, 2), hold(3, 3)]
+      holds: [hold(1, 1), hold(2, 1), hold(3, 1)]
     })
+    // 3 open tabs holding one comparison is exactly the regression the gate exists for.
+    expect(red.ok).toBe(false)
     expect(red.violations).toContain(VIOLATION_HOLD_COMPARISONS)
   })
 
@@ -225,13 +222,13 @@ describe('evaluatePerf', () => {
       },
       holds: [
         hold(1, 1),
-        hold(2, 1),
-        hold(3, 1),
-        { ...hold(3, 1), label: 'after-3-tabs' },
-        hold(4, 1, 2, 3),
-        hold(5, 1, 2, 3),
-        { ...hold(5, 1, 2, 3), label: 'after-hot-upserts' },
-        { ...hold(5, 1, 2, 2), label: 'reclaim' }
+        hold(2, 2),
+        hold(3, 3),
+        { ...hold(3, 3), label: 'after-3-tabs' },
+        hold(4, 3, 2, 3),
+        hold(5, 3, 2, 3),
+        { ...hold(5, 3, 2, 3), label: 'after-hot-upserts' },
+        { ...hold(5, 2, 2, 2), label: 'reclaim' }
       ],
       roundHashedFiles: [10, 0, 0, 0, 0],
       rendererPids: [5151, 5151, 5151, 5151, 5151]
@@ -281,6 +278,16 @@ describe('evaluatePerf', () => {
       )
     })
     expect(wrongTabs.violations).toContain(VIOLATION_HOLD_TABS)
+
+    // A detached summary tab keeps 1 comparison for 3 open tabs: red.
+    const detached = evaluatePerf({
+      ...base,
+      holds: base.holds.map((item) =>
+        item.label === 'after-3-tabs' ? { ...item, comparisons: 1 } : item
+      )
+    })
+    expect(detached.ok).toBe(false)
+    expect(detached.violations).toContain(VIOLATION_HOLD_COMPARISONS)
   })
 
   it('turns an unmeasured or empty hold series into a red verdict', () => {

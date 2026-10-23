@@ -86,7 +86,7 @@ describe('runPerfRounds', () => {
     expect(new Set(reports.map((report) => report.sessionId)).size).toBe(2)
   })
 
-  it('retains 3 tabs across hot rounds and rebuilds the landing tab after a close', async () => {
+  it('retains 3 tabs across hot rounds and lands on a neighbour after a close', async () => {
     const platform = await seededPlatform()
     const commits: Array<readonly WorkbenchSession[]> = []
     const stages: Array<{ label: string; tabs: number }> = []
@@ -123,20 +123,20 @@ describe('runPerfRounds', () => {
     for (const report of reports.slice(3)) {
       expect(report.counts.hashedFiles).toBe(0)
     }
-    // No commit ever keeps more than the active tree resident.
+    // Every open tab keeps its own tree; nothing is detached at a boundary.
     for (const sessions of commits) {
-      expect(
-        sessions.filter((session) => session.directory !== undefined).length
-      ).toBeLessThanOrEqual(1)
+      expect(sessions.filter((session) => session.directory !== undefined)).toHaveLength(
+        sessions.length
+      )
     }
     expect(stages).toEqual([
       { label: 'after-3-tabs', tabs: 3 },
       { label: 'after-hot-upserts', tabs: 3 }
     ])
     expect(reclaimTabs).toBe(2)
-    // The landing tab was rebuilt from the warm cache: still 2 tabs, one tree.
-    expect(commits[commits.length - 1].map((session) => session.id).length).toBe(2)
-    expect(commits[commits.length - 1].filter((session) => session.directory !== undefined)).toHaveLength(1)
+    // Closing the active tab leaves the two resident neighbours and their trees.
+    expect(commits[commits.length - 1].map((session) => session.id)).toHaveLength(2)
+    expect(commits[commits.length - 1].filter((session) => session.directory !== undefined)).toHaveLength(2)
   })
 
   it('reports each round wall clock and ISO boundaries', async () => {

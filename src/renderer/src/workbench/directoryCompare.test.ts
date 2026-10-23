@@ -5,12 +5,10 @@ import { setLivenessEnabled, livenessCounts } from '@shared/perf/liveness'
 import {
   attachDirectoryComparison,
   createDrilldownSession,
-  detachDirectoryComparison,
   directoryComparisonKey,
   directoryViewKey,
   releaseDirectoryComparison,
-  resolveDirectoryReturn,
-  summarizeComparison
+  resolveDirectoryReturn
 } from './directoryCompare'
 import type { DrilldownTarget } from './fileKinds'
 import type { WorkbenchSession } from './session'
@@ -128,20 +126,8 @@ describe('directory view key', () => {
   })
 })
 
-describe('summary and activation rebuild', () => {
-  it('summarises a comparison without keeping the tree', () => {
-    const comparison = comparisonOf('/left', '/right')
-    const summary = summarizeComparison(comparison)
-    expect(summary).toEqual({
-      counts: comparison.counts,
-      fileCount: comparison.fileCount,
-      leftSkipped: 0,
-      rightSkipped: 0,
-      skipped: 0
-    })
-  })
-
-  it('attaches a rebuilt comparison to the same tab identity and registers it live', () => {
+describe('attaching a comparison', () => {
+  it('keeps the tab identity, fills the counts and registers the tree live', () => {
     setLivenessEnabled(true)
     try {
       const session = directorySession('directory:left ↔ right')
@@ -150,16 +136,10 @@ describe('summary and activation rebuild', () => {
 
       expect(attached.id).toBe(session.id)
       expect(attached.title).toBe(session.title)
+      expect(attached.subtitle).toBe(session.subtitle)
       expect(attached.directory).toBe(comparison)
-      expect(attached.directorySummary?.counts).toEqual(comparison.counts)
+      expect(attached.composition).toEqual({ ...comparison.counts, conflict: 0 })
       expect(livenessCounts().comparisons).toBe(1)
-
-      const detached = detachDirectoryComparison(attached)
-      expect(detached.directory).toBeUndefined()
-      expect(detached.directorySummary?.counts).toEqual(comparison.counts)
-      // Rebuilding after a GC remounts a new comparison; both are tracked live.
-      attachDirectoryComparison(detached, comparisonOf('/left', '/right'))
-      expect(livenessCounts().comparisons).toBe(2)
     } finally {
       setLivenessEnabled(false)
     }

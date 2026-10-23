@@ -9,10 +9,12 @@
  * condition instead of a note in a report.
  *
  * Multi-tab scenes (`multisession` / `retained`) are judged on the user-visible
- * shape instead of a transient peak: the settle readings and the whole-app peak
- * stay hard lines, while an instantaneous ready peak is only a regression
- * guardrail. The old profile target is still reported as a notice so the
- * evidence keeps the comparison column.
+ * shape instead of a transient peak: every open directory tab keeps its own
+ * comparison tree, so `comparisons` must equal that scene's tab count, while
+ * the settle readings and the whole-app peak stay hard lines and an
+ * instantaneous ready peak is only a regression guardrail. The old profile
+ * target is still reported as a notice so the evidence keeps the comparison
+ * column.
  */
 import type {
   PerfHoldSample,
@@ -155,12 +157,11 @@ function holdViolations(
   for (const hold of holds) {
     if (!hold.gc) violations.push(VIOLATION_HOLD_UNMEASURED)
     if (hold.rowModels > MAX_LIVE_ROW_MODELS) violations.push(VIOLATION_HOLD_ROW_MODELS)
-    // A summary-only inactive tab means only the active session holds a
-    // comparison, in every mode — the old "= round" shape is exactly the bug.
-    if (hold.comparisons !== 1) violations.push(VIOLATION_HOLD_COMPARISONS)
-    if (hold.tabs !== expectedHoldTabs(mode, hold, retained)) {
-      violations.push(VIOLATION_HOLD_TABS)
-    }
+    // Every directory tab keeps its tree, so one comparison per tab is the only
+    // truthful shape; one comparison for 3 tabs means tabs were detached again.
+    const expectedTabs = expectedHoldTabs(mode, hold, retained)
+    if (hold.comparisons !== expectedTabs) violations.push(VIOLATION_HOLD_COMPARISONS)
+    if (hold.tabs !== expectedTabs) violations.push(VIOLATION_HOLD_TABS)
   }
   return violations
 }
