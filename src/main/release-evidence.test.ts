@@ -670,3 +670,42 @@ describe('inspectV025Evidence negative fixtures', () => {
     expect(status).toBe('verified')
   })
 })
+
+// v0.2.7 shipped. Its evidence record is the newest published counterpart of
+// the v0.2.5 record above: the same read-only parser with an explicit path, so
+// a missing or fabricated record fails `pnpm test` without touching history.
+const evidenceV027Path = join(repoRoot, 'docs/release-evidence/v0.2.7.md')
+
+describe('v0.2.7 release evidence document', () => {
+  const doc = (): string => readEvidence(evidenceV027Path)
+
+  it('exists, is non-empty and declares verified exactly once', () => {
+    expect(existsSync(evidenceV027Path)).toBe(true)
+    const text = doc()
+    expect(text.trim().length).toBeGreaterThan(0)
+    expect(text.match(/^status:\s*verified$/gm)?.length).toBe(1)
+
+    const { status, problems } = inspectReleaseEvidence(text, 'v0.2.7')
+    expect(problems).toEqual([])
+    expect(status).toBe('verified')
+  })
+
+  it('records the release identity, run, dmg digest and the blocked L1 legs', () => {
+    const text = doc()
+    for (const marker of [
+      'adc6e1e50b84e211d1e1791a4ae61b6d6ba87d24',
+      'e071f876da8cf502728e4d31b2699da8254629d5',
+      '422765578',
+      '40100596470',
+      '4375fe95f5048195e1bcf46513da6291a8363585ed01f6f636ec18845a24e8f5',
+      'blocked',
+      'ZenMind',
+      'Δ3=2.06 MB',
+      '116 ms'
+    ]) {
+      expect(text).toContain(marker)
+    }
+    expect(text.match(/blocked/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
+    expect(text).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+  })
+})
