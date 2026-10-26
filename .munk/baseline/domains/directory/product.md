@@ -29,6 +29,8 @@
 - **不可读项容错（横切契约，归 `io-tolerance` 域）**：`scanDirectory` 跳过平台标注的 `broken` 条目与不可列举子树并累计 `ScannedTree.skipped`（根目录失败仍 reject）；`compareDirectories` / `compareDirectorySides` 产出按侧 `DirectoryComparison.leftSkipped` / `rightSkipped`（`skipped` 为两侧之和），正文读取失败的文件对判 `modified` 而不中止整次对比；`fileCount` 仍等于 `same + added + removed + modified`。坏项不进任何状态计数。目录视图 footer 在 `leftSkipped + rightSkipped > 0` 时显示「已跳过：左 X / 右 Y」，两侧为 0 不显示，不再显示合并总数。
 - **视图面文案渲染期解析（词典归 `i18n` 域，本域承载渲染）**：过滤条（组可访问名 + 五档标签，顺序仍按 `DIRECTORY_FILTERS`）、工具栏十个按钮与其 `title`、`pickerAvailable` 门控的 Web 提示、两个隐藏快照 input 的 `aria-label`、左右 Panel 的 `meta` 来源标识（源目录 / 目标目录 / 快照）、单侧空态句、跳过提示行、下钻说明，以及同步预览与模板归位对话框的外壳文案，全部经 `useI18n().t(key, params)` 渲染；`TreeView` 的展开 / 折叠 `aria-label` 走词典插值，而树根名、行 `title`、Panel `title` / `subtitle` 仍是用户数据不翻译。zh 值逐字沿用原界面，行模型、过滤、折叠、选中、四态计数、同步计划与模板匹配语义均不变（AC 定义归 `domains/i18n` 的 `ac-filter-copy`…`ac-en-smoke-no-han-directory`）。
 
+- **目录对比 HTML 报告导出（归 `directory-report` 域）**：把已完成的 `DirectoryComparison` 渲染为自包含、可离线、默认隐藏本机绝对路径且带行数/字节双上限的单文件 HTML，纯函数内核在 `src/core/directory/report.ts`（`buildDirectoryReport` / `directoryReportSource`），版本单点在 `src/shared/appVersion.ts`。本域只提供 `DirectoryComparison` 作为输入；报告语义、转义与隐私口径、上限与截断、应用版本来源见 `domains/directory-report` 的 AC 定义，`DirectoryView` 接线与词典新增不在该域已交付范围。
+
 ## 验收
 
 - **ac-engine-classify**：双目录对比引擎按相对路径配对，对每个文件正确产出 相同 / 右独有 / 左独有 / 修改 四类状态，并靠 SHA-256 内容哈希判定「大小相同但内容不同」的修改（vitest 可单测）。
