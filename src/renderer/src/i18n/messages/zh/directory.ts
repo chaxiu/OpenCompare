@@ -83,5 +83,32 @@ export const directory = {
   'directory.template.reason.ambiguous': '同名多候选',
   'directory.template.reason.contentMismatch': '同名内容不同',
   'directory.template.placing': '正在归位…',
-  'directory.template.place': '确认提取归位'
+  'directory.template.place': '确认提取归位',
+  'directory.report.toolbar.export': '导出 HTML 报告',
+  'directory.report.toolbar.exportTitle':
+    '把当前目录对比导出为可离线打开的单文件 HTML 报告；取消保存不会写入文件',
+  'directory.report.toolbar.hideLocalPaths': '隐藏本机路径',
+  'directory.report.toolbar.hideLocalPathsTitle':
+    '默认开启：报告只显示相对路径或目录名，不包含本机绝对路径',
+  'directory.report.title': '目录对比报告',
+  'directory.report.privacyNotice': '由本机生成，分享前自查路径',
+  'directory.report.generatedAt': '生成时间',
+  'directory.report.appVersion': '应用版本',
+  'directory.report.leftRoot': '左根目录',
+  'directory.report.rightRoot': '右根目录',
+  'directory.report.limits': '上限（行 / 字节）',
+  'directory.report.scopeAll': '统计口径：全部条目（不受当前过滤影响）',
+  'directory.report.countsHeading': '差异统计',
+  'directory.report.columns.path': '路径',
+  'directory.report.columns.leftSize': '左侧大小',
+  'directory.report.columns.rightSize': '右侧大小',
+  'directory.report.columns.status': '状态',
+  'directory.report.truncated': '已展示 {shown} / 原始 {total}（已截断）',
+  'directory.report.truncatedHint': '截断处子树不全，完整清单请在本机查看。',
+  'directory.report.empty': '没有可导出的条目。',
+  'directory.report.saveTitle': '导出目录对比 HTML 报告',
+  'directory.report.filterName': 'HTML 报告',
+  'directory.report.saved': 'HTML 报告已保存到 {path}',
+  'directory.report.savedTruncated':
+    'HTML 报告已保存到 {path}（已展示 {shown} / 原始 {total} 行，已截断）'
 } as const

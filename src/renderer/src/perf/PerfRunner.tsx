@@ -212,6 +212,9 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
             onExportSnapshot={ignoreSide}
             onImportSnapshot={ignoreImport}
             onLoadRemoteSnapshotSample={ignorePath}
+            hideLocalPaths
+            onHideLocalPathsChange={ignorePath}
+            onExportReport={ignorePath}
             onPreviewSync={ignorePath}
             onPreviewTemplate={ignorePath}
             syncPreview={null}

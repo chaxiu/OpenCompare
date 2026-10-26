@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
-import { compareDirectories, createComparisonCache } from '@core/directory/compare'
+import type { RealDirectoryFixture } from '../../test-support/directoryFixture'
+import {
+  REAL_FIXTURE_COUNTS,
+  createRealDirectoryFixture,
+  removeRealDirectoryFixture
+} from '../../test-support/directoryFixture'
 import {
   DIRECTORY_FILTERS,
   countTreeFiles,
@@ -21,7 +23,6 @@ import {
   visibleDirectoryCounts
 } from '@core/directory/rows'
 import type { DirectoryRowModel } from '@core/directory/rows'
-import type { DirectoryEntry } from '@shared/platform/types'
 import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { zh } from '@renderer/i18n/messages'
 import { DirectoryView } from './DirectoryView'
@@ -62,126 +63,6 @@ afterAll(() => {
 })
 
 afterEach(cleanup)
-
-/* ------------------------------------------------------------------ */
-/* Real 50k-entry fixture                                              */
-/* ------------------------------------------------------------------ */
-
-const FIXED_MTIME = new Date('2026-01-02T03:04:05.000Z')
-const BIG_SAME = 10_000
-const BIG_MODIFIED = 10_000
-const BIG_COUNT = BIG_SAME + BIG_MODIFIED
-const SAME_FILES = 3_500
-const MODIFIED_FILES = 1_000
-const REMOVED_FILES = 1_500
-const ADDED_FILES = 1_500
-const LEAF_DIR_COUNT = 500
-const OTHER_FILES = SAME_FILES + MODIFIED_FILES + REMOVED_FILES + ADDED_FILES
-
-interface Fixture {
-  readonly root: string
-  readonly comparison: DirectoryComparison
-}
-
-/** `g{g}/s{s}/t{t}`: three directory levels below the root. */
-function leafDirectory(index: number): string {
-  const group = Math.floor(index / 100)
-  const sub = Math.floor((index % 100) / 10)
-  const leaf = index % 10
-  return `g${group}/s${sub}/t${leaf}`
-}
-
-async function listDirectory(directory: string): Promise<readonly DirectoryEntry[]> {
-  const entries = await readdir(directory, { withFileTypes: true })
-  return Promise.all(
-    entries.map(async (entry) => {
-      const full = path.join(directory, entry.name)
-      const info = await stat(full)
-      return {
-        name: entry.name,
-        path: full,
-        isDirectory: entry.isDirectory(),
-        size: info.size,
-        modifiedMs: info.mtimeMs
-      }
-    })
-  )
-}
-
-/**
- * Two real trees with 26,000 files each (plus 557 directories), one `big`
- * directory holding 20,000 direct children, and at least 1,000 files of each
- * of the four statuses. `same` pairs share content and a pinned mtime so the
- * engine settles them by hash.
- */
-async function createFixture(): Promise<Fixture> {
-  const root = await mkdtemp(path.join(tmpdir(), 'opencompare-directory-view-'))
-  const left = path.join(root, 'left')
-  const right = path.join(root, 'right')
-  await mkdir(path.join(left, 'big'), { recursive: true })
-  await mkdir(path.join(right, 'big'), { recursive: true })
-
-  const samePairs: { readonly left: string; readonly right: string }[] = []
-
-  for (let index = 0; index < BIG_COUNT; index += 1) {
-    const name = `big-${String(index).padStart(5, '0')}.txt`
-    const leftPath = path.join(left, 'big', name)
-    const rightPath = path.join(right, 'big', name)
-    if (index < BIG_SAME) {
-      const content = `big same ${index}`
-      await writeFile(leftPath, content)
-      await writeFile(rightPath, content)
-      samePairs.push({ left: leftPath, right: rightPath })
-    } else {
-      await writeFile(leftPath, `big modified ${index}`)
-      await writeFile(rightPath, `big modified ${index} with more bytes`)
-    }
-  }
-
-  for (let index = 0; index < LEAF_DIR_COUNT; index += 1) {
-    const relative = leafDirectory(index)
-    await mkdir(path.join(left, relative), { recursive: true })
-    await mkdir(path.join(right, relative), { recursive: true })
-  }
-
-  for (let index = 0; index < OTHER_FILES; index += 1) {
-    const relative = leafDirectory(index % LEAF_DIR_COUNT)
-    const name = `leaf-${String(index).padStart(5, '0')}.txt`
-    const leftPath = path.join(left, relative, name)
-    const rightPath = path.join(right, relative, name)
-    if (index < SAME_FILES) {
-      const content = `leaf same ${index}`
-      await writeFile(leftPath, content)
-      await writeFile(rightPath, content)
-      samePairs.push({ left: leftPath, right: rightPath })
-    } else if (index < SAME_FILES + MODIFIED_FILES) {
-      await writeFile(leftPath, `leaf modified ${index}`)
-      await writeFile(rightPath, `leaf modified ${index} with more bytes`)
-    } else if (index < SAME_FILES + MODIFIED_FILES + REMOVED_FILES) {
-      await writeFile(leftPath, `leaf removed ${index}`)
-    } else {
-      await writeFile(rightPath, `leaf added ${index}`)
-    }
-  }
-
-  await Promise.all(
-    samePairs.map(async (pair) => {
-      await utimes(pair.left, FIXED_MTIME, FIXED_MTIME)
-      await utimes(pair.right, FIXED_MTIME, FIXED_MTIME)
-    })
-  )
-
-  const comparison = await compareDirectories(
-    left,
-    right,
-    listDirectory,
-    (file) => readFile(file, 'utf8'),
-    createComparisonCache(),
-    undefined,
-    { concurrency: 32 }
-  )
-  return { root, comparison }
-}
 
 /** Synthetic 5,000-row comparison shaped like the real window's first rows. */
 function syntheticComparison(fileCount: number): DirectoryComparison {
@@ -261,16 +142,25 @@ const INITIAL_STATE: SavedState = {
 function Harness({
   comparison,
   initial,
-  onSaved
+  onSaved,
+  busy = false,
+  initialHideLocalPaths = true,
+  onHideLocalPathsChange,
+  onExportReport
 }: {
   readonly comparison: DirectoryComparison
   readonly initial: SavedState
   readonly onSaved?: (state: SavedState) => void
+  readonly busy?: boolean
+  readonly initialHideLocalPaths?: boolean
+  readonly onHideLocalPathsChange?: (hideLocalPaths: boolean) => void
+  readonly onExportReport?: () => void
 }): JSX.Element {
   const [filter, setFilter] = useState<DirectoryFilter>(initial.filter)
   const [collapsed, setCollapsed] = useState<readonly string[]>(initial.collapsed)
   const [selectedPath, setSelectedPath] = useState<string | null>(initial.selectedPath)
   const [scrollTops, setScrollTops] = useState({ left: initial.left, right: initial.right })
+  const [hideLocalPaths, setHideLocalPaths] = useState(initialHideLocalPaths)
 
   useEffect(() => {
     onSaved?.({
@@ -281,6 +171,11 @@ function Harness({
       right: scrollTops.right
     })
   }, [onSaved, filter, collapsed, selectedPath, scrollTops])
+
+  function changeHideLocalPaths(next: boolean): void {
+    setHideLocalPaths(next)
+    onHideLocalPathsChange?.(next)
+  }
 
   function togglePath(target: string): void {
     setCollapsed((current) =>
@@ -306,7 +201,7 @@ function Harness({
       }
       visibleCounts={{ ...comparison.counts, conflict: 0 }}
       pickerAvailable={false}
-      busy={false}
+      busy={busy}
       onPick={() => {}}
       onLoadSample={() => {}}
       onOpenFile={() => {}}
@@ -315,6 +210,9 @@ function Harness({
       onExportSnapshot={() => {}}
       onImportSnapshot={() => {}}
       onLoadRemoteSnapshotSample={() => {}}
+      hideLocalPaths={hideLocalPaths}
+      onHideLocalPathsChange={changeHideLocalPaths}
+      onExportReport={onExportReport ?? (() => {})}
       onPreviewSync={() => {}}
       onPreviewTemplate={() => {}}
       syncPreview={null}
@@ -407,20 +305,15 @@ function expandLabel(name: string): string {
 /* Suite                                                               */
 /* ------------------------------------------------------------------ */
 
-let fixture: Fixture
+let fixture: RealDirectoryFixture
 
 beforeAll(async () => {
-  fixture = await createFixture()
-  expect(fixture.comparison.counts).toEqual({
-    same: BIG_SAME + SAME_FILES,
-    added: ADDED_FILES,
-    removed: REMOVED_FILES,
-    modified: BIG_MODIFIED + MODIFIED_FILES
-  })
+  fixture = await createRealDirectoryFixture()
+  expect(fixture.comparison.counts).toEqual(REAL_FIXTURE_COUNTS)
 }, 120_000)
 
 afterAll(async () => {
-  if (fixture) await rm(fixture.root, { recursive: true, force: true })
+  if (fixture) await removeRealDirectoryFixture(fixture)
 })
 
 describe('DirectoryView windowed tree', () => {
@@ -757,5 +650,80 @@ describe('DirectoryView windowed tree', () => {
         )
       }
     }
+  })
+})
+
+describe('DirectoryView report toolbar', () => {
+  it('keeps the report export button in every filter state and calls back once', () => {
+    const onExportReport = vi.fn()
+    render(
+      <Harness
+        comparison={syntheticComparison(12)}
+        initial={INITIAL_STATE}
+        onExportReport={onExportReport}
+      />
+    )
+
+    const label = zh['directory.report.toolbar.export']
+    for (const filter of DIRECTORY_FILTERS) {
+      fireEvent.click(screen.getByRole('tab', { name: zh[FILTER_LABEL_KEYS[filter]] }))
+      const button = screen.getByRole('button', { name: label }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+      expect(button.title).toBe(zh['directory.report.toolbar.exportTitle'])
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    expect(onExportReport).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the report export button while busy and never calls back', () => {
+    const onExportReport = vi.fn()
+    render(
+      <Harness
+        comparison={syntheticComparison(12)}
+        initial={INITIAL_STATE}
+        busy
+        onExportReport={onExportReport}
+      />
+    )
+
+    const button = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(onExportReport).not.toHaveBeenCalled()
+  })
+
+  it('defaults the hide-local-paths switch to checked and reports both directions', () => {
+    const onHideLocalPathsChange = vi.fn()
+    render(
+      <Harness
+        comparison={syntheticComparison(12)}
+        initial={INITIAL_STATE}
+        onHideLocalPathsChange={onHideLocalPathsChange}
+      />
+    )
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: zh['directory.report.toolbar.hideLocalPaths']
+    }) as HTMLInputElement
+    expect(checkbox.checked).toBe(true)
+    expect(checkbox.closest('label')?.getAttribute('title')).toBe(
+      zh['directory.report.toolbar.hideLocalPathsTitle']
+    )
+
+    fireEvent.click(checkbox)
+    expect(onHideLocalPathsChange).toHaveBeenLastCalledWith(false)
+    expect(checkbox.checked).toBe(false)
+
+    fireEvent.click(checkbox)
+    expect(onHideLocalPathsChange).toHaveBeenLastCalledWith(true)
+    expect(checkbox.checked).toBe(true)
+
+    const button = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
   })
 })
