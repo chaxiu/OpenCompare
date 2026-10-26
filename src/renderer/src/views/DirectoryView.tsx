@@ -3,6 +3,7 @@ import type { JSX } from 'react'
 import {
   Cloud,
   Download,
+  FileDown,
   FolderSearch,
   LoaderCircle,
   Shuffle,
@@ -63,6 +64,11 @@ export interface DirectoryViewProps {
   readonly onExportSnapshot: (side: SidePosition) => void
   readonly onImportSnapshot: (side: SidePosition, file: File) => void
   readonly onLoadRemoteSnapshotSample: () => void
+  /** Privacy switch of the HTML report; the shell owns it, so it survives remounts. */
+  readonly hideLocalPaths: boolean
+  readonly onHideLocalPathsChange: (hideLocalPaths: boolean) => void
+  /** Asks the shell to build and save the HTML report; this view never renders it. */
+  readonly onExportReport: () => void
   readonly onPreviewSync: (direction: SyncDirection, mode: SyncMode) => void
   readonly onPreviewTemplate: () => void
   readonly syncPreview: SyncPreview | null
@@ -100,6 +106,9 @@ export function DirectoryView({
   onExportSnapshot,
   onImportSnapshot,
   onLoadRemoteSnapshotSample,
+  hideLocalPaths,
+  onHideLocalPathsChange,
+  onExportReport,
   onPreviewSync,
   onPreviewTemplate,
   syncPreview,
@@ -291,6 +300,27 @@ export function DirectoryView({
         >
           {t('directory.toolbar.demoRemote')}
         </ToolbarButton>
+        <ToolbarButton
+          size="sm"
+          icon={<FileDown aria-hidden className="size-3.5" />}
+          onClick={onExportReport}
+          disabled={busy}
+          title={t('directory.report.toolbar.exportTitle')}
+        >
+          {t('directory.report.toolbar.export')}
+        </ToolbarButton>
+        <label
+          className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
+          title={t('directory.report.toolbar.hideLocalPathsTitle')}
+        >
+          <input
+            type="checkbox"
+            checked={hideLocalPaths}
+            onChange={(event) => onHideLocalPathsChange(event.target.checked)}
+            className="size-3.5 shrink-0 accent-accent"
+          />
+          {t('directory.report.toolbar.hideLocalPaths')}
+        </label>
         <input
           ref={leftInputRef}
           type="file"

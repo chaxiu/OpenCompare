@@ -60,6 +60,12 @@ import {
 } from './directoryOps'
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
+import {
+  buildDirectoryReportForComparison,
+  directoryReportFileName,
+  directoryReportFilter,
+  directoryReportSaveCopy
+} from './directoryReport'
 import { loadSampleSessions, SampleLibraryError } from './loadSampleSessions'
 import {
   describeSession,
@@ -333,7 +339,7 @@ function sampleErrorNotice(cause: unknown): Notice {
 
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
 export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
-  const { t } = useI18n()
+  const { language, t } = useI18n()
   const [status, setStatus] = useState<WorkbenchStatus>('empty')
   const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -346,6 +352,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryStates, setDirectoryStates] = useState<Record<string, DirectoryViewState>>({})
   const [directoryScroll, setDirectoryScroll] = useState<Record<string, DirectoryScroll>>({})
+  /**
+   * Privacy switch of the HTML report. It lives on the shell, not on a session,
+   * so switching tabs or remounting the view keeps the user's choice.
+   */
+  const [hideLocalPaths, setHideLocalPaths] = useState(true)
   const [pendingLeft, setPendingLeft] = useState<PendingLeft | null>(null)
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
@@ -980,6 +991,41 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }
 
+  /**
+   * Builds the self-contained HTML report of the visible directory comparison
+   * and saves it through the existing `PlatformPort.saveFile` dialog. Counts,
+   * roots and rows come from the same comparison the view renders; a cancelled
+   * save simply ends without a notice or a write.
+   */
+  async function handleExportReport(): Promise<void> {
+    const comparison = active?.scene === 'directory' ? active.directory : undefined
+    if (!comparison) return
+
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const built = buildDirectoryReportForComparison(
+        comparison,
+        t,
+        language,
+        hideLocalPaths
+      )
+      const path = await platform.saveFile({
+        title: t('directory.report.saveTitle'),
+        defaultPath: directoryReportFileName(comparison.leftName, comparison.rightName),
+        filters: [directoryReportFilter(t('directory.report.filterName'))],
+        content: built.html
+      })
+      if (path === null) return
+      const saved = directoryReportSaveCopy(built, path)
+      report(copyNotice(saved.key, saved.params), 'info')
+    } catch (cause) {
+      report(detailNotice(errorText(cause)))
+    } finally {
+      setDirectoryBusy(false)
+    }
+  }
+
   /** Mounts a picked `.ocsnap.json` on one side and recomputes the comparison. */
   async function handleImportSnapshot(side: SidePosition, file: File): Promise<void> {
     const current = activeSides
@@ -1178,6 +1224,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             onExportSnapshot={(side) => void handleExportSnapshot(side)}
             onImportSnapshot={(side, file) => void handleImportSnapshot(side, file)}
             onLoadRemoteSnapshotSample={() => void runSidesCompare(remoteSnapshotSides())}
+            hideLocalPaths={hideLocalPaths}
+            onHideLocalPathsChange={setHideLocalPaths}
+            onExportReport={() => void handleExportReport()}
             onPreviewSync={(direction, mode) => void handlePreviewSync(direction, mode)}
             onPreviewTemplate={() => void handlePreviewTemplate()}
             syncPreview={syncPreview}

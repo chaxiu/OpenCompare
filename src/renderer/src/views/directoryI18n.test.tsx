@@ -50,7 +50,7 @@ afterEach(cleanup)
 
 const HAN = /\p{Script=Han}/u
 
-/** The ten toolbar buttons and the dictionary key of each English title. */
+/** The eleven toolbar buttons and the dictionary key of each English title. */
 const EN_TOOLBAR = [
   ['Choose left folder', 'directory.toolbar.pickLeftTitle'],
   ['Choose right folder', 'directory.toolbar.pickRightTitle'],
@@ -61,7 +61,8 @@ const EN_TOOLBAR = [
   ['Import left snapshot', 'directory.toolbar.importLeftTitle'],
   ['Export right snapshot', 'directory.toolbar.exportRightTitle'],
   ['Import right snapshot', 'directory.toolbar.importRightTitle'],
-  ['Demo: remote snapshot', 'directory.toolbar.demoRemoteTitle']
+  ['Demo: remote snapshot', 'directory.toolbar.demoRemoteTitle'],
+  ['Export HTML report', 'directory.report.toolbar.exportTitle']
 ] as const
 
 function makeFile(
@@ -270,7 +271,8 @@ function ViewHarness({
   leftIsSnapshot = false,
   rightIsSnapshot = false,
   toggles,
-  selects
+  selects,
+  hideLocalPaths = true
 }: {
   readonly comparison: DirectoryComparison
   readonly initialFilter?: DirectoryFilter
@@ -280,6 +282,7 @@ function ViewHarness({
   readonly rightIsSnapshot?: boolean
   readonly toggles?: string[]
   readonly selects?: string[]
+  readonly hideLocalPaths?: boolean
 }): JSX.Element {
   const [filter, setFilter] = useState<DirectoryFilter>(initialFilter)
   const [collapsed, setCollapsed] = useState<readonly string[]>(initialCollapsed)
@@ -318,6 +321,9 @@ function ViewHarness({
       onExportSnapshot={() => undefined}
       onImportSnapshot={() => undefined}
       onLoadRemoteSnapshotSample={() => undefined}
+      hideLocalPaths={hideLocalPaths}
+      onHideLocalPathsChange={() => undefined}
+      onExportReport={() => undefined}
       onPreviewSync={() => undefined}
       onPreviewTemplate={() => undefined}
       syncPreview={null}
@@ -350,6 +356,10 @@ function button(name: string): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+function checkbox(name: string): HTMLElement {
+  return screen.getByRole('checkbox', { name })
+}
+
 function expectNoHan(values: readonly (string | null | undefined)[]): void {
   for (const value of values) {
     expect(value ?? '', value ?? '').not.toMatch(HAN)
@@ -379,7 +389,7 @@ describe('DirectoryView bilingual copy', () => {
     expect(labels).toEqual(DIRECTORY_FILTERS.map((filter) => zh[FILTER_LABEL_KEYS[filter]]))
   })
 
-  it('localizes all ten toolbar buttons and their titles', () => {
+  it('localizes all eleven toolbar buttons and their titles', () => {
     renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'en')
     for (const [label, key] of EN_TOOLBAR) {
       expect(button(label).getAttribute('title')).toBe(en[key])
@@ -394,7 +404,9 @@ describe('DirectoryView bilingual copy', () => {
       ['directory.toolbar.importLeft', '导入左侧快照'],
       ['directory.toolbar.exportRight', '导出右侧快照'],
       ['directory.toolbar.importRight', '导入右侧快照'],
-      ['directory.toolbar.demoRemote', '演示：远端快照']
+      ['directory.toolbar.demoRemote', '演示：远端快照'],
+      ['directory.report.toolbar.export', '导出 HTML 报告'],
+      ['directory.report.toolbar.hideLocalPaths', '隐藏本机路径']
     ] as const) {
       expect(zh[key]).toBe(text)
     }
@@ -406,6 +418,25 @@ describe('DirectoryView bilingual copy', () => {
     )
     expect(button(zh['directory.toolbar.previewSync']).getAttribute('title')).toBe(
       zh['directory.toolbar.previewSyncTitle']
+    )
+    expect(button(zh['directory.report.toolbar.export']).getAttribute('title')).toBe(
+      zh['directory.report.toolbar.exportTitle']
+    )
+    expect(checkbox(zh['directory.report.toolbar.hideLocalPaths']).closest('label')?.getAttribute('title')).toBe(
+      zh['directory.report.toolbar.hideLocalPathsTitle']
+    )
+  })
+
+  it('defaults the hide-local-paths switch on and carries the English title', () => {
+    renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'en')
+
+    const switchInput = checkbox(en['directory.report.toolbar.hideLocalPaths']) as HTMLInputElement
+    expect(switchInput.checked).toBe(true)
+    expect(switchInput.closest('label')?.getAttribute('title')).toBe(
+      en['directory.report.toolbar.hideLocalPathsTitle']
+    )
+    expect(button(en['directory.report.toolbar.export']).getAttribute('title')).toBe(
+      en['directory.report.toolbar.exportTitle']
     )
   })
 

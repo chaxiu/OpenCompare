@@ -87,5 +87,33 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.reason.ambiguous': 'Multiple candidates with the same name',
   'directory.template.reason.contentMismatch': 'Same name, different content',
   'directory.template.placing': 'Placing…',
-  'directory.template.place': 'Extract and place'
+  'directory.template.place': 'Extract and place',
+  'directory.report.toolbar.export': 'Export HTML report',
+  'directory.report.toolbar.exportTitle':
+    'Export the current directory comparison as a self-contained HTML report that opens offline; cancelling the save writes nothing',
+  'directory.report.toolbar.hideLocalPaths': 'Hide local paths',
+  'directory.report.toolbar.hideLocalPathsTitle':
+    'On by default: the report shows relative paths or folder names only, never absolute local paths',
+  'directory.report.title': 'Directory comparison report',
+  'directory.report.privacyNotice': 'Generated locally — review paths before sharing',
+  'directory.report.generatedAt': 'Generated at',
+  'directory.report.appVersion': 'App version',
+  'directory.report.leftRoot': 'Left root',
+  'directory.report.rightRoot': 'Right root',
+  'directory.report.limits': 'Limits (rows / bytes)',
+  'directory.report.scopeAll': 'Scope: all entries (not affected by the current filter)',
+  'directory.report.countsHeading': 'Difference counts',
+  'directory.report.columns.path': 'Path',
+  'directory.report.columns.leftSize': 'Left size',
+  'directory.report.columns.rightSize': 'Right size',
+  'directory.report.columns.status': 'Status',
+  'directory.report.truncated': 'Showing {shown} of {total} (truncated)',
+  'directory.report.truncatedHint':
+    'Subtrees are incomplete where truncated; see the full list on this machine.',
+  'directory.report.empty': 'No entries to export.',
+  'directory.report.saveTitle': 'Export directory comparison HTML report',
+  'directory.report.filterName': 'HTML report',
+  'directory.report.saved': 'Saved the HTML report to {path}',
+  'directory.report.savedTruncated':
+    'Saved the HTML report to {path} (showing {shown} of {total} rows; truncated)'
 }
