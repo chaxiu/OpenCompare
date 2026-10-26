@@ -2,6 +2,22 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## v0.2.8
+
+本版是面向用户的两项变化：目录对比结果可导出为自包含单文件 HTML 报告，对外品牌与入口更名为 Open Rebuilds。对比算法、目录扫描、快照格式与发布模型均未改动。
+
+### 新增
+
+- **目录对比结果导出为自包含单文件 HTML 报告**：目录视图工具栏提供常驻导出入口，经系统保存框落盘；产物内联 CSS、无 JS、无外链 CSS / 字体 / 图片与 http(s) 资源，直接用 `file://` 打开即可阅读。左右路径默认相对化到公共祖先，并默认开启「隐藏本机路径」开关；报告顶部固定一行「由本机生成，分享前自查路径」。报告保留四态计数与应用版本（与界面同源），`<html lang>` 跟随当前界面语言；行数上限 200,000、字节上限 10 MB，截断时报告内写明「已展示 N / 原始 M（已截断）」。
+
+### 改进
+
+- **对外品牌与入口更名为 Open Rebuilds**：README 两版入口章节与链接同步更名为 Open Rebuilds（https://github.com/munk-sh/open-rebuilds）。安装包品牌、`appId`、`productName`、快照格式与发布通道不变，本次不改安装包名称。
+
+### 升级方式
+
+建议 v0.2.7 及更早的用户升级到 v0.2.8。下载 v0.2.8 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `OpenCompare-Setup-0.2.8.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+
 ## v0.2.7
 
 本版是面向用户的两项变化：桌面端界面支持中英双语，README 精简为 9 节双语门面。对比算法、目录扫描、快照格式与发布模型均未改动。
