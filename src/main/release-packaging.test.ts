@@ -215,6 +215,13 @@ const historicalNotesV022 = existsSync(historicalNotesV022Path)
   ? readFileSync(historicalNotesV022Path, 'utf8')
   : ''
 
+// v0.2.7 is the newest published version; its notes stay byte-identical as
+// history once the converged version owns the release-notes anchor.
+const historicalNotesV027Path = join(repoRoot, 'docs/release-notes/v0.2.7.md')
+const historicalNotesV027 = existsSync(historicalNotesV027Path)
+  ? readFileSync(historicalNotesV027Path, 'utf8')
+  : ''
+
 const firstHeading = (markdown: string): string =>
   markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
 
@@ -593,10 +600,12 @@ describe('release version gate', () => {
     for (const line of [readmeStatusLine(readmeEn), readmeStatusLine(readmeZh)]) {
       expect(line).toContain(latestPublishedTag)
     }
-    // The newest published anchor is the shipped tag; the previous one still
-    // trails the converged version, proving the shipped history moved forward.
+    // The newest published anchor is the shipped tag; it trails the converged
+    // version until the release wrap-up moves README line 5 forward.
     expect(publishedTags).toContain(latestPublishedTag)
-    expect(latestPublishedTag).toBe(currentTag)
+    expect(latestPublishedTag).not.toBe(currentTag)
+    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
+    expect(isTagBefore(previousPublishedTag, latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, currentTag)).toBe(true)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
     expect(releaseProcessDoc).toContain(`default: '${currentTag}'`)
@@ -1169,7 +1178,9 @@ describe('release notes changelog', () => {
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    expect(latestPublished).toBe(current)
+    // The converged version sits above the shipped one; the wrap-up commit
+    // that moves README line 5 forward also makes the two indices equal.
+    expect(latestPublished).toBeGreaterThan(current)
     expect(lastReleased).toBeGreaterThan(latestPublished)
     expect(releasedV025).toBeGreaterThan(lastReleased)
     expect(released).toBeGreaterThan(releasedV025)
@@ -1204,8 +1215,37 @@ describe('release notes changelog', () => {
     expect(section).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
   })
 
-  it('documents only the bilingual UI and the 9-section README in the current entry', () => {
+  it('documents the HTML report export and the Open Rebuilds rename in the current entry', () => {
     const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const section = changelog.slice(start, end)
+    for (const phrase of [
+      '### 新增',
+      '### 改进',
+      '### 升级方式',
+      'HTML',
+      '自包含',
+      '隐藏本机路径',
+      '200,000',
+      '10 MB',
+      'Open Rebuilds',
+      'https://github.com/munk-sh/open-rebuilds',
+      latestPublishedTag
+    ]) {
+      expect(section).toContain(phrase)
+    }
+    expect(section).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(section).not.toMatch(/[0-9a-f]{64}/)
+    // No benchmark numbers are claimed for this release; the documented byte
+    // cap is the only MB figure the entry may carry.
+    expect(section).not.toMatch(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/)
+    expect(section.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
+  })
+
+  it('keeps the bilingual UI and the 9-section README in the v0.2.7 entry as history', () => {
+    const start = changelog.indexOf(`## ${latestPublishedTag}`)
     const end = changelog.indexOf(`## ${previousPublishedTag}`)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1280,7 +1320,8 @@ describe('release notes changelog', () => {
     const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
       (match) => match[1]
     )
-    expect(headings).toEqual([currentTag])
+    // The converged entry and the shipped one; no ghost version in between.
+    expect(headings).toEqual([currentTag, latestPublishedTag])
   })
 
   it('keeps the v0.2.2 changelog entry as history', () => {
@@ -1343,13 +1384,13 @@ describe('release notes changelog', () => {
   })
 
   it('anchors the newest published release notes at the shipped tag', () => {
-    // Right after a release wrap-up the newest published tag equals the
-    // converged version, so both anchors resolve to the same notes file.
+    // A version convergence keeps the published notes at the shipped tag while
+    // the converged notes file is already in place for the coming release.
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
+    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
   })
 
   it('covers the still-public v0.2.2 release notes', () => {
@@ -1405,8 +1446,42 @@ describe('release notes changelog', () => {
     expect(historicalNotesV026).not.toMatch(/[0-9a-f]{64}/)
   })
 
-  it('documents the current release notes with the bilingual UI and 9-section README', () => {
+  it('documents the current release notes with the HTML report and the Open Rebuilds rename', () => {
     expect(firstHeading(releaseNotes)).toContain(currentTag)
+    for (const phrase of [
+      'HTML',
+      '自包含',
+      '内联 CSS',
+      '无 JS',
+      '无外链',
+      'http(s)',
+      'file://',
+      '隐藏本机路径',
+      '200,000',
+      '10 MB',
+      '四态计数',
+      '<html lang>',
+      'Open Rebuilds',
+      'https://github.com/munk-sh/open-rebuilds',
+      '升级方式',
+      latestPublishedTag
+    ]) {
+      expect(releaseNotes).toContain(phrase)
+    }
+    expect(releaseNotes).not.toContain('待验证')
+    expect(releaseNotes).not.toContain('预计通过')
+    expect(releaseNotes).not.toContain('应该通过')
+    expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(releaseNotes).not.toMatch(/[0-9a-f]{64}/)
+    // No benchmark numbers or timelines are claimed for this release; the
+    // documented byte cap is the only MB figure the notes may carry.
+    expect(releaseNotes).not.toMatch(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/)
+    expect(releaseNotes.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
+  })
+
+  it('keeps the v0.2.7 bilingual UI release notes as shipped history', () => {
+    expect(existsSync(historicalNotesV027Path)).toBe(true)
+    expect(firstHeading(historicalNotesV027)).toContain(latestPublishedTag)
     for (const phrase of [
       '双语',
       '系统语言',
@@ -1419,15 +1494,13 @@ describe('release notes changelog', () => {
       '升级方式',
       latestPublishedTag
     ]) {
-      expect(releaseNotes).toContain(phrase)
+      expect(historicalNotesV027).toContain(phrase)
     }
-    expect(releaseNotes).not.toContain('待验证')
-    expect(releaseNotes).not.toContain('预计通过')
-    expect(releaseNotes).not.toContain('应该通过')
-    expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
-    expect(releaseNotes).not.toMatch(/[0-9a-f]{64}/)
-    // No benchmark numbers or timelines are claimed for this release.
-    expect(releaseNotes).not.toMatch(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)\b/)
+    expect(historicalNotesV027).not.toContain('待验证')
+    expect(historicalNotesV027).not.toContain('预计通过')
+    expect(historicalNotesV027).not.toContain('应该通过')
+    expect(historicalNotesV027).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(historicalNotesV027).not.toMatch(/[0-9a-f]{64}/)
   })
 
   it('keeps the v0.2.5 release notes as released history', () => {
@@ -2154,7 +2227,9 @@ describe('v0.2.7 verified release evidence record', () => {
       `latest published release: ${latestPublishedTag} (this tag: ${latestPublishedTag})`,
       `\`releases/latest\` = \`${latestPublishedTag}\``,
       'notarization successful',
-      `CFBundleShortVersionString=${pkg.version}`,
+      // The evidence record is shipped history: its bundle version must stay
+      // the released one instead of drifting with package.json.
+      'CFBundleShortVersionString=0.2.7',
       'com.opencompare.app',
       'valid on disk',
       'satisfies its Designated Requirement',
