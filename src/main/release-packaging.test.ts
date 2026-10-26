@@ -1733,7 +1733,7 @@ describe('bilingual README parity', () => {
       'Project structure',
       'Known issues',
       'Evidence and docs',
-      'Kill Paid Apps 001',
+      'Open Rebuilds 001',
       'License'
     ])
     expect(h2Headings(readmeZh)).toEqual([
@@ -1744,7 +1744,7 @@ describe('bilingual README parity', () => {
       '项目结构',
       '已知问题',
       '证据与文档',
-      'Kill Paid Apps 001 平替',
+      'Open Rebuilds 001 平替',
       '许可'
     ])
   })
@@ -1883,8 +1883,8 @@ describe('bilingual README parity', () => {
 
   it('indexes the docs and performance evidence in one line each', () => {
     for (const [doc, heading, next] of [
-      [readmeEn, '## Evidence and docs', '## Kill Paid Apps 001'],
-      [readmeZh, '## 证据与文档', '## Kill Paid Apps 001 平替']
+      [readmeEn, '## Evidence and docs', '## Open Rebuilds 001'],
+      [readmeZh, '## 证据与文档', '## Open Rebuilds 001 平替']
     ] as Array<[string, string, string]>) {
       const evidence = readmeSection(doc, heading, next)
       for (const path of [
@@ -1939,9 +1939,15 @@ describe('bilingual README parity', () => {
     }
   })
 
-  it('links the Kill Paid Apps 001 alternative in both READMEs', () => {
+  it('links the Open Rebuilds 001 alternative in both READMEs', () => {
+    expect(readmeEn).toContain(
+      'OpenCompare is a free MIT alternative to Beyond Compare 5 Pro, tracked as alternative 001 in [Open Rebuilds](https://github.com/munk-sh/open-rebuilds).'
+    )
+    expect(readmeZh).toContain(
+      'OpenCompare 是 Beyond Compare 5 Pro 的免费 MIT 平替，收录为 [Open Rebuilds](https://github.com/munk-sh/open-rebuilds) 系列第 001 号项目。'
+    )
     for (const doc of [readmeEn, readmeZh]) {
-      expect(doc).toContain('https://github.com/munk-sh/kill-paid-apps')
+      expect(doc).toContain('https://github.com/munk-sh/open-rebuilds')
       expect(doc).toContain('001')
       expect(doc).toContain('Beyond Compare 5 Pro')
     }
@@ -1950,7 +1956,7 @@ describe('bilingual README parity', () => {
   it('keeps only the published tag and shared project facts in both READMEs', () => {
     for (const doc of [readmeEn, readmeZh]) {
       expect(doc).toContain(latestPublishedTag)
-      expect(doc).toContain('https://github.com/munk-sh/kill-paid-apps')
+      expect(doc).toContain('https://github.com/munk-sh/open-rebuilds')
       expect(doc).toContain('Beyond Compare 5 Pro')
       const otherLines = readmeLines(doc)
         .filter((_, index) => index !== 4)

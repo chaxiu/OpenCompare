@@ -69,9 +69,9 @@ None known right now. Report anything reproducible on the [issue tracker](https:
 
 Performance & memory evidence: [read-only diagnosis](docs/perf/upsert-memory-diagnosis-2026-10-23.md) and [large-directory memory](docs/perf/large-directory-memory.md).
 
-## Kill Paid Apps 001
+## Open Rebuilds 001
 
-OpenCompare is a free MIT alternative to Beyond Compare 5 Pro, tracked as alternative 001 in [Kill Paid Apps](https://github.com/munk-sh/kill-paid-apps).
+OpenCompare is a free MIT alternative to Beyond Compare 5 Pro, tracked as alternative 001 in [Open Rebuilds](https://github.com/munk-sh/open-rebuilds).
 
 ## License
 
