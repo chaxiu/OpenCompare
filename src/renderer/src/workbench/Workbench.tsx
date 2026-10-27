@@ -52,6 +52,7 @@ import {
   FilePairError,
   openFilePairSession,
   releaseSessionTree,
+  replaceFilePairSide,
   resolveDirectoryReturn
 } from './directoryCompare'
 import {
@@ -470,6 +471,23 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   }, [])
 
   /**
+   * Writes a file opened inside a file view (code / CSV / structured) back to
+   * the session's own facts, so the tab and the panel read the same paths. The
+   * update is functional: an in-flight read or comparison settling later never
+   * rewrites the list from an older snapshot.
+   */
+  const handleSessionFileOpen = useCallback(
+    (id: string, side: SidePosition, file: { readonly path: string; readonly text: string }) => {
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === id ? replaceFilePairSide(session, side, file) : session
+        )
+      )
+    },
+    []
+  )
+
+  /**
    * Switches the visible tab. Every open directory tab keeps its own comparison
    * tree, so this only moves `activeId`: no scan, no digest and no rebuild.
    */
@@ -491,7 +509,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       // Prefer the next tab; the previous one is the fallback at the right edge.
       setActiveId((remaining[index] ?? remaining[index - 1])?.id ?? null)
     }
-    setSessions(remaining)
+    setSessions((current) => closeSessions(current, id))
     setDirectoryStates((current) => withoutKey(current, id))
     setDirectoryScroll((current) => withoutKey(current, id))
     setCodeMerge((current) => withoutKey(current, id))
@@ -656,8 +674,10 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   function upsertSession(session: WorkbenchSession): void {
     // A re-compare replaces the old comparison object; the new one (and any
     // other tab on the same roots) keeps the cache warm. The list semantics
-    // live in `sessionStore`, shared verbatim with the memory harness.
-    setSessions(commitSessionTree(cache.current, sessions, session))
+    // live in `sessionStore`, shared verbatim with the memory harness. The
+    // update is functional, so a slow read that settles after another commit
+    // never rewrites the list from the snapshot its flow started with.
+    setSessions((current) => commitSessionTree(cache.current, current, session))
     setActiveId(session.id)
   }
 
@@ -667,7 +687,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
    * keeps the identity it was opened with instead of leaving a stale one behind.
    */
   function replaceSession(id: string, session: WorkbenchSession): void {
-    setSessions(commitSessionTree(cache.current, sessions, session, { replaceId: id }))
+    setSessions((current) =>
+      commitSessionTree(cache.current, current, session, { replaceId: id })
+    )
     setActiveId(id)
   }
 
@@ -1294,6 +1316,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             platform={platform}
             onDirtyChange={(dirty) => handleSessionDirty(session.id, dirty)}
             onBufferChange={(buffer) => handleSessionBuffer(session.id, buffer)}
+            onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
           />
         ) : (
           <CodeView
@@ -1318,6 +1341,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               tables={tables}
               platform={platform}
               onAlignStateChange={handleCsvAlign}
+              onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
             />
           )
         }
@@ -1341,6 +1365,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             pair={session.adhoc.pair}
             format={session.adhoc.format}
             platform={platform}
+            onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
           />
         ) : (
           <StructuredView key={session.id} fixture={STRUCTURED_SCENE} platform={platform} />

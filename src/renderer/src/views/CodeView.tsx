@@ -82,7 +82,8 @@ function CodeDiffView({
   buffer,
   platform,
   onDirtyChange,
-  onBufferChange
+  onBufferChange,
+  onOpenSide
 }: {
   readonly pair: FilePair
   /** Working copies kept on the session, used when the view remounts. */
@@ -92,6 +93,8 @@ function CodeDiffView({
   readonly onDirtyChange?: (dirty: boolean) => void
   /** Reports the editable state up so a tab switch cannot drop unsaved work. */
   readonly onBufferChange?: (buffer: CodeFileBuffer) => void
+  /** Writes a newly opened file back to the session's own pair facts. */
+  readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
   const initial = {
@@ -211,6 +214,9 @@ function CodeDiffView({
         [textFileFilter(t('common.fileKind.code'))]
       )
       if (picked === null) return
+      // The session keeps the same tab: the new path/body lands on its pair
+      // facts, so the tab title and the panel never disagree about the file.
+      onOpenSide?.(side, picked)
       if (side === 'left') {
         setLeftPath(picked.path)
         setLeftSource(picked.text)
@@ -689,7 +695,8 @@ export function CodeView({
   platform,
   onMergeStateChange,
   onDirtyChange,
-  onBufferChange
+  onBufferChange,
+  onOpenSide
 }: {
   readonly fixture?: CodeSceneFixture
   /** Three-column merge is the default for a session declared with three panes. */
@@ -704,6 +711,8 @@ export function CodeView({
   readonly onDirtyChange?: (dirty: boolean) => void
   /** Reports the diff pair's editable state up to the session model. */
   readonly onBufferChange?: (buffer: CodeFileBuffer) => void
+  /** Writes a newly opened file back to the session's own pair facts. */
+  readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
   const [mode, setMode] = useState<CodeMode>(defaultMode)
@@ -776,6 +785,7 @@ export function CodeView({
           platform={platform}
           onDirtyChange={onDirtyChange}
           onBufferChange={onBufferChange}
+          onOpenSide={onOpenSide}
         />
       ) : mergeSides && model ? (
         <CodeMergeView

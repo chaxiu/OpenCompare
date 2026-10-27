@@ -12,6 +12,7 @@ import type { DiffStatus } from '@shared/fixtures'
 import type { Translate } from '@renderer/i18n/context'
 import type { InterpolationParams } from '@renderer/i18n/interpolate'
 import type { MessageKey } from '@renderer/i18n/messages'
+import { baseName } from './fileKinds'
 import type { FileKind } from './fileKinds'
 import type { WorkbenchSession } from './session'
 
@@ -165,6 +166,22 @@ function pathParts(path: string): SessionText {
   ]
 }
 
+/** File name of one side path, with the internal missing-side token stripped. */
+function displayName(path: string): string {
+  const missing = missingSideOf(path)
+  if (missing === null) return baseName(path)
+  return baseName(path.slice(0, path.length - MISSING_SUFFIX[missing].length))
+}
+
+/** Title of a file pair: the shared file name, or both names when they differ. */
+function filePairTitle(session: WorkbenchSession): SessionText {
+  const adhoc = session.adhoc
+  if (!adhoc) return [{ text: session.title }]
+  const left = displayName(adhoc.pair.left.path)
+  const right = displayName(adhoc.pair.right.path)
+  return [{ text: left === right ? left : `${left} ↔ ${right}` }]
+}
+
 function filePairSubtitle(session: WorkbenchSession): SessionText {
   const adhoc = session.adhoc
   if (!adhoc) return [{ text: session.subtitle }]
@@ -175,6 +192,22 @@ function filePairSubtitle(session: WorkbenchSession): SessionText {
     { text: ' · ' },
     { key: fileKindKey(session) }
   ]
+}
+
+/**
+ * Title and subtitle of a directory pair, derived from the roots of the
+ * comparison actually on screen. A session never freezes these at creation, so
+ * swapping one side or re-comparing the same tab follows the new roots.
+ */
+function directoryText(session: WorkbenchSession): { title: SessionText; subtitle: SessionText } {
+  const comparison = session.directory
+  if (comparison === undefined) {
+    return { title: [{ text: session.title }], subtitle: [{ text: session.subtitle }] }
+  }
+  return {
+    title: [{ text: `${comparison.leftName} ↔ ${comparison.rightName}` }],
+    subtitle: [{ text: `${comparison.leftRoot} ↔ ${comparison.rightRoot}` }]
+  }
 }
 
 /** Describes one session for the shell, without resolving any dictionary value. */
@@ -189,15 +222,16 @@ export function describeSession(session: WorkbenchSession): SessionDisplay {
   }
 
   if (session.directory !== undefined) {
+    const text = directoryText(session)
     return {
-      title: [{ text: session.title }],
-      subtitle: [{ text: session.subtitle }],
+      title: text.title,
+      subtitle: text.subtitle,
       stats: statEntries(session, RUNTIME_DIRECTORY_STATS)
     }
   }
 
   return {
-    title: [{ text: session.title }],
+    title: filePairTitle(session),
     subtitle: filePairSubtitle(session),
     stats: statEntries(session, FILE_PAIR_STATS)
   }

@@ -78,15 +78,21 @@ describe('runtime session display', () => {
     const session: WorkbenchSession = {
       id: 'directory:/left ↔ /right',
       scene: 'directory',
-      title: 'left ↔ right',
-      subtitle: '/left ↔ /right',
+      // The frozen copy is deliberately stale: display derives from the roots.
+      title: 'stale ↔ stale',
+      subtitle: 'stale ↔ stale',
       columns: 2,
       stats: [
         { label: '文件（源）', value: 3 },
         { label: '文件（目标）', value: 4 },
         { label: '差异', value: 2 }
       ],
-      directory: {} as NonNullable<WorkbenchSession['directory']>
+      directory: {
+        leftRoot: '/left',
+        rightRoot: '/right',
+        leftName: 'left',
+        rightName: 'right'
+      } as NonNullable<WorkbenchSession['directory']>
     }
     const display = describeSession(session)
 
@@ -99,6 +105,55 @@ describe('runtime session display', () => {
     ])
     const differences = display.stats[2]
     expect(differences === undefined ? '' : en(differences.key)).toBe('Differences')
+  })
+
+  it('derives a directory tab from the current roots, not the creation-time copy', () => {
+    const session: WorkbenchSession = {
+      id: 'directory:/old-left ↔ /old-right',
+      scene: 'directory',
+      title: 'old-left ↔ old-right',
+      subtitle: '/old-left ↔ /old-right',
+      columns: 2,
+      stats: [],
+      directory: {
+        leftRoot: '/new-left',
+        rightRoot: '/old-right',
+        leftName: 'new-left',
+        rightName: 'old-right'
+      } as NonNullable<WorkbenchSession['directory']>
+    }
+
+    expect(renderSessionText(describeSession(session).title, en)).toBe('new-left ↔ old-right')
+    expect(renderSessionText(describeSession(session).subtitle, en)).toBe(
+      '/new-left ↔ /old-right'
+    )
+  })
+
+  it('derives a same-name file pair title from the two paths, not the frozen title', () => {
+    const session = createFilePairSession(
+      'file:/a/report.md ↔ /b/report.md',
+      'stale title',
+      { kind: 'code', label: 'code' },
+      { path: '/a/report.md', text: 'left\n' },
+      { path: '/b/report.md', text: 'right\n' }
+    )
+
+    expect(renderSessionText(describeSession(session).title, en)).toBe('report.md')
+    expect(renderSessionText(describeSession(session).subtitle, en)).toBe(
+      '/a/report.md ↔ /b/report.md · Code / text'
+    )
+  })
+
+  it('derives a mixed-name file pair title from both file names', () => {
+    const session = createFilePairSession(
+      'file:/a/left.md ↔ /b/right.md',
+      'stale title',
+      { kind: 'code', label: 'code' },
+      { path: '/a/left.md', text: 'left\n' },
+      { path: '/b/right.md', text: 'right\n' }
+    )
+
+    expect(renderSessionText(describeSession(session).title, en)).toBe('left.md ↔ right.md')
   })
 
   it('localizes the file-family name in a file pair subtitle', () => {
@@ -142,6 +197,8 @@ describe('runtime session display', () => {
 
     expect(session.adhoc?.pair.left.path).toBe('src/core/engine.ts::opencompare-missing-left')
     const display = describeSession(session)
+    // The internal missing-side token never leaks into the tab title.
+    expect(renderSessionText(display.title, zh)).toBe('engine.ts')
     expect(renderSessionText(display.subtitle, zh)).toBe(
       'src/core/engine.ts（左不存在） ↔ /right/src/core/engine.ts · 代码 / 文本'
     )

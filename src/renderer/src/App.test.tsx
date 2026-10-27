@@ -2,7 +2,7 @@
 import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
+import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
@@ -316,6 +316,12 @@ describe('workbench shell', () => {
     loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
+    const tabCount = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
+    const directoryTab = within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', {
+      name: /baseline ↔ candidate/
+    })
+    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+
     fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))
     const dialog = await screen.findByRole('dialog', { name: /左 → 右 · 增量同步预览/ })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认执行' }))
@@ -324,6 +330,14 @@ describe('workbench shell', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     // The refresh compares the materialised writable copy, not the read-only mount.
     expect(screen.queryByText('/samples/directory/candidate')).toBeNull()
+
+    // The tab keeps its identity and position, and its label follows the new roots.
+    const tabs = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+    expect(tabs).toHaveLength(tabCount)
+    expect(directoryTab.getAttribute('aria-selected')).toBe('true')
+    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(directoryTab.textContent).toContain('/memory/')
+    expect(directoryTab.textContent).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
   })
 
   it('previews the template placement and extracts it into a writable root', async () => {
@@ -2571,5 +2585,310 @@ describe('directory progress and cancel UI', () => {
     fireEvent.click(within(templateDialog).getByRole('button', { name: '确认提取归位' }))
     await screen.findByText(/模板归位完成/)
     expect(progressBar()).toBeNull()
+  })
+})
+
+describe('session tab labels follow the session facts', () => {
+  const LEFT_YAML = `${DIRECTORY_SAMPLE_PATHS.left}/config/deploy.yaml`
+  const RIGHT_YAML = `${DIRECTORY_SAMPLE_PATHS.right}/config/deploy.yaml`
+  const JSON_LEFT = STRUCTURED_SCENE.json.left.path
+  const JSON_RIGHT = STRUCTURED_SCENE.json.right.path
+
+  function sessionTabs(): HTMLElement {
+    return screen.getByRole('tablist', { name: '会话' })
+  }
+
+  function tabTexts(): string[] {
+    return within(sessionTabs())
+      .getAllByRole('tab')
+      .map((item) => item.textContent ?? '')
+  }
+
+  function tab(name: RegExp): HTMLElement {
+    return within(sessionTabs()).getByRole('tab', { name })
+  }
+
+  /** One status-bar cell as rendered: label plus value. */
+  function statusValue(label: string): string {
+    return screen.getByText(label).parentElement?.textContent ?? ''
+  }
+
+  /** Text of the panel whose header shows `title` (a path). */
+  function panelText(title: string): string {
+    return screen.getAllByTitle(title)[0].closest('section')?.textContent ?? ''
+  }
+
+  /** Clicks「打开文件」and waits for the pair to be read. */
+  async function clickOpenFile(): Promise<void> {
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: '打开文件' }) as HTMLButtonElement).disabled).toBe(
+        false
+      )
+    )
+  }
+
+  it('labels each file pair from its own two paths, same name or not', async () => {
+    render(
+      <Workbench
+        platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT, RIGHT_REPORT] })}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
+    const engine = await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    // Both sides share a file name: the title is that name, the subtitle both paths.
+    expect(engine.textContent).toContain(LEFT_ENGINE)
+    expect(engine.textContent).toContain(RIGHT_ENGINE)
+
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })
+
+    // Each tab keeps its own pair; the first one was not re-labelled by the second.
+    expect(tab(/engine\.ts/).textContent).toContain(LEFT_ENGINE)
+    expect(tab(/engine\.ts/).textContent).toContain(RIGHT_ENGINE)
+    expect(tab(/engine\.ts/).textContent).not.toContain(LEFT_REPORT)
+    expect(tab(/report\.csv/).textContent).toContain(LEFT_REPORT)
+    expect(tab(/report\.csv/).textContent).toContain(RIGHT_REPORT)
+    expect(tabTexts()).toHaveLength(2)
+  })
+
+  it('moves a swapped directory side onto the visible tab without the replaced path', async () => {
+    const base = createWebPlatformPort()
+    const answers = [
+      DIRECTORY_SAMPLE_PATHS.left,
+      DIRECTORY_SAMPLE_PATHS.right,
+      DIRECTORY_SAMPLE_PATHS.incoming
+    ]
+    const port: PlatformPort = {
+      ...base,
+      kind: 'electron',
+      selectDirectory: async () => answers.shift() ?? null
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '选择右目录' }))
+
+    const swapped = await screen.findByRole(
+      'tab',
+      { name: /baseline ↔ incoming/ },
+      { timeout: 4000 }
+    )
+    expect(swapped.getAttribute('aria-selected')).toBe('true')
+    expect(swapped.textContent).toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(swapped.textContent).toContain(DIRECTORY_SAMPLE_PATHS.incoming)
+    expect(swapped.textContent).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
+
+    // The tab that was not swapped keeps its own pair.
+    expect(tab(/baseline ↔ candidate/).textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+    expect(tabTexts()).toHaveLength(2)
+  })
+
+  it('writes a code-view file open back to the tab and the working copy', async () => {
+    const base = createWebPlatformPort()
+    const OTHER = '/memory/notes/other.ts'
+    await base.writeTextFile(OTHER, 'export const onlyHere = 1\n')
+    const answers = [LEFT_ENGINE, RIGHT_ENGINE, LEFT_YAML, RIGHT_YAML, OTHER]
+    const port: PlatformPort = { ...base, selectFile: async () => answers.shift() ?? null }
+
+    render(<Workbench platform={port} />)
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /deploy\.yaml/ }, { timeout: 4000 })
+
+    fireEvent.click(tab(/engine\.ts/))
+    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+
+    const opened = await screen.findByRole(
+      'tab',
+      { name: /other\.ts ↔ engine\.ts/ },
+      { timeout: 4000 }
+    )
+    expect(opened.textContent).toContain(OTHER)
+    expect(opened.textContent).toContain(RIGHT_ENGINE)
+    expect(opened.textContent).not.toContain(LEFT_ENGINE)
+    // The panel shows the same file the tab claims, and the stats follow it.
+    expect(panelText(OTHER)).toContain('onlyHere = 1')
+    expect(statusValue('行数（左）')).toBe('行数（左）1')
+
+    // Leaving and coming back remounts from the session facts, not the old file.
+    fireEvent.click(tab(/deploy\.yaml/))
+    fireEvent.click(tab(/other\.ts ↔ engine\.ts/))
+    expect(panelText(OTHER)).toContain('onlyHere = 1')
+    expect(statusValue('行数（左）')).toBe('行数（左）1')
+  })
+
+  it('recomputes a CSV session from the file opened in its view', async () => {
+    const base = createWebPlatformPort()
+    const OTHER = '/memory/data/other.csv'
+    await base.writeTextFile(OTHER, 'id,name\n1,a\n2,b\n')
+    const answers = [LEFT_ENGINE, RIGHT_ENGINE, LEFT_REPORT, RIGHT_REPORT, OTHER]
+    const port: PlatformPort = { ...base, selectFile: async () => answers.shift() ?? null }
+
+    render(<Workbench platform={port} />)
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+
+    const opened = await screen.findByRole(
+      'tab',
+      { name: /other\.csv ↔ report\.csv/ },
+      { timeout: 4000 }
+    )
+    expect(opened.textContent).toContain(OTHER)
+    expect(opened.textContent).toContain('· CSV')
+    expect(statusValue('行数（左）')).toBe('行数（左）3')
+
+    fireEvent.click(tab(/engine\.ts/))
+    fireEvent.click(tab(/other\.csv ↔ report\.csv/))
+    expect(screen.getAllByText(/other\.csv ↔ report\.csv/).length).toBeGreaterThan(0)
+    expect(statusValue('行数（左）')).toBe('行数（左）3')
+  })
+
+  it('moves a structured session onto the format of the file opened in its view', async () => {
+    const base = createWebPlatformPort()
+    const OTHER = '/memory/structured/other.yaml'
+    await base.writeTextFile(OTHER, 'service:\n  name: other\n')
+    const answers = [LEFT_ENGINE, RIGHT_ENGINE, JSON_LEFT, JSON_RIGHT, OTHER]
+    const port: PlatformPort = { ...base, selectFile: async () => answers.shift() ?? null }
+
+    render(<Workbench platform={port} />)
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /config\.left\.json/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+
+    const opened = await screen.findByRole(
+      'tab',
+      { name: /other\.yaml ↔ config\.right\.json/ },
+      { timeout: 4000 }
+    )
+    expect(opened.textContent).toContain(OTHER)
+    expect(opened.textContent).toContain('· YAML')
+
+    fireEvent.click(tab(/engine\.ts/))
+    fireEvent.click(tab(/other\.yaml ↔ config\.right\.json/))
+    expect(screen.getAllByTitle(OTHER).length).toBeGreaterThan(0)
+    expect(opened.textContent).toContain('· YAML')
+  })
+
+  it('keeps a file, a directory and a drilldown tab apart, and restores the directory label', async () => {
+    const base = createWebPlatformPort()
+    const FILE_LEFT = '/memory/notes/a.md'
+    const FILE_RIGHT = '/memory/notes/b.md'
+    await base.writeTextFile(FILE_LEFT, '# a\n')
+    await base.writeTextFile(FILE_RIGHT, '# b\n')
+    const files = [FILE_LEFT, FILE_RIGHT]
+    const directories = [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    const port: PlatformPort = {
+      ...base,
+      selectFile: async () => files.shift() ?? null,
+      selectDirectory: async () => directories.shift() ?? null
+    }
+
+    render(<Workbench platform={port} />)
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /a\.md ↔ b\.md/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    const directoryTab = await screen.findByRole(
+      'tab',
+      { name: /baseline ↔ candidate/ },
+      { timeout: 4000 }
+    )
+    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
+    const drilldown = await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    expect(drilldown.textContent).toContain(LEFT_ENGINE)
+    expect(drilldown.textContent).toContain(RIGHT_ENGINE)
+    expect(tabTexts()).toHaveLength(3)
+
+    // Switching tabs never borrows another session's paths.
+    fireEvent.click(tab(/a\.md ↔ b\.md/))
+    expect(tab(/a\.md ↔ b\.md/).getAttribute('aria-selected')).toBe('true')
+    expect(tab(/a\.md ↔ b\.md/).textContent).not.toContain('/samples/directory')
+    expect(tab(/baseline ↔ candidate/).textContent).toContain(
+      `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
+    )
+
+    // Going back lands on the directory tab with its own roots again.
+    fireEvent.click(tab(/engine\.ts/))
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
+    expect(tab(/baseline ↔ candidate/).textContent).toContain(
+      `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
+    )
+    expect(tab(/baseline ↔ candidate/).textContent).not.toContain('engine.ts')
+
+    // Closing a neighbour leaves the remaining labels untouched.
+    fireEvent.click(screen.getByRole('button', { name: '关闭 a.md ↔ b.md' }))
+    expect(tabTexts()).toHaveLength(2)
+    expect(tab(/engine\.ts/).textContent).toContain(LEFT_ENGINE)
+    expect(tab(/baseline ↔ candidate/).textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+  })
+
+  it('does not let a slow read clobber a session committed meanwhile', async () => {
+    const base = createWebPlatformPort()
+    const SLOW_LEFT = '/memory/slow/one.txt'
+    const SLOW_RIGHT = '/memory/slow/two.txt'
+    const FAST_LEFT = '/memory/fast/alpha.txt'
+    const FAST_RIGHT = '/memory/fast/beta.txt'
+    for (const [path, body] of [
+      [SLOW_LEFT, 'slow left\n'],
+      [SLOW_RIGHT, 'slow right\n'],
+      [FAST_LEFT, 'fast left\n'],
+      [FAST_RIGHT, 'fast right\n']
+    ] as const) {
+      await base.writeTextFile(path, body)
+    }
+
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const listeners = new Set<(payload: CompareRequestPayload) => void>()
+    const port: PlatformPort = {
+      ...base,
+      readTextFile: async (path) => {
+        if (path.startsWith('/memory/slow/')) await gate
+        return base.readTextFile(path)
+      },
+      onCompareRequest: (listener) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      compareRequestsReady: async () => undefined
+    }
+
+    render(<Workbench platform={port} />)
+    await waitFor(() => expect(listeners.size).toBe(1))
+
+    const emit = (request: CompareRequestPayload): void => {
+      act(() => {
+        for (const listener of [...listeners]) listener(request)
+      })
+    }
+
+    emit({ ok: true, request: { kind: 'file', left: SLOW_LEFT, right: SLOW_RIGHT } })
+    emit({ ok: true, request: { kind: 'file', left: FAST_LEFT, right: FAST_RIGHT } })
+
+    await waitFor(() => expect(tabTexts()).toHaveLength(1))
+    release()
+
+    // Both sessions survive the overlapping reads, each with its own paths.
+    await waitFor(() => expect(tabTexts()).toHaveLength(2))
+    expect(tab(/one\.txt ↔ two\.txt/).textContent).toContain(SLOW_LEFT)
+    expect(tab(/alpha\.txt ↔ beta\.txt/).textContent).toContain(FAST_LEFT)
   })
 })
