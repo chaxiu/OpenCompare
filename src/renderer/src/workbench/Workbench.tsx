@@ -22,6 +22,8 @@ import type { PlatformPort } from '@shared/platform/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
 import { visibleDirectoryCounts } from '@core/directory/rows'
+import { directoryReportSource } from '@core/directory/report'
+import type { DirectoryReportProgress } from '@core/directory/report'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
@@ -61,7 +63,8 @@ import {
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
 import {
-  buildDirectoryReportForComparison,
+  buildDirectoryReportForComparisonAsync,
+  createReportProgressThrottle,
   directoryReportFileName,
   directoryReportFilter,
   directoryReportSaveCopy
@@ -347,6 +350,12 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [codeMerge, setCodeMerge] = useState<Record<string, CodeMergeState>>({})
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
+  /**
+   * The report export is its own task: it never touches `directoryBusy`, so the
+   * rest of the directory surface stays usable while a large report renders.
+   */
+  const [reportExporting, setReportExporting] = useState(false)
+  const [reportProgress, setReportProgress] = useState<DirectoryReportProgress | null>(null)
   const [directoryProgress, setDirectoryProgress] = useState<DirectoryProgressState | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
@@ -368,6 +377,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const opSequence = useRef(0)
   /** The directory comparison that can still be cancelled, if one is running. */
   const activeDirectoryOperation = useRef<ActiveDirectoryOperation | null>(null)
+  /** The running report export; the ref also guards against double starts. */
+  const reportExportController = useRef<AbortController | null>(null)
   /** Latest launch-request handler; the subscription itself is installed once. */
   const launchRequest = useRef<(payload: CompareRequestPayload) => void>(() => undefined)
 
@@ -993,23 +1004,43 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
   /**
    * Builds the self-contained HTML report of the visible directory comparison
-   * and saves it through the existing `PlatformPort.saveFile` dialog. Counts,
-   * roots and rows come from the same comparison the view renders; a cancelled
-   * save simply ends without a notice or a write.
+   * and saves it through the existing `PlatformPort.saveFile` dialog.
+   *
+   * The export is an independent, cancellable task: counts and rows come from
+   * the same comparison the view renders, progress is throttled to one paint per
+   * window, and the save dialog only opens after the whole document exists. A
+   * cancelled generation writes nothing; a cancelled save ends silently.
    */
   async function handleExportReport(): Promise<void> {
     const comparison = active?.scene === 'directory' ? active.directory : undefined
-    if (!comparison) return
+    if (!comparison || reportExportController.current !== null) return
 
-    setDirectoryBusy(true)
+    const controller = new AbortController()
+    reportExportController.current = controller
+    const totalRows = directoryReportSource(comparison).totalRows
+    setReportExporting(true)
     setNotice(null)
+    setReportProgress({ processedRows: 0, totalRows })
+    const throttle = createReportProgressThrottle((progress) => setReportProgress(progress))
+    let latest: DirectoryReportProgress = { processedRows: 0, totalRows }
     try {
-      const built = buildDirectoryReportForComparison(
+      const built = await buildDirectoryReportForComparisonAsync(
         comparison,
         t,
         language,
-        hideLocalPaths
+        hideLocalPaths,
+        {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            latest = progress
+            throttle.push(progress)
+          }
+        }
       )
+      throttle.finish(latest)
+      // Generation is over; the native save dialog that follows cannot be
+      // cancelled here, so the progress row leaves the toolbar first.
+      setReportProgress(null)
       const path = await platform.saveFile({
         title: t('directory.report.saveTitle'),
         defaultPath: directoryReportFileName(comparison.leftName, comparison.rightName),
@@ -1020,10 +1051,23 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       const saved = directoryReportSaveCopy(built, path)
       report(copyNotice(saved.key, saved.params), 'info')
     } catch (cause) {
-      report(detailNotice(errorText(cause)))
+      throttle.clear()
+      if (isOperationCancelled(cause)) {
+        report(copyNotice('directory.report.cancelled'), 'info')
+      } else {
+        report(detailNotice(errorText(cause)))
+      }
     } finally {
-      setDirectoryBusy(false)
+      throttle.clear()
+      reportExportController.current = null
+      setReportProgress(null)
+      setReportExporting(false)
     }
+  }
+
+  /** Stops the report generation before it reaches the save dialog. */
+  function cancelReportExport(): void {
+    reportExportController.current?.abort()
   }
 
   /** Mounts a picked `.ocsnap.json` on one side and recomputes the comparison. */
@@ -1227,6 +1271,9 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             hideLocalPaths={hideLocalPaths}
             onHideLocalPathsChange={setHideLocalPaths}
             onExportReport={() => void handleExportReport()}
+            reportExporting={reportExporting}
+            reportProgress={reportProgress}
+            onCancelReportExport={cancelReportExport}
             onPreviewSync={(direction, mode) => void handlePreviewSync(direction, mode)}
             onPreviewTemplate={() => void handlePreviewTemplate()}
             syncPreview={syncPreview}
