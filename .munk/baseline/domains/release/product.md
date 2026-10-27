@@ -639,6 +639,29 @@
 - **ac-gates-green**：默认 9 道 `code_gates`（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate）全部退出码 0；`pnpm test` 覆盖 `release-packaging.test.ts` 与 `release-evidence.test.ts`。
 - **ac-change-surface**：`git diff --name-only` 恰为 6 个文件：`README.md`、`README.zh-CN.md`、`docs/release-evidence/v0.2.8.md`、`docs/release-evidence/v0.2.7.md`、`docs/release-signing.md`、`src/main/release-packaging.test.ts`；不含任何其他 `src/**`、`package.json`、`CHANGELOG.md`、`.github/workflows/**`、`electron-builder.yml`、`.munk/code-gates.json`。
 
+### v0.2.9 版本收敛与发布面同批对齐（收敛轮，单提交）
+
+> **收敛姿态**：`currentTag = v0.2.9`、`latestPublishedTag = v0.2.8`（已发布事实不动），二者**必须不相等**、`latestPublishedTag` 严格落后 `currentTag`；README 两版第 5 行与 `docs/release-evidence/**` 本项零改动，发布后收尾是下一次独立提交。全部改动落在同一个 commit。
+
+- **ac-version-029**：`package.json#version` 恰为 `0.2.9`；`package.json` 的 diff 只有这一行变化（`dependencies` / `devDependencies` / `scripts` 零改动）。
+- **ac-no-new-literals**：`src/main/release-packaging.test.ts` 中 `0.2.9` 字面量出现次数为 0；所有断言仍经 `currentTag` / `latestPublishedTag` 派生（`grep -c '0\.2\.9'` 为 0）。
+- **ac-latest-trails-current**：`release version gate` 中 `latestPublishedTag` 仍为显式 `v0.2.8`、`latestPublishedTag !== currentTag`、`isTagBefore(latestPublishedTag, currentTag) === true`；原 `expect(latestPublishedTag).toBe(currentTag)` 已删除；`previousPublishedTag` 的两条 `isTagBefore` 保留。
+- **ac-notes-anchors-distinct**：`anchors the newest published release notes at the shipped tag` 中 `lastReleasedNotesPath !== releaseNotesPath`，两份文件均存在且首个标题分别含 `v0.2.8` / `currentTag`；原 `toBe` 断言翻成 `not.toBe` + latest 落后 current。
+- **ac-changelog-v028-reanchored**：`documents the HTML report export ...` 的切片起点为 `## ${latestPublishedTag}`、终点为 `## v0.2.7`，切片内 `MB` 数字集合恰为 `['10 MB']`，且仍含 `latestPublishedTag` 字样与 `https://github.com/munk-sh/open-rebuilds`。
+- **ac-changelog-v029-top-entry**：`CHANGELOG.md` 中新出现 `## ${currentTag}` 段，位置先于 `## ${latestPublishedTag}`、`## v0.2.7`；`[## ${currentTag}, ## ${latestPublishedTag})` 切片的二级标题集合恰为 `[currentTag]`（非空、无幽灵版本、无重复条目）。
+- **ac-changelog-order-pinned**：CHANGELOG 排序断言钉住 `currentTag > latestPublishedTag > v0.2.7 > v0.2.6 > v0.2.5 > v0.2.4 > v0.2.2 > v0.2.0 > v0.1.2` 的索引递增。
+- **ac-changelog-v029-content**：`[## ${currentTag}, ## ${latestPublishedTag})` 切片同时出现四类变化关键词：HTML 报告异步导出（`导出` + `取消`）、会话 tab 文案派生（`标签页` + `标题`）、保存原子化（`原子` + `磁盘空间不足`/`只读`）、报告上限口径（`200,000` + `10 MB`），以及 `### 升级方式`。
+- **ac-changelog-no-ghost**：全仓仍无 `## v0.2.3` 标题，且任何文档不含 `docs/release-notes/v0.2.3.md` 或 `releases/tag/v0.2.3` 链接。
+- **ac-release-notes-029-content**：`docs/release-notes/v0.2.9.md` 存在、首个标题含 `currentTag`，且同时含 `HTML`、`自包含`、`内联 CSS`、无 JS、无外链、`http(s)`、`file://`、`隐藏本机路径`、`200,000`、`10 MB`、四态计数、`<html lang>`、`Open Rebuilds`、`https://github.com/munk-sh/open-rebuilds`、`升级方式`、`v0.2.8`。
+- **ac-release-notes-029-hygiene**：该文件不含 `待验证` / `预计通过` / `应该通过` / `TODO` / `TBD` / `FIXME` / 64 位 hex；`MB` 数字集合恰为 `['10 MB']`，且不出现 `MiB` / `GiB` / `GB`。
+- **ac-caps-restated-not-new**：两份新文案中提及 `200,000` / `10 MB` 的段落必须同时含 `沿用` 与 `v0.2.8`，且不含 `本版新增`（报告上限是 v0.2.8 起的既有口径，只能重述）。
+- **ac-dispatch-defaults**：`release.yml` 的 dispatch 块、`docs/release-process.md`、`docs/release-signing.md` 三处均含 `default`/`默认` 的 `v0.2.9`（测试统一用 `default: '${currentTag}'` 与 `` 默认 \`${currentTag}\` `` 断言）；受扫描的配置与文档中 `default: 'v0.2.8'` 出现次数为 0（`.munk/**` 的 Host 历史基线不在扫描范围）。
+- **ac-signing-posture-kept**：`docs/release-signing.md` 仍含 `当前状态：v0.2.8 已发布`、`正式版发布姿态（v0.2.8）`、`docs/release-notes/v0.2.8.md`、`docs/release-evidence/v0.2.8.md`；新增一句说明 v0.2.9 收敛已合入 `main`、发布说明在 `docs/release-notes/v0.2.9.md`，且全篇不含 `待发布`。
+- **ac-readme-untouched**：`README.md` / `README.zh-CN.md` 第 5 行仍为 `v0.2.8`，`git diff --name-only` 不含任何 README；两版 README 全文零改动。
+- **ac-scope-closed**：`git diff --name-only` ⊆ {`package.json`, `CHANGELOG.md`, `docs/release-notes/v0.2.9.md`, `docs/release-process.md`, `docs/release-signing.md`, `.github/workflows/release.yml`, `src/main/release-packaging.test.ts`}；`docs/release-evidence/**` 与 `src/` 其它文件零改动。
+- **ac-six-gates-green**：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` 六项 gate 依次全绿。
+- **ac-extra-gates-not-red**：`test-compare-request` / `cancel-gate` / `memory-gate` 三项附加 gate 不得变红。
+
 ## 非目标
 
 - 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
@@ -658,6 +681,7 @@
 - 不追求 bit-identical 二进制可复现；只保证输入锁定与产物名/版本确定。
 - 品牌图标项不改 `appId`（保持 `com.opencompare.app`）、`productName`、发布模型与 `release.yml` 的打包 / 发布 / 公证流程；不升版本号、不改 CHANGELOG / Release Notes、不动 `v0.1.2` tag 与资产；不做应用内「关于」页面或设置页、不做主题 / 视觉改版；不新增运行时或开发依赖、不引入在线图标生成服务、不使用 Electron 默认图标或任何第三方版权图标；不在本项执行签名、公证、打 tag、push、publish 或创建 Release。
 - v0.2.0 收敛项只做「发版元信息收敛 + 只读一致性断言」：**不打 tag、不 push、不 publish、不创建或公开 Release**，不修改任何远端 Release 及其资产（含 v0.1.2 的 11 个资产）——这些动作由人与 Host 完成并触发 `human_required`。
+- v0.2.9 收敛项只做**版本号 + 发布前置文件 + 随之必须翻面的发布事实断言**（同一提交）：不建 tag、不 push、不 publish、不创建 / 编辑 GitHub Release、不动已公开 tag 与资产；不做实机验收；不改 `src/` 业务代码（只允许 `src/main/release-packaging.test.ts`）、不改依赖 / 脚本 / `package.json` 其它字段；不改两版 README（第 5 行也是 `v0.2.8`）与 `docs/release-evidence/**`；不新增第二份版本真源；不把 latest 提前指向 `v0.2.9`；不重写测试其它段落，只做「姿态翻面 + 切片重锚 + 派生断言补充」。
 - 不删除 / 不移动 / 不重打 `v0.1.2`（以及 `v0.1.0` / `v0.1.1`）tag，不替换已发布资产，不改写任何历史提交。
 - 不改发布模型与签名链路：`tags: v*` 触发、`gates → 矩阵 --publish never → finalize`、单点预建 draft、六项 Secret 与 fail-closed 逻辑、`electron-builder.yml` 的签名/公证/图标/protocol 配置全部不动；不新增 Secret。
 - 发版流水线加固项本身不在 CI 之外改签名链路；本机 `codesign` / `stapler` / `spctl` 实证与 `docs/release-evidence/` 归「本机发版产物取证」项，且不把「CI 绿了」当签名/公证证据。
@@ -767,10 +791,11 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_346e888fff636a78`（v0.2.8 发布面收尾：README 两版第 5 行 → v0.2.8、`docs/release-evidence/v0.2.8.md` 归档、v0.2.7 证据追加复验与机制更正、判定口径改写、签名文档锚点前移、`release-packaging.test.ts` 锚点成组翻面；`kind: release-finish`）
+- WI：`wi_ws_e412c1de377c9e45`（v0.2.9 版本收敛：`package.json#version` → `0.2.9`、`CHANGELOG.md` 新增 `## v0.2.9`、新增 `docs/release-notes/v0.2.9.md`、dispatch 默认 tag 三处对齐、`release-packaging.test.ts` 姿态翻面与切片重锚；`kind: release-convergence`）
 - 日期：2026-10-27
-- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_a77d71606092033e/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。九门退出码全 0（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate），`pnpm test` 62 files / 959 passed + 1 skipped / 960，`src/main/release-packaging.test.ts` 183 用例全绿。
-- 改动面：`git diff --numstat` 恰为 5 个已跟踪文件 + 1 个新增，与 `ac-change-surface` 一致——`README.md` +1/−1、`README.zh-CN.md` +1/−1、`docs/release-evidence/v0.2.7.md` +22/−2、`docs/release-signing.md` +7/−6、`src/main/release-packaging.test.ts` +223/−49、新增 `docs/release-evidence/v0.2.8.md`；`package.json`、`CHANGELOG.md`、`docs/release-notes/**`、`docs/release-process.md`、`.github/workflows/**`、`electron-builder.yml`、`.munk/code-gates.json`、`src/main/release-evidence.test.ts` 零 diff。
-- 覆盖摘要：锚点成组翻面——`latestPublishedTag='v0.2.8'` / `previousPublishedTag='v0.2.6'` / `publishedTags` 显式含 `'v0.2.7'`，版本门由 `not.toBe` + `isTagBefore(latest, current)` 翻回 `toBe(currentTag)`，CHANGELOG 索引由 `greaterThan` 翻回 `toBe`，`lastReleasedNotesPath` / `releaseNotesPath` 由「不相等」翻回 `.toBe`，当前段切片终点与幽灵版本终点改字面量 `## v0.2.7`（标题集合 `['v0.2.8']`）。v0.2.7 证据块整体降级为显式历史块（保留 11 项 sha256 / 五 job / Release id `422765578` / `published_at` / `blocked` ≥4 / `ZenMind` / `2.06` / `116 ms`），L1「不宣称通过」切片改按 `## 7.`→`## 8.`；新增 v0.2.8 断言集只覆盖已给事实（不要求 Release id / `published_at` / 公证原文 / 11 项 sha256）。
-- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 逐条落档为 `qa/v028-release-finish-evidence-caliber.md`。后续注意：① v0.2.8 证据刻意**不写** Release id / `published_at` / 公证原文 / 其余 10 件资产摘要（这些字段在发布期证据 `trun_77eb52ceff8c28c5` 里但本环境不可读），下一版若拿到完整发布期证据，补字段时须同步放宽 v0.2.8 证据块的**负向**断言，否则会红；② 「`status: verified` 恰 1 处」「§7 起不出现『通过』『已通过』」是本仓证据语义的硬口径，新证据文件按 v0.2.7 节序（§1–§10）复用即可，但判定口径段必须逐字同文写两份；③ 本域已是连续第七版复用「收敛轮 → 收尾轮」两段式，收尾轮固定改 6 个路径，收敛轮固定 7 个路径；两轮的 `latestPublishedTag` 断言方向相反，混轮即红。
-- 历史（上一轮）：`wi_ws_62e19b4b19b79485`（v0.2.8 版本收敛：`package.json#version` → `0.2.8` + 发布前置文件翻面 + 派生断言重定标）。
+- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_d22d1533781453d4/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。九门退出码全 0（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate），`pnpm test` 62 files / 1011 passed + 1 skipped / 1012，`release-packaging.test.ts` 185 用例、`release-evidence.test.ts` 34 用例全绿。
+- 改动面：`git diff --numstat` 恰为 6 个已跟踪文件 + 1 个新增——`package.json` +1/−1、`CHANGELOG.md` +21、`docs/release-process.md` +1/−1、`docs/release-signing.md` +2/−1、`.github/workflows/release.yml` +1/−1、`src/main/release-packaging.test.ts` +68/−7、新增 `docs/release-notes/v0.2.9.md`；两版 README、`docs/release-evidence/**`、`src/**` 其它文件、`electron-builder.yml` 零 diff（符合 `ac-scope-closed` / `ac-readme-untouched`）。
+- 覆盖摘要：版本门由 `toBe(currentTag)` 翻为 `not.toBe` + `isTagBefore(latest, current)`（`latestPublishedTag` 仍是显式 `v0.2.8`）；`lastReleasedNotesPath` / `releaseNotesPath` 由 `.toBe` 翻为 `.not.toBe`；v0.2.8 CHANGELOG 切片起点改 `## ${latestPublishedTag}`；幽灵版本切片终点改 `## ${latestPublishedTag}`（标题集合仍 `[currentTag]`）；排序链插入 `latestPublished`；新增两条派生断言（四类变化关键词切片 + 报告上限「沿用 v0.2.8、非本版新增」）。测试内 `0.2.9` 字面量 0 处。
+- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 逐条落档为 `qa/v029-version-convergence-release-notes.md`。后续注意：① 本轮是「收敛轮」，`latestPublishedTag` 必须落后 `currentTag`；下一轮（v0.2.9 收尾）方向相反（翻回 `toBe` / `.toBe`），且固定改 6 个路径（两版 README 第 5 行、`docs/release-evidence/v0.2.9.md`、`docs/release-signing.md` 锚点、`release-packaging.test.ts`），两轮混做即红；② v0.2.9 段把报告上限写成「沿用 v0.2.8」，收尾轮若改写 v0.2.9 证据/说明须保留 `沿用` + `v0.2.8` 且不得出现 `本版新增`（`ac-caps-restated-not-new` 会判红）；③ 签名文档第五节已加一句「v0.2.9 收敛已合入 `main`」，收尾轮翻锚点时这句要保留语义、只改「当前状态 / 姿态 / 承接」锚点。
+- 历史（上一轮）：`wi_ws_346e888fff636a78`（v0.2.8 发布面收尾：README 两版第 5 行 → v0.2.8、证据归档、签名文档锚点前移、测试锚点成组翻面）。
+

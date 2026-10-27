@@ -604,7 +604,8 @@ describe('release version gate', () => {
     // The newest published anchor is the shipped tag; it equals the converged
     // version right after the release wrap-up and may trail it in between.
     expect(publishedTags).toContain(latestPublishedTag)
-    expect(latestPublishedTag).toBe(currentTag)
+    expect(latestPublishedTag).not.toBe(currentTag)
+    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, currentTag)).toBe(true)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
@@ -1150,6 +1151,9 @@ describe('release signing credentials checklist', () => {
     expect(signingDoc).not.toContain(pendingWord)
     // The re-issue entry keeps the converged version as its dispatch default.
     expect(signingDoc).toContain(`默认 \`${currentTag}\``)
+    // The convergence is merged on main while the published anchor still trails it.
+    expect(signingDoc).toContain('已合入 `main`')
+    expect(signingDoc).toContain(`docs/release-notes/${currentTag}.md`)
     expect(signingDoc).not.toContain(`当前状态：${previousPublishedTag}`)
     expect(signingDoc).not.toContain('当前状态：v0.2.4')
     expect(signingDoc).not.toContain('当前状态：v0.2.2')
@@ -1166,8 +1170,9 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/latest\*\.yml/)
   })
 
-  it('orders the current, v0.2.7, v0.2.6, v0.2.5, v0.2.4, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
+  it('orders the current, latest published, v0.2.7, v0.2.6, v0.2.5, v0.2.4, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
     const current = changelog.indexOf(`## ${currentTag}`)
+    const latestPublished = changelog.indexOf(`## ${latestPublishedTag}`)
     // The published anchors are explicit literals, not derived from the current
     // tag, so a version convergence keeps the shipped history in place.
     const shippedV027 = changelog.indexOf('## v0.2.7')
@@ -1178,9 +1183,10 @@ describe('release notes changelog', () => {
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    // The converged entry is the released one right after the wrap-up commit;
-    // the shipped entries below stay in their own order.
-    expect(shippedV027).toBeGreaterThan(current)
+    // The converged entry sits above the last released one; between releases the
+    // newest published anchor trails the converged version.
+    expect(latestPublished).toBeGreaterThan(current)
+    expect(shippedV027).toBeGreaterThan(latestPublished)
     expect(lastReleased).toBeGreaterThan(shippedV027)
     expect(releasedV025).toBeGreaterThan(lastReleased)
     expect(released).toBeGreaterThan(releasedV025)
@@ -1215,8 +1221,8 @@ describe('release notes changelog', () => {
     expect(section).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
   })
 
-  it('documents the HTML report export and the Open Rebuilds rename in the current entry', () => {
-    const start = changelog.indexOf(`## ${currentTag}`)
+  it('documents the HTML report export and the Open Rebuilds rename in the last released entry', () => {
+    const start = changelog.indexOf(`## ${latestPublishedTag}`)
     const end = changelog.indexOf('## v0.2.7')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1242,6 +1248,49 @@ describe('release notes changelog', () => {
     // cap is the only MB figure the entry may carry.
     expect(section).not.toMatch(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/)
     expect(section.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
+  })
+
+  it('covers the current changelog entry with the four shipped change areas', () => {
+    const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const section = changelog.slice(start, end)
+    for (const phrase of [
+      '### 升级方式',
+      '导出',
+      '取消',
+      '标签页',
+      '标题',
+      '原子',
+      '磁盘空间不足',
+      '只读',
+      '200,000',
+      '10 MB'
+    ]) {
+      expect(section).toContain(phrase)
+    }
+    expect(section).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(section).not.toMatch(/[0-9a-f]{64}/)
+    expect(section.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
+  })
+
+  it('restates the report caps as the existing released posture instead of a new change', () => {
+    const currentEntry = changelog.slice(
+      changelog.indexOf(`## ${currentTag}`),
+      changelog.indexOf(`## ${latestPublishedTag}`)
+    )
+    for (const doc of [currentEntry, releaseNotes]) {
+      const capParagraphs = doc
+        .split(/\n\s*\n/)
+        .filter((paragraph) => paragraph.includes('200,000') || paragraph.includes('10 MB'))
+      expect(capParagraphs.length).toBeGreaterThan(0)
+      for (const paragraph of capParagraphs) {
+        expect(paragraph).toContain('沿用')
+        expect(paragraph).toContain(latestPublishedTag)
+        expect(paragraph).not.toContain('本版新增')
+      }
+    }
   })
 
   it('keeps the bilingual UI and the 9-section README in the v0.2.7 entry as history', () => {
@@ -1314,7 +1363,7 @@ describe('release notes changelog', () => {
   it('drops the never-published entry and adds no fake version heading', () => {
     expect(changelog).not.toMatch(new RegExp(`^## ${ghostTag}`, 'm'))
     const start = changelog.indexOf(`## ${currentTag}`)
-    const end = changelog.indexOf('## v0.2.7')
+    const end = changelog.indexOf(`## ${latestPublishedTag}`)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
@@ -1390,7 +1439,8 @@ describe('release notes changelog', () => {
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
+    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
+    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
   })
 
   it('covers the still-public v0.2.2 release notes', () => {
