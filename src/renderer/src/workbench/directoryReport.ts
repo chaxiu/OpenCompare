@@ -9,8 +9,17 @@
  * flow cannot drift apart.
  */
 import type { DirectoryComparison, FileDiffStatus } from '@core/directory/compare'
-import { buildDirectoryReport, directoryReportSource } from '@core/directory/report'
-import type { DirectoryReport, DirectoryReportStrings } from '@core/directory/report'
+import {
+  buildDirectoryReport,
+  buildDirectoryReportAsync,
+  directoryReportSource
+} from '@core/directory/report'
+import type {
+  DirectoryReport,
+  DirectoryReportAsyncOptions,
+  DirectoryReportProgress,
+  DirectoryReportStrings
+} from '@core/directory/report'
 import type { FileDialogFilter, Language } from '@shared/platform/types'
 import { APP_VERSION } from '@shared/appVersion'
 import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
@@ -88,6 +97,90 @@ export function buildDirectoryReportForComparison(
     appVersion: APP_VERSION,
     hideLocalPaths
   })
+}
+
+/**
+ * The same document as {@link buildDirectoryReportForComparison}, rendered in
+ * chunks so the workbench can paint progress and cancel it. The input is built
+ * exactly like the synchronous path; only the driver differs.
+ */
+export async function buildDirectoryReportForComparisonAsync(
+  comparison: DirectoryComparison,
+  t: Translate,
+  language: Language,
+  hideLocalPaths: boolean,
+  options: DirectoryReportAsyncOptions = {},
+  generatedAt: string = new Date().toISOString()
+): Promise<DirectoryReport> {
+  return buildDirectoryReportAsync(
+    {
+      source: directoryReportSource(comparison),
+      strings: directoryReportStrings(t),
+      htmlLang: htmlLang(language),
+      generatedAt,
+      appVersion: APP_VERSION,
+      hideLocalPaths
+    },
+    options
+  )
+}
+
+/** Window in which repeated progress callbacks collapse into one paint. */
+export const REPORT_PROGRESS_THROTTLE_MS = 50
+
+/** Leading + trailing progress throttle; the UI contract is in the tests. */
+export interface ReportProgressThrottle {
+  /** Reports one scalar progress sample, at most once per window. */
+  push(progress: DirectoryReportProgress): void
+  /** Forces the final sample through, cancelling any pending window. */
+  finish(progress: DirectoryReportProgress): void
+  /** Drops a pending sample without emitting it. */
+  clear(): void
+}
+
+/**
+ * Collapses a burst of chunk progress into one commit per window: the first
+ * sample paints at once, the rest keep only the latest value and flush it when
+ * the window ends. A finished generation forces its final value through, so a
+ * stall between the last chunk and `resolve` cannot hide the true end state.
+ */
+export function createReportProgressThrottle(
+  emit: (progress: DirectoryReportProgress) => void,
+  intervalMs: number = REPORT_PROGRESS_THROTTLE_MS
+): ReportProgressThrottle {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pending: DirectoryReportProgress | null = null
+
+  return {
+    push(progress) {
+      if (timer === null) {
+        emit(progress)
+        timer = setTimeout(() => {
+          timer = null
+          const trailing = pending
+          pending = null
+          if (trailing !== null) emit(trailing)
+        }, intervalMs)
+        return
+      }
+      pending = progress
+    },
+    finish(progress) {
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+      pending = null
+      emit(progress)
+    },
+    clear() {
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+      pending = null
+    }
+  }
 }
 
 /** Dictionary copy of the save confirmation, truncation summary included. */

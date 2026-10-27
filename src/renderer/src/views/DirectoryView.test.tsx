@@ -23,6 +23,7 @@ import {
   visibleDirectoryCounts
 } from '@core/directory/rows'
 import type { DirectoryRowModel } from '@core/directory/rows'
+import type { DirectoryReportProgress } from '@core/directory/report'
 import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { zh } from '@renderer/i18n/messages'
 import { DirectoryView } from './DirectoryView'
@@ -146,7 +147,10 @@ function Harness({
   busy = false,
   initialHideLocalPaths = true,
   onHideLocalPathsChange,
-  onExportReport
+  onExportReport,
+  reportExporting = false,
+  reportProgress = null,
+  onCancelReportExport
 }: {
   readonly comparison: DirectoryComparison
   readonly initial: SavedState
@@ -155,6 +159,9 @@ function Harness({
   readonly initialHideLocalPaths?: boolean
   readonly onHideLocalPathsChange?: (hideLocalPaths: boolean) => void
   readonly onExportReport?: () => void
+  readonly reportExporting?: boolean
+  readonly reportProgress?: DirectoryReportProgress | null
+  readonly onCancelReportExport?: () => void
 }): JSX.Element {
   const [filter, setFilter] = useState<DirectoryFilter>(initial.filter)
   const [collapsed, setCollapsed] = useState<readonly string[]>(initial.collapsed)
@@ -213,6 +220,9 @@ function Harness({
       hideLocalPaths={hideLocalPaths}
       onHideLocalPathsChange={changeHideLocalPaths}
       onExportReport={onExportReport ?? (() => {})}
+      reportExporting={reportExporting}
+      reportProgress={reportProgress}
+      onCancelReportExport={onCancelReportExport}
       onPreviewSync={() => {}}
       onPreviewTemplate={() => {}}
       syncPreview={null}
@@ -725,5 +735,65 @@ describe('DirectoryView report toolbar', () => {
       name: zh['directory.report.toolbar.export']
     }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('shows the throttled progress row and an always-clickable cancel entry', () => {
+    const onCancelReportExport = vi.fn()
+    render(
+      <Harness
+        comparison={syntheticComparison(12)}
+        initial={INITIAL_STATE}
+        reportExporting
+        reportProgress={{ processedRows: 4_000, totalRows: 26_000 }}
+        onCancelReportExport={onCancelReportExport}
+      />
+    )
+
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain('4000')
+    expect(status.textContent).toContain('26000')
+
+    const cancel = within(status).getByRole('button', {
+      name: zh['directory.report.cancel']
+    }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(false)
+    expect(cancel.title).toBe(zh['directory.report.cancelTitle'])
+    fireEvent.click(cancel)
+    expect(onCancelReportExport).toHaveBeenCalledTimes(1)
+
+    const exportButton = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    expect(exportButton.disabled).toBe(true)
+    expect(exportButton.title).toBe(zh['directory.report.toolbar.exportTitle'])
+  })
+
+  it('disables only the export button while the export is in flight', () => {
+    render(
+      <Harness
+        comparison={syntheticComparison(12)}
+        initial={INITIAL_STATE}
+        reportExporting
+        reportProgress={{ processedRows: 0, totalRows: 26_000 }}
+      />
+    )
+
+    for (const key of [
+      'directory.toolbar.loadSample',
+      'directory.toolbar.previewSync',
+      'directory.toolbar.template',
+      'directory.toolbar.exportLeft',
+      'directory.toolbar.importLeft',
+      'directory.toolbar.demoRemote'
+    ] as const) {
+      expect((screen.getByRole('button', { name: zh[key] }) as HTMLButtonElement).disabled, key).toBe(
+        false
+      )
+    }
+
+    expect(screen.getByRole('checkbox', {
+      name: zh['directory.report.toolbar.hideLocalPaths']
+    }).hasAttribute('disabled')).toBe(false)
   })
 })

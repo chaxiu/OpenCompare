@@ -90,6 +90,10 @@ export const directory = {
   'directory.report.toolbar.hideLocalPaths': '隐藏本机路径',
   'directory.report.toolbar.hideLocalPathsTitle':
     '默认开启：报告只显示相对路径或目录名，不包含本机绝对路径',
+  'directory.report.progress': '正在导出报告 {done} / {total} 行',
+  'directory.report.cancel': '取消',
+  'directory.report.cancelTitle': '停止生成报告：不会打开保存面板，也不会写入任何文件',
+  'directory.report.cancelled': '已取消导出',
   'directory.report.title': '目录对比报告',
   'directory.report.privacyNotice': '由本机生成，分享前自查路径',
   'directory.report.generatedAt': '生成时间',

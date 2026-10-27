@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFile, stat } from 'node:fs/promises'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type {
   DirectoryEntry,
   DirectoryListing,
@@ -13,7 +13,11 @@ import { APP_VERSION } from '@shared/appVersion'
 import { FILE_DIFF_STATUSES } from '@core/directory/compare'
 import type { FileDiffStatus } from '@core/directory/compare'
 import { sha256Bytes } from '@core/directory/hash'
+import { directoryReportSource } from '@core/directory/report'
+import type { DirectoryReport } from '@core/directory/report'
+import { OperationCancelledError } from '@core/io'
 import { DIFF_LABEL_KEYS, DIFF_STATUSES } from '@renderer/components/diffSemantics'
+import { interpolate } from '@renderer/i18n/interpolate'
 import { zh, en } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
@@ -23,7 +27,27 @@ import {
   listRealDirectory,
   removeRealDirectoryFixture
 } from '../../test-support/directoryFixture'
+import {
+  buildDirectoryReportForComparison,
+  buildDirectoryReportForComparisonAsync
+} from './directoryReport'
 import { Workbench } from './Workbench'
+
+/**
+ * The workbench wiring is the subject here: the async builder is stubbed per
+ * test where the flow needs a controllable generation. Its real parity with the
+ * synchronous path is covered in `directoryReport.test.ts`, and the default
+ * implementation below keeps the 26k-row integration on the real generator.
+ */
+vi.mock('./directoryReport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./directoryReport')>()
+  return {
+    ...actual,
+    buildDirectoryReportForComparisonAsync: vi.fn(actual.buildDirectoryReportForComparisonAsync)
+  }
+})
+
+const buildAsync = vi.mocked(buildDirectoryReportForComparisonAsync)
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
 const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
@@ -46,7 +70,10 @@ afterAll(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  buildAsync.mockClear()
+})
 
 const VIRTUAL_LEFT = '/Users/alice/work/left'
 const VIRTUAL_RIGHT = '/Users/alice/work/right'
@@ -213,6 +240,70 @@ function reportCounts(document: Document): Record<FileDiffStatus, number> {
   return counts
 }
 
+/** A memory-sandbox pair with one identical file on each side. */
+async function createMemoryPair(prefix: string): Promise<PlatformPort> {
+  const base = createWebPlatformPort()
+  await base.writeTextFile(`/memory/${prefix}-left/a.txt`, 'same\n')
+  await base.writeTextFile(`/memory/${prefix}-right/a.txt`, 'same\n')
+  return base
+}
+
+/** A synthetic generation result for the wiring assertions. */
+function stubReport(overrides: Partial<DirectoryReport> = {}): DirectoryReport {
+  return {
+    html: '<!DOCTYPE html><html lang="zh-CN"><body><p>stub</p></body></html>',
+    bytes: 64,
+    totalRows: 2,
+    shownRows: 2,
+    truncatedRows: 0,
+    truncated: false,
+    ...overrides
+  }
+}
+
+/** Resolves the next generation with the real document of the small pair. */
+function queueRealReport(): void {
+  buildAsync.mockImplementationOnce(async (comparison, t, language, hide, _options, generatedAt) =>
+    buildDirectoryReportForComparison(comparison, t, language, hide, generatedAt)
+  )
+}
+
+/** Keeps the next generation pending until the workbench aborts it. */
+function queuePendingReport(): void {
+  buildAsync.mockImplementationOnce(
+    (comparison, _t, _language, _hide, options) =>
+      new Promise<DirectoryReport>((_resolve, reject) => {
+        options?.onProgress?.({
+          processedRows: 0,
+          totalRows: directoryReportSource(comparison).totalRows
+        })
+        options?.signal?.addEventListener(
+          'abort',
+          () => reject(new OperationCancelledError()),
+          { once: true }
+        )
+      })
+  )
+}
+
+/** Toolbar actions gated by the directory comparison's own busy flag. */
+const DIRECTORY_BUSY_KEYS = [
+  'directory.toolbar.loadSample',
+  'directory.toolbar.previewSync',
+  'directory.toolbar.template',
+  'directory.toolbar.exportLeft',
+  'directory.toolbar.importLeft',
+  'directory.toolbar.demoRemote'
+] as const
+
+function expectDirectoryBusyButtonsEnabled(): void {
+  for (const key of DIRECTORY_BUSY_KEYS) {
+    expect((screen.getByRole('button', { name: zh[key] }) as HTMLButtonElement).disabled, key).toBe(
+      false
+    )
+  }
+}
+
 describe('directory HTML report export', () => {
   let fixture: RealDirectoryFixture
 
@@ -239,6 +330,22 @@ describe('directory HTML report export', () => {
     expect(viewCounts.modified).toBeGreaterThanOrEqual(10_000)
 
     fireEvent.click(screen.getByRole('button', { name: zh['directory.report.toolbar.export'] }))
+
+    // The progress row is on screen before the save dialog is even considered.
+    const expectedTotal = directoryReportSource(fixture.comparison).totalRows
+    const status = screen.getByRole('status')
+    expect(status.textContent).toMatch(new RegExp(`\\d+ / ${expectedTotal} 行`))
+    const cancel = within(status).getByRole('button', { name: zh['directory.report.cancel'] })
+    expect((cancel as HTMLButtonElement).disabled).toBe(false)
+    expect(
+      (
+        screen.getByRole('button', {
+          name: zh['directory.report.toolbar.export']
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+    expect(saved).toHaveLength(0)
+
     await waitFor(() => expect(saved).toHaveLength(1))
 
     const options = saved[0]
@@ -326,7 +433,7 @@ describe('directory HTML report export', () => {
     let calls = 0
     const saveFile = async (): Promise<string | null> => {
       calls += 1
-      return null
+      return calls === 1 ? null : SAVED_PATH
     }
 
     renderWithI18n(<Workbench platform={{ ...base, saveFile }} />, 'zh')
@@ -347,6 +454,9 @@ describe('directory HTML report export', () => {
 
     fireEvent.click(button)
     await waitFor(() => expect(calls).toBe(2))
+    // The very next attempt is a normal, successful save.
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(SAVED_PATH))
+    expectDirectoryBusyButtonsEnabled()
   })
 
   it('keeps the hide-local-paths switch across a directory remount', async () => {
@@ -384,5 +494,232 @@ describe('directory HTML report export', () => {
       (screen.getByRole('checkbox', { name: zh['directory.report.toolbar.hideLocalPaths'] }) as HTMLInputElement)
         .checked
     ).toBe(false)
+  })
+
+  it('keeps the surface usable while generating and cancels without saving', async () => {
+    const base = await createMemoryPair('stop')
+    const saved: SaveFileOptions[] = []
+    const port: PlatformPort = {
+      ...base,
+      saveFile: async (options) => {
+        saved.push(options)
+        return SAVED_PATH
+      }
+    }
+    queuePendingReport()
+
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+    await openDirectoryPair(ZH_DIALOG, '/memory/stop-left', '/memory/stop-right')
+    await waitForDirectoryView(zh['directory.report.toolbar.export'])
+
+    const before = (await base.listDirectory('/memory')).map((entry) => entry.name).sort()
+    const exportButton = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    fireEvent.click(exportButton)
+
+    // The row exists synchronously, before any save dialog could be opened.
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain(
+      interpolate(zh['directory.report.progress'], { done: 0, total: 2 })
+    )
+    const cancelButton = within(status).getByRole('button', {
+      name: zh['directory.report.cancel']
+    }) as HTMLButtonElement
+    expect(cancelButton.disabled).toBe(false)
+    expect(exportButton.disabled).toBe(true)
+
+    // A second press cannot start a second generation.
+    fireEvent.click(exportButton)
+    expect(buildAsync).toHaveBeenCalledTimes(1)
+
+    // The rest of the directory surface is not busy-gated by the export.
+    const hideLocalPaths = screen.getByRole('checkbox', {
+      name: zh['directory.report.toolbar.hideLocalPaths']
+    }) as HTMLInputElement
+    expect(hideLocalPaths.disabled).toBe(false)
+    fireEvent.click(hideLocalPaths)
+    expect(hideLocalPaths.checked).toBe(false)
+
+    fireEvent.click(screen.getByRole('tab', { name: zh['directory.filter.differences'] }))
+    await waitFor(() => expect(legendNumbers(zh).same).toBe(0))
+    expectDirectoryBusyButtonsEnabled()
+
+    fireEvent.click(cancelButton)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(saved).toHaveLength(0)
+    expect(buildAsync).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(exportButton.disabled).toBe(false))
+    expectDirectoryBusyButtonsEnabled()
+    const notice = screen.getByRole('alert')
+    expect(notice.textContent).toBe(zh['directory.report.cancelled'])
+    expect(notice.className).toContain('text-diff-added')
+    await expect(base.exists('/memory/stop-left-vs-stop-right.html')).resolves.toBe(false)
+    const after = (await base.listDirectory('/memory')).map((entry) => entry.name).sort()
+    expect(after).toEqual(before)
+  })
+
+  it('exports again right after a cancelled generation', async () => {
+    const base = await createMemoryPair('retry')
+    const saved: SaveFileOptions[] = []
+    const port: PlatformPort = {
+      ...base,
+      saveFile: async (options) => {
+        saved.push(options)
+        return SAVED_PATH
+      }
+    }
+    queuePendingReport()
+
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+    await openDirectoryPair(ZH_DIALOG, '/memory/retry-left', '/memory/retry-right')
+    await waitForDirectoryView(zh['directory.report.toolbar.export'])
+
+    const exportButton = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    fireEvent.click(exportButton)
+    fireEvent.click(
+      within(screen.getByRole('status')).getByRole('button', {
+        name: zh['directory.report.cancel']
+      })
+    )
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(saved).toHaveLength(0)
+
+    fireEvent.click(exportButton)
+    await waitFor(() => expect(saved).toHaveLength(1))
+    const content = saved[0].content
+    expect(content.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(content.trimEnd().endsWith('</html>')).toBe(true)
+    expect(reportCounts(reportDocument(content))).toEqual(legendNumbers(zh))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(SAVED_PATH))
+  })
+
+  it('keeps one task in flight and confirms the saved path', async () => {
+    const base = await createMemoryPair('saved')
+    const saved: SaveFileOptions[] = []
+    let release: ((path: string | null) => void) | null = null
+    const port: PlatformPort = {
+      ...base,
+      saveFile: (options) =>
+        new Promise<string | null>((resolve) => {
+          saved.push(options)
+          release = resolve
+        })
+    }
+    const releaseSave = (): void => release?.(SAVED_PATH)
+    queueRealReport()
+
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+    await openDirectoryPair(ZH_DIALOG, '/memory/saved-left', '/memory/saved-right')
+    await waitForDirectoryView(zh['directory.report.toolbar.export'])
+
+    const exportButton = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    fireEvent.click(exportButton)
+    await waitFor(() => expect(saved).toHaveLength(1))
+
+    // While the save dialog is open the task is still single and the export
+    // button keeps its accessible name, only gaining `disabled`.
+    expect(exportButton.disabled).toBe(true)
+    expect(
+      screen.getByRole('button', { name: zh['directory.report.toolbar.export'] })
+    ).toBe(exportButton)
+    fireEvent.click(exportButton)
+    expect(buildAsync).toHaveBeenCalledTimes(1)
+    expect(saved).toHaveLength(1)
+
+    releaseSave()
+    await waitFor(() => expect(exportButton.disabled).toBe(false))
+    const notice = await screen.findByRole('alert')
+    expect(notice.className).toContain('text-diff-added')
+    expect(notice.textContent).toContain(SAVED_PATH)
+    expect(saved[0].defaultPath).toBe('saved-left-vs-saved-right.html')
+    expect(saved[0].filters?.[0]?.extensions).toContain('html')
+    expect(saved[0].content.startsWith('<!DOCTYPE html>')).toBe(true)
+    expectDirectoryBusyButtonsEnabled()
+  })
+
+  it('names both row counts when the saved report was truncated', async () => {
+    const base = await createMemoryPair('truncated')
+    const saved: SaveFileOptions[] = []
+    const answers = ['/memory/truncated.html', '/memory/complete.html']
+    const port: PlatformPort = {
+      ...base,
+      saveFile: async (options) => {
+        saved.push(options)
+        return answers[saved.length - 1] ?? null
+      }
+    }
+    buildAsync.mockImplementationOnce(async () =>
+      stubReport({ totalRows: 358_156, shownRows: 120_000, truncatedRows: 238_156, truncated: true })
+    )
+
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+    await openDirectoryPair(ZH_DIALOG, '/memory/truncated-left', '/memory/truncated-right')
+    await waitForDirectoryView(zh['directory.report.toolbar.export'])
+
+    const exportButton = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    fireEvent.click(exportButton)
+    await waitFor(() => expect(saved).toHaveLength(1))
+    await waitFor(() => {
+      const text = screen.getByRole('alert').textContent ?? ''
+      expect(text).toContain(String(120_000))
+      expect(text).toContain(String(358_156))
+      expect(text).toContain('/memory/truncated.html')
+    })
+
+    // An untruncated save never carries the truncation numbers.
+    queueRealReport()
+    await waitFor(() => expect(exportButton.disabled).toBe(false))
+    fireEvent.click(exportButton)
+    await waitFor(() => expect(saved).toHaveLength(2))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('/memory/complete.html')
+    )
+    const text = screen.getByRole('alert').textContent ?? ''
+    expect(text).not.toContain(String(120_000))
+    expect(text).not.toContain(String(358_156))
+  })
+
+  it('reports an unwritable target and allows a retry', async () => {
+    const base = await createMemoryPair('readonly')
+    const message = '无法写入文件 /memory/readonly-left-vs-readonly-right.html：只读（EROFS）'
+    const attempts: SaveFileOptions[] = []
+    const port: PlatformPort = {
+      ...base,
+      saveFile: async (options) => {
+        attempts.push(options)
+        throw new Error(message)
+      }
+    }
+    queueRealReport()
+
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+    await openDirectoryPair(ZH_DIALOG, '/memory/readonly-left', '/memory/readonly-right')
+    await waitForDirectoryView(zh['directory.report.toolbar.export'])
+
+    const exportButton = screen.getByRole('button', {
+      name: zh['directory.report.toolbar.export']
+    }) as HTMLButtonElement
+    fireEvent.click(exportButton)
+    await waitFor(() => expect(attempts).toHaveLength(1))
+
+    const notice = await screen.findByRole('alert')
+    expect(notice.className).toContain('text-danger')
+    expect(notice.textContent).toBe(message)
+    expect(notice.textContent).not.toContain(zh['directory.report.saved'].replace('{path}', ''))
+
+    await waitFor(() => expect(exportButton.disabled).toBe(false))
+    await expect(base.exists('/memory/readonly-left-vs-readonly-right.html')).resolves.toBe(false)
+
+    fireEvent.click(exportButton)
+    await waitFor(() => expect(attempts).toHaveLength(2))
+    expect(screen.getByRole('alert').textContent).toBe(message)
+    expectDirectoryBusyButtonsEnabled()
   })
 })

@@ -3,7 +3,7 @@
 目录对比 **HTML 报告导出**域：把已完成的 `DirectoryComparison` 渲染为**自包含、可离线、不含本机绝对路径、带双上限**的单文件 HTML 报告，并在目录视图里提供**常驻导出入口 + 隐私开关 + 保存对话框接线**。本域承载两层：
 
 - **纯函数内核**（`src/core/directory/report.ts` + `src/shared/appVersion.ts`，零 Electron / React / DOM）：文档结构、转义、隐私相对化、双上限、共享版本源，以及**同步/异步两个入口共用的单次流式分块管线**（`buildDirectoryReport` / `buildDirectoryReportAsync`，可取消、块间让出宏任务、进度只上报标量）。
-- **renderer 接线**（`src/renderer/src/workbench/directoryReport.ts`、`DirectoryView`、`Workbench`、`zh/en directory.ts`）：工具栏按钮与「隐藏本机路径」复选框、文件名规范化、`PlatformPort.saveFile` 成功/取消/截断提示，全部只消费内核、不改内核语义。
+- **renderer 接线**（`src/renderer/src/workbench/directoryReport.ts`、`DirectoryView`、`Workbench`、`zh/en directory.ts`）：工具栏按钮与「隐藏本机路径」复选框、异步包装 + 进度节流器、**独立可取消的导出任务**（行内进度区 + 取消入口）、文件名规范化、`PlatformPort.saveFile` 成功/取消/截断/不可写提示，全部只消费内核、不改内核语义。
 
 ## 范围
 
@@ -25,10 +25,13 @@
 
 ### renderer 接线
 
-- **工具栏入口（`DirectoryView` 第三行工具栏）**：常驻「导出 HTML 报告」按钮（`ToolbarButton` + `FileDown` 图标），仅在 `busy` 时禁用，与是否选了真实目录、是否 Web 运行时无关；同排「隐藏本机路径」复选框（默认勾选、复用现有表单样式）。新增 props `hideLocalPaths` / `onHideLocalPathsChange` / `onExportReport`；按钮点击只调用 `onExportReport`，视图不自行生报告、不碰平台层。
+- **工具栏入口（`DirectoryView` 第三行工具栏）**：常驻「导出 HTML 报告」按钮（`ToolbarButton` + `FileDown` 图标），仅在 `busy` 或导出进行中（`reportExporting`）时禁用，与是否选了真实目录、是否 Web 运行时无关；同排「隐藏本机路径」复选框（默认勾选、复用现有表单样式）。新增 props `hideLocalPaths` / `onHideLocalPathsChange` / `onExportReport`；按钮点击只调用 `onExportReport`，视图不自行生报告、不碰平台层。
 - **renderer 边界模块（`src/renderer/src/workbench/directoryReport.ts`）**：集中提供 `directoryReportFileName`（`<左名>-vs-<右名>.html`，非法字符替换、去尾空格、空名回退 `directory`、不含绝对路径）、`directoryReportFilter`（html/htm，名称来自词典）、`directoryReportStrings(t)`（全部 `DirectoryReportStrings` 键经 `t` 解析，四态状态名复用 `DIFF_LABEL_KEYS`）、`buildDirectoryReportForComparison(comparison, t, language, hideLocalPaths, generatedAt?)`（`directoryReportSource` 投影 + `htmlLang(language)` + `APP_VERSION`，只调一次 `buildDirectoryReport`）与 `directoryReportSaveCopy`（成功/截断两套提示 key 与参数）。
 - **Workbench 持有隐私开关**：`hideLocalPaths`（默认 `true`）是 shell 级 state，不进 per-session state，切换目录会话或视图重挂载后保持。
-- **Workbench 导出流程**：用当前 `comparison` 投影报告，经既有 `platform.saveFile({ title, defaultPath, filters, content })` 落盘；`null`（取消）直接结束（不提示、不写、不重试）；成功提示含落盘路径；截断时提示同时带「已展示 N / 原始 M」；异常走既有 `detailNotice`；`busy` 复用 `directoryBusy`，导出期间按钮禁用且不可重入；仅调用既有 `PlatformPort.saveFile`，不新增 IPC。
+- **异步包装与节流器（`directoryReport.ts`）**：`buildDirectoryReportForComparisonAsync(comparison, t, language, hideLocalPaths, options, generatedAt?)` 构造**同一个** `DirectoryReportInput`（`directoryReportSource` + `directoryReportStrings` + `htmlLang` + `APP_VERSION` + `hideLocalPaths`）并只调一次 `buildDirectoryReportAsync`，原样透传 `signal` / `onProgress`；同步 helper `buildDirectoryReportForComparison` 保留不动，两入口同输入 `html` 逐字符相等。同模块导出可单测的前沿+尾随节流器 `createReportProgressThrottle(emit, intervalMs = REPORT_PROGRESS_THROTTLE_MS /* 50 */)`：首次回调立即提交、窗口内只保留最新值并到期补发、`finish(progress)` 强制提交最终值、`clear()` 丢弃未提交样本。
+- **Workbench 独立导出任务**：`handleExportReport` 自带 `reportExporting` / `reportProgress` state + `reportExportController` ref（同时充当重入闸：ref 非空即直接返回），**不复用 `directoryBusy`**；先算 `directoryReportSource(comparison).totalRows` 作为起始进度，再 `await` 异步包装（`signal` + 节流 `onProgress`），resolve 后 `throttle.finish(latest)`、清掉进度区，然后**只调一次** `platform.saveFile(...)`；`null` 取消静默、成功走 `report(..., 'info')`（截断带 N / M）、其它 reject 走既有 `detailNotice(errorText(cause))`，`OperationCancelledError` 只报普通 info「已取消导出」；`finally` 里 `throttle.clear()`、复位 ref / 进度 / 进行中标记。`cancelReportExport` 只 `abort()` 当前控制器。
+- **视图进度与取消入口（`DirectoryView` 第三行工具栏）**：新增可选 props `reportExporting` / `reportProgress` / `onCancelReportExport`；`reportProgress` 非空时渲染行内 `role="status"` 区（`directory.report.progress` 带 `{done}` / `{total}`，`tabular`）与「取消」`ToolbarButton`（永远不受 `busy` 禁用）；导出按钮 `disabled = busy || reportExporting`，可访问名与 title 不变；不传新 props 时渲染与旧版一致。
+- **i18n**：`zh/en directory.ts` 成对新增 `directory.report.progress` / `cancel` / `cancelTitle` / `cancelled`（仅这 4 个键），en 无中文、parity 测试通过。
 - **i18n**：`zh/en directory.ts` 成对新增 `directory.report.*` 分组（工具栏文案与 title、开关文案与 title、保存框标题、文件过滤器名、成功/截断提示，以及报告内标题、固定隐私提示、生成时间/版本/左右根/上限行标签、口径说明、四态列名与状态名、截断文案与提示、空表文案）；`directoryI18n.test.tsx` 英文工具栏清单同步，既有中文硬编码扫描保持通过。
 
 ## 验收
@@ -116,9 +119,27 @@
 - **ac-save-cancel-silent**：`saveFile` 返回 `null` 时不再有第二次 `saveFile` 调用，不出现包含路径的成功提示，不产生任何落盘写入副作用，`busy` 复位；按钮可再次点击。
 - **ac-save-truncation-notice**：报告被截断时成功提示同时包含已展示行数与原始行数（`N` / `M`），未截断时提示不含截断措辞。
 
+### 接线：导出进度、可取消与三种保存结果
+
+- **ac-export-progress-on-click**：已打开目录对比的 Workbench 中点击「导出 HTML 报告」，在 `saveFile` 被调用之前同步可断言：出现导出进度区（`role="status"`），文本含已处理行数与总数、且总数等于 `directoryReportSource(comparison).totalRows`（树行数）；同一区域存在 enabled 的「取消」按钮；导出按钮 `disabled === true`。
+- **ac-progress-throttled**：节流器在 `vi.useFakeTimers()` 下：同一时刻连续 100 次进度回调导致提交次数 ≤ 2，最终提交值为最后一次 `processedRows/totalRows`；首次回调无需等待窗口即可见（进度不空白）；窗口结束后下一次回调提交新值；生成 resolve 时 `finish` 强制提交最终值；`clear()` 丢弃未提交样本。
+- **ac-export-ui-interactive**：导出进行中，过滤器 tab 与「隐藏本机路径」checkbox 仍 enabled 且点击后状态生效；被 `directoryBusy` 门控的按钮（载入样本 / 预览同步 / 模板 / 导出快照 / 导入快照 / 远端样本）保持 enabled；导出结束后（成功 / 取消保存 / 失败 / 取消生成）它们仍 enabled，未残留全局 busy。
+- **ac-export-not-reentrant**：导出进行中再次点击导出按钮不启动第二个任务（生成调用 1 次、`saveFile` 1 次）；导出按钮可访问名恒为 `directory.report.toolbar.export`（不因导出中改名）。
+- **ac-cancel-generation-no-save**：进度出现后点击「取消」→ `saveFile` 调用 0 次；进度区消失；导出按钮恢复 enabled；默认路径 `<left>-vs-<right>.html` 在平台沙箱 `exists === false`；保存目标目录条目集合与导出前完全相同（无 0 字节 / `.tmp` / 半成品）；不出现 danger 的 `role="alert"`（允许一条普通 info「已取消导出」）。
+- **ac-cancel-then-export**：取消后立即再次导出且 `saveFile` resolve 路径 → 恰好 1 次 `saveFile`（本次），出现成功提示，报告内容以 `<!DOCTYPE html>` 开头、`</html>` 闭合且四态计数与 legend 一致（无残留控制器或半成品）。
+- **ac-save-success-path**：`saveFile` resolve `'/memory/left-vs-right.html'` → 无 danger `role="alert"`；info 提示文本包含完整路径；`saveFile` 参数 `defaultPath` 仍为 `left-vs-right.html`、`filters[0].extensions` 含 `html`、`content` 为完整自包含文档。
+- **ac-save-truncated-copy**：生成结果为截断时成功提示文本同时包含 `shownRows` 与 `totalRows` 两个数字（逐字）；未截断时提示不含这两个数字。用 stub 的截断生成结果（如 `shownRows: 120000 / totalRows: 358156`）驱动接线断言。
+- **ac-save-cancelled-silent**：`saveFile` resolve `null` → `saveFile` 恰 1 次、无 `role="alert"`（含 info）、平台内目标 / 默认文件名不存在、导出按钮恢复；随后再次导出可成功。
+- **ac-save-unwritable**：`saveFile` reject `new Error('无法写入文件 …：只读（EROFS）')` → 出现 danger `role="alert"`，文本含该消息且不含成功文案；目标路径无文件、无临时残留；导出按钮恢复；再次点击触发第二次 `saveFile` 调用（可重试）。
+- **ac-async-parity**：同一 `comparison` / `t` / `language` / `hideLocalPaths` / `generatedAt` 下，`buildDirectoryReportForComparisonAsync` 与 `buildDirectoryReportForComparison` 的 `html` 逐字符相等，`bytes` / `totalRows` / `shownRows` / `truncatedRows` / `truncated` 逐项相等（zh、en × hideLocalPaths true、false 各覆盖）。
+- **ac-async-signal-progress**：异步包装原样透传 `signal` / `onProgress`：未 abort 时 `onProgress` 收到的 `totalRows` 恒等于树行数、`processedRows` 单调不减且最后一次等于实际消费行数；传入已 abort 的 `AbortSignal` 时以 `name === 'OperationCancelledError'` reject，`saveFile` 0 次。
+- **ac-real-fixture-report**：26,000 文件双目录 fixture 经 UI 导出：报告四态与 `CompositionLegend` DOM 逐项相等；`<html lang>` 为 `zh-CN` / `en`；`.meta-app-version` 为 `APP_VERSION`；隐藏本机路径开关两种状态行为不变；默认文件名与滤镜不变（既有集成断言原样保留并通过）。
+- **ac-toolbar-regression**：`DirectoryView` 既有「每个 filter 下导出按钮可用且回调一次」「busy 时禁用不回调」「hideLocalPaths 双向」三组用例零回归；未传新增进度 props 时渲染与现状一致（导出按钮 enabled、无进度区）；传 `reportExporting` 时只有导出按钮 disabled、取消按钮仍可点击。
+
 ### 接线：i18n 与平台边界
 
 - **ac-i18n-parity**：`zh` 与 `en` 词典新增键一一对应、无缺失；英文界面不出现中文；`directoryI18n.test.tsx` 英文工具栏清单包含新按钮与新开关标题，现有 i18n 扫描测试全部通过。
+- **ac-export-i18n-parity**：新增的 4 个 `directory.report.*` 键（`progress` / `cancel` / `cancelTitle` / `cancelled`）在 zh / en 一一对应且非空，`messages.test.ts` parity 通过；en 界面下进度 / 取消 / 已取消文案不含中文字符。
 - **ac-no-new-ipc**：导出全程只调用既有 `PlatformPort.saveFile`，不新增 IPC channel 或平台方法；renderer 不直接引用 Electron API。
 
 ### 工程门禁
@@ -128,8 +149,9 @@
 
 ## 非目标
 
-- 不改 `src/core/directory/report.ts` 的报告结构、转义、隐私相对化、上限/截断语义与 `APP_VERSION` 读取方式；接线项只消费内核。
-- 不改 renderer 接线、Workbench/DirectoryView、进度与取消 UI、i18n 键；不改 `PlatformPort.saveFile`、主进程原子写、临时文件清理、IPC 通道。异步入口当前只供内核与单测使用，UI 消费属同一需求集其它子项。
+- 不改 `src/core/directory/report.ts` 的报告结构、转义、隐私相对化、上限/截断语义、`buildDirectoryReportAsync` 签名与块大小、`APP_VERSION` 读取方式；接线项只消费内核，不得复制任何上限 / 截断 / 转义逻辑。
+- 不改 `PlatformPort.saveFile` / `SaveFileOptions`、主进程原子写、临时文件清理、IPC 通道、preload、Web 平台实现。
+- 不改 `directoryProgress`（目录对比进度条）与 `cancelDirectoryCompare`、快照导出 / 导入、合并结果保存、同步预览 / 模板；不新增页面 / 面板 / 弹窗 / 设计 token，不重排目录工具栏既有按钮顺序。
 - 不放宽/不改动双上限常量，不把上限改成可配置；不通过只改小 `maxRows` / `maxBytes` 来「验证」边界（边界用例必须走真实常量）。不新增第三方依赖、不新增/修改 `code_gates.json`、不改 `test:memory` / `test:cancel` / `perf:gate` 的数据集与阈值。
 - 不新增 Electron IPC、`PlatformPort` 方法，不把报告生成搬到主进程；不覆盖文件 diff、CSV/JSON/YAML/结构化视图报告。
 - 不重构 `src/core/io.ts`、不动 `DirectoryReportInput` / `DirectoryReportSource` 既有字段语义，不引入流式 Node API 或 Worker（块间让出只用宏任务）。
@@ -158,20 +180,23 @@
 ### renderer 接线
 
 - 复用既有组件与视觉 token：工具栏按钮用 `ToolbarButton`（`lucide-react` 图标），复选框复用现有表单样式，不写死颜色/尺寸；不新建页面、弹窗或状态容器。
-- `Workbench` 内复用现有 `report` / `copyNotice` / `detailNotice` 提示通道与 `directoryBusy`，不新增全局 notice 机制。
+- `Workbench` 内复用现有 `report` / `copyNotice` / `detailNotice` 提示通道，不新增全局 notice 机制；但**导出任务状态必须与 `directoryBusy` 分离**（`AbortController` + 进行中标记 + 节流进度放在导出任务自己的 state / ref），取消按钮只在无任务或任务已收口时不可点，永不因 `busy` 禁用。
 - 报告文案必须经 `useI18n()` 的 `t` 与 `language` 取得；`htmlLang` 复用 `src/renderer/src/i18n/htmlLang.ts`，核心与 renderer 均不得自行切语言或写死 `zh-CN` / `en`。
-- 只调用一次 `buildDirectoryReport`；不得为了估算体积先行物化行源或遍历树，行数与字节上限由内核负责。
+- 单一管线：异步包装只组装 `DirectoryReportInput` 并调用 `buildDirectoryReportAsync`，不得复制任何上限 / 截断 / 转义逻辑；`generatedAt` 必须可显式传入以便与同步路径逐字符比对；不得为了估算体积先行物化行源或遍历树。
+- 进度提交节流：同一窗口合并为一次（`REPORT_PROGRESS_THROTTLE_MS = 50`），首次回调立即提交，生成结束强制提交最终值；不得每行触发一次 React 更新，`onProgress` 只携带标量。
+- `saveFile` 只在生成 resolve 后调用一次；`null` 静默；reject 走既有 `detailNotice(errorText(cause))`；`OperationCancelledError`（`name === 'OperationCancelledError'`）不得渲染为 danger 错误。
+- 导出按钮保持既有可访问标签与 title（`directory.report.toolbar.export` / `exportTitle`），导出中只增加 `disabled`；进度与取消是独立行内元素（`role="status"` + 既有 `ToolbarButton`），只引用既有 token，不写死颜色 / 尺寸。
 - 文件名规范化在 renderer 侧集中一处实现并被单测覆盖，避免按钮与保存两处各写一遍。
 - i18n 键统一 `directory.report.*` 分组；源码中不得出现中文硬编码（现有 `mainScan` 扫描保持通过），新增测试断言只读词典键。
 - 测试基线：`DirectoryView.test.tsx` 的真实 26,000 文件双目录 fixture 复用（已抽到 `src/renderer/test-support/directoryFixture.ts` 供 view 与 Workbench 共用），另行构造 `/Users/<name>/...` 根路径用例；解析 HTML 用 jsdom `DOMParser`，计数对比必须读界面 `CompositionLegend` 的 DOM 数字而非重算。
-- `saveFile` 用注入的 `PlatformPort` mock 分别返回路径与 `null`；不得依赖内置样本或真实磁盘写入完成断言。
+- `saveFile` 用注入的 `PlatformPort` mock 分别注入 resolve / `null` / reject；「无残留」用目录条目集合比较或 `platform.exists` 断言；截断提示用 stub 的生成结果驱动，生产代码不新增测试专用分支；26k fixture 集成用例沿用既有显式 per-test `timeout`，不改 `vitest.config.mts` 全局配置，不做墙钟 / 堆峰值断言。
 
 ## 最近交付证明
 
-- WI：`wi_ws_1461270a69388629`（报告内核：可取消分块生成、双上限边界与 30 万级语义，`kind: feature`）
-- 前序 WI：`wi_ws_4ead71112fec1b93`（目录视图常驻导出入口、隐藏本机路径开关与保存接线）、`wi_ws_babecd546a792306`（报告纯函数内核 + `APP_VERSION` 单点）
+- WI：`wi_ws_4506bd04246b761f`（目录导出进度、可取消与三种保存结果接线，`kind: feature`）
+- 前序 WI：`wi_ws_1461270a69388629`（报告内核可取消分块生成 / 双上限边界）、`wi_ws_4ead71112fec1b93`（常驻导出入口、隐藏本机路径开关与保存接线）、`wi_ws_babecd546a792306`（报告纯函数内核 + `APP_VERSION` 单点）
 - 日期：2026-10-27
-- 结果：code_gates passed（9 gates，attempt 001；本轮 `needSelfTest=false`，UI 自测跳过）。
-- 覆盖摘要：`src/core/directory/report.ts` 重写为单一 `ReportPass` 文档块生成器（`pullChunk` / `pulledRows` / `release` / `finish`），转义、隐私相对化、空态、行数上限、字节上限、截断回撤与文档闭合只剩一份实现。同步入口 `buildDirectoryReport` 用 `while (pass.pullChunk())` 抽干；新增 `buildDirectoryReportAsync(input, { signal?, onProgress? })` 逐块抽取，块间 `onProgress({ processedRows, totalRows })`（纯标量、每块最多一次）+ `await nextMacrotask()`（`setTimeout(resolve, 0)`）+ 两次 `throwIfAborted`（块后与 yield 后），取消走 `@core/io` 的 `OperationCancelledError` 并 `pass.release()` 丢弃全部片段。行源改为单次流式消费：只保存行 HTML 片段与累计字节（`rowHtml` / `rowBytes` / `cumulativeBytes`），不再物化 `DirectoryReportRow` 数组、不再全量 `join()` 后重组整篇。新增导出常量 `DIRECTORY_REPORT_CHUNK_ROWS = 4_000`；`DIRECTORY_REPORT_MAX_ROWS` / `DIRECTORY_REPORT_MAX_BYTES` 值未变。报告结构、文案键、`lang`/版本注入、渲染结果与既有上限语义保持逐字不变（同步/异步同输入 `html` 逐字符相等）。
-- 测试：`src/core/directory/report.test.ts` +507/−72 行，新增 13 条（总用例覆盖 ac-sync-async-same-document / ac-progress-scalar-monotonic / ac-progress-bounded-count / ac-yield-macrotask / ac-abort-between-chunks / ac-abort-before-start）：`buildDirectoryReportAsync` 5 条（同步等价、进度精确等量且每块一次、宏任务先行、块间 abort 拒 `OperationCancelledError` 且新源可复用、已 abort 立即拒绝 0 拉取）；真实常量行数边界 2 条（200,000 恰好不截断、200,001 截断文案与 `<tr>` 自洽）；真实常量字节边界 2 条（恰好 10,000,000 不截断、+1 字节截断且文档闭合）；30 万级惰性源 2 条（358,156 / 358,209 长路径全 `modified`，显式 per-test timeout）；单次流式与不复制 3 条（单迭代器且不越读、结果键恰为 6 个标量、深度冻结树不抛错不改写）。既有 30 条断言（转义/自包含/隐私/计数/上限/投影）保持原样通过。
-- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），故本域 `qa/` 无新增折叠用例、全局 tech / design 折叠跳过。**后续项注意**：异步入口已就绪但 **renderer 尚未接线**——`buildDirectoryReportForComparison` 仍只调同步 `buildDirectoryReport`，超大目录导出在主线程一次跑完且无进度/取消 UI；接线子项需新增宿主 props/回调与 `directory.report.*` 进度文案，并且必须保持「只建一次报告、同一 `ReportPass` 管线」约束。另：`DIRECTORY_REPORT_CHUNK_ROWS` 已导出但当前无 UI 覆盖参数，若后续要让用户调节块大小须新开工单改契约。
+- 结果：code_gates passed（9 gates；本轮 `needSelfTest=false`，UI 自测跳过）。
+- 覆盖摘要：把上一 WI 的内核异步入口接到 renderer。`directoryReport.ts` 新增 `buildDirectoryReportForComparisonAsync`（构造**同一个** `DirectoryReportInput`、只调一次 `buildDirectoryReportAsync`、原样透传 `signal` / `onProgress`，`generatedAt` 可显式传入以做逐字符对齐；同步 helper 原样保留）与前沿+尾随节流器 `createReportProgressThrottle` / `REPORT_PROGRESS_THROTTLE_MS = 50`（首次立即提交、窗口内只留最新值、`finish` 强制提交最终值、`clear` 丢弃未提交样本）。`Workbench.handleExportReport` 改为**独立导出任务**：`reportExporting` / `reportProgress` state + `reportExportController` ref（同时作为重入闸），**不复用 `directoryBusy`**，起始进度取 `directoryReportSource(comparison).totalRows`；生成 resolve 后 `throttle.finish(latest)`、撤掉进度区，再只调一次 `saveFile`；成功 info（截断带 N / M）、`null` 静默、reject 走 `detailNotice(errorText(cause))`、`OperationCancelledError` 仅报普通 info「已取消导出」；`finally` 清节流器并复位全部状态。`DirectoryView` 新增可选 props `reportExporting` / `reportProgress` / `onCancelReportExport`：`role="status"` 进度行（`{done}` / `{total}`，`tabular`）+ 取消按钮（永不受 `busy` 禁用），导出按钮 `disabled = busy || reportExporting` 且可访问名不变；不传新 props 时渲染与旧版一致。zh/en 各新增 4 个 `directory.report.*` 键（`progress` / `cancel` / `cancelTitle` / `cancelled`）。内核、`PlatformPort.saveFile`、IPC、快照/合并/同步预览路径一律未动。
+- 测试：`DirectoryReportExport.test.tsx` +343 行（5 条 26k 真实双目录 fixture 集成：导出中界面仍可交互 + 取消生成不落盘不报 danger、取消后立即再导出恰好 1 次 `saveFile` 且文档闭合、单任务在飞且成功提示带路径、截断提示双数字、`EROFS` reject 报 danger 且可重试）；`directoryReport.test.ts` +142 行（节流器 3 条：前沿/尾随合并、`finish` 强制终值、`clear` 丢弃；异步包装 3 条：zh/en × hideLocalPaths 两态逐字符等同同步、进度 `totalRows` 恒等于树行数且单调到终值、已 abort signal 以 `OperationCancelledError` reject）；`DirectoryView.test.tsx` +72 行（进度行与常点取消入口、导出中仅导出按钮 disabled；既有三组工具栏用例零回归）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），故本域 `qa/` 无新增折叠用例、全局 tech / design 折叠跳过。**后续项注意**：`saveFile` 打开原生保存面板后无法取消（只能等用户操作），因此进度区在生成结束、进入保存前就已撤掉——若后续要做「保存阶段也可取消」须改 `PlatformPort.saveFile` 契约，不属本域现有能力。另：取消只 `abort` 生成，节流器残留的未提交样本由 `clear()` 丢弃，取消路径不写盘也不留 `.tmp`；导出任务仍是渲染进程内单任务，若未来要并行导出多个目录对比需重新设计 ref 闸。

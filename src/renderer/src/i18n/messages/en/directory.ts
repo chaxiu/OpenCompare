@@ -94,6 +94,11 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.report.toolbar.hideLocalPaths': 'Hide local paths',
   'directory.report.toolbar.hideLocalPathsTitle':
     'On by default: the report shows relative paths or folder names only, never absolute local paths',
+  'directory.report.progress': 'Exporting report: {done} / {total} rows',
+  'directory.report.cancel': 'Cancel',
+  'directory.report.cancelTitle':
+    'Stop generating the report: no save dialog opens and no file is written',
+  'directory.report.cancelled': 'Export cancelled',
   'directory.report.title': 'Directory comparison report',
   'directory.report.privacyNotice': 'Generated locally — review paths before sharing',
   'directory.report.generatedAt': 'Generated at',

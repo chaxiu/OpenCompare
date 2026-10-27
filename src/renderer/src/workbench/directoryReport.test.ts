@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import {
   DIRECTORY_REPORT_MAX_BYTES,
@@ -6,6 +6,7 @@ import {
   buildDirectoryReport,
   directoryReportSource
 } from '@core/directory/report'
+import type { DirectoryReportProgress } from '@core/directory/report'
 import { APP_VERSION } from '@shared/appVersion'
 import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { translate } from '@renderer/i18n/context'
@@ -13,7 +14,10 @@ import { interpolate } from '@renderer/i18n/interpolate'
 import { htmlLang } from '@renderer/i18n/htmlLang'
 import { en, zh } from '@renderer/i18n/messages'
 import {
+  REPORT_PROGRESS_THROTTLE_MS,
   buildDirectoryReportForComparison,
+  buildDirectoryReportForComparisonAsync,
+  createReportProgressThrottle,
   directoryReportFileName,
   directoryReportFilter,
   directoryReportSaveCopy,
@@ -240,5 +244,141 @@ describe('directoryReportSaveCopy', () => {
     const notice = interpolate(zh[copy.key], copy.params)
     expect(notice).toContain(String(built.shownRows))
     expect(notice).toContain(String(built.totalRows))
+  })
+})
+
+describe('createReportProgressThrottle', () => {
+  it('paints the first sample at once and coalesces a burst into one trailing commit', () => {
+    vi.useFakeTimers()
+    try {
+      const emitted: DirectoryReportProgress[] = []
+      const throttle = createReportProgressThrottle((progress) => emitted.push(progress))
+
+      for (let index = 1; index <= 100; index += 1) {
+        throttle.push({ processedRows: index, totalRows: 100 })
+      }
+
+      // The first sample never waits for the window, so the row is not blank.
+      expect(emitted).toEqual([{ processedRows: 1, totalRows: 100 }])
+
+      vi.advanceTimersByTime(REPORT_PROGRESS_THROTTLE_MS)
+      expect(emitted).toHaveLength(2)
+      expect(emitted[1]).toEqual({ processedRows: 100, totalRows: 100 })
+
+      // Once the window has closed, the next sample paints immediately again.
+      throttle.push({ processedRows: 120, totalRows: 200 })
+      expect(emitted.at(-1)).toEqual({ processedRows: 120, totalRows: 200 })
+      throttle.clear()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forces the final value through when the generation resolves', () => {
+    vi.useFakeTimers()
+    try {
+      const emitted: DirectoryReportProgress[] = []
+      const throttle = createReportProgressThrottle((progress) => emitted.push(progress))
+
+      throttle.push({ processedRows: 10, totalRows: 40 })
+      throttle.push({ processedRows: 40, totalRows: 40 })
+      // Resolving before the window ends must not leave the row at 10 / 40.
+      throttle.finish({ processedRows: 40, totalRows: 40 })
+      expect(emitted.at(-1)).toEqual({ processedRows: 40, totalRows: 40 })
+
+      const commits = emitted.length
+      vi.advanceTimersByTime(REPORT_PROGRESS_THROTTLE_MS * 4)
+      expect(emitted).toHaveLength(commits)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a pending sample on clear without emitting it', () => {
+    vi.useFakeTimers()
+    try {
+      const emitted: DirectoryReportProgress[] = []
+      const throttle = createReportProgressThrottle((progress) => emitted.push(progress))
+
+      throttle.push({ processedRows: 1, totalRows: 10 })
+      throttle.push({ processedRows: 2, totalRows: 10 })
+      throttle.clear()
+      vi.advanceTimersByTime(REPORT_PROGRESS_THROTTLE_MS * 4)
+
+      expect(emitted).toEqual([{ processedRows: 1, totalRows: 10 }])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('buildDirectoryReportForComparisonAsync', () => {
+  it('renders the byte-identical document of the synchronous path in both languages', async () => {
+    for (const language of ['zh', 'en'] as const) {
+      for (const hideLocalPaths of [true, false]) {
+        const source = comparison()
+        const sync = buildDirectoryReportForComparison(
+          source,
+          translate(language),
+          language,
+          hideLocalPaths,
+          GENERATED_AT
+        )
+        const asyncReport = await buildDirectoryReportForComparisonAsync(
+          source,
+          translate(language),
+          language,
+          hideLocalPaths,
+          undefined,
+          GENERATED_AT
+        )
+
+        expect(asyncReport.html).toBe(sync.html)
+        expect(asyncReport.bytes).toBe(sync.bytes)
+        expect(asyncReport.totalRows).toBe(sync.totalRows)
+        expect(asyncReport.shownRows).toBe(sync.shownRows)
+        expect(asyncReport.truncatedRows).toBe(sync.truncatedRows)
+        expect(asyncReport.truncated).toBe(sync.truncated)
+      }
+    }
+  })
+
+  it('passes progress through with the tree total and the consumed row count', async () => {
+    const source = comparison()
+    const expectedTotal = directoryReportSource(source).totalRows
+    const samples: DirectoryReportProgress[] = []
+
+    const built = await buildDirectoryReportForComparisonAsync(
+      source,
+      translate('zh'),
+      'zh',
+      true,
+      { onProgress: (progress) => samples.push(progress) },
+      GENERATED_AT
+    )
+
+    expect(samples.length).toBeGreaterThan(0)
+    for (const sample of samples) expect(sample.totalRows).toBe(expectedTotal)
+
+    const processed = samples.map((sample) => sample.processedRows)
+    expect(processed).toEqual([...processed].sort((left, right) => left - right))
+    expect(processed.at(-1)).toBe(expectedTotal)
+    expect(built.totalRows).toBe(expectedTotal)
+  })
+
+  it('rejects an already aborted signal as a cancellation', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      buildDirectoryReportForComparisonAsync(
+        comparison(),
+        translate('zh'),
+        'zh',
+        true,
+        { signal: controller.signal },
+        GENERATED_AT
+      )
+    ).rejects.toMatchObject({ name: 'OperationCancelledError' })
   })
 })

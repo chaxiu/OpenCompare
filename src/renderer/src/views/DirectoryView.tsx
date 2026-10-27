@@ -17,6 +17,7 @@ import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/com
 import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
 import { buildDirectoryRowModel } from '@core/directory/rows'
+import type { DirectoryReportProgress } from '@core/directory/report'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Panel } from '@renderer/components/Panel'
@@ -69,6 +70,12 @@ export interface DirectoryViewProps {
   readonly onHideLocalPathsChange: (hideLocalPaths: boolean) => void
   /** Asks the shell to build and save the HTML report; this view never renders it. */
   readonly onExportReport: () => void
+  /** True while the report task runs (generating or saving); only the export button reads it. */
+  readonly reportExporting?: boolean
+  /** Throttled progress of the running generation, `null` while it is not generating. */
+  readonly reportProgress?: DirectoryReportProgress | null
+  /** Stops the running generation; never disabled by `busy`. */
+  readonly onCancelReportExport?: () => void
   readonly onPreviewSync: (direction: SyncDirection, mode: SyncMode) => void
   readonly onPreviewTemplate: () => void
   readonly syncPreview: SyncPreview | null
@@ -109,6 +116,9 @@ export function DirectoryView({
   hideLocalPaths,
   onHideLocalPathsChange,
   onExportReport,
+  reportExporting = false,
+  reportProgress = null,
+  onCancelReportExport,
   onPreviewSync,
   onPreviewTemplate,
   syncPreview,
@@ -304,11 +314,31 @@ export function DirectoryView({
           size="sm"
           icon={<FileDown aria-hidden className="size-3.5" />}
           onClick={onExportReport}
-          disabled={busy}
+          disabled={busy || reportExporting}
           title={t('directory.report.toolbar.exportTitle')}
         >
           {t('directory.report.toolbar.export')}
         </ToolbarButton>
+        {reportProgress ? (
+          <span
+            role="status"
+            className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
+          >
+            <span className="tabular">
+              {t('directory.report.progress', {
+                done: reportProgress.processedRows,
+                total: reportProgress.totalRows
+              })}
+            </span>
+            <ToolbarButton
+              size="sm"
+              onClick={onCancelReportExport}
+              title={t('directory.report.cancelTitle')}
+            >
+              {t('directory.report.cancel')}
+            </ToolbarButton>
+          </span>
+        ) : null}
         <label
           className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
           title={t('directory.report.toolbar.hideLocalPathsTitle')}
