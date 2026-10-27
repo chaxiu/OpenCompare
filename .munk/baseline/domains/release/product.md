@@ -662,6 +662,20 @@
 - **ac-six-gates-green**：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` 六项 gate 依次全绿。
 - **ac-extra-gates-not-red**：`test-compare-request` / `cancel-gate` / `memory-gate` 三项附加 gate 不得变红。
 
+### v0.2.9 发布说明「风险与验证规模」小节（实测规模如实披露 + `MiB` 白名单）
+
+> **口径变更**：v0.2.9 收敛轮的 `ac-release-notes-029-hygiene` 曾要求 v0.2.9 发布说明「不出现 `MiB` / `GiB` / `GB`」；本项按裁决把它**收窄为白名单**——`GiB` / `MiB` / `GB` 数字集合按出现顺序恰为 `['1,325 MiB', '764.9 MiB']`，其它任何带该单位的数字仍 fail-closed（原负向断言不是删除，而是重定标为等值集合断言）。`MB` 集合仍恰为 `['10 MB']`。
+
+- **ac-section-present**：`docs/release-notes/v0.2.9.md` 中存在**恰好一个**以 `## 风险与验证规模` 开头的二级标题行，且该小节正文非空（去空行后行数 ≥ 2）。
+- **ac-section-position**：`## 风险与验证规模` 的字节偏移严格大于 `## 本次变化` 之后最后一个 `### ` 标题的偏移、严格小于 `## 升级方式` 的偏移；该文件二级标题顺序为 `## 本次变化` → `## 风险与验证规模` → `## 升级方式`，无其它新增二级标题。
+- **ac-literal-scale**：该小节正文含原样实测口径 `358,249`、`358,155 / 358,208`、`6,907 ms`、`289 ms`、`9,999,926 B`、`68,865`、`Showing 68865 of 358249 (truncated)`、`M = 358,249`、`1,325 MiB`、`764.9 MiB`、`38 ms`、`35 / 80 / 41 / 326,099`，以及证据路径 `projects/ops_df43e423451170fd/.munk/runs/trun_100be579fd6a9610/evidence/stages.md` 与 commit `a1e91cb3`；不得改写成「23.4 万」「358000」等变体。
+- **ac-no-public-claim**：该小节含未闭环陈述——真实原生 `NSSavePanel` 导出落盘一次与取消一次仍待 computer 场，结论落入 `qa-checklist.md` 之前不得对外宣称已完成全链路验证；全文不得出现「30 万可放心用」等肯定式兜底宣称，也不得出现「验证规模 234k」/「358k 待验」旧口径。
+- **ac-untouched-sections**：H1 行、`## 本次变化` 下全部既有 `###` 小节正文、`## 升级方式` 及其后全部正文与 `git show a1e91cb:docs/release-notes/v0.2.9.md` 逐字相同；该文件 diff 只包含新增的该 H2 小节及其前后空行（`+15/−0`）。
+- **ac-no-banned-tokens**：该文件不含 `待验证` / `预计通过` / `应该通过` / `TODO` / `TBD` / `FIXME`、不含 64 位十六进制串、不含三条作废旧口径；`GiB` / `MiB` / `GB` 数字集合按出现顺序恰为 `['1,325 MiB', '764.9 MiB']`（护栏只写「未触既有内存护栏」，不写护栏数字），`MB` 集合恰为 `['10 MB']`；不含任何 `releases/tag/` 链接。
+- **ac-scope-two-files**：`git diff --name-only`（除 `.munk/changes/**` 外）恰为 `docs/release-notes/v0.2.9.md` 与 `src/main/release-packaging.test.ts`；`package.json`、`CHANGELOG.md`、两版 `README*`、`docs/release-signing.md`、`docs/release-process.md`、`docs/release-evidence/**`、`src/**`（除该测试文件外）、`.github/workflows/**` 零 diff。
+- **ac-no-release-side-effects**：`package.json#version` 仍为 `0.2.9`；`git tag --list` 与改动前一致（未新建 / 移动 tag）；未执行 push、publish、`gh release` 写操作或 workflow dispatch。
+- **ac-gates-green**：Host `code_gates` 全部 gate（含 `install` / `lint` / `typecheck` / `build` / `build:web` / `test` 及 `code-gates.json` 其余 gate）退出码 0；`src/main/release-packaging.test.ts` 除该单条白名单断言按上述裁决重定标外，其余发布说明断言零改动即通过。
+
 ## 非目标
 
 - 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
@@ -682,6 +696,7 @@
 - 品牌图标项不改 `appId`（保持 `com.opencompare.app`）、`productName`、发布模型与 `release.yml` 的打包 / 发布 / 公证流程；不升版本号、不改 CHANGELOG / Release Notes、不动 `v0.1.2` tag 与资产；不做应用内「关于」页面或设置页、不做主题 / 视觉改版；不新增运行时或开发依赖、不引入在线图标生成服务、不使用 Electron 默认图标或任何第三方版权图标；不在本项执行签名、公证、打 tag、push、publish 或创建 Release。
 - v0.2.0 收敛项只做「发版元信息收敛 + 只读一致性断言」：**不打 tag、不 push、不 publish、不创建或公开 Release**，不修改任何远端 Release 及其资产（含 v0.1.2 的 11 个资产）——这些动作由人与 Host 完成并触发 `human_required`。
 - v0.2.9 收敛项只做**版本号 + 发布前置文件 + 随之必须翻面的发布事实断言**（同一提交）：不建 tag、不 push、不 publish、不创建 / 编辑 GitHub Release、不动已公开 tag 与资产；不做实机验收；不改 `src/` 业务代码（只允许 `src/main/release-packaging.test.ts`）、不改依赖 / 脚本 / `package.json` 其它字段；不改两版 README（第 5 行也是 `v0.2.8`）与 `docs/release-evidence/**`；不新增第二份版本真源；不把 latest 提前指向 `v0.2.9`；不重写测试其它段落，只做「姿态翻面 + 切片重锚 + 派生断言补充」。
+- v0.2.9「风险与验证规模」小节项只做**发布说明新增一节 + 单条断言白名单放宽**：不改 `CHANGELOG.md`、两版 README、`docs/release-signing.md`、`docs/release-process.md`、`docs/release-evidence/**`、`package.json#version`、`.munk/code-gates.json`；不新建 / 追加其它发布说明，不改任何历史发布说明；不改 `src/main/release-packaging.test.ts` 中除该单条断言以外的任何测试；不建 tag、不 push、不 publish、不 dispatch workflow、不改已公开 Release 与资产、不构建或上传安装包；不补充超出裁决实测数据的数字 / 比例 / 时间线 / 结论，不新增「全链路已验证」类正面口径。
 - 不删除 / 不移动 / 不重打 `v0.1.2`（以及 `v0.1.0` / `v0.1.1`）tag，不替换已发布资产，不改写任何历史提交。
 - 不改发布模型与签名链路：`tags: v*` 触发、`gates → 矩阵 --publish never → finalize`、单点预建 draft、六项 Secret 与 fail-closed 逻辑、`electron-builder.yml` 的签名/公证/图标/protocol 配置全部不动；不新增 Secret。
 - 发版流水线加固项本身不在 CI 之外改签名链路；本机 `codesign` / `stapler` / `spctl` 实证与 `docs/release-evidence/` 归「本机发版产物取证」项，且不把「CI 绿了」当签名/公证证据。
@@ -789,13 +804,16 @@
 - **证据的事实边界（v0.2.8 证据文件最容易被写坏的地方）**：Release id、`published_at`、tag 对象 SHA、其余 10 件资产的字节数与 sha256、公证原始输出**均未提供**，v0.2.8 证据只写「以发布期证据 `trun_77eb52ceff8c28c5` 为准」，不写数字也不写通过标记；负向断言（禁 `valid on disk` / `stapler` / `spctl` / `accepted` / `Notarized Developer ID`、禁第二个 `status:`）就是这条口径的守门。§7 起（含 §8/§9/§10）不得出现字面「通过」「已通过」——这是与 v0.2.7 证据「L1 段不宣称通过」的既有语义保持一致，改写时统一用「零失败」「满足判定口径」。判定口径两处（v0.2.7 / v0.2.8）必须**逐字同文**：180 s 冷跑、取消任意时点可点且回退干净、恢复条件须另指 ≥60 GB/侧专用大机器且属公司负责人裁定的口径变更、不再逐版记 blocked、保留 v0.2.7 历史 blocked 不改写。
 - **改动范围收敛（本项）**：允许改的路径恰为六项——`README.md`（仅第 5 行）、`README.zh-CN.md`（仅第 5 行）、`docs/release-evidence/v0.2.8.md`（新增）、`docs/release-evidence/v0.2.7.md`（只追加，§1–§7 逐字保留）、`docs/release-signing.md`（只前移当前状态锚点）、`src/main/release-packaging.test.ts`；`.munk/changes/**` 与 `.munk/baseline/**` 除外。**外部 run 证据目录在本环境不可读**，禁止尝试读取、禁止重新 `gh release view` / 下载资产 / 打包 / 公证 / 采样；未给出的字节数与 sha256 不得从缺省模式推导。命令按 argv 单条执行，9 道门退出码如实在交付说明记录。
 
+- **v0.2.9「风险与验证规模」小节的排版与单位陷阱纪律**：位置以字节序判定——`## 风险与验证规模` 必须落在 `## 本次变化` 最后一个 `###` 之后、`## 升级方式` 之前，前后各留一个空行，不新增其它二级标题、不调其它小节顺序、不改小节标题。单位是最大陷阱：`release-packaging.test.ts` 断言 `MB` 数字集合恰为 `['10 MB']`、`GiB`/`MiB`/`GB` 集合按出现顺序恰为 `['1,325 MiB', '764.9 MiB']`，因此新小节**只能**出现这两个带单位的内存数字（`1,325 MiB` 必须在 `764.9 MiB` 之前），内存护栏只写「未触既有内存护栏」、不写护栏的具体 MB / MiB 数字。上限段陷阱：测试对「含 `200,000` 或 `10 MB` 的段落」断言同时含 `沿用` 与 `v0.2.8`，新小节不得复述行数 / 字节上限。禁用词陷阱：`待验证` 是既有测试的负向断言字面量，本文件不得出现；旧口径「验证规模 234k；358k 待验」「30 万可放心用」已作废，不得再写。链接陷阱：新小节不写任何 `releases/tag/` 链接。实测数字必须原样出现（不拆成「23.4 万」「358000」等变体），且「仍未闭环……不得对外宣称已完成全链路验证」的限制语义不得弱化或省略；证据路径与 commit 只引用不重新取数。
+
 ## 最近交付证明
 
-- WI：`wi_ws_e412c1de377c9e45`（v0.2.9 版本收敛：`package.json#version` → `0.2.9`、`CHANGELOG.md` 新增 `## v0.2.9`、新增 `docs/release-notes/v0.2.9.md`、dispatch 默认 tag 三处对齐、`release-packaging.test.ts` 姿态翻面与切片重锚；`kind: release-convergence`）
+- WI：`wi_ws_6c8601576156de1b`（v0.2.9 发布说明新增 `## 风险与验证规模` 实测小节 + `release-packaging.test.ts` 单条 `GiB/MiB/GB` 负断言放宽为实测内存值白名单；`kind: release-notes-risk-scale`，`deliveryIntent: local merge`）
 - 日期：2026-10-27
-- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_d22d1533781453d4/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。九门退出码全 0（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate），`pnpm test` 62 files / 1011 passed + 1 skipped / 1012，`release-packaging.test.ts` 185 用例、`release-evidence.test.ts` 34 用例全绿。
-- 改动面：`git diff --numstat` 恰为 6 个已跟踪文件 + 1 个新增——`package.json` +1/−1、`CHANGELOG.md` +21、`docs/release-process.md` +1/−1、`docs/release-signing.md` +2/−1、`.github/workflows/release.yml` +1/−1、`src/main/release-packaging.test.ts` +68/−7、新增 `docs/release-notes/v0.2.9.md`；两版 README、`docs/release-evidence/**`、`src/**` 其它文件、`electron-builder.yml` 零 diff（符合 `ac-scope-closed` / `ac-readme-untouched`）。
-- 覆盖摘要：版本门由 `toBe(currentTag)` 翻为 `not.toBe` + `isTagBefore(latest, current)`（`latestPublishedTag` 仍是显式 `v0.2.8`）；`lastReleasedNotesPath` / `releaseNotesPath` 由 `.toBe` 翻为 `.not.toBe`；v0.2.8 CHANGELOG 切片起点改 `## ${latestPublishedTag}`；幽灵版本切片终点改 `## ${latestPublishedTag}`（标题集合仍 `[currentTag]`）；排序链插入 `latestPublished`；新增两条派生断言（四类变化关键词切片 + 报告上限「沿用 v0.2.8、非本版新增」）。测试内 `0.2.9` 字面量 0 处。
-- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 逐条落档为 `qa/v029-version-convergence-release-notes.md`。后续注意：① 本轮是「收敛轮」，`latestPublishedTag` 必须落后 `currentTag`；下一轮（v0.2.9 收尾）方向相反（翻回 `toBe` / `.toBe`），且固定改 6 个路径（两版 README 第 5 行、`docs/release-evidence/v0.2.9.md`、`docs/release-signing.md` 锚点、`release-packaging.test.ts`），两轮混做即红；② v0.2.9 段把报告上限写成「沿用 v0.2.8」，收尾轮若改写 v0.2.9 证据/说明须保留 `沿用` + `v0.2.8` 且不得出现 `本版新增`（`ac-caps-restated-not-new` 会判红）；③ 签名文档第五节已加一句「v0.2.9 收敛已合入 `main`」，收尾轮翻锚点时这句要保留语义、只改「当前状态 / 姿态 / 承接」锚点。
-- 历史（上一轮）：`wi_ws_346e888fff636a78`（v0.2.8 发布面收尾：README 两版第 5 行 → v0.2.8、证据归档、签名文档锚点前移、测试锚点成组翻面）。
+- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_cf7b1a91ec8712f9/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。九门退出码全 0（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate），`pnpm test` 62 files / 1011 passed + 1 skipped / 1012。
+- 改动面：`git diff --numstat`（commit `bb4b5565`）恰为两个文件——`docs/release-notes/v0.2.9.md` +15/−0、`src/main/release-packaging.test.ts` +7/−3；`package.json`、`CHANGELOG.md`、两版 `README*`、`docs/release-signing.md`、`docs/release-process.md`、`docs/release-evidence/**`、`src/**` 其它文件、`.github/workflows/**` 零 diff（符合 `ac-scope-two-files`）。
+- 覆盖摘要：新小节落在 `## 本次变化` 最后一个 `###` 之后、`## 升级方式` 之前（二级标题顺序 `本次变化` → `风险与验证规模` → `升级方式`），逐条写入 358,249 条目 / 两侧 358,155 与 358,208 / ready 6,907 ms / 导出 289 ms / 9,999,926 B / 68,865 行 / `Showing 68865 of 358249 (truncated)` / `M = 358,249` / app 峰值 1,325 MiB / renderer 764.9 MiB / 取消 38 ms / 四态 35 / 80 / 41 / 326,099，并给出证据路径与 commit `a1e91cb3`；未闭环陈述（原生 `NSSavePanel` 落盘 + 取消待 computer 场、结论入 `qa-checklist.md` 前不得对外宣称全链路验证）如实保留。文件内 `releases/tag/` 0 命中、禁用词 0 命中、`MB` 集合仍为 `['10 MB']`、`GiB/MiB/GB` 集合为 `['1,325 MiB', '764.9 MiB']`。
+- 口径裁决记录：v0.2.9 收敛轮的「发布说明不得出现 `MiB`/`GiB`/`GB`」负断言由本项按裁决**重定标为等值集合白名单**（非删除、非放宽为无断言）；其余发布说明断言零改动即通过（`ac-gates-green`）。
+- 注：本 WI change pack 只提供 `prd.md`，无 `tests/cases/**` / `tech.md` / `ux/**` —— 无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 逐条落档为 `qa/v029-risk-and-verification-scale.md`。后续注意：① 这一节把「实测规模」变成了**对外公开口径**，后续任何 v0.2.9 收尾 / 证据回填都不得改写这些数字或把「仍未闭环」句删掉——`ac-literal-scale` / `ac-no-public-claim` 会判红；② 白名单是**等值集合**而非「允许任意内存数字」，下一轮若真跑 NSSavePanel 场或补新实测数字，必须同批改 `release-packaging.test.ts` 的集合断言，否则发布说明加一行 `MiB` 就红；③ 内存护栏数字仍不得写入发布说明（只能写「未触既有内存护栏」），护栏阈值只留在 `perf-memory` / `memory-bounded` 域的文档里。
+- 历史（上一轮）：`wi_ws_e412c1de377c9e45`（v0.2.9 版本收敛：`package.json#version` → `0.2.9`、CHANGELOG 新增 `## v0.2.9`、新增 `docs/release-notes/v0.2.9.md`、dispatch 默认 tag 三处对齐、测试姿态翻面与切片重锚）。
 
