@@ -8,6 +8,7 @@
 - 安装本栈官方/主流 Skill 到 worktree `.agents/skills/`，并写薄 `AGENTS.md` 路由。
 - 打通双模运行架构：`PlatformPort` 抽象 + Electron IPC 实现 + Web/内存实现，renderer 仅依赖 `PlatformPort`。
 - **平台文件 IO 能力（`PlatformPort.selectFile` / `saveFile`）**：原生打开文件对话框返回所选绝对路径（取消 `null`）；保存对话框 + `node:fs/promises` 写盘返回目标路径（取消 `null`）；options 支持 `title` / 扩展名 `filters` / `defaultPath`。三处实现齐备且行为一致：Electron（`dialog.showOpenDialog`/`showSaveDialog`）、preload channel 白名单（`src/shared/platform/channels.ts`）、Web 内存实现（隐藏 file input 物化到内存 FS；保存写内存 FS 并尽力触发下载）。
+- **保存落盘原子化与成功/取消/不可写三路径（`saveFile` 内部，签名与通道不变）**：Electron `saveFile` 先 `assertWritable`（`/samples/**` 只读校验在任何写之前），再经内部共享 helper `writeFileAtomically` 在**目标同目录**写 `${target}.${randomUUID()}.tmp` 并 `rename` 覆盖目标；写入或 `rename` 任一失败在 `catch` 里 `rm(temporary, { force: true })` 后抛出原始错误（清理失败不掩盖原始原因），随后由 `readableWriteFailure` 包装为「无法写入文件 <path>：<中文原因>（<CODE>）。」，不暴露临时文件名。`writeUserSettings` 复用同一 helper（不再有第二套临时文件命名/清理逻辑）。临时文件禁止用 `os.tmpdir()` / `app.getPath('temp')`（须同设备才能真正原子）。跨平台口径写在实现注释：POSIX `rename` 原子替换，Windows 由 libuv 走 `MoveFileExW` + `MOVEFILE_REPLACE_EXISTING`，目标被占用/只读或为非空目录时失败并走同一清理路径；不做 `fsync`、不做 `EXDEV` 回退。`saveFile` 失败消息的码表在 `describeFileSystemCode` 增补 `EISDIR`/`ENOTEMPTY`/`EEXIST`/`ENOSPC`/`EROFS` 并支持写入专用兜底文案。
 - **目录列表能力（`PlatformPort.listDirectory`）**：Electron 实现 `readdir({ withFileTypes: true })` 后逐条 `lstat` 取 `name` / `path` / `isDirectory` / `size` / `modifiedMs`（**不跟随符号链接**）；`lstat` 报告是链接时 `readlink` 取 `linkTarget` 并只探测目标形态 `linkTargetKind: 'file' | 'directory' | 'missing'`，条目固定 `isSymbolicLink: true` + `isDirectory: false`（链接恒为叶条目）。`DirectoryEntry` 的 `isSymbolicLink` / `linkTarget` / `linkTargetKind` 为可选字段，不新增 `PlatformPort` 方法与 channel；Web 内存实现不必支持链接。逐条 `lstat` 的 fan-out 经 `@core/io` 的 `mapWithLimit` 走有界窗口（默认 8），返回顺序与字段与逐条串行结果一致。链接的四态 / 计数口径归 `symlink-semantics` 域，限流与句柄错误文案归 `io-concurrency` 域，本域不重复实现。
 - **原始字节批量摘要能力（`PlatformPort.digestFiles`，横切契约归 `content-digest` 域）**：一次请求带一批绝对路径，按输入顺序返回每项 `{ path, ok, sha256, bytes }` 或 `{ path, ok: false, reason }`；单个坏文件只失败该项，批仍 resolve；句柄耗尽整批 reject。返回类型是判别联合 `DigestFilesResult = readonly FileDigest[] | { readonly cancelled: true }`：取消以**结构化结果 resolve**，不以 rejected Promise 表达，调用方用 `Array.isArray` 区分（不引入额外包装层）。Electron 实现流式 `createReadStream` + `createHash('sha256')`（`/samples/**` 按 UTF-8 字节），Web 实现走核心 `sha256Bytes`；通道 `platform:digest-files` 登记在 `PLATFORM_CHANNELS`，preload 白名单转发。
 - **批量列目录能力（`PlatformPort.listDirectories(paths, options?)`）**：一次请求携带多个目录绝对路径，按输入顺序返回等长槽位 `DirectoryListing`（成功 `{ path, ok: true, entries }`，失败 `{ path, ok: false, reason }`）；单个目录不可列只失败该槽位、整批仍 resolve，`reason` 沿用「无法读取目录 <path>：…」中文措辞；句柄耗尽整批 reject。Electron 实现对整批所有目录的所有条目共用**一份全局有界 `stat` 预算**（`DEFAULT_STAT_CONCURRENCY = 16`，可注入 `lstatFile` / `statConcurrency` 观测），`/samples/**` 与真实路径共用同一通道；Web 内存实现按目录切片返回同语义槽位，`/samples/**` 同样可列。`listDirectory(path)` 保留并复用批量实现（`[path]` 单槽）。通道 `platform:list-directories` 登记在 `PLATFORM_CHANNELS`，preload 仅白名单转发；`PlatformPort` 表面新增以 `listDirectories` 为最新一项。并发窗口与句柄错误口径归 `io-concurrency` 域，本域不重复实现。
@@ -24,7 +25,18 @@
 - **ac-deps**：`diff` / `node-diff3` / `papaparse` / `@tanstack/react-virtual` / `yaml` / `jsonc-parser` / `lucide-react` / `vitest` 均已在 `package.json` 声明且可被 typecheck 解析。
 - **ac-platformport**：定义 `PlatformPort` 抽象并给出 Electron 与 Web 两套实现，renderer 不直接依赖 Electron API。
 - **ac-select-file**：`PlatformPort.selectFile` 在两套实现中可用 —— Electron 走原生打开文件对话框返回所选绝对路径，Web 兼容实现用隐藏 file input 把所选内容物化到内存 FS 并返回可选路径；取消时返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。
-- **ac-save-file**：`PlatformPort.saveFile` 在两套实现中可用 —— Electron 保存对话框 + `node:fs/promises` 写盘并返回目标路径，Web 兼容实现把内容写入内存 FS（并尽力触发下载）；取消返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。
+- **ac-save-file**：`PlatformPort.saveFile` 在两套实现中可用 —— Electron 保存对话框 + `node:fs/promises` 写盘并返回目标路径，Web 兼容实现把内容写入内存 FS（并尽力触发下载）；取消返回 `null` 且不抛错；两套实现成功与取消路径均有单测覆盖。（落盘细节由下列 `ac-save-*` 细化。）
+- **ac-save-success-content**：保存对话框返回一个新路径时，`saveFile` 解析为该路径，落地文件按 UTF-8 读回与传入 `content` 逐字相等（覆盖空字符串、含中文/emoji 多字节文本、>1 MB 文本三种输入）。
+- **ac-save-overwrite-existing**：目标路径已存在内容不同的旧文件时，保存成功后目标文件内容为新 `content`，旧内容不再存在。
+- **ac-save-no-temp-residue**：成功路径结束后，目标目录的条目集合等于保存前的条目集合加上目标文件本身，目录内不存在任何临时文件残留（按新增条目 / `.tmp` 后缀判定，不硬编码临时文件名）。
+- **ac-save-cancel-null**：保存对话框返回 `canceled: true`（或 `filePath` 为空）时，`saveFile` 解析为 `null`，目标目录条目集合与调用前完全相同，无新建文件、无截断、无临时文件。
+- **ac-save-samples-readonly**：对话框返回 `/samples/**` 路径时 `saveFile` reject，错误消息含「只读」与目标路径；该路径不落盘，目标目录无任何新增条目。
+- **ac-save-failure-readable**：真实写失败（临时文件写入失败，或目标为已存在目录导致 `rename` 失败）时 `saveFile` reject，错误为非空 `Error` 且消息包含目标路径与非空的中文原因说明（有 OS code 时一并给出），不返回 `null`、不静默成功。
+- **ac-save-failure-no-residue**：上述失败后目标目录条目集合与保存前完全相同：没有 0 字节目标文件、没有半截内容、没有 `*.tmp` 临时文件；rename 失败时已存在的目标（如原文件 / 原目录及其内容）保持原样未被破坏。
+- **ac-save-port-contract**：`PlatformPort.saveFile(options: SaveFileOptions): Promise<string | null>` 的类型与 `PLATFORM_CHANNELS.saveFile` 通道名不变，`src/preload/**`、`src/renderer/**`、`src/shared/platform/**` 无改动；成功时仍返回目标路径字符串，取消仍返回 `null`。
+- **ac-save-callers-green**：既有调用方测试零回归 —— `src/main/platform/electron-platform.test.ts` 的 native save dialog 用例、`src/renderer/src/workbench/DirectoryReportExport.test.tsx`、`src/renderer/src/App.snapshot.test.tsx`、`src/renderer/src/views/CodeView.test.tsx`（合并结果导出）全部通过，`pnpm test` / `pnpm typecheck` / `pnpm lint` 全绿。
+- **ac-save-web-unchanged**：Web 平台 `saveFile` 语义不变：`/memory/**` 返回路径并写入内存沙箱 + 触发下载，`/samples/**` reject 含「只读」；Web 实现不引入临时文件概念，其既有测试不变地通过。
+- **ac-save-rename-platform**：「rename 覆盖既有文件」在当前平台有可断言行为（`ac-save-overwrite-existing` 在 macOS 上真实执行），且实现处以注释写明跨平台口径：POSIX `rename` 原子替换目标，Windows 由 libuv 走 `MoveFileExW` + `MOVEFILE_REPLACE_EXISTING` 覆盖，目标被占用/只读时失败并走同一临时文件清理路径。
 - **ac-gates**：`.munk/code-gates.json` 存在，含相互独立的 `install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate` 门禁，且每条命令为单条 argv。
 - **ac-desktop-build**：`build` 门禁成功产出 Electron 桌面端产物；主进程 + renderer 均可构建，能拉起基础壳窗口。
 - **ac-web-render**：renderer 可在 Web/内存模式下构建并拉起基础壳（不依赖 Electron 原生能力）。
@@ -51,6 +63,7 @@
 - 不做打包分发 / CI 发布（安装包目标、代码签名、公证、自动更新、GitHub Release 属 `release` 域）；本域只在 `PlatformPort` 层提供文件对话框与读写能力，不含各视图的「打开/保存本地文件」业务入口。
 - 不做远端能力（FTP / SFTP）。
 - 不做快捷键、分栏拖拽、主题切换等交互细节。
+- 保存原子化**不**改 `writeTextFile` / `writeUserSettings` / `deleteFile` / `selectFile` 或任何其它 IPC 通道的行为与签名（不对 `writeTextFile` 做原子化）；不新增 IPC channel、设置项、依赖，不改 `.munk/code-gates.json` 或新增长跑门禁；不改 Web 平台实现、preload 桥、renderer 组件、i18n 文案、HTML 报告内核与 `src/core/**`；不做 `fsync` / 目录 fsync 崩溃持久化保证、跨设备（`EXDEV`）回退、权限/属主/ACL 继承、旧文件备份或版本历史；不改保存对话框标题/默认文件名/滤镜/取消语义；不 bump 版本，不改 README / CHANGELOG / release notes；不做真实 358k 目录实测或原生保存面板人工验收（另派 product-qa）。
 
 ## 实现约束
 
@@ -61,35 +74,13 @@
 - 门禁每条命令必须可被 Host 作为单条 argv 执行，不得用 shell 链接符拼接。
 - **平台能力按「新增能力 + 可选参数」演进**：不改既有方法签名语义（`listDirectory(path)` 保留并复用批量实现）；新增能力必须同时给 Electron IPC 与 Web 内存两套实现，channel 只登记在 `src/shared/platform/channels.ts`，preload 仅白名单转发，并同步 preload 表面清单测试；批量槽位形状与失败隔离在同一 `DirectoryListing` 类型上收口，不在调用点各自拼装。
 - **取消能力同样两套实现、同形态**：`cancelOperation` 在 Electron 与 Web 两条路径上幂等且**返回同一结构化取消形状**（`{ cancelled: true }`，来自 `@shared/platform/types` 的 `DigestFilesCancelled`）；`OperationCancelledError`（`@core/io`）只在 renderer 适配层出现，renderer 不引 `node:*`；新 channel 登记单一来源并随 preload 表面清单测试；不新增第二条进度推送通道。
+- **保存原子写单点实现**：临时文件命名与清理只能有一处（内部 `writeFileAtomically`），`saveFile` 与 `writeUserSettings` 共用；写盘顺序固定为 `assertWritable(target)` → `writeFile(temporary, content, 'utf8')` → `rename(temporary, target)`，失败分支 `rm(temporary, { force: true })` 兜底后抛出原始/包装错误；临时文件必须与目标同目录，禁止系统临时目录。失败文案对齐既有 `describeFileSystemCode` 风格（中文原因 + `（CODE）`）且包含目标路径、不含临时文件名。
+- **测试只走既有模式**：沿用 `electron-platform.test.ts` 的 `vi.mock('electron')` + `dialogs.save.mockResolvedValueOnce` + `scratchRoot()` + node 真实文件系统，经 `platform.saveFile`（IPC handler）驱动；「保存前后 `readdir` 集合」用专门子目录比较；不可写路径用真实文件系统条件制造（`/samples/**` 只读哨兵；`rename` 失败用「目标为已存在的非空目录」），不新增生产代码测试 seam；不锁定平台相关的 rename 错误码（POSIX `EISDIR`/`ENOTEMPTY`，Windows `EPERM`/`EACCES`/`EEXIST`）。
 
 ## 最近交付证明
 
-- WI：`wi_ws_80cc30bb21c00dc3`（用户设置与系统语言平台通道，`kind: feature`）
-- 日期：2026-10-23
-- 结果：code_gates passed（`needSelfTest=false`，UI 自测跳过）。
-- 覆盖摘要：`src/shared/platform/types.ts` 新增 `Language = 'zh' | 'en'` / `UserSettings` 与 `PlatformPort.readUserSettings` / `writeUserSettings` / `systemLocale`（本轮表面仅新增这三项）；新增 `src/shared/platform/settings.ts` 共享解析（`isLanguage` / `parseUserSettings` / `parseUserSettingsJson` / `USER_SETTINGS_STORAGE_KEY = 'opencompare.userSettings'`）；`channels.ts` 仅新增三个通道名，preload 白名单转发并更新 surface 断言；Electron 侧 `userData` 下单 JSON 原子写（同目录临时文件 + rename，目录缺失先建），读取对缺失 / 坏 JSON / 非对象 / 非法语言值一律 `null` 不 reject，`systemLocale()` 原样返回 `app.getLocale()`；Web 侧 localStorage 单键读写 + 模块级内存回退，`systemLocale()` 取 `navigator.language`（缺省 `''`）。`electron-platform.test.ts` 增 roundtrip / 五类损坏 / locale 原样用例，`web-platform.test.ts` 增跨实例读回 / 非法 JSON / 内存回退用例。
-- 注：词典、`I18nProvider`、首启解析与测试辅助折叠在新增域 `domains/i18n`；本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例。设置存储不新增第二套配置文件，后续设置面板 WI 必须复用 `opencompare.userSettings` 单键与本组方法。
-
-- WI：`wi_ws_601ef56ae8fd93a4`（取消结构化返回、零日志噪声与零残留，`kind: fix`）
-- 日期：2026-10-22
-- 结果：code_gates passed（新增第 7 条 `cancel-gate` = `pnpm test:cancel`；本轮 `needSelfTest=false`，UI 自测跳过）。
-- 覆盖摘要：`src/shared/platform/types.ts` 新增 `DigestFilesCancelled` / `DigestFilesResult = readonly FileDigest[] | DigestFilesCancelled`，`PlatformPort.digestFiles` 与 `cancelOperation` 的文档契约改为「取消 resolve 结构化结果」；`DigestFilesOptions`、`PlatformPort` 方法与 `channels.ts` 均未新增项/通道。Electron `digestFiles` 在入口已取消时直接 `return { cancelled: true }`、在 `mapWithLimit` 抛出 `OperationCancelledError` 时同样转结构化（`finally` 仍回收注册项），`registerPlatformIpc` 的 `platform:digest-files` handler 外层再兜一次（`async` + try/catch），使取消异常绝不以 reject 穿过 `ipcMain.handle`；`PlatformIpcOptions` 增 `digestStreamFactory` 测试缝。Web 实现改为返回 `{ cancelled: true }` 并删除对 `@core/io` 的 import。新增 `src/renderer/src/platform/index.ts` 的 `unwrapDigestResult`（`Array.isArray` 判别后在本进程抛 `OperationCancelledError`）与 `digestFilesForComparison`，`directoryOps` / `loadSampleSessions` / `snapshotOps` 三个调用点改经它取摘要。preload cast 改为 `Promise<DigestFilesResult>`。既有 `electron-platform.test.ts` 的取消用例改为断言结构化结果（含 `digestOperationCount() === 0`），`web-platform.test.ts` / `preload/index.test.ts` 随动。
-- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例，全局 tech / design 折叠跳过；流/注册表残留与门禁归 `domains/io-concurrency`，摘要取消契约与缓存完整性归 `domains/content-digest`，`compareSides` 半树/重试归 `domains/directory`，取消提示 UI 归 `domains/workbench`。
-
-- WI：`wi_ws_90a06ca6d557d5cd`（扫描/哈希进度与可取消，`kind: feature`）
-- 日期：2026-10-21
-- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 全绿，含 seam / Web 同构用例）。
-- 覆盖摘要：`src/shared/platform/types.ts` 的 `DigestFilesOptions` 新增可选 `operationId`，`PlatformPort` 新增 `cancelOperation(operationId): Promise<void>`（本轮表面仅新增该项）；`channels.ts` 仅新增 `cancelOperation: 'platform:cancel-operation'`，preload 白名单转发（`index.test.ts` 表面清单与「renderer 只经 PlatformPort」断言随动）；Electron 侧 `ipcMain.handle` 校验字符串 id 后调 `cancelOperation`；Web 侧以已取消 id 集合实现幂等 `cancelOperation`，`digestFiles` 在已取消 id 上抛 `OperationCancelledError`、其余路径返回值不变。`web-platform.test.ts` 新增「web digest cancellation」2 条，`preload/index.test.ts` 覆盖新通道转发与表面约束。
-- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例；取消语义/流销毁归 `domains/io-concurrency`，`operationId` 与摘要取消契约归 `domains/content-digest`，核心进度与分块归 `domains/directory`。
-
-- WI：`wi_ws_deb41e1c6a5a2b8f`（目录条目批量 IPC 与 ≥16 路有界遍历，`kind: feature`）
-- 日期：2026-10-21
-- 结果：code_gates passed（本轮 `needSelfTest=false`，UI 自测跳过；`pnpm test` 全绿，含新增批量列目录/槽位形状/seam 用例）。
-- 覆盖摘要：`src/shared/platform/types.ts` 新增 `DirectoryListingSuccess` / `DirectoryListingFailure` / `DirectoryListing` / `ListDirectoriesOptions` 与 `PlatformPort.listDirectories(paths, options?)`（`PlatformPort` 表面本轮仅新增该项）；`channels.ts` 新增 `listDirectories: 'platform:list-directories'`，preload 白名单转发（`index.test.ts` 表面清单随动）。Electron 侧抽出 `listDirectories(paths, options)`：`readdir` 并发取目录、整批所有条目共用一份 `mapWithLimit` 的 `stat` 预算（导出 `DEFAULT_STAT_CONCURRENCY = 16`，可注入 `statFile`），样本路径与真实路径共用同一通道，`listDirectory` 变为 `[path]` 单槽复用；Web 侧以 `entriesOf` / `listingOf` 按内存树切槽，样本路径同样可列。`electron-platform.test.ts` 新增「batch directory listing」6 条用例（等长有序槽位且失败局部化、整批共享 stat 预算、stat 耗尽整批 reject、与串行扫描树/index/skipped/四态一致、样本目录经批量通道可列、根目录不可列 reject）；`web-platform.test.ts` / `App.test.tsx` 随动。
-- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域 `qa/` 无新增折叠用例；目录扫描引擎语义折叠在 `domains/directory`，并发/句柄口径折叠在 `domains/io-concurrency`。
-
-- WI：`wi_intake_e60068db55d0fef9`（真实文件 IO 闭环 + GitHub 开源发布基线，`kind: feature`）
-- 日期：2026-10-19
-- 结果：self_test passed。
-- 覆盖摘要：`PlatformPort`（`src/shared/platform/types.ts`）扩展 `selectFile` / `saveFile`（options 含 `title` / `filters` / `defaultPath`，取消返回 `null`）；`channels.ts` 收敛新 IPC channel 白名单；Electron 实现走 `dialog.showOpenDialog({properties:['openFile']})` / `dialog.showSaveDialog` + `node:fs/promises` 写盘（`electron-platform.ts`），preload 白名单桥接，Web 实现用隐藏 file input 物化到内存 FS / 写内存 FS 并尽力触发下载（`web-platform.ts`）；两套实现 plus `/samples` 只读保护均有单测（`electron-platform.test.ts` / `web-platform.test.ts`），`pnpm test` 全绿。
-- 注：本域本轮折叠用例 `qa/select-file.md`、`qa/save-file.md`；release 打包/CI 基线折叠在 `domains/release`。
+- WI：`wi_ws_5d6ca74561fcb9ea`（保存落盘原子化与成功/取消/不可写三路径，`kind: fix`）
+- 日期：2026-10-27
+- 结果：code_gates passed（9 条门禁 attempt 001 全绿：install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate；`pnpm test` 62 个文件 965 passed / 1 skipped）；本轮 `needSelfTest=false`，UI 自测与原生保存面板人工验收跳过。
+- 覆盖摘要：`src/main/platform/electron-platform.ts` 新增内部 `writeFileAtomically(target, content)`——同目录 `${target}.${randomUUID()}.tmp` + `rename` 覆盖，失败分支 `rm(temporary, { force: true })` 清理后抛原始错误；`saveFile` 改为 `assertWritable` → `writeFileAtomically`，失败经新增 `readableWriteFailure` 包装成「无法写入文件 <path>：<中文原因>（<CODE>）。」（不暴露临时文件名）；`describeFileSystemCode` 增补 `EISDIR` / `ENOTEMPTY` / `EEXIST` / `ENOSPC` / `EROFS` 与写入专用兜底文案；`writeUserSettings` 删除自带的临时文件/rename/清理代码改为复用同一 helper（仓库内不再有第二套原子写实现）。`PlatformPort.saveFile` 签名、`PLATFORM_CHANNELS.saveFile`、preload / renderer / shared 平台类型零改动；Web 实现零改动。`electron-platform.test.ts` 新增「atomic save」6 条：空串/中文 emoji/>1.2 MB 逐字回读且目录无新增临时文件、覆盖旧内容且旧文本消失、取消（`canceled: true` 与空 `filePath`）零新建、`/samples/**` 只读 reject 且不落盘、rename 到已存在非空目录 reject 且目录与 `keep.txt` 原样无残留、写入不存在子目录 reject 且根目录零残留；失败消息断言含中文与目标路径且不含 `.tmp`，不锁具体错误码。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**`、`tech.md`、`ux/**`），全局 tech / design 折叠跳过；新增 `qa/save-file-atomic.md` 按本域 AC 落档（非 change-pack 用例）。`saveFile` 调用方（快照导出 / 合并结果保存 / HTML 报告导出）实现与测试均零改动，`ac-save-callers-green` 由 `pnpm test` 全量回归覆盖；跨平台 rename 口径只写注释与 macOS 真实验证，Windows 目标占用/只读分支本机未实测。
