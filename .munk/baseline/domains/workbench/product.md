@@ -20,6 +20,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **回归保留**：新建对比链路不介入既有路径——拖拽双路径仍按 `handleDroppedFiles` 建会话，标签切换仍保留工作副本与脏标记，目录下钻与「返回上级目录视图」的过滤 / 折叠 / 选中状态保持。
 - **真实路径拖入窗口**：空首屏与有会话时均可拖入真实路径——恰好 2 个同类路径（两文件 / 两目录）直接建同一会话模型；1 个路径作为左侧基准填入 + info 提示；>2 个或文件目录混合则明确提示、不建会话、不改既有会话。拖入阻断浏览器/窗口默认导航，应用停留原状态；真实绝对路径解析经平台缝（preload / `webUtils.getPathForFile` 或 main IPC 白名单），renderer 不猜测路径。
 - **样本入口降级为演示辅助**：样本按钮 / 下拉保留但显式标注演示用途，文案不再暗示「必须先加载样本」，可被完全跳过。
+- **会话标签文案由会话事实派生（单一真源）**：tab 标题 / 副标题不再沿用创建时冻结的 `title` / `subtitle`，而在渲染期由会话当前事实派生——目录会话取 `directory.leftName/rightName` 与 `leftRoot/rightRoot`，文件会话取 `adhoc.pair` 两侧路径（两侧同名 → 标题为该文件名，否则 `左名 ↔ 右名`，副标题两侧完整路径）与 `delimiter` / `format`；内置样本仍按 session id 走字典 key，缺失侧仍走 `missingSidePath` + 既有 missing 字典文案。任何换路径动作（目录换侧、代码 / CSV / 结构化视图内「打开左 / 右文件」、下钻、同 id 原位刷新）都必须先落到会话事实（`setSessions` 函数式更新），视图局部 state 不是真源；因此 tab 与面板永远同帧一致，切 tab 往返与异步读盘收尾都不会让文案回到旧文件。
 - **索引与路由**：`ux/design-baseline.md`（token 路径、组件清单、主屏路径、取舍）折入 `.munk/baseline/design/*`；`AGENTS.md` 增视觉基线路由。
 
 ## 验收
@@ -90,6 +91,23 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-picker-cancel-keeps-dialog**：弹窗内「打开文件夹」的用户在系统选择器取消（返回 `null`）时，「新建对比」弹窗仍然打开、不建会话、不进入扫描（关闭时机改动不得让弹窗在「还没确定一对路径」时消失）。
 - **ac-renderer-cancel-notice**：扫描阶段与哈希阶段各取消一次，进度条消失、`directoryBusy` 解除、取消按钮恢复可点，notice 文本为「已取消本次目录对比，工作台保持取消前的状态。」，会话 tab、main 区域与状态栏与取消前一致。该行为在平台改为结构化取消（`{ cancelled: true }`）后仍必须成立——壳层不改布局与文案结构，取消提示由核心取消 catch 分支经既有 `noticeTone: 'info'` 通道发出。
 
+### 会话文案单一真源（tab 标题 / 副标题由会话事实派生）
+
+- **ac-directory-tab-follows-new-roots**：先用目录路径 A 建会话，再用目录路径 B 新建对比后，激活 tab 的标题为 B 的左右目录名、副标题为 B 的左右根路径；A tab 仍显示 A 的目录名与根路径，两 tab 不互相污染。
+- **ac-file-pair-title-derived**：用两侧同名但位于不同目录的文件（如 `.../a/report.md` ↔ `.../b/report.md`）新建对比，tab 标题为该文件名，副标题同时包含两侧完整路径；再开另一对同名不同目录文件，两个 tab 各自显示自己的路径。
+- **ac-side-swap-follows**：目录会话内换一侧目录成功后，可见 tab 的副标题为新一侧根路径 + 未改侧原路径，不残留被替换的旧侧路径。
+- **ac-code-view-open-writes-session**：代码会话内「打开左文件」为新路径后，tab 标题与副标题立即显示新路径；会话事实（`adhoc.pair.left.path` 与代码工作副本路径）均为新路径且正文为新文件内容；切到其它 tab 再切回，面板路径与内容仍是新文件。
+- **ac-csv-view-open-writes-session**：CSV/TSV 会话内打开一侧文件后，tab 副标题与面板同时显示新路径（含按新正文重算的行数），切 tab 往返不回到旧文件。
+- **ac-structured-view-open-writes-session**：JSON/YAML 会话内打开一侧文件后，tab 副标题与面板同时显示新路径与格式，切 tab 往返不回到旧文件。
+- **ac-stats-follow-new-pair**：视图内换文件后状态栏 / 会话统计按新正文重算，不残留旧文件的行数。
+- **ac-drilldown-tab-paths**：目录会话下钻打开文件对后，下钻 tab 标题为该文件名、副标题为两侧真实路径；返回目录视图后目录 tab 副标题恢复其根路径，下钻文案不残留到目录 tab。
+- **ac-missing-side-kept**：一侧缺失的下钻会话，副标题仍走既有缺失侧字典文案（相对路径 + 缺失标记），标题只显示文件名、不出现内部 `::opencompare-missing-*` 后缀。
+- **ac-async-commit-no-clobber**：一次读盘打开文件对尚未返回期间另一会话完成提交，收尾后两个会话都存在且文案各自正确，不出现旧快照覆盖导致会话丢失或文案回退。
+- **ac-inplace-refresh-sync**：同 id 原位刷新（sync 后重新对比）后 tab 保持原 id 与位置，标题 / 副标题为新对比结果的左右根路径，视图显示新对比树而非旧树。
+- **ac-sample-labels-unchanged**：四个内置样本 tab 仍按 session id 走字典文案，中英文切换时标题 / 副标题随字典变化，不受派生逻辑影响。
+- **ac-multi-tab-isolation**：文件会话、目录会话、下钻会话并存时连续切换 tab，每个 tab 的标题与副标题只属于自己；关闭相邻 tab 后剩余文案不变。
+- **ac-vitest-regression**：上述场景全部落成 vitest 断言（先红后绿，复用既有 App / 纯函数夹具），仓库 `code_gates` 全绿。
+
 ## 非目标
 
 - **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域。各视图只读呈现内容，不做差异高亮与统计；除目录会话（其四态计数由运行时对比结果按过滤档派生，语义归 `directory` 域）外，其余视图的状态栏计数与标签取自样本自带 answer key（编辑期标注），非运行时计算。
@@ -115,11 +133,17 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - 视觉索引只写 change pack `ux/design-baseline.md`，不自己改 `.munk/baseline/**`。
 - 「新建对比」只用既有 `components/Dialog`（新增 `initialFocusRef` 以把初始焦点放到左侧输入框）、`ToolbarButton` 与 `main.css` token，不写死颜色尺寸、不新增设计系统；`parseManualPaths` / `resolveCompareRequest` 是唯一校验入口，renderer 不另写解析、规范化或错误码，错误文案直接用 `error.message`。会话创建只复用 `openFilePair` / `runSidesCompare`，`upsertSession` / `activeId` 状态机不改。
 - **进度 / 取消复用现有通道与 token**：进度条复用 `formatBytes` / `ToolbarButton` / 状态栏与 `notice` 既有语义 token（`bg-surface-sunken` / `border-line-subtle` / `text-content-*` / `bg-accent`），不新建页面、不改既有布局层级、不使用硬编码颜色；进度条放壳层以便空态可见，取消按钮点击后到对比 settle 前 `disabled`，避免重复取消。取消路径只调 `controller.abort()` + `platform.cancelOperation(id)`，成功后不 `upsertSession`、不切会话、不动状态栏。
+- **会话文案派生纪律**：`describeSession` 保持纯函数、每次渲染现算，不深拷贝目录树或文件正文；`title` / `subtitle` 字段保留作兼容但不得再作为 tab 文案唯一来源；视图内换文件只经 `onOpenSide(side, picked)` 回写会话（文件对 path / text、CSV `delimiter` + `tables`、结构化 `format`、代码 `codeBuffer` 与 `stats` 同一次提交落地），不得另开同名 tab 掩盖换路径；`sessions` 的所有写入统一走函数式 `setSessions`（`upsertSession` / `replaceSession` / `closeSession` / 换侧回写），异步流程结束后不得用闭包旧快照整体覆盖；视图内回写不得在每次按键编辑时额外深拷贝正文。测试复用 `App.test.tsx` 的 `scriptedPort` / 注入请求端口与 `sessionDisplay.test.ts` / `sessionStore.test.ts` / `directoryCompare.test.ts` 既有夹具，不新建测试基建或目录。
 - **关闭时机只提前、不抬层级**：把「关闭新建对比弹窗」提前到目录对比真正开始的那一刻——在 `Workbench.tsx` 的 `runSidesCompare()` 进入扫描前清掉 `compareDialogOpen`（一处状态调用即同时覆盖键入路径与弹窗内选择器路径，且天然保留「选择器被取消时弹窗不关」）；`NewCompareDialog.submit()` 中 `await openRequest(...)` 之后的 `onClose()` 保留为幂等兜底。关闭时机必须晚于路径校验与 `resolveCompareRequest` 探测；**不要**把 `Dialog` 遮罩抬到进度条之上、也不要改成非模态（AC 要求扫描期 `aria-modal` 计数为 0）。测试落点在 `src/renderer/src/App.test.tsx`（jsdom）的 `new compare dialog` 与 `directory progress and cancel UI` 两处 describe，用 DOM 层级（`[aria-modal="true"]` 计数、`closest()`、按钮 `disabled`、click 后 `cancelOperation` 调用）表达「无覆盖层」，不要求 jsdom 做真实坐标 hit-test。
 
 ## 最近交付证明
 
-- WI：`wi_ws_a0d69b96e026b9df`（工作台外壳与新建对比双语化：壳层文案接词典、会话显示渲染期化，`kind: feature`）
+- WI：`wi_ws_a66e5d868c6c9cee`（会话文案单一真源：tab 标题 / 副标题由会话事实派生，`kind: fix`）
+- 日期：2026-10-27
+- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_dc0d09e3b67f486c/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。`pnpm test` 62 files / 1005 passed + 1 skipped / 1006（较上轮 58 文件 897+1 增 4 文件 / 108 条）。
+- 覆盖摘要：`workbench/sessionDisplay.ts` 的 `describeSession` 改为按会话事实派生文案——新增 `filePairTitle`（取 `adhoc.pair` 两侧 `baseName`，同名 → 该名，异名 → `左名 ↔ 右名`，`displayName` 先剥掉内部 `::opencompare-missing-*` 后缀）与 `directoryText`（取 `session.directory` 的 `leftName ↔ rightName` 与 `leftRoot ↔ rightRoot`），`title` / `subtitle` 仅在无对应事实时作兜底；`workbench/directoryCompare.ts` 新增纯函数 `replaceFilePairSide(session, side, file)`，把换文件收敛到一次提交——`adhoc.pair` 该侧 path/text、CSV `delimiter` + 重算 `tables`（`parseCsvTable`）、结构化 `format`（`classifyFile`，未知扩展名保留原值）、`stats` 行数（`pairStats` 与创建期同源）、代码工作副本 `codeBuffer` 该侧 path/source/text 同步重置，非 ad-hoc 会话原样返回；`CodeView` / `CsvView` / `StructuredView` 新增 `onOpenSide` 回写回调（选到文件即上报，菜单 / 校验收敛在既有 `pickTextFile` 流程之后），`Workbench` 的 `handleSessionFileOpen` 用 `setSessions((current) => …)` 落到对应会话；`upsertSession` / `replaceSession` / `closeSession` 一并改为函数式 `setSessions`，异步读盘晚到的提交不再用闭包旧快照覆盖。测试：`App.test.tsx` 新增 `session tab labels follow the session facts` 6 条（同名 / 异名文件对各守自己的路径、目录换侧跟新根且不残留旧侧、代码 / CSV / 结构化视图打开文件后 tab + 面板 + 行数同步且切 tab 往返不回退、文件 + 目录 + 下钻三 tab 隔离且返回目录后文案复原、慢读盘不覆盖期间提交的会话），并在既有「预览并同步」用例补 4 条原位刷新后 tab 身份 / 位置 / 新根路径断言；`sessionDisplay.test.ts` 新增 3 条纯函数断言（目录根派生、同名文件对、异名文件对），`directoryCompare.test.ts` 新增 4 条 `replaceFilePairSide` 断言（CSV 表 / 分隔符 / 行数同动、结构化格式、代码工作副本单侧重置、无 adhoc 会话不动）。
+- 注：① 本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 逐条落档为 `qa/session-tab-labels-follow-session-facts.md`。② `describeSession` 现在是 tab 文案唯一入口——今后任何新会话形态必须给它可派生的事实字段，否则只能落到 `session.title` 兜底并会重新出现「文案冻结」类问题。③ `replaceFilePairSide` 是「视图换文件」的唯一写入口，新视图若再加「打开文件」必须走它而不是自己改局部 state，否则 tab 与面板会再次分叉。④ 目录文案改为读 `session.directory` 后，`directoryCompare.ts` 创建期写入的 `title` / `subtitle` 只剩兼容用途，不要再在别处读它们作显示。
+- 历史（上一轮）：`wi_ws_a0d69b96e026b9df`（工作台外壳与新建对比双语化：壳层文案接词典、会话显示渲染期化，`kind: feature`）
 - 日期：2026-10-23
 - 结果：code_gates passed（9 门禁，`needSelfTest=false`，UI 自测跳过）。
 - 覆盖摘要：`App.tsx` 启动走 `loadInitialLanguage(platform)`，解析期间只渲染无文字品牌帧，settle 后以解析结果作 `I18nProvider initialLanguage` 挂一次 `Workbench`（语言值不作 `key`），`?perf=1` 分支不变；`Workbench.tsx` 顶栏 / 视图切换 / 三态 / 标签条入参 / 通知条 / 关闭确认对话框 / 目录进度与取消 / 状态栏与图例 / 选择器与保存 `title` 全部改词典渲染期解析；新增纯函数 `workbench/sessionDisplay.ts`（按会话身份出标题 / 副标题 / 稳定统计 key + 用户数据片段，缺失侧用 `::opencompare-missing-{left,right}` 稳定标记）；`NewCompareDialog.tsx` 外壳文案与 `compareRequest` 稳定错误码文案（未知 I/O 失败只保留原始详情）；`Dialog` / `SessionTabs` / `StatusBar` / `DiffBadge` / `diffSemantics`（`DIFF_LABEL_KEYS`）接词典；`fileKinds.label` 改稳定文件族标识并在 `directoryCompare.ts` 同步使用。词典只在 `common`（27 键）/ `shell`（128 键）成对新增，zh 逐字沿用原界面。新增测试：`App.i18n.test.tsx`（启动四态 + 英文壳层 / 进度取消 / 通知 / 新建对比 / 下钻 / 选择器 title / 中英同调用序列 / 无汉字冒烟）、`sharedI18n.test.tsx`、`sessionDisplay.test.ts`、`shellScan.test.ts`（显式 10 文件清单 0 命中 + 无 `stat.label` 中文比较）；既有 `App` / `App.snapshot` 预置 zh 记录并等待首屏。

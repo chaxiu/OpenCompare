@@ -96,6 +96,14 @@ function comparisonStats(
   ]
 }
 
+/** Line counts of a file pair, recomputed whenever a side is replaced. */
+function pairStats(pair: AdhocFilePair['pair']): WorkbenchSession['stats'] {
+  return [
+    { label: 'linesLeft', value: countTextLines(pair.left.text) },
+    { label: 'linesRight', value: countTextLines(pair.right.text) }
+  ]
+}
+
 /**
  * Attaches a freshly built comparison to one existing session, preserving its
  * identity (id, title, subtitle, sides). Every commit goes through here, so
@@ -236,11 +244,55 @@ export function createFilePairSession(
     // mounted snapshot points back at its `/snapshots/...` mount.
     subtitle: `${left.path} ↔ ${right.path} · ${target.label}`,
     columns: 2,
-    stats: [
-      { label: 'linesLeft', value: countTextLines(left.text) },
-      { label: 'linesRight', value: countTextLines(right.text) }
-    ],
+    stats: pairStats({ left, right }),
     adhoc
+  }
+}
+
+/**
+ * Rewrites one side of an open file session when a view opens a local file on
+ * it. The session facts are the single truth: the pair body/path, the parsed
+ * table or format and the line stats all move together, and the code working
+ * copy is reset for that side in the same commit, so a tab switch remounts from
+ * the file the panel shows instead of the one it was opened with.
+ */
+export function replaceFilePairSide(
+  session: WorkbenchSession,
+  side: 'left' | 'right',
+  file: { readonly path: string; readonly text: string }
+): WorkbenchSession {
+  const adhoc = session.adhoc
+  if (!adhoc) return session
+
+  const pair = { ...adhoc.pair, [side]: { path: file.path, text: file.text } }
+  // The picked file decides its own family; an unknown extension keeps the
+  // session's current one instead of inventing a delimiter/format.
+  const target = classifyFile(file.path)
+  const delimiter =
+    adhoc.scene === 'csv' ? (target?.delimiter ?? adhoc.delimiter) : adhoc.delimiter
+  const format =
+    adhoc.scene === 'structured' ? (target?.format ?? adhoc.format) : adhoc.format
+  const tables =
+    adhoc.scene === 'csv' && adhoc.tables
+      ? {
+          ...adhoc.tables,
+          [side]: parseCsvTable({ path: file.path, text: file.text, delimiter: delimiter ?? ',' })
+        }
+      : adhoc.tables
+
+  const buffer = session.codeBuffer
+  const codeBuffer =
+    buffer === undefined
+      ? undefined
+      : side === 'left'
+        ? { ...buffer, leftPath: file.path, leftSource: file.text, leftText: file.text }
+        : { ...buffer, rightPath: file.path, rightSource: file.text, rightText: file.text }
+
+  return {
+    ...session,
+    adhoc: { ...adhoc, pair, delimiter, format, tables },
+    stats: pairStats(pair),
+    codeBuffer
   }
 }
 

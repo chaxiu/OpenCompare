@@ -9,10 +9,13 @@ import {
   directoryComparisonKey,
   directoryViewKey,
   releaseDirectoryComparison,
+  replaceFilePairSide,
   resolveDirectoryReturn
 } from './directoryCompare'
 import type { DrilldownTarget } from './fileKinds'
 import type { WorkbenchSession } from './session'
+import { describeSession } from './sessionDisplay'
+import { translate } from '@renderer/i18n/context'
 
 const TARGET: DrilldownTarget = { kind: 'code', label: 'code' }
 
@@ -225,5 +228,104 @@ describe('releaseDirectoryComparison', () => {
     expect(previous.directory).not.toBe(replacement.directory)
     expect(replacement.directory).not.toBe(undefined)
     expect(cache.hashes.has('/left/a.txt')).toBe(true)
+  })
+})
+
+describe('replacing one side of an open file session', () => {
+  const en = translate('en')
+
+  it('moves a CSV side, its parsed table, delimiter and line stats together', () => {
+    const session = createFilePairSession(
+      'file:/a/orders.csv ↔ /b/orders.csv',
+      'orders.csv',
+      { kind: 'csv', label: 'csv', delimiter: ',' },
+      { path: '/a/orders.csv', text: 'id,name\n1,left\n' },
+      { path: '/b/orders.csv', text: 'id,name\n1,right\n' }
+    )
+
+    const next = replaceFilePairSide(session, 'left', {
+      path: '/c/new.tsv',
+      text: 'id\tname\n1\tone\n2\ttwo\n'
+    })
+
+    expect(next.adhoc?.pair.left.path).toBe('/c/new.tsv')
+    expect(next.adhoc?.pair.right.path).toBe('/b/orders.csv')
+    expect(next.adhoc?.delimiter).toBe('\t')
+    expect(next.adhoc?.tables?.left.header).toEqual(['id', 'name'])
+    expect(next.adhoc?.tables?.left.rows).toHaveLength(2)
+    // The untouched side keeps its own parsed table.
+    expect(next.adhoc?.tables?.right.rows).toHaveLength(1)
+    expect(next.stats.map((stat) => stat.value)).toEqual([3, 2])
+    expect(next.stats.map((stat) => stat.label)).toEqual(['linesLeft', 'linesRight'])
+    // The tab text derives from the new facts, not the tab's opening copy.
+    expect(
+      describeSession(next).subtitle.map((part) => ('text' in part ? part.text : en(part.key))).join('')
+    ).toBe('/c/new.tsv ↔ /b/orders.csv · TSV')
+  })
+
+  it('moves a structured side and its format', () => {
+    const session = createFilePairSession(
+      'file:/a/x.json ↔ /b/x.json',
+      'x.json',
+      { kind: 'structured', label: 'json', format: 'json' },
+      { path: '/a/x.json', text: '{"a":1}\n' },
+      { path: '/b/x.json', text: '{"a":2}\n' }
+    )
+
+    const next = replaceFilePairSide(session, 'right', {
+      path: '/c/y.yaml',
+      text: 'a: 2\n'
+    })
+
+    expect(next.adhoc?.pair.right.path).toBe('/c/y.yaml')
+    expect(next.adhoc?.pair.left.path).toBe('/a/x.json')
+    expect(next.adhoc?.format).toBe('yaml')
+  })
+
+  it('resets the code working copy of the opened side and keeps the other side', () => {
+    const session = createFilePairSession(
+      'file:/a/engine.ts ↔ /b/engine.ts',
+      'engine.ts',
+      TARGET,
+      { path: '/a/engine.ts', text: 'a\nb\n' },
+      { path: '/b/engine.ts', text: 'a\nc\n' }
+    )
+    const withBuffer: WorkbenchSession = {
+      ...session,
+      codeBuffer: {
+        leftPath: '/a/engine.ts',
+        rightPath: '/b/engine.ts',
+        leftSource: 'a\nb\n',
+        rightSource: 'a\nc\n',
+        leftText: 'a\nb\nedited\n',
+        rightText: 'a\nc\n'
+      }
+    }
+
+    const next = replaceFilePairSide(withBuffer, 'left', {
+      path: '/c/other.ts',
+      text: 'x\ny\nz\n'
+    })
+
+    expect(next.adhoc?.pair.left).toEqual({ path: '/c/other.ts', text: 'x\ny\nz\n' })
+    expect(next.codeBuffer?.leftPath).toBe('/c/other.ts')
+    expect(next.codeBuffer?.leftSource).toBe('x\ny\nz\n')
+    expect(next.codeBuffer?.leftText).toBe('x\ny\nz\n')
+    // The side that was not opened keeps its unsaved working copy.
+    expect(next.codeBuffer?.rightText).toBe('a\nc\n')
+    expect(next.stats.map((stat) => stat.value)).toEqual([3, 2])
+  })
+
+  it('leaves a session without an ad-hoc pair untouched', () => {
+    const sample: WorkbenchSession = {
+      id: 'session-code',
+      scene: 'code',
+      title: 'sample',
+      subtitle: 'sample',
+      columns: 3,
+      stats: []
+    }
+
+    expect(replaceFilePairSide(sample, 'left', { path: '/a.txt', text: 'a\n' })).toBe(sample)
   })
 })

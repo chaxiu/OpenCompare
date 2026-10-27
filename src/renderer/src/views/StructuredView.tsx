@@ -24,6 +24,7 @@ import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
 import { classifyFile } from '@renderer/workbench/fileKinds'
 import { STRUCTURED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
+import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair } from '@renderer/workbench/session'
 
 const FORMAT_OPTIONS: readonly { readonly value: StructuredFormat; readonly key: MessageKey }[] = [
@@ -160,13 +161,16 @@ export function StructuredView({
   fixture,
   pair,
   format,
-  platform
+  platform,
+  onOpenSide
 }: {
   readonly fixture?: StructuredSceneFixture
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
   readonly format?: StructuredFormat
   readonly platform: PlatformPort
+  /** Writes a newly opened file back to the session's own pair facts. */
+  readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
   const [selected, setSelected] = useState<StructuredFormat>('json')
@@ -214,6 +218,9 @@ export function StructuredView({
         right: side === 'right' ? { path: picked.path, text: picked.text } : (source?.right ?? { path: picked.path, text: '' })
       }
       const nextFormat = classifyFile(picked.path)?.format ?? effective
+      // The session keeps the same tab: path, body and family land on its pair
+      // facts together, so the tab subtitle follows the panel.
+      onOpenSide?.(side, picked)
       setOpened({ pair: next, format: nextFormat })
       if (!adhoc) setSelected(nextFormat)
       setNotice({ text: t('files.notice.opened', { path: picked.path }), tone: 'ok' })

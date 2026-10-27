@@ -15,6 +15,7 @@ import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
 import { classifyFile } from '@renderer/workbench/fileKinds'
 import { DELIMITED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
+import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import { parseCsvTable } from '@renderer/workbench/session'
 import type { CsvTables } from '@renderer/workbench/session'
 
@@ -197,7 +198,8 @@ export function CsvView({
   defaultKeyColumns,
   tables,
   platform,
-  onAlignStateChange
+  onAlignStateChange,
+  onOpenSide
 }: {
   readonly sessionId: string
   readonly left: CsvSample
@@ -207,6 +209,8 @@ export function CsvView({
   readonly tables: CsvTables
   readonly platform: PlatformPort
   readonly onAlignStateChange?: (state: CsvAlignState) => void
+  /** Writes a newly opened file back to the session's own pair facts. */
+  readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
   // Opening a local file swaps one side; the parsed tables follow it, so the
@@ -257,6 +261,9 @@ export function CsvView({
         left: side === 'left' ? parseCsvTable(sample) : currentTables.left,
         right: side === 'right' ? parseCsvTable(sample) : currentTables.right
       }
+      // The session keeps the same tab: its pair facts carry the new path and
+      // body, so the tab subtitle follows the panel instead of the old file.
+      onOpenSide?.(side, picked)
       if (side === 'left') setLeftSide(sample)
       else setRightSide(sample)
       setCurrentTables(next)
