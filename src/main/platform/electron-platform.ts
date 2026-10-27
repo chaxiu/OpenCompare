@@ -196,6 +196,31 @@ async function selectFile(options: DialogRequest): Promise<string | null> {
   return result.filePaths[0]
 }
 
+/**
+ * Writes `content` atomically: a uniquely named temporary file **in the target
+ * directory** (same device, so the rename is a real atomic replace) is renamed
+ * over `target`. A failed write or rename removes that temporary file, so the
+ * target is never left zero-byte or half-written.
+ *
+ * Cross-platform rename semantics: POSIX `rename` atomically replaces an
+ * existing file; on Windows libuv maps it to `MoveFileExW` with
+ * `MOVEFILE_REPLACE_EXISTING`, which also replaces the target. A target that is
+ * a non-empty directory, locked or read-only makes the rename fail and takes the
+ * same temporary-file cleanup path. No `fsync` guarantee and no `EXDEV`
+ * fallback: the temporary file always sits beside the target.
+ */
+async function writeFileAtomically(target: string, content: string): Promise<void> {
+  const temporary = `${target}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, content, 'utf8')
+    await rename(temporary, target)
+  } catch (error) {
+    // Cleanup must never mask the original reason the write failed.
+    await rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
 async function saveFile(options: DialogRequest, content: string): Promise<string | null> {
   const result = await dialog.showSaveDialog({
     title: options.title,
@@ -203,8 +228,13 @@ async function saveFile(options: DialogRequest, content: string): Promise<string
     filters: options.filters
   })
   if (result.canceled || !result.filePath) return null
+  // The read-only sample mount is rejected before any file is created.
   const target = assertWritable(result.filePath)
-  await writeFile(target, content, 'utf8')
+  try {
+    await writeFileAtomically(target, content)
+  } catch (error) {
+    throw readableWriteFailure(error, target)
+  }
   return target
 }
 
@@ -222,7 +252,7 @@ function errorCode(error: unknown): string | undefined {
 }
 
 /** Chinese gloss of the OS codes the platform layer can surface. */
-function describeFileSystemCode(code: string | undefined): string {
+function describeFileSystemCode(code: string | undefined, fallback = '文件系统读取失败'): string {
   switch (code) {
     case 'ENOENT':
       return '路径不存在或已被移动'
@@ -233,9 +263,28 @@ function describeFileSystemCode(code: string | undefined): string {
       return '没有访问权限'
     case 'ELOOP':
       return '符号链接层级过深或形成循环'
+    case 'EISDIR':
+    case 'ENOTEMPTY':
+    case 'EEXIST':
+      return '目标是目录或目录非空'
+    case 'ENOSPC':
+      return '磁盘空间不足'
+    case 'EROFS':
+      return '目标所在磁盘为只读'
     default:
-      return '文件系统读取失败'
+      return fallback
   }
+}
+
+/**
+ * Readable reason a save failed. The message carries the target path only —
+ * never the temporary file's name — and keeps the OS code when there is one.
+ */
+function readableWriteFailure(error: unknown, path: string): Error {
+  const code = errorCode(error)
+  return new Error(
+    `无法写入文件 ${path}：${describeFileSystemCode(code, '文件系统写入失败')}${code ? `（${code}）` : ''}。`
+  )
 }
 
 function readableFailure(subject: '目录' | '文件', error: unknown, path: string): Error {
@@ -679,15 +728,8 @@ async function readUserSettings(): Promise<UserSettings | null> {
  */
 async function writeUserSettings(settings: UserSettings): Promise<void> {
   const target = userSettingsPath()
-  const temporary = `${target}.${randomUUID()}.tmp`
   await mkdir(dirname(target), { recursive: true })
-  try {
-    await writeFile(temporary, JSON.stringify(settings), 'utf8')
-    await rename(temporary, target)
-  } catch (error) {
-    await rm(temporary, { force: true }).catch(() => undefined)
-    throw error
-  }
+  await writeFileAtomically(target, JSON.stringify(settings))
 }
 
 /** The OS locale exactly as Electron reports it; never truncated or remapped. */
