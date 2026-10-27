@@ -1034,6 +1034,133 @@ describe('native file dialogs', () => {
   })
 })
 
+describe('atomic save', () => {
+  /** Directory entries in a stable order, so "before vs after" is exact. */
+  async function entriesOf(directory: string): Promise<string[]> {
+    return (await readdir(directory)).sort()
+  }
+
+  it('writes every content verbatim and adds no temporary file', async () => {
+    const root = await scratchRoot()
+    const directory = join(root, 'exports')
+    await mkdir(directory, { recursive: true })
+    const before = await entriesOf(directory)
+    const created: string[] = []
+    const contents = [
+      '',
+      '合并结果 · 报告 🚀\n第二行：多字节文本',
+      `<!DOCTYPE html>\n${'x'.repeat(1_200_000)}`
+    ]
+
+    for (const [index, content] of contents.entries()) {
+      const name = `report-${index}.html`
+      const target = join(directory, name)
+      dialogs.save.mockResolvedValueOnce({ canceled: false, filePath: target })
+
+      await expect(platform.saveFile({ content })).resolves.toBe(target)
+
+      expect(await readFile(target, 'utf8')).toBe(content)
+      created.push(name)
+      const entries = await entriesOf(directory)
+      expect(entries).toEqual([...before, ...created].sort())
+      expect(entries.filter((entry) => entry.endsWith('.tmp'))).toEqual([])
+    }
+  })
+
+  it('replaces an existing file so the previous content is gone', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'existing.html')
+    await writeFile(target, '<!DOCTYPE html>old body', 'utf8')
+    dialogs.save.mockResolvedValueOnce({ canceled: false, filePath: target })
+
+    await expect(platform.saveFile({ content: '<!DOCTYPE html>new body' })).resolves.toBe(target)
+
+    expect(await readFile(target, 'utf8')).toBe('<!DOCTYPE html>new body')
+    expect(await entriesOf(root)).toEqual(['existing.html'])
+  })
+
+  it('creates nothing when the dialog is cancelled or returns no path', async () => {
+    const root = await scratchRoot()
+    const directory = join(root, 'exports')
+    await mkdir(directory, { recursive: true })
+    const before = await entriesOf(directory)
+
+    for (const cancelled of [
+      { canceled: true, filePath: undefined },
+      { canceled: false, filePath: '' }
+    ]) {
+      dialogs.save.mockResolvedValueOnce(cancelled)
+      await expect(platform.saveFile({ content: 'never written' })).resolves.toBeNull()
+    }
+
+    expect(await entriesOf(directory)).toEqual(before)
+    expect(await entriesOf(root)).toEqual(['exports'])
+  })
+
+  it('rejects the read-only sample mount before creating any file', async () => {
+    const target = '/samples/merged.txt'
+    dialogs.save.mockResolvedValueOnce({ canceled: false, filePath: target })
+
+    const error = await platform.saveFile({ content: 'nope' }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain('只读')
+    expect(message).toContain(target)
+
+    // The sample mount gained nothing: the target is still absent there.
+    await expect(platform.statPath(target)).resolves.toBe('missing')
+    await expect(platform.exists(target)).resolves.toBe(false)
+  })
+
+  it('rejects a rename onto a non-empty directory, leaving it intact and residue-free', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'occupied')
+    await mkdir(target, { recursive: true })
+    await writeFile(join(target, 'keep.txt'), 'original', 'utf8')
+    const before = await entriesOf(root)
+    dialogs.save.mockResolvedValueOnce({ canceled: false, filePath: target })
+
+    const error = await platform.saveFile({ content: 'new body' }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain(target)
+    expect(message).toMatch(/[\u4e00-\u9fff]/)
+    // The temporary file's name never leaks into the user-facing reason.
+    expect(message).not.toContain('.tmp')
+    expect(await entriesOf(target)).toEqual(['keep.txt'])
+    expect(await readFile(join(target, 'keep.txt'), 'utf8')).toBe('original')
+    const after = await entriesOf(root)
+    expect(after).toEqual(before)
+    expect(after.filter((entry) => entry.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('rejects a write into a missing directory without residue', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'missing-dir', 'out.txt')
+    dialogs.save.mockResolvedValueOnce({ canceled: false, filePath: target })
+
+    const error = await platform.saveFile({ content: 'body' }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain(target)
+    expect(message).toMatch(/[\u4e00-\u9fff]/)
+    expect(message).not.toContain('.tmp')
+    expect(await entriesOf(root)).toEqual([])
+  })
+})
+
 /**
  * Real-project acceptance, env-gated so the suite never depends on a machine's
  * absolute paths. Set both variables to compare two real trees:
