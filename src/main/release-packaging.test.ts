@@ -52,7 +52,7 @@ const pendingWord = ['待', '发布'].join('')
 // converged version in package.json. Once a release lands, one wrap-up commit
 // updates both README line 5 and this constant together, so the two are equal
 // right after a wrap-up and may differ by one unreleased version in between.
-const latestPublishedTag = 'v0.2.7'
+const latestPublishedTag = 'v0.2.8'
 // The previous public release. Pinned on its own so flipping the newest anchor
 // never retargets the history assertions below.
 const previousPublishedTag = 'v0.2.6'
@@ -65,6 +65,7 @@ const publishedTags = [
   'v0.2.4',
   'v0.2.5',
   previousPublishedTag,
+  'v0.2.7',
   latestPublishedTag
 ]
 const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
@@ -600,11 +601,10 @@ describe('release version gate', () => {
     for (const line of [readmeStatusLine(readmeEn), readmeStatusLine(readmeZh)]) {
       expect(line).toContain(latestPublishedTag)
     }
-    // The newest published anchor is the shipped tag; it trails the converged
-    // version until the release wrap-up moves README line 5 forward.
+    // The newest published anchor is the shipped tag; it equals the converged
+    // version right after the release wrap-up and may trail it in between.
     expect(publishedTags).toContain(latestPublishedTag)
-    expect(latestPublishedTag).not.toBe(currentTag)
-    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
+    expect(latestPublishedTag).toBe(currentTag)
     expect(isTagBefore(previousPublishedTag, latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, currentTag)).toBe(true)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
@@ -1166,11 +1166,11 @@ describe('release notes changelog', () => {
     expect(changelog).toMatch(/latest\*\.yml/)
   })
 
-  it('orders the current, v0.2.6, v0.2.5, v0.2.4, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
+  it('orders the current, v0.2.7, v0.2.6, v0.2.5, v0.2.4, v0.2.2, v0.2.0 and v0.1.2 entries newest first', () => {
     const current = changelog.indexOf(`## ${currentTag}`)
     // The published anchors are explicit literals, not derived from the current
     // tag, so a version convergence keeps the shipped history in place.
-    const latestPublished = changelog.indexOf(`## ${latestPublishedTag}`)
+    const shippedV027 = changelog.indexOf('## v0.2.7')
     const lastReleased = changelog.indexOf(`## ${previousPublishedTag}`)
     const releasedV025 = changelog.indexOf('## v0.2.5')
     const released = changelog.indexOf('## v0.2.4')
@@ -1178,10 +1178,10 @@ describe('release notes changelog', () => {
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    // The converged version sits above the shipped one; the wrap-up commit
-    // that moves README line 5 forward also makes the two indices equal.
-    expect(latestPublished).toBeGreaterThan(current)
-    expect(lastReleased).toBeGreaterThan(latestPublished)
+    // The converged entry is the released one right after the wrap-up commit;
+    // the shipped entries below stay in their own order.
+    expect(shippedV027).toBeGreaterThan(current)
+    expect(lastReleased).toBeGreaterThan(shippedV027)
     expect(releasedV025).toBeGreaterThan(lastReleased)
     expect(released).toBeGreaterThan(releasedV025)
     expect(previousEntry).toBeGreaterThan(released)
@@ -1217,7 +1217,7 @@ describe('release notes changelog', () => {
 
   it('documents the HTML report export and the Open Rebuilds rename in the current entry', () => {
     const start = changelog.indexOf(`## ${currentTag}`)
-    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    const end = changelog.indexOf('## v0.2.7')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const section = changelog.slice(start, end)
@@ -1245,7 +1245,7 @@ describe('release notes changelog', () => {
   })
 
   it('keeps the bilingual UI and the 9-section README in the v0.2.7 entry as history', () => {
-    const start = changelog.indexOf(`## ${latestPublishedTag}`)
+    const start = changelog.indexOf('## v0.2.7')
     const end = changelog.indexOf(`## ${previousPublishedTag}`)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1314,14 +1314,14 @@ describe('release notes changelog', () => {
   it('drops the never-published entry and adds no fake version heading', () => {
     expect(changelog).not.toMatch(new RegExp(`^## ${ghostTag}`, 'm'))
     const start = changelog.indexOf(`## ${currentTag}`)
-    const end = changelog.indexOf(`## ${previousPublishedTag}`)
+    const end = changelog.indexOf('## v0.2.7')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
       (match) => match[1]
     )
-    // The converged entry and the shipped one; no ghost version in between.
-    expect(headings).toEqual([currentTag, latestPublishedTag])
+    // The converged entry alone; no ghost version in between.
+    expect(headings).toEqual([currentTag])
   })
 
   it('keeps the v0.2.2 changelog entry as history', () => {
@@ -1384,13 +1384,13 @@ describe('release notes changelog', () => {
   })
 
   it('anchors the newest published release notes at the shipped tag', () => {
-    // A version convergence keeps the published notes at the shipped tag while
-    // the converged notes file is already in place for the coming release.
+    // The wrap-up commit lands the shipped notes and the converged notes in the
+    // same file; a convergence in between keeps them apart again.
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
+    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
   })
 
   it('covers the still-public v0.2.2 release notes', () => {
@@ -1481,7 +1481,7 @@ describe('release notes changelog', () => {
 
   it('keeps the v0.2.7 bilingual UI release notes as shipped history', () => {
     expect(existsSync(historicalNotesV027Path)).toBe(true)
-    expect(firstHeading(historicalNotesV027)).toContain(latestPublishedTag)
+    expect(firstHeading(historicalNotesV027)).toContain('v0.2.7')
     for (const phrase of [
       '双语',
       '系统语言',
@@ -1492,7 +1492,7 @@ describe('release notes changelog', () => {
       'README',
       '9 节',
       '升级方式',
-      latestPublishedTag
+      'v0.2.7'
     ]) {
       expect(historicalNotesV027).toContain(phrase)
     }
@@ -1639,14 +1639,22 @@ describe('release document consistency', () => {
 // live in the release evidence record asserted further below.
 const readmeStatusLine = (markdown: string): string => markdown.split(/\r?\n/)[4] ?? ''
 
-// The newest published-asset digests are release-time facts; pinning them here
-// makes a fabricated or hand-edited evidence record fail `pnpm test`.
+// The newest published evidence record is a release-time fact; pinning its
+// anchors here makes a fabricated or hand-edited record fail `pnpm test`.
 const releaseEvidencePath = join(repoRoot, `docs/release-evidence/${latestPublishedTag}.md`)
 const releaseEvidence = existsSync(releaseEvidencePath)
   ? readFileSync(releaseEvidencePath, 'utf8')
   : ''
 
-const publishedEvidenceAssets: Array<[name: string, sha256: string]> = [
+// v0.2.7 shipped before the current release: its evidence record and the 11
+// published digests stay pinned as explicit history instead of following the
+// released anchor.
+const historicalEvidenceV027Path = join(repoRoot, 'docs/release-evidence/v0.2.7.md')
+const historicalEvidenceV027 = existsSync(historicalEvidenceV027Path)
+  ? readFileSync(historicalEvidenceV027Path, 'utf8')
+  : ''
+
+const historicalEvidenceV027Assets: Array<[name: string, sha256: string]> = [
   [
     'OpenCompare-0.2.7-arm64.dmg',
     '4375fe95f5048195e1bcf46513da6291a8363585ed01f6f636ec18845a24e8f5'
@@ -2164,11 +2172,11 @@ describe('v0.2.6 verified release evidence record (historical)', () => {
   })
 })
 
-describe('v0.2.7 verified release evidence record', () => {
+describe('v0.2.7 verified release evidence record (historical)', () => {
   it('exists, is non-empty and declares the verified run identity', () => {
-    expect(existsSync(releaseEvidencePath)).toBe(true)
-    expect(releaseEvidence.trim().length).toBeGreaterThan(0)
-    expect(releaseEvidence).toMatch(/^status:\s*verified$/m)
+    expect(existsSync(historicalEvidenceV027Path)).toBe(true)
+    expect(historicalEvidenceV027.trim().length).toBeGreaterThan(0)
+    expect(historicalEvidenceV027).toMatch(/^status:\s*verified$/m)
     for (const marker of [
       'adc6e1e50b84e211d1e1791a4ae61b6d6ba87d24',
       'e071f876da8cf502728e4d31b2699da8254629d5',
@@ -2180,9 +2188,130 @@ describe('v0.2.7 verified release evidence record', () => {
       'releases/latest',
       '已知遗留'
     ]) {
+      expect(historicalEvidenceV027).toContain(marker)
+    }
+    expect(historicalEvidenceV027).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+  })
+
+  it('lists all five release CI jobs as successful for the tagged commit', () => {
+    const rows = historicalEvidenceV027
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('| '))
+    for (const job of [
+      'Quality gates',
+      'Package win',
+      'Package linux',
+      'Package mac',
+      'Publish the GitHub Release'
+    ]) {
+      const row = rows.find((line) => line.startsWith(`| ${job} |`))
+      expect(row, `missing job row ${job}`).toBeDefined()
+      expect(row).toContain('success')
+    }
+    expect(historicalEvidenceV027).toContain(
+      'headSha `e071f876da8cf502728e4d31b2699da8254629d5`'
+    )
+  })
+
+  it('pins every published asset name, sha256 and public url', () => {
+    expect(historicalEvidenceV027Assets).toHaveLength(11)
+    for (const [name, sha] of historicalEvidenceV027Assets) {
+      expect(historicalEvidenceV027).toContain(`\`${name}\``)
+      expect(historicalEvidenceV027).toContain(sha)
+      expect(historicalEvidenceV027).toContain(
+        `https://github.com/chaxiu/OpenCompare/releases/download/v0.2.7/${name}`
+      )
+    }
+    for (const marker of [
+      'version: 0.2.7',
+      'path: OpenCompare-Setup-0.2.7.exe',
+      '102,964,024'
+    ]) {
+      expect(historicalEvidenceV027).toContain(marker)
+    }
+  })
+
+  it('records the uniqueness, latest gate and notarization markers', () => {
+    for (const marker of [
+      'releases for v0.2.7: 1 (drafts: 0, prereleases: 0)',
+      'latest published release: v0.2.7 (this tag: v0.2.7)',
+      '`releases/latest` = `v0.2.7`',
+      'notarization successful',
+      // The evidence record is shipped history: its bundle version must stay
+      // the released one instead of drifting with package.json.
+      'CFBundleShortVersionString=0.2.7',
+      'com.opencompare.app',
+      'valid on disk',
+      'satisfies its Designated Requirement',
+      'The validate action worked!',
+      'accepted',
+      'source=Notarized Developer ID',
+      historicalEvidenceV027Assets[0][1]
+    ]) {
+      expect(historicalEvidenceV027).toContain(marker)
+    }
+  })
+
+  it('archives the L1 recheck with all four load legs blocked', () => {
+    for (const marker of [
+      'blocked',
+      'ZenMind',
+      'Δ3=2.06 MB',
+      '116 ms',
+      '3,043 / 5,262 / 46,827 / 1,377',
+      '51,247 / 9,682 / 53,466'
+    ]) {
+      expect(historicalEvidenceV027).toContain(marker)
+    }
+    expect(historicalEvidenceV027.match(/blocked/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
+    // The four load legs stay blocked history; the L1 section never claims a
+    // pass. The slice stops at the appended recheck section so the new caliber
+    // wording cannot be misread as an L1 pass.
+    const l1Start = historicalEvidenceV027.indexOf('## 7.')
+    const l1Section = historicalEvidenceV027.slice(
+      l1Start,
+      historicalEvidenceV027.indexOf('## 8.', l1Start)
+    )
+    expect(l1Section).not.toBe('')
+    expect(l1Section).not.toContain('通过')
+  })
+
+  it('keeps the appended recheck and the executable caliber in the history file', () => {
+    for (const marker of [
+      'trun_4ba3dfc950d639e7',
+      '301,311 / 301,300',
+      '8.6 s',
+      '8.1 s',
+      '0 回退',
+      '116 ms',
+      '976 MiB / 1,439 MiB',
+      'size/mtime 快路径已把每对判 modified',
+      '原 §7 的四条负载腿 blocked 结论是历史事实，不据此改写'
+    ]) {
+      expect(historicalEvidenceV027).toContain(marker)
+    }
+  })
+})
+
+describe('v0.2.8 verified release evidence record', () => {
+  it('exists, is non-empty and declares verified exactly once', () => {
+    expect(existsSync(releaseEvidencePath)).toBe(true)
+    expect(releaseEvidence.trim().length).toBeGreaterThan(0)
+    expect(releaseEvidence.match(/^status:\s*verified$/gm)?.length).toBe(1)
+    expect(releaseEvidence.match(/^status:/gm)?.length).toBe(1)
+    for (const marker of [
+      '# v0.2.8 公开 Release 发布证据',
+      'v0.2.8',
+      '356ad044faf3b9b246f89990aaa72033fc2203a5',
+      '40427569024',
+      'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.8',
+      '不重指、不重打'
+    ]) {
       expect(releaseEvidence).toContain(marker)
     }
     expect(releaseEvidence).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(releaseEvidence).not.toContain('待回填')
+    expect(releaseEvidence).not.toMatch(/<[^>\n]+>/)
   })
 
   it('lists all five release CI jobs as successful for the tagged commit', () => {
@@ -2199,68 +2328,113 @@ describe('v0.2.7 verified release evidence record', () => {
       expect(row).toContain('success')
     }
     expect(releaseEvidence).toContain(
-      'headSha `e071f876da8cf502728e4d31b2699da8254629d5`'
+      'headSha `356ad044faf3b9b246f89990aaa72033fc2203a5`'
     )
   })
 
-  it('pins every published asset name, sha256 and public url', () => {
-    expect(publishedEvidenceAssets).toHaveLength(11)
-    for (const [name, sha] of publishedEvidenceAssets) {
+  it('pins the eleven asset names and public urls with only the dmg measured', () => {
+    const dmgSha = '2917a65b93368b717d610770c6ef19ef7557b1bd953c9e2161fa5a7c03729458'
+    const assetNames = [
+      'OpenCompare-0.2.8-arm64.dmg',
+      'OpenCompare-0.2.8-arm64.dmg.blockmap',
+      'OpenCompare-0.2.8-arm64-mac.zip',
+      'OpenCompare-0.2.8-arm64-mac.zip.blockmap',
+      'OpenCompare-Setup-0.2.8.exe',
+      'OpenCompare-Setup-0.2.8.exe.blockmap',
+      'OpenCompare-0.2.8.AppImage',
+      'opencompare_0.2.8_amd64.deb',
+      'latest.yml',
+      'latest-mac.yml',
+      'latest-linux.yml'
+    ]
+    expect(assetNames).toHaveLength(11)
+    for (const name of assetNames) {
       expect(releaseEvidence).toContain(`\`${name}\``)
-      expect(releaseEvidence).toContain(sha)
       expect(releaseEvidence).toContain(
-        `https://github.com/chaxiu/OpenCompare/releases/download/${latestPublishedTag}/${name}`
+        `https://github.com/chaxiu/OpenCompare/releases/download/v0.2.8/${name}`
       )
     }
-    for (const marker of [
-      'version: 0.2.7',
-      'path: OpenCompare-Setup-0.2.7.exe',
-      '102,964,024'
-    ]) {
-      expect(releaseEvidence).toContain(marker)
-    }
+    expect(releaseEvidence).toContain('113,437,237 B')
+    expect(releaseEvidence).toContain(dmgSha)
+    // Only the dmg carries a measured size / digest; every other asset row
+    // points at the release-time evidence instead of inventing numbers.
+    expect(releaseEvidence.match(/[0-9a-f]{64}/g)).toEqual([dmgSha])
+    expect(releaseEvidence.match(/\b[\d,]{6,} B\b/g) ?? []).toEqual(['113,437,237 B'])
+    expect(releaseEvidence.match(/见发布期证据/g)?.length ?? 0).toBeGreaterThanOrEqual(10)
   })
 
-  it('records the uniqueness, latest gate and notarization markers', () => {
-    for (const marker of [
-      `releases for ${latestPublishedTag}: 1 (drafts: 0, prereleases: 0)`,
-      `latest published release: ${latestPublishedTag} (this tag: ${latestPublishedTag})`,
-      `\`releases/latest\` = \`${latestPublishedTag}\``,
-      'notarization successful',
-      // The evidence record is shipped history: its bundle version must stay
-      // the released one instead of drifting with package.json.
-      'CFBundleShortVersionString=0.2.7',
-      'com.opencompare.app',
+  it('leaves the fields the release-time evidence did not hand over unrecorded', () => {
+    // The record must not invent a release id, a publish timestamp, a tag
+    // object sha, notarization transcripts or the other ten asset digests.
+    for (const banned of [
+      'published_at',
+      'Release id',
       'valid on disk',
       'satisfies its Designated Requirement',
       'The validate action worked!',
+      'stapler',
+      'spctl',
       'accepted',
-      'source=Notarized Developer ID',
-      publishedEvidenceAssets[0][1]
+      'Notarized Developer ID'
+    ]) {
+      expect(releaseEvidence).not.toContain(banned)
+    }
+    // The commit is the only full 40-hex identity the record may carry; a tag
+    // object sha would be a second one.
+    expect([...new Set(releaseEvidence.match(/\b[0-9a-f]{40}\b/g) ?? [])]).toEqual([
+      '356ad044faf3b9b246f89990aaa72033fc2203a5'
+    ])
+  })
+
+  it('archives the L1 recheck as zero failures and the load comparison', () => {
+    const l1Start = releaseEvidence.indexOf('## 7.')
+    const l1Section = releaseEvidence.slice(l1Start, releaseEvidence.indexOf('## 8.', l1Start))
+    expect(l1Start).toBeGreaterThan(-1)
+    expect(l1Section).toContain('trun_e9d687a57b51de6f')
+    expect(l1Section).toContain('零失败')
+
+    for (const marker of [
+      'trun_ecbdd72beef29b0a',
+      '35.8 万',
+      '32.6 万',
+      '8,262 ms',
+      '7,898 ms',
+      '3 条采样 0 回退',
+      '取消 116 ms',
+      '零残留',
+      '855.5 MiB',
+      '1,310.4 MiB',
+      'v0.2.7 已实测同一管线，本场为对照复测',
+      'size/mtime',
+      '元数据扫描管线',
+      'hash 管线',
+      'trun_4ba3dfc950d639e7'
     ]) {
       expect(releaseEvidence).toContain(marker)
     }
   })
 
-  it('archives the L1 recheck with all four load legs blocked', () => {
-    for (const marker of [
-      'blocked',
-      'ZenMind',
-      'Δ3=2.06 MB',
-      '116 ms',
-      '3,043 / 5,262 / 46,827 / 1,377',
-      '51,247 / 9,682 / 53,466'
-    ]) {
-      expect(releaseEvidence).toContain(marker)
+  it('never claims a pass from section 7 onwards', () => {
+    const tail = releaseEvidence.slice(releaseEvidence.indexOf('## 7.'))
+    expect(tail).not.toBe('')
+    expect(tail).not.toContain('通过')
+  })
+
+  it('writes the same executable caliber into both evidence records', () => {
+    const caliber = [
+      '**冷跑在 180 s 内完成**。',
+      '**取消在进度出现后的任意时点可点且回退干净（无半棵树 / 无残留四态 / 异常计数 0）**。',
+      '**专用大磁盘机器（≥60 GB/侧）**',
+      '公司负责人裁定的口径变更',
+      '不再逐版记 blocked'
+    ]
+    for (const doc of [releaseEvidence, historicalEvidenceV027]) {
+      for (const phrase of caliber) {
+        expect(doc).toContain(phrase)
+      }
     }
-    expect(releaseEvidence.match(/blocked/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
-    // The four load legs stay blocked; the L1 section never claims a pass.
-    const l1Section = releaseEvidence.slice(releaseEvidence.indexOf('## 7.'))
-    expect(l1Section).not.toBe('')
-    expect(l1Section).not.toContain('通过')
   })
 })
-
 // ---------------------------------------------------------------------------
 // Brand icon assets (self-made, replaceable) and their packaging / runtime wiring
 // ---------------------------------------------------------------------------
