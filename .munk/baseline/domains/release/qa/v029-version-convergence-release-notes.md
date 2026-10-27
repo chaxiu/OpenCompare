@@ -29,8 +29,7 @@
 
 ## 最近执行
 
-- 时间：2026-10-27（同 WI code_gates attempt 001）
-- 九门：install 0 / lint 0 / typecheck 0 / build 0 / build-web 0 / test 0 / test-compare-request 0 / cancel-gate 0 / memory-gate 0
-- `pnpm test`：62 files / 1011 passed + 1 skipped / 1012；`src/main/release-packaging.test.ts` 185 用例、`src/main/release-evidence.test.ts` 34 用例均绿
-- 证据路径：`.munk/runs/run_ws_d22d1533781453d4/code-gates/attempts/001/manifest.json`
-- 本 WI `needSelfTest=false`，UI 自测跳过；无 tag / push / dispatch / 打包 / 公证动作（非目标）
+- workItemId: wi_ws_e412c1de377c9e45
+- at: 2026-10-27
+- status: pass
+- note: 本轮 `needSelfTest=false`，跳过 UI 自测，以 Host `code_gates` 为交付门槛（9 gates attempt 001 全绿，`.munk/runs/run_ws_d22d1533781453d4/code-gates/attempts/001`；`pnpm test` 62 files / 1011 passed + 1 skipped / 1012，`src/main/release-packaging.test.ts` 185 用例、`src/main/release-evidence.test.ts` 34 用例全绿）。静态核对：`git diff --numstat` = `package.json` +1/−1、`CHANGELOG.md` +21、`docs/release-process.md` +1/−1、`docs/release-signing.md` +2/−1、`.github/workflows/release.yml` +1/−1、`src/main/release-packaging.test.ts` +68/−7，外加新增 `docs/release-notes/v0.2.9.md`——恰为 prd 允许集合。锚点翻面已落实：`latestPublishedTag` 仍显式 `v0.2.8`，版本门 `not.toBe(currentTag)` + `isTagBefore(latestPublishedTag, currentTag)`，CHANGELOG 当前段切片终点与 notes 路径断言同步改为「不相等」。边界：未打 tag、未 push、未 dispatch、未打包 / 公证，未改两版 README、`docs/release-evidence/**`、`src/**` 其它文件与依赖 / 脚本。
