@@ -3,15 +3,20 @@ import { describe, expect, it } from 'vitest'
 import { htmlLang } from '@renderer/i18n/htmlLang'
 import { APP_VERSION } from '@shared/appVersion'
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from './compare'
+import { OperationCancelledError } from '../io'
 import {
+  DIRECTORY_REPORT_CHUNK_ROWS,
   DIRECTORY_REPORT_MAX_BYTES,
   DIRECTORY_REPORT_MAX_ROWS,
   buildDirectoryReport,
+  buildDirectoryReportAsync,
   directoryReportSource
 } from './report'
 import type {
   DirectoryReport,
+  DirectoryReportAsyncOptions,
   DirectoryReportInput,
+  DirectoryReportProgress,
   DirectoryReportRow,
   DirectoryReportSource,
   DirectoryReportStrings
@@ -90,10 +95,10 @@ interface BuildOptions {
   readonly maxBytes?: number
 }
 
-function build(options: BuildOptions = {}): DirectoryReport {
+function makeInput(options: BuildOptions = {}): DirectoryReportInput {
   const source = makeSource(options.rows, options.totalRows, options.source)
   const strings: DirectoryReportStrings = { ...STRINGS, ...options.strings }
-  const input: DirectoryReportInput = {
+  return {
     source,
     strings,
     htmlLang: options.htmlLang ?? 'zh-CN',
@@ -103,7 +108,17 @@ function build(options: BuildOptions = {}): DirectoryReport {
     maxRows: options.maxRows,
     maxBytes: options.maxBytes
   }
-  return buildDirectoryReport(input)
+}
+
+function build(options: BuildOptions = {}): DirectoryReport {
+  return buildDirectoryReport(makeInput(options))
+}
+
+function buildAsync(
+  options: BuildOptions = {},
+  asyncOptions?: DirectoryReportAsyncOptions
+): Promise<DirectoryReport> {
+  return buildDirectoryReportAsync(makeInput(options), asyncOptions)
 }
 
 function parse(html: string): Document {
@@ -621,5 +636,491 @@ describe('directoryReportSource', () => {
     expect(seen[9]?.relativePath).toBe('d8')
     expect(elementReads).toBeLessThanOrEqual(10)
     expect(childrenAccesses).toBeLessThanOrEqual(10)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Async entry, chunking, cancellation and real-constant boundaries            */
+/* -------------------------------------------------------------------------- */
+
+const EN_STRINGS: DirectoryReportStrings = {
+  title: 'Directory comparison report',
+  privacyNotice: 'Generated locally — review paths before sharing',
+  generatedAt: 'Generated at',
+  appVersion: 'App version',
+  leftRoot: 'Left root',
+  rightRoot: 'Right root',
+  limits: 'Limits',
+  scopeAll: 'Scope: all entries (ignores the current filter)',
+  countsHeading: 'Counts by status',
+  status: { same: 'Same', added: 'Added', removed: 'Removed', modified: 'Modified' },
+  columns: { path: 'Path', leftSize: 'Left size', rightSize: 'Right size', status: 'Status' },
+  truncated: 'Showing {shown} of {total} (truncated)',
+  truncatedHint: 'The subtree at the cut-off point is incomplete; open the app locally for the full list.',
+  empty: 'Nothing to show.'
+}
+
+const encoder = new TextEncoder()
+
+function* sampleRows(
+  count: number,
+  counter: { produced: number }
+): Generator<DirectoryReportRow> {
+  for (let index = 0; index < count; index += 1) {
+    counter.produced += 1
+    yield makeRow({ name: 'a', relativePath: 'a', depth: 0, leftSize: 1, rightSize: 1 })
+  }
+}
+
+function expectSameReport(actual: DirectoryReport, expected: DirectoryReport): void {
+  expect(actual.html).toBe(expected.html)
+  expect(actual.bytes).toBe(expected.bytes)
+  expect(actual.totalRows).toBe(expected.totalRows)
+  expect(actual.shownRows).toBe(expected.shownRows)
+  expect(actual.truncatedRows).toBe(expected.truncatedRows)
+  expect(actual.truncated).toBe(expected.truncated)
+}
+
+describe('buildDirectoryReportAsync', () => {
+  it('renders the same document as the sync driver', async () => {
+    const cases: (() => BuildOptions)[] = [
+      () => ({ rows: DEFAULT_ROWS, totalRows: DEFAULT_ROWS.length, hideLocalPaths: true }),
+      () => ({ rows: DEFAULT_ROWS, totalRows: DEFAULT_ROWS.length, hideLocalPaths: false }),
+      () => ({
+        rows: DEFAULT_ROWS,
+        totalRows: DEFAULT_ROWS.length,
+        strings: EN_STRINGS,
+        htmlLang: 'en'
+      }),
+      () => ({ rows: [], totalRows: 0 }),
+      () => ({ rows: [], totalRows: 0, strings: EN_STRINGS, htmlLang: 'en', hideLocalPaths: false }),
+      () => ({ rows: sampleRows(9_000, { produced: 0 }), totalRows: 9_000, strings: EN_STRINGS })
+    ]
+    for (const makeCase of cases) {
+      expectSameReport(await buildAsync(makeCase()), build(makeCase()))
+    }
+  })
+
+  it('reports the source total and the exact pulled count once per chunk', async () => {
+    expect(DIRECTORY_REPORT_CHUNK_ROWS).toBe(4_000)
+
+    const counter = { produced: 0 }
+    const progress: DirectoryReportProgress[] = []
+    const pulledAtCallback: number[] = []
+    const result = await buildAsync(
+      { rows: sampleRows(DIRECTORY_REPORT_MAX_ROWS, counter), totalRows: DIRECTORY_REPORT_MAX_ROWS },
+      {
+        onProgress: (entry) => {
+          progress.push(entry)
+          pulledAtCallback.push(counter.produced)
+        }
+      }
+    )
+
+    expect(result.shownRows).toBe(DIRECTORY_REPORT_MAX_ROWS)
+    expect(counter.produced).toBe(DIRECTORY_REPORT_MAX_ROWS)
+    expect(progress.length).toBeGreaterThanOrEqual(2)
+    expect(progress.length).toBeLessThanOrEqual(
+      Math.ceil(counter.produced / DIRECTORY_REPORT_CHUNK_ROWS) + 1
+    )
+    for (const entry of progress) expect(entry.totalRows).toBe(DIRECTORY_REPORT_MAX_ROWS)
+    for (const [index, entry] of progress.entries()) {
+      expect(entry.processedRows).toBe(pulledAtCallback[index])
+      if (index > 0) {
+        expect(entry.processedRows).toBeGreaterThan(progress[index - 1]!.processedRows)
+      }
+    }
+    expect(progress[progress.length - 1]?.processedRows).toBe(counter.produced)
+  })
+
+  it('lets other macrotasks run before the generation promise settles', async () => {
+    const order: string[] = []
+    const timer = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        order.push('timer')
+        resolve()
+      }, 0)
+    })
+
+    const result = await buildAsync({
+      rows: sampleRows(DIRECTORY_REPORT_MAX_ROWS, { produced: 0 }),
+      totalRows: DIRECTORY_REPORT_MAX_ROWS
+    })
+    order.push('done')
+    await timer
+
+    expect(order).toEqual(['timer', 'done'])
+    expect(result.shownRows).toBe(DIRECTORY_REPORT_MAX_ROWS)
+  })
+
+  it('rejects with OperationCancelledError when aborted between chunks', async () => {
+    const controller = new AbortController()
+    const counter = { produced: 0 }
+    const progress: DirectoryReportProgress[] = []
+    const pulledAtAbort = { value: -1 }
+
+    const generation = buildAsync(
+      { rows: sampleRows(12_000, counter), totalRows: 12_000 },
+      {
+        signal: controller.signal,
+        onProgress: (entry) => {
+          progress.push(entry)
+          if (progress.length === 1) {
+            pulledAtAbort.value = counter.produced
+            controller.abort()
+          }
+        }
+      }
+    )
+
+    const error: unknown = await generation.then(
+      () => null,
+      (reason: unknown) => reason
+    )
+    expect(error).toBeInstanceOf(OperationCancelledError)
+    expect((error as OperationCancelledError).name).toBe('OperationCancelledError')
+    expect((error as OperationCancelledError).code).toBe('ECANCELED')
+    expect(counter.produced - pulledAtAbort.value).toBeLessThanOrEqual(
+      DIRECTORY_REPORT_CHUNK_ROWS
+    )
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10)
+    })
+    expect(progress).toHaveLength(1)
+
+    // No module-level state survives a cancel: the next export is complete.
+    const again = await buildAsync({ rows: DEFAULT_ROWS, totalRows: DEFAULT_ROWS.length })
+    expect(again.truncated).toBe(false)
+    expect(again.shownRows).toBe(DEFAULT_ROWS.length)
+    expect(again.html.endsWith('</table></main></body></html>')).toBe(true)
+  })
+
+  it('rejects an already-aborted signal without pulling any row', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const counter = { produced: 0 }
+
+    const error: unknown = await buildAsync(
+      { rows: sampleRows(10, counter), totalRows: 10 },
+      { signal: controller.signal }
+    ).then(
+      () => null,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(OperationCancelledError)
+    expect(counter.produced).toBe(0)
+  })
+})
+
+describe('real-constant row cap boundaries', () => {
+  it('does not truncate exactly at the row cap in either entry', async () => {
+    const syncCounter = { produced: 0 }
+    const asyncCounter = { produced: 0 }
+    const sync = build({
+      rows: sampleRows(DIRECTORY_REPORT_MAX_ROWS, syncCounter),
+      totalRows: DIRECTORY_REPORT_MAX_ROWS
+    })
+    const asyncResult = await buildAsync({
+      rows: sampleRows(DIRECTORY_REPORT_MAX_ROWS, asyncCounter),
+      totalRows: DIRECTORY_REPORT_MAX_ROWS
+    })
+
+    expect(syncCounter.produced).toBe(DIRECTORY_REPORT_MAX_ROWS)
+    expect(asyncCounter.produced).toBe(DIRECTORY_REPORT_MAX_ROWS)
+    expectSameReport(asyncResult, sync)
+    for (const result of [sync, asyncResult]) {
+      expect(result.truncated).toBe(false)
+      expect(result.shownRows).toBe(DIRECTORY_REPORT_MAX_ROWS)
+      expect(result.truncatedRows).toBe(0)
+      expect(result.totalRows).toBe(DIRECTORY_REPORT_MAX_ROWS)
+      expect(result.html).not.toContain('（已截断）')
+      expect(result.html).not.toContain(STRINGS.truncatedHint)
+      expect(result.bytes).toBe(encoder.encode(result.html).length)
+      expect(result.bytes).toBeLessThanOrEqual(DIRECTORY_REPORT_MAX_BYTES)
+    }
+  })
+
+  it('truncates one row over the row cap in either entry', async () => {
+    const total = DIRECTORY_REPORT_MAX_ROWS + 1
+    const sync = build({ rows: sampleRows(total, { produced: 0 }), totalRows: total })
+    const asyncResult = await buildAsync({ rows: sampleRows(total, { produced: 0 }), totalRows: total })
+
+    expectSameReport(asyncResult, sync)
+    for (const result of [sync, asyncResult]) {
+      expect(result.truncated).toBe(true)
+      expect(result.shownRows).toBe(DIRECTORY_REPORT_MAX_ROWS)
+      expect(result.truncatedRows).toBe(1)
+      expect(result.totalRows).toBe(total)
+      expect(result.shownRows + result.truncatedRows).toBe(result.totalRows)
+      expect(result.html).toContain(`已展示 ${DIRECTORY_REPORT_MAX_ROWS} / 原始 ${total}（已截断）`)
+      expect(countOf(result.html, STRINGS.truncatedHint)).toBe(1)
+      expect(countOf(result.html, '<tr>') - 1).toBe(result.shownRows)
+      expect(result.bytes).toBeLessThanOrEqual(DIRECTORY_REPORT_MAX_BYTES)
+    }
+  })
+})
+
+describe('real-constant byte cap boundaries', () => {
+  const rows = 25_000
+  const basePathLength = 320
+
+  function paddedRows(input: {
+    readonly count: number
+    readonly base: number
+    readonly extraPerRow: number
+    readonly extraRows: number
+  }): Iterable<DirectoryReportRow> {
+    return (function* (): Generator<DirectoryReportRow> {
+      for (let index = 0; index < input.count; index += 1) {
+        const padding = input.base + input.extraPerRow + (index < input.extraRows ? 1 : 0)
+        yield makeRow({
+          name: 'f.ll',
+          relativePath: `deep/${'x'.repeat(padding)}`,
+          depth: 2,
+          status: 'modified',
+          leftSize: 1,
+          rightSize: 2
+        })
+      }
+    })()
+  }
+
+  /**
+   * Two fresh inputs whose final document is exactly the byte cap, or one byte
+   * over it. The gap is closed by padding row paths, never by touching the cap.
+   */
+  function exactByteInputs(overshoot: number): readonly DirectoryReportInput[] {
+    const base = build({
+      rows: paddedRows({ count: rows, base: basePathLength, extraPerRow: 0, extraRows: 0 }),
+      totalRows: rows
+    })
+    expect(base.truncated).toBe(false)
+    const shortfall = DIRECTORY_REPORT_MAX_BYTES + overshoot - base.bytes
+    expect(shortfall).toBeGreaterThan(rows)
+    const extraPerRow = Math.floor(shortfall / rows)
+    const extraRows = shortfall % rows
+    const makeOne = (): DirectoryReportInput =>
+      makeInput({
+        rows: paddedRows({ count: rows, base: basePathLength, extraPerRow, extraRows }),
+        totalRows: rows
+      })
+    return [makeOne(), makeOne()]
+  }
+
+  it('does not truncate a document that is exactly the byte cap', async () => {
+    const [syncInput, asyncInput] = exactByteInputs(0)
+    const sync = buildDirectoryReport(syncInput)
+    const asyncResult = await buildDirectoryReportAsync(asyncInput)
+
+    expect(sync.bytes).toBe(DIRECTORY_REPORT_MAX_BYTES)
+    expectSameReport(asyncResult, sync)
+    for (const result of [sync, asyncResult]) {
+      expect(result.truncated).toBe(false)
+      expect(result.shownRows).toBe(rows)
+      expect(result.truncatedRows).toBe(0)
+      expect(result.html).not.toContain('（已截断）')
+      expect(result.html).not.toContain(STRINGS.truncatedHint)
+      expect(result.html.endsWith('</table></main></body></html>')).toBe(true)
+      expect(encoder.encode(result.html).length).toBe(DIRECTORY_REPORT_MAX_BYTES)
+    }
+  })
+
+  it('truncates one byte over the byte cap and keeps the document closed', async () => {
+    const [syncInput, asyncInput] = exactByteInputs(1)
+    const sync = buildDirectoryReport(syncInput)
+    const asyncResult = await buildDirectoryReportAsync(asyncInput)
+
+    expectSameReport(asyncResult, sync)
+    for (const result of [sync, asyncResult]) {
+      expect(result.truncated).toBe(true)
+      expect(result.bytes).toBeLessThanOrEqual(DIRECTORY_REPORT_MAX_BYTES)
+      expect(result.totalRows).toBe(rows)
+      expect(result.shownRows).toBeLessThan(result.totalRows)
+      expect(result.shownRows + result.truncatedRows).toBe(result.totalRows)
+      expect(result.html.endsWith('</table></main></body></html>')).toBe(true)
+      expect(countOf(result.html, '<tr>') - 1).toBe(result.shownRows)
+      expect(result.html).toContain(`已展示 ${result.shownRows} / 原始 ${rows}（已截断）`)
+      expect(countOf(result.html, STRINGS.truncatedHint)).toBe(1)
+      expect(encoder.encode(result.html).length).toBe(result.bytes)
+    }
+  })
+})
+
+describe('300k-scale lazy sources', () => {
+  const worstPath = `packages/llvm-project/llvm/lib/Target/AMDGPU/gfx90a/${'y'.repeat(180)}/module.ll`
+
+  function* worstCaseRows(
+    count: number,
+    counter: { produced: number }
+  ): Generator<DirectoryReportRow> {
+    for (let index = 0; index < count; index += 1) {
+      counter.produced += 1
+      yield makeRow({
+        name: `module-${index}.ll`,
+        relativePath: worstPath,
+        depth: 6,
+        status: 'modified',
+        leftSize: 1024,
+        rightSize: 2048
+      })
+    }
+  }
+
+  it(
+    'keeps the real 358k worst case inside both caps and keeps the original total',
+    async () => {
+      for (const total of [358_156, 358_209]) {
+        const syncCounter = { produced: 0 }
+        const asyncCounter = { produced: 0 }
+        const sync = build({
+          rows: worstCaseRows(total - 1, syncCounter),
+          totalRows: total
+        })
+        const asyncResult = await buildAsync({
+          rows: worstCaseRows(total - 1, asyncCounter),
+          totalRows: total
+        })
+
+        expectSameReport(asyncResult, sync)
+        for (const [result, counter] of [
+          [sync, syncCounter],
+          [asyncResult, asyncCounter]
+        ] as const) {
+          expect(result.totalRows).toBe(total)
+          expect(result.truncated).toBe(true)
+          expect(result.bytes).toBeLessThanOrEqual(DIRECTORY_REPORT_MAX_BYTES)
+          expect(result.shownRows).toBeLessThanOrEqual(DIRECTORY_REPORT_MAX_ROWS)
+          expect(result.shownRows).toBeGreaterThan(0)
+          expect(result.shownRows + result.truncatedRows).toBe(total)
+          expect(counter.produced).toBeLessThanOrEqual(DIRECTORY_REPORT_MAX_ROWS)
+          expect(result.html).toContain(`已展示 ${result.shownRows} / 原始 ${total}（已截断）`)
+          expect(result.html.endsWith('</table></main></body></html>')).toBe(true)
+          expect(countOf(result.html, '<tr>') - 1).toBe(result.shownRows)
+          expect(encoder.encode(result.html).length).toBe(result.bytes)
+        }
+      }
+    },
+    60_000
+  )
+})
+
+describe('single-pass, non-retentive generation', () => {
+  function countingIterable(
+    rows: readonly DirectoryReportRow[],
+    state: { iterators: number; pulls: number }
+  ): Iterable<DirectoryReportRow> {
+    return {
+      [Symbol.iterator](): Iterator<DirectoryReportRow> {
+        state.iterators += 1
+        let index = 0
+        return {
+          next(): IteratorResult<DirectoryReportRow> {
+            if (index >= rows.length) return { done: true, value: undefined }
+            const value = rows[index] as DirectoryReportRow
+            index += 1
+            state.pulls += 1
+            return { done: false, value }
+          }
+        }
+      }
+    }
+  }
+
+  const rows = Array.from({ length: 11 }, (_, index) =>
+    makeRow({ name: `f${index}`, relativePath: `f${index}` })
+  )
+  const keys = ['html', 'bytes', 'totalRows', 'shownRows', 'truncatedRows', 'truncated']
+
+  it('pulls one iterator once and never reads past the document', async () => {
+    const syncState = { iterators: 0, pulls: 0 }
+    const sync = build({
+      rows: countingIterable(rows, syncState),
+      totalRows: rows.length
+    })
+    expect(syncState).toEqual({ iterators: 1, pulls: rows.length })
+    expect(sync.shownRows).toBe(rows.length)
+
+    const asyncState = { iterators: 0, pulls: 0 }
+    const asyncResult = await buildAsync({
+      rows: countingIterable(rows, asyncState),
+      totalRows: rows.length
+    })
+    expect(asyncState).toEqual({ iterators: 1, pulls: rows.length })
+    expectSameReport(asyncResult, sync)
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10)
+    })
+    expect(syncState.pulls).toBe(rows.length)
+    expect(asyncState.pulls).toBe(rows.length)
+  })
+
+  it('returns only scalars and the document, never row objects', async () => {
+    const sync = build({ rows, totalRows: rows.length })
+    expect(Object.keys(sync)).toEqual(keys)
+    expect(Object.keys(await buildAsync({ rows, totalRows: rows.length }))).toEqual(keys)
+  })
+
+  it('generates from a deeply frozen comparison without copying or mutating it', async () => {
+    function deepFreeze<T>(value: T): T {
+      if (value !== null && typeof value === 'object') {
+        for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child)
+        Object.freeze(value)
+      }
+      return value
+    }
+
+    const frozen = deepFreeze({
+      root: {
+        name: 'root',
+        relativePath: '',
+        kind: 'directory' as const,
+        status: 'same' as const,
+        children: [
+          {
+            name: 'a.ts',
+            relativePath: 'a.ts',
+            kind: 'file' as const,
+            status: 'modified' as const,
+            children: [],
+            counts: { same: 0, added: 0, removed: 0, modified: 1 },
+            leftSize: 1,
+            rightSize: 2
+          }
+        ],
+        counts: { same: 1, added: 0, removed: 0, modified: 1 }
+      },
+      leftRoot: '/Users/alice/work/left',
+      rightRoot: '/Users/alice/work/right',
+      leftName: 'left',
+      rightName: 'right',
+      counts: { same: 1, added: 0, removed: 0, modified: 1 },
+      fileCount: 1,
+      leftSkipped: 0,
+      rightSkipped: 0,
+      skipped: 0
+    }) satisfies DirectoryComparison
+    const snapshot = JSON.stringify(frozen)
+
+    const syncSource = directoryReportSource(frozen)
+    expect(syncSource.totalRows).toBe(2)
+    expect(Array.isArray(syncSource.rows)).toBe(false)
+
+    const sync = build({
+      rows: syncSource.rows,
+      totalRows: syncSource.totalRows,
+      source: { counts: frozen.counts }
+    })
+    const asyncResult = await buildAsync({
+      rows: directoryReportSource(frozen).rows,
+      totalRows: frozen.root.children.length + 1,
+      source: { counts: frozen.counts }
+    })
+
+    expectSameReport(asyncResult, sync)
+    expect(sync.totalRows).toBe(2)
+    expect(JSON.stringify(frozen)).toBe(snapshot)
   })
 })

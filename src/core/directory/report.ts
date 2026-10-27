@@ -18,12 +18,20 @@
  */
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from './compare'
 import { FILE_DIFF_STATUSES } from './compare'
+import { throwIfAborted } from '../io'
 
 /** Data rows (`<tr>`) one report may carry. */
 export const DIRECTORY_REPORT_MAX_ROWS = 200_000
 
 /** UTF-8 bytes of the final document, measured with `TextEncoder`. */
 export const DIRECTORY_REPORT_MAX_BYTES = 10_000_000
+
+/**
+ * Rows pulled and rendered between two event-loop yields of the async entry.
+ * Small enough that a 358k-row tree never blocks a frame, large enough that the
+ * per-chunk overhead disappears next to the row rendering.
+ */
+export const DIRECTORY_REPORT_CHUNK_ROWS = 4_000
 
 /** One tree-table row; produced lazily from a comparison tree. */
 export interface DirectoryReportRow {
@@ -92,6 +100,19 @@ export interface DirectoryReport {
   readonly shownRows: number
   readonly truncatedRows: number
   readonly truncated: boolean
+}
+
+/** Scalar-only progress; the UI throttles how often it paints it. */
+export interface DirectoryReportProgress {
+  /** Rows pulled from the source so far (the row source is never read ahead). */
+  readonly processedRows: number
+  /** The source's own total, so the UI can show "processed / total". */
+  readonly totalRows: number
+}
+
+export interface DirectoryReportAsyncOptions {
+  readonly signal?: AbortSignal
+  readonly onProgress?: (progress: DirectoryReportProgress) => void
 }
 
 /* -------------------------------------------------------------------------- */
@@ -363,93 +384,196 @@ function normalizeTotal(value: number): number {
 }
 
 /**
- * Renders one directory report. The row source is consumed at most `maxRows`
- * times; the byte cap is then applied by rolling back to the last row whose
- * complete document (including the truncation notice) still fits.
+ * One document being built. Rows are pulled and rendered chunk by chunk; only
+ * the needed HTML fragments (bounded by the byte cap) are kept, never the
+ * `DirectoryReportRow` objects. Both public entries drive this same pass, so
+ * escaping, privacy, caps, rollback and document assembly exist exactly once.
  */
-export function buildDirectoryReport(input: DirectoryReportInput): DirectoryReport {
+interface ReportPass {
+  /** Renders the next chunk in place; `false` when the source is spent or capped. */
+  readonly pullChunk: () => boolean
+  /** Rows pulled from the source so far. */
+  readonly pulledRows: () => number
+  /** Drops every fragment, so a cancelled pass retains nothing. */
+  readonly release: () => void
+  readonly finish: () => DirectoryReport
+}
+
+function nextMacrotask(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 0)
+  })
+}
+
+function assembleDocument(
+  prefix: string,
+  fragments: readonly string[],
+  shown: number,
+  suffix: string
+): string {
+  const parts: string[] = [prefix]
+  for (let index = 0; index < shown; index += 1) parts.push(fragments[index] ?? '')
+  parts.push(suffix)
+  return parts.join('')
+}
+
+function createReportPass(input: DirectoryReportInput): ReportPass {
   const { source, strings } = input
   const maxRows = normalizeLimit(input.maxRows, DIRECTORY_REPORT_MAX_ROWS)
   const maxBytes = normalizeLimit(input.maxBytes, DIRECTORY_REPORT_MAX_BYTES)
   const encoder = new TextEncoder()
 
-  const collected: DirectoryReportRow[] = []
-  let exhausted = false
-  const iterator = source.rows[Symbol.iterator]()
-  while (collected.length < maxRows) {
-    const next = iterator.next()
-    if (next.done === true) {
-      exhausted = true
-      break
-    }
-    collected.push(next.value)
-  }
-
-  // The caller's total is a promise, not a fact: when the source ends early we
-  // trust what it produced, and when it promised fewer rows we drop the excess.
-  let total = normalizeTotal(source.totalRows)
-  if (exhausted && collected.length < total) total = collected.length
-  if (collected.length > total) collected.length = total
-
-  const empty = total === 0
-  const context: DocumentContext = {
-    strings,
-    source,
-    htmlLang: input.htmlLang,
-    generatedAt: input.generatedAt,
-    appVersion: input.appVersion,
-    roots: resolveReportRoots(source.leftRoot, source.rightRoot, input.hideLocalPaths),
-    maxRows,
-    maxBytes,
-    empty,
-    total
-  }
-
+  /** Row fragments only; no row object outlives the chunk it was pulled in. */
   const rowHtml: string[] = []
-  for (const row of collected) rowHtml.push(renderRow(row, strings))
+  /** Cumulative UTF-8 bytes of `rowHtml`, used by the byte-cap rollback. */
+  const rowBytes: number[] = []
+  let cumulativeBytes = 0
+  let iterator: Iterator<DirectoryReportRow> | undefined
+  let exhausted = false
+  let stopped = false
 
-  const suffix = renderSuffix(empty)
-  const suffixBytes = encoder.encode(suffix).length
-  let shown = rowHtml.length
-  let prefix = renderPrefix(context, shown)
-  const wholeBytes =
-    encoder.encode(prefix).length + encoder.encode(rowHtml.join('')).length + suffixBytes
+  function release(): void {
+    stopped = true
+    iterator = undefined
+    rowHtml.length = 0
+    rowBytes.length = 0
+    cumulativeBytes = 0
+  }
 
-  if (wholeBytes > maxBytes) {
-    // Only the byte-capped path needs per-row weights; the row-capped path
-    // stays at one encode of the whole document.
-    const rowPrefixBytes: number[] = []
-    let cumulativeBytes = 0
-    for (const html of rowHtml) {
+  function pullChunk(): boolean {
+    if (stopped) return false
+    iterator ??= source.rows[Symbol.iterator]()
+    const start = rowHtml.length
+    const boundary = Math.min(start + DIRECTORY_REPORT_CHUNK_ROWS, maxRows)
+    while (rowHtml.length < boundary) {
+      // Rows past the byte cap can never fit, so a 358k-row tree is never pulled
+      // further than the document could ever show.
+      if (cumulativeBytes > maxBytes) {
+        stopped = true
+        break
+      }
+      const next = iterator.next()
+      if (next.done === true) {
+        // The caller's total is a promise, not a fact: remember that the source
+        // ended early so `finish` can trust what it produced.
+        exhausted = true
+        stopped = true
+        break
+      }
+      const html = renderRow(next.value, strings)
       cumulativeBytes += encoder.encode(html).length
-      rowPrefixBytes.push(cumulativeBytes)
+      rowHtml.push(html)
+      rowBytes.push(cumulativeBytes)
     }
-    const fits = (count: number): boolean => {
-      const prefixBytes = encoder.encode(renderPrefix(context, count)).length
-      const rowsBytes = count === 0 ? 0 : (rowPrefixBytes[count - 1] ?? 0)
-      return prefixBytes + rowsBytes + suffixBytes <= maxBytes
-    }
-    let low = 0
-    let high = rowHtml.length
-    while (low < high) {
-      const middle = Math.ceil((low + high) / 2)
-      if (fits(middle)) low = middle
-      else high = middle - 1
-    }
-    shown = low
-    prefix = renderPrefix(context, shown)
+    if (rowHtml.length >= maxRows) stopped = true
+    return rowHtml.length > start
   }
 
-  const html = prefix + (shown === 0 ? '' : rowHtml.slice(0, shown).join('')) + suffix
+  function finish(): DirectoryReport {
+    stopped = true
+    iterator = undefined
 
-  return {
-    html,
-    bytes: encoder.encode(html).length,
-    totalRows: total,
-    shownRows: shown,
-    truncatedRows: total - shown,
-    truncated: shown < total
+    let total = normalizeTotal(source.totalRows)
+    if (exhausted && rowHtml.length < total) total = rowHtml.length
+    const fitted = Math.min(rowHtml.length, total)
+    const empty = total === 0
+    const context: DocumentContext = {
+      strings,
+      source,
+      htmlLang: input.htmlLang,
+      generatedAt: input.generatedAt,
+      appVersion: input.appVersion,
+      roots: resolveReportRoots(source.leftRoot, source.rightRoot, input.hideLocalPaths),
+      maxRows,
+      maxBytes,
+      empty,
+      total
+    }
+
+    const suffix = renderSuffix(empty)
+    const suffixBytes = encoder.encode(suffix).length
+    const rowsBytes = (count: number): number => (count === 0 ? 0 : (rowBytes[count - 1] ?? 0))
+
+    let shown = fitted
+    let prefix = renderPrefix(context, shown)
+    if (encoder.encode(prefix).length + rowsBytes(shown) + suffixBytes > maxBytes) {
+      // Roll back to the last row whose complete document (truncation notice
+      // included) still fits inside the byte cap.
+      const fits = (count: number): boolean =>
+        encoder.encode(renderPrefix(context, count)).length + rowsBytes(count) + suffixBytes <=
+        maxBytes
+      let low = 0
+      let high = fitted
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2)
+        if (fits(middle)) low = middle
+        else high = middle - 1
+      }
+      shown = low
+      prefix = renderPrefix(context, shown)
+    }
+
+    const html = assembleDocument(prefix, rowHtml, shown, suffix)
+    const bytes = encoder.encode(html).length
+    release()
+
+    return {
+      html,
+      bytes,
+      totalRows: total,
+      shownRows: shown,
+      truncatedRows: total - shown,
+      truncated: shown < total
+    }
   }
+
+  return { pullChunk, pulledRows: () => rowHtml.length, release, finish }
+}
+
+/**
+ * Renders one directory report synchronously. This is the sync driver of the
+ * same pass {@link buildDirectoryReportAsync} steps through in chunks.
+ */
+export function buildDirectoryReport(input: DirectoryReportInput): DirectoryReport {
+  const pass = createReportPass(input)
+  while (pass.pullChunk()) {
+    // Drain the document pass; all limits and rollback live inside it.
+  }
+  return pass.finish()
+}
+
+/**
+ * Renders the same document as {@link buildDirectoryReport}, chunk by chunk.
+ *
+ * Every chunk is followed by a progress callback carrying only scalars, then by
+ * a macrotask yield, so a 358k-row tree neither freezes the caller nor lets a
+ * cancel click land in the middle of a chunk. Aborting either before the first
+ * row or between chunks releases everything and rejects with
+ * {@link OperationCancelledError} instead of returning a partial document.
+ */
+export async function buildDirectoryReportAsync(
+  input: DirectoryReportInput,
+  options: DirectoryReportAsyncOptions = {}
+): Promise<DirectoryReport> {
+  const { signal, onProgress } = options
+  throwIfAborted(signal)
+
+  const pass = createReportPass(input)
+  const totalRows = normalizeTotal(input.source.totalRows)
+  try {
+    while (pass.pullChunk()) {
+      onProgress?.({ processedRows: pass.pulledRows(), totalRows })
+      // An abort raised inside `onProgress` lands here, before another row is
+      // pulled; the check after the yield covers aborts from other macrotasks.
+      throwIfAborted(signal)
+      await nextMacrotask()
+      throwIfAborted(signal)
+    }
+  } catch (error) {
+    pass.release()
+    throw error
+  }
+  return pass.finish()
 }
 
 function* walkReportRows(node: DirectoryDiffNode, depth: number): Generator<DirectoryReportRow> {
