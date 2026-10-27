@@ -1523,10 +1523,14 @@ describe('release notes changelog', () => {
     expect(releaseNotes).not.toContain('应该通过')
     expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
     expect(releaseNotes).not.toMatch(/[0-9a-f]{64}/)
-    // No benchmark numbers or timelines are claimed for this release; the
-    // documented byte cap is the only MB figure the notes may carry.
-    expect(releaseNotes).not.toMatch(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/)
+    // The documented byte cap is the only MB figure the notes may carry.
     expect(releaseNotes.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
+    // Whitelist for the v0.2.9 measured memory figures; any other GiB/MiB/GB
+    // number still fails closed.
+    expect(releaseNotes.match(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/g) ?? []).toEqual([
+      '1,325 MiB',
+      '764.9 MiB'
+    ])
   })
 
   it('keeps the v0.2.7 bilingual UI release notes as shipped history', () => {
