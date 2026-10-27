@@ -2628,6 +2628,39 @@ describe('session tab labels follow the session facts', () => {
     )
   }
 
+  /**
+   * Title and subtitle of one tab, read from their own spans: the label is the
+   * first `font-medium` span, the path line the following `text-2xs` span.
+   */
+  function tabLabels(item: HTMLElement): { title: string; subtitle: string } {
+    return {
+      title: item.querySelector('.font-medium')?.textContent ?? '',
+      subtitle: item.querySelector('.text-2xs')?.textContent ?? ''
+    }
+  }
+
+  /** One `{ title, subtitle }` pair per tab, in tablist order. */
+  function tabMatrix(): { title: string; subtitle: string }[] {
+    return within(sessionTabs()).getAllByRole('tab').map(tabLabels)
+  }
+
+  function activeTab(): HTMLElement {
+    const selected = within(sessionTabs())
+      .getAllByRole('tab')
+      .find((item) => item.getAttribute('aria-selected') === 'true')
+    if (!selected) throw new Error('no active session tab')
+    return selected
+  }
+
+  /** Submits one file pair through the「新建对比」dialog, as a user would. */
+  function submitComparePair(left: string, right: string): void {
+    fireEvent.click(screen.getAllByRole('button', { name: '新建对比' })[0])
+    const panel = screen.getByRole('dialog', { name: '新建对比' })
+    fireEvent.change(within(panel).getByLabelText('左侧路径'), { target: { value: left } })
+    fireEvent.change(within(panel).getByLabelText('右侧路径'), { target: { value: right } })
+    fireEvent.click(within(panel).getByRole('button', { name: '建立对比' }))
+  }
+
   it('labels each file pair from its own two paths, same name or not', async () => {
     render(
       <Workbench
@@ -2890,5 +2923,191 @@ describe('session tab labels follow the session facts', () => {
     await waitFor(() => expect(tabTexts()).toHaveLength(2))
     expect(tab(/one\.txt ↔ two\.txt/).textContent).toContain(SLOW_LEFT)
     expect(tab(/alpha\.txt ↔ beta\.txt/).textContent).toContain(FAST_LEFT)
+  })
+
+  it('rebuilds a same-name pair from A to B without borrowing A paths', async () => {
+    const base = createWebPlatformPort()
+    const A_LEFT = '/memory/one/report.md'
+    const A_RIGHT = '/memory/two/report.md'
+    const B_LEFT = '/memory/three/report.md'
+    const B_RIGHT = '/memory/four/report.md'
+    for (const path of [A_LEFT, A_RIGHT, B_LEFT, B_RIGHT]) {
+      await base.writeTextFile(path, `# ${path}\n`)
+    }
+
+    render(<Workbench platform={base} />)
+
+    submitComparePair(A_LEFT, A_RIGHT)
+    await waitFor(() => expect(tabMatrix()).toHaveLength(1))
+    expect(tabMatrix()).toEqual([
+      { title: 'report.md', subtitle: `${A_LEFT} ↔ ${A_RIGHT} · 代码 / 文本` }
+    ])
+
+    // A second pair with the same file name in two other directories.
+    submitComparePair(B_LEFT, B_RIGHT)
+    await waitFor(() => expect(tabMatrix()).toHaveLength(2))
+
+    const [aTab, bTab] = within(sessionTabs()).getAllByRole('tab')
+    expect(bTab.getAttribute('aria-selected')).toBe('true')
+    expect(tabLabels(bTab)).toEqual({
+      title: 'report.md',
+      subtitle: `${B_LEFT} ↔ ${B_RIGHT} · 代码 / 文本`
+    })
+    expect(tabLabels(aTab)).toEqual({
+      title: 'report.md',
+      subtitle: `${A_LEFT} ↔ ${A_RIGHT} · 代码 / 文本`
+    })
+    expect(tabLabels(bTab).subtitle).not.toContain(A_LEFT)
+    expect(tabLabels(bTab).subtitle).not.toContain(A_RIGHT)
+    expect(tabLabels(aTab).subtitle).not.toContain(B_LEFT)
+    expect(tabLabels(aTab).subtitle).not.toContain(B_RIGHT)
+  })
+
+  it('follows both sides opened inside the view without minting a new tab', async () => {
+    const base = createWebPlatformPort()
+    const NEXT_LEFT = '/memory/next/alpha.ts'
+    const NEXT_RIGHT = '/memory/next/beta.ts'
+    await base.writeTextFile(NEXT_LEFT, 'export const alpha = 1\n')
+    await base.writeTextFile(NEXT_RIGHT, 'export const beta = 2\n')
+    const answers = [LEFT_ENGINE, RIGHT_ENGINE, LEFT_YAML, RIGHT_YAML, NEXT_LEFT, NEXT_RIGHT]
+    const port: PlatformPort = { ...base, selectFile: async () => answers.shift() ?? null }
+
+    render(<Workbench platform={port} />)
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /deploy\.yaml/ }, { timeout: 4000 })
+
+    fireEvent.click(tab(/engine\.ts/))
+    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    await waitFor(() =>
+      expect(tabLabels(activeTab()).title).toBe('alpha.ts ↔ engine.ts')
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开右文件' }))
+    await waitFor(() => expect(tabLabels(activeTab()).title).toBe('alpha.ts ↔ beta.ts'))
+
+    // The session kept its identity: still one tab per opened pair, same slots.
+    expect(tabMatrix()).toEqual([
+      { title: 'alpha.ts ↔ beta.ts', subtitle: `${NEXT_LEFT} ↔ ${NEXT_RIGHT} · 代码 / 文本` },
+      { title: 'deploy.yaml', subtitle: `${LEFT_YAML} ↔ ${RIGHT_YAML} · YAML` }
+    ])
+    const openedLabels = tabLabels(tab(/alpha\.ts ↔ beta\.ts/))
+    expect(openedLabels.subtitle).not.toContain(LEFT_ENGINE)
+    expect(openedLabels.subtitle).not.toContain(RIGHT_ENGINE)
+
+    // Leaving and coming back remounts from the new pair, not the old one.
+    fireEvent.click(tab(/deploy\.yaml/))
+    fireEvent.click(tab(/alpha\.ts ↔ beta\.ts/))
+    expect(tabLabels(activeTab())).toEqual({
+      title: 'alpha.ts ↔ beta.ts',
+      subtitle: `${NEXT_LEFT} ↔ ${NEXT_RIGHT} · 代码 / 文本`
+    })
+  })
+
+  it('labels a drilldown tab and restores the directory tab on return', async () => {
+    const base = createWebPlatformPort()
+    const directories = [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    const port: PlatformPort = {
+      ...base,
+      selectDirectory: async () => directories.shift() ?? null
+    }
+
+    render(<Workbench platform={port} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    const directoryLabels = {
+      title: 'baseline ↔ candidate',
+      subtitle: `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
+    }
+    expect(tabLabels(tab(/baseline ↔ candidate/))).toEqual(directoryLabels)
+
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+
+    const drilldownLabels = {
+      title: 'engine.ts',
+      subtitle: `${LEFT_ENGINE} ↔ ${RIGHT_ENGINE} · 代码 / 文本`
+    }
+    expect(tabLabels(tab(/engine\.ts/))).toEqual(drilldownLabels)
+    // Drilling out never rewrites the source directory tab.
+    expect(tabLabels(tab(/baseline ↔ candidate/))).toEqual(directoryLabels)
+
+    fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
+    await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
+
+    expect(tabLabels(tab(/baseline ↔ candidate/))).toEqual(directoryLabels)
+    expect(tabLabels(tab(/engine\.ts/))).toEqual(drilldownLabels)
+    expect(tabLabels(tab(/baseline ↔ candidate/)).subtitle).not.toContain('engine.ts')
+  })
+
+  it('keeps file, directory and drilldown labels apart and stable on neighbour close', async () => {
+    const base = createWebPlatformPort()
+    const FILE_LEFT = '/memory/notes/a.md'
+    const FILE_RIGHT = '/memory/notes/b.md'
+    await base.writeTextFile(FILE_LEFT, '# a\n')
+    await base.writeTextFile(FILE_RIGHT, '# b\n')
+    const files = [FILE_LEFT, FILE_RIGHT]
+    const directories = [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]
+    const port: PlatformPort = {
+      ...base,
+      selectFile: async () => files.shift() ?? null,
+      selectDirectory: async () => directories.shift() ?? null
+    }
+
+    render(<Workbench platform={port} />)
+    await clickOpenFile()
+    await screen.findByRole('tab', { name: /a\.md ↔ b\.md/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
+
+    const expected = [
+      { title: 'a.md ↔ b.md', subtitle: `${FILE_LEFT} ↔ ${FILE_RIGHT} · 代码 / 文本` },
+      {
+        title: 'baseline ↔ candidate',
+        subtitle: `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
+      },
+      { title: 'engine.ts', subtitle: `${LEFT_ENGINE} ↔ ${RIGHT_ENGINE} · 代码 / 文本` }
+    ]
+    expect(tabMatrix()).toEqual(expected)
+
+    // Every tab owns its own facts; none borrows another session's paths.
+    const [fileTab, directoryTab, drilldownTab] = within(sessionTabs()).getAllByRole('tab')
+    expect(tabLabels(fileTab).subtitle).not.toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(tabLabels(fileTab).subtitle).not.toContain(LEFT_ENGINE)
+    expect(tabLabels(directoryTab).subtitle).not.toContain(FILE_LEFT)
+    expect(tabLabels(directoryTab).subtitle).not.toContain('engine.ts')
+    expect(tabLabels(drilldownTab).subtitle).not.toContain(FILE_LEFT)
+
+    // A full round trip: each selection keeps every label on its own facts.
+    for (const [index, name] of [
+      [0, /a\.md ↔ b\.md/],
+      [1, /baseline ↔ candidate/],
+      [2, /engine\.ts/],
+      [0, /a\.md ↔ b\.md/]
+    ] as const) {
+      fireEvent.click(tab(name))
+      expect(tabMatrix()).toEqual(expected)
+      expect(tabLabels(activeTab())).toEqual(expected[index])
+    }
+
+    // Active middle tab (the directory); close its non-active left neighbour.
+    fireEvent.click(tab(/baseline ↔ candidate/))
+    const beforeClose = tabMatrix()
+    const panelBefore = screen.getByRole('contentinfo').textContent
+    fireEvent.click(screen.getByRole('button', { name: '关闭 a.md ↔ b.md' }))
+
+    expect(tabMatrix()).toEqual([beforeClose[1], beforeClose[2]])
+    expect(tabLabels(activeTab())).toEqual({
+      title: 'baseline ↔ candidate',
+      subtitle: `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
+    })
+    expect(activeTab().getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('contentinfo').textContent).toBe(panelBefore)
+    expect(screen.getAllByRole('tree')).toHaveLength(2)
   })
 })

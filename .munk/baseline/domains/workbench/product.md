@@ -21,6 +21,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **真实路径拖入窗口**：空首屏与有会话时均可拖入真实路径——恰好 2 个同类路径（两文件 / 两目录）直接建同一会话模型；1 个路径作为左侧基准填入 + info 提示；>2 个或文件目录混合则明确提示、不建会话、不改既有会话。拖入阻断浏览器/窗口默认导航，应用停留原状态；真实绝对路径解析经平台缝（preload / `webUtils.getPathForFile` 或 main IPC 白名单），renderer 不猜测路径。
 - **样本入口降级为演示辅助**：样本按钮 / 下拉保留但显式标注演示用途，文案不再暗示「必须先加载样本」，可被完全跳过。
 - **会话标签文案由会话事实派生（单一真源）**：tab 标题 / 副标题不再沿用创建时冻结的 `title` / `subtitle`，而在渲染期由会话当前事实派生——目录会话取 `directory.leftName/rightName` 与 `leftRoot/rightRoot`，文件会话取 `adhoc.pair` 两侧路径（两侧同名 → 标题为该文件名，否则 `左名 ↔ 右名`，副标题两侧完整路径）与 `delimiter` / `format`；内置样本仍按 session id 走字典 key，缺失侧仍走 `missingSidePath` + 既有 missing 字典文案。任何换路径动作（目录换侧、代码 / CSV / 结构化视图内「打开左 / 右文件」、下钻、同 id 原位刷新）都必须先落到会话事实（`setSessions` 函数式更新），视图局部 state 不是真源；因此 tab 与面板永远同帧一致，切 tab 往返与异步读盘收尾都不会让文案回到旧文件。
+- **跨场景 tab 文案回归矩阵（App 级，锁死上面这条单一真源）**：在既有 App 级测试基建（`src/renderer/src/App.test.tsx` 的 `scriptedPort` / `dropPaths` / 「打开文件」「打开文件夹」/ 新建对比对话框 / `sessionTabs`）上补齐四条跨场景矩阵——① 路径 A→B 重建（同名文件不同目录）；② 文件会话内视图「打开左文件」「打开右文件」；③ 目录会话下钻文件再「返回上级目录视图」；④ 文件 / 目录 / 下钻三类会话并存时连续切换与关闭非活动邻居。矩阵对 tablist 内**每个** tab 分别读取标题元素（第一个 `font-medium` span）与副标题元素（紧随其后的 `text-2xs` span）做逐项相等比较，不用整 tab 合并 `textContent` 包含判断、不用跨会话 `getAllByText` 代替 tablist 内断言；每条用例还断言任一 tab 的标题 + 副标题不包含其它会话的路径片段。矩阵暴露的残留缺陷在本域内修到代码闭环（不放宽既有实现或断言来消除失败），作为会话文案派生纪律的常驻回归网。
 - **索引与路由**：`ux/design-baseline.md`（token 路径、组件清单、主屏路径、取舍）折入 `.munk/baseline/design/*`；`AGENTS.md` 增视觉基线路由。
 
 ## 验收
@@ -108,6 +109,17 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-multi-tab-isolation**：文件会话、目录会话、下钻会话并存时连续切换 tab，每个 tab 的标题与副标题只属于自己；关闭相邻 tab 后剩余文案不变。
 - **ac-vitest-regression**：上述场景全部落成 vitest 断言（先红后绿，复用既有 App / 纯函数夹具），仓库 `code_gates` 全绿。
 
+### 跨场景 tab 文案回归矩阵
+
+- **ac-matrix-per-tab-title-subtitle**：矩阵的每条 tab 断言都分别读取 tablist 中该 tab 的标题元素（第一个 `font-medium` span）与副标题元素（紧随其后的 `text-2xs` span）做逐项相等比较；不得只用整个 tab 的合并 `textContent` 包含判断，也不得用跨会话 `getAllByText` 代替 tablist 内断言。
+- **ac-rebuild-a-to-b-same-name**：经「新建对比」对话框依次提交文件对 A（`/memory/one/report.md` ↔ `/memory/two/report.md`）与文件对 B（`/memory/three/report.md` ↔ `/memory/four/report.md`）后，tablist 恰有 2 个 tab；B tab 标题为 `report.md`、副标题同时包含 B 两侧完整路径且不包含 `/memory/one/report.md` 或 `/memory/two/report.md`；A tab 标题仍为 `report.md`、副标题含 A 两侧路径且不含 B 任一侧路径；B 为 `aria-selected="true"`。
+- **ac-view-open-both-sides**：文件会话内在视图依次「打开左文件」与「打开右文件」为新路径后，tablist 仍只有原会话一个 tab（session 身份不变、无新增同名 tab）；该 tab 标题为两侧新文件名（同名 → 文件名；异名 → `左名 ↔ 右名`），副标题同时含两侧新路径且不含任一侧旧路径；切到另一 tab 再切回，标题与副标题仍为新路径。
+- **ac-drilldown-tab-then-return**：目录会话下钻 `engine.ts` 后，下钻 tab 标题为 `engine.ts`、副标题含 `<left root>/src/core/engine.ts` 与 `<right root>/src/core/engine.ts`；点「返回上级目录视图」后目录 tab 的标题为两侧目录名（`baseline ↔ candidate`）、副标题为两侧根路径且不含 `engine.ts`，下钻 tab 的标题与副标题保持不变。
+- **ac-mixed-tab-switch-isolation**：文件、目录、下钻三个 tab 并存时，依次点击每个 tab（含一轮往返），每次点击后 tablist 中每个 tab 的标题与副标题都与各自会话事实一致，且任一 tab 的标题 + 副标题不包含其它会话的路径片段。
+- **ac-close-neighbour-labels-stable**：在三个 tab 并存且当前活动为中间 tab 时关闭一个非活动邻居，tablist 剩余 tab 数与预期一致；剩余每个 tab 的标题与副标题字符串与关闭前逐项相等，活动 tab 的 `aria-selected` 不变、可见面板（状态栏 / 目录树）内容不变。
+- **ac-matrix-no-weakened-assertions**：新增矩阵全部落在既有测试文件与既有夹具（`scriptedPort` / `dropPaths` / 打开文件 / 文件夹 / 新建对比 / `sessionTabs`）内，不新增测试文件、测试目录或依赖，不引入 `it.skip` / `it.only` / 缩短超时 / `try-catch` 吞断言；若矩阵暴露残留缺陷，产品侧修到通过，断言路径与期望值保持本 prd 定义的严格口径。
+- **ac-six-gates-green**：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` 六项门禁全部成功，`pnpm test` 包含上述矩阵用例且无新增跳过项。
+
 ## 非目标
 
 - **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域。各视图只读呈现内容，不做差异高亮与统计；除目录会话（其四态计数由运行时对比结果按过滤档派生，语义归 `directory` 域）外，其余视图的状态栏计数与标签取自样本自带 answer key（编辑期标注），非运行时计算。
@@ -138,7 +150,12 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 
 ## 最近交付证明
 
-- WI：`wi_ws_a66e5d868c6c9cee`（会话文案单一真源：tab 标题 / 副标题由会话事实派生，`kind: fix`）
+- WI：`wi_ws_89f1791b7f90e713`（跨场景 App 级 tab 文案回归矩阵，`kind: test`）
+- 日期：2026-10-27
+- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_1dc02fdbf254a0cb/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。`pnpm test` 62 files / 1009 passed + 1 skipped / 1010（较上轮 1005+1 增 4 条）。
+- 覆盖摘要：**实现零改动，只加测试**——`src/renderer/src/App.test.tsx` 的 `describe('session tab labels follow the session facts')` 内新增 4 条矩阵 + 4 个局部 helper（`tabLabels` 取 tab 内第一个 `font-medium` span 与紧随的 `text-2xs` span、`tabMatrix` 按 tablist 顺序出 `{title, subtitle}[]`、`activeTab` 按 `aria-selected`、`submitComparePair` 走「新建对比」对话框提交文件对）。四条用例：① A→B 同名文件不同目录重建（2 tab、B 为 active、两 tab 各含自己两侧路径且互不含对方路径）；② 视图内「打开左文件」→「打开右文件」为新路径（仍只有原会话一个 tab，标题按异名 `alpha.ts ↔ beta.ts`、副标题为新路径且不含旧的 `engine.ts` 路径，切走再切回不回退）；③ 目录会话下钻 `engine.ts` 后下钻 tab 标题 / 两侧真实路径，点「返回上级目录视图」后目录 tab 复原 `baseline ↔ candidate` + 两侧根且不含 `engine.ts`、下钻 tab 文案不变；④ 文件 + 目录 + 下钻三 tab 混合连续切换（含往返）每 tab 各守自己事实、互不含其它会话路径，活动为中间 tab 时关闭非活动左邻居后剩余两条 `{title, subtitle}` 与关闭前逐项相等、`aria-selected` 与状态栏 / 目录树不变。
+- 注：① 本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收落档为 `qa/cross-scene-tab-matrix.md`。② **红验证已补做**：矩阵在上一轮的派生实现上直接全绿，故在 Delivery 侧临时把 `describeSession` 文件对分支回退为冻结 `session.title` / `session.subtitle` 复跑——A→B 用例首条断言即失败（冻结节显示 `· code` 而非词典家族）、视图双侧打开用例失败（标题停在 `engine.ts`），随后还原文件（`git status` 仅剩 `App.test.tsx`），目标 describe 11 passed；即矩阵确实能捕获「冻结旧文案 / 视图局部 state」两类回归。③ 残留观察：下钻返回与混合切换 / 关闭邻居两条用例在当前实现上**没有失败历史**，属纯回归锁（不证明曾存在缺陷）；它们依赖 `SessionTabs` 的标题为第一个 `font-medium` span、副标题为后继 `text-2xs` span 这一版式契约，后续若重排 `SessionTabs` 层级必须同步改 helper，否则矩阵会假绿。④ 本轮测试增量落在既有 describe 内、未新增测试文件 / 目录 / 依赖，`it.skip` 计数不变（1 skipped 为该文件既有项）。
+- 历史（上一轮）：WI：`wi_ws_a66e5d868c6c9cee`（会话文案单一真源：tab 标题 / 副标题由会话事实派生，`kind: fix`）
 - 日期：2026-10-27
 - 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_ws_dc0d09e3b67f486c/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。`pnpm test` 62 files / 1005 passed + 1 skipped / 1006（较上轮 58 文件 897+1 增 4 文件 / 108 条）。
 - 覆盖摘要：`workbench/sessionDisplay.ts` 的 `describeSession` 改为按会话事实派生文案——新增 `filePairTitle`（取 `adhoc.pair` 两侧 `baseName`，同名 → 该名，异名 → `左名 ↔ 右名`，`displayName` 先剥掉内部 `::opencompare-missing-*` 后缀）与 `directoryText`（取 `session.directory` 的 `leftName ↔ rightName` 与 `leftRoot ↔ rightRoot`），`title` / `subtitle` 仅在无对应事实时作兜底；`workbench/directoryCompare.ts` 新增纯函数 `replaceFilePairSide(session, side, file)`，把换文件收敛到一次提交——`adhoc.pair` 该侧 path/text、CSV `delimiter` + 重算 `tables`（`parseCsvTable`）、结构化 `format`（`classifyFile`，未知扩展名保留原值）、`stats` 行数（`pairStats` 与创建期同源）、代码工作副本 `codeBuffer` 该侧 path/source/text 同步重置，非 ad-hoc 会话原样返回；`CodeView` / `CsvView` / `StructuredView` 新增 `onOpenSide` 回写回调（选到文件即上报，菜单 / 校验收敛在既有 `pickTextFile` 流程之后），`Workbench` 的 `handleSessionFileOpen` 用 `setSessions((current) => …)` 落到对应会话；`upsertSession` / `replaceSession` / `closeSession` 一并改为函数式 `setSessions`，异步读盘晚到的提交不再用闭包旧快照覆盖。测试：`App.test.tsx` 新增 `session tab labels follow the session facts` 6 条（同名 / 异名文件对各守自己的路径、目录换侧跟新根且不残留旧侧、代码 / CSV / 结构化视图打开文件后 tab + 面板 + 行数同步且切 tab 往返不回退、文件 + 目录 + 下钻三 tab 隔离且返回目录后文案复原、慢读盘不覆盖期间提交的会话），并在既有「预览并同步」用例补 4 条原位刷新后 tab 身份 / 位置 / 新根路径断言；`sessionDisplay.test.ts` 新增 3 条纯函数断言（目录根派生、同名文件对、异名文件对），`directoryCompare.test.ts` 新增 4 条 `replaceFilePairSide` 断言（CSV 表 / 分隔符 / 行数同动、结构化格式、代码工作副本单侧重置、无 adhoc 会话不动）。
