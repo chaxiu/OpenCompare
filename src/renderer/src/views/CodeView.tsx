@@ -172,22 +172,40 @@ function CodeDiffView({
     if (target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft
   }
 
+  /**
+   * Writes the block's first row straight onto both panes before React renders.
+   * The windowed panes read the element's own `scrollTop` on that next render,
+   * so a jump lands even though no scroll event follows a programmatic write.
+   */
+  function scrollToBlock(index: number): void {
+    const block = diff.blocks[index]
+    if (!block) return
+    const top = block.startRow * DIFF_ROW_HEIGHT
+    for (const pane of [leftScroll.current, rightScroll.current]) {
+      if (pane) pane.scrollTop = top
+    }
+  }
+
   function step(delta: number): void {
     if (blockCount === 0) return
-    setActive((current) => (Math.min(current, blockCount - 1) + delta + blockCount) % blockCount)
+    const next = (Math.min(active, blockCount - 1) + delta + blockCount) % blockCount
+    scrollToBlock(next)
+    setActive(next)
     setJumpToken((token) => token + 1)
   }
 
   /** Selects a block from the ruler; the shared `active` state drives everything. */
   function selectBlock(index: number): void {
     if (blockCount === 0 || index < 0) return
+    scrollToBlock(index)
     setActive(index)
     setJumpToken((token) => token + 1)
   }
 
   /** Re-targets the current block (ruler `Enter`), even if it is already active. */
   function jumpActive(): void {
-    if (blockCount === 0) return
+    if (activeIndex < 0) return
+    scrollToBlock(activeIndex)
     setJumpToken((token) => token + 1)
   }
 
