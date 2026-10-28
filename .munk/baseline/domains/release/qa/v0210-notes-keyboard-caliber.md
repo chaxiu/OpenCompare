@@ -33,5 +33,5 @@
 
 - workItemId: wi_ws_c2c193cd78e46d26
 - at: 2026-10-28
-- status: pass（1 条 AC 按互斥说明记「部分满足」，非功能缺陷）
-- note: 本轮 `needSelfTest=false`，跳过 UI 自测，以 Host `code_gates` 为交付门槛（9 gates，attempt 001，`.munk/runs/run_ws_66532ae174593307/code-gates/attempts/001`，全 exit 0；`pnpm test` 69 files / 1104 passed + 1 skipped / 1105，`src/main/release-packaging.test.ts` 199 tests）。静态核对：`git diff --name-only` 恰为 `docs/release-notes/v0.2.10.md`（+3/−3）；测试文件、`package.json`、`CHANGELOG.md`、两版 README、`docs/release-evidence/**` 零 diff。grep 取证：`/点选与键盘跳转/`、`/键盘[^。]*(已实测|已验证|实测可用)/`、六个单位数字外的新单位数字、禁用词与 40–64 位十六进制串全零命中。边界：本项只改文案，不重跑实测、不判定键盘是否真的可用；若后续场次拿到键盘实测结论，需另开 WI 回填并补 run / commit 绑定。
+- status: pass
+- note: 1 条 AC（`ac-diff-two-hunks`）按上方互斥说明记「部分满足」，属 prd 两条 AC 自相矛盾而非功能缺陷。本轮 `needSelfTest=false`，跳过 UI 自测，以 Host `code_gates` 为交付门槛（9 gates，attempt 001，`.munk/runs/run_ws_66532ae174593307/code-gates/attempts/001`，全 exit 0；`pnpm test` 69 files / 1104 passed + 1 skipped / 1105，`src/main/release-packaging.test.ts` 199 tests）。静态核对：`git diff --name-only` 恰为 `docs/release-notes/v0.2.10.md`（+3/−3）；测试文件、`package.json`、`CHANGELOG.md`、两版 README、`docs/release-evidence/**` 零 diff。grep 取证：`/点选与键盘跳转/`、`/键盘[^。]*(已实测|已验证|实测可用)/`、六个单位数字外的新单位数字、禁用词与 40–64 位十六进制串全零命中。边界：本项只改文案，不重跑实测、不判定键盘是否真的可用；若后续场次拿到键盘实测结论，需另开 WI 回填并补 run / commit 绑定。
