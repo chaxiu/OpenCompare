@@ -1,7 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { JSX, RefObject } from 'react'
+import type { JSX, MouseEvent, RefObject } from 'react'
 import type { DiffBlock, DiffRow } from '@core/text/diff'
-import { buildRulerBands, computeViewportWindow, nearestBlockIndex } from '@core/text/ruler'
+import {
+  buildRulerBands,
+  computeViewportWindow,
+  nearestBlockIndex,
+  resolveJumpTargetAtRatio
+} from '@core/text/ruler'
 import { useI18n } from '@renderer/i18n/context'
 import { DIFF_ROW_HEIGHT } from './DiffPane'
 import { DIFF_DOT_CLASSES, DIFF_LABEL_KEYS } from './diffSemantics'
@@ -9,6 +14,13 @@ import { cx } from './utils'
 
 /** Preferred band height (px); it only sets the track's row-bucket resolution. */
 const RULER_BAND_HEIGHT = 4
+
+/**
+ * Smallest marker height (px). A 350k-row track packs ~2,300 rows into a 4px
+ * band, so most markers are sub-pixel; this keeps them visible and clickable
+ * without changing the projected row ranges.
+ */
+const RULER_MARKER_MIN_HEIGHT = 2
 
 export interface DiffRulerProps {
   /** Aligned rows from the live `diffLineTexts` result; only `status` is read. */
@@ -36,6 +48,8 @@ export interface DiffRulerProps {
  *
  * Geometry comes from `@core/text/ruler`; this component only measures its own
  * track and dispatches selection, so scrolling never re-projects the bands.
+ * The whole track is a hit target: a click anywhere resolves its vertical ratio
+ * to the nearest block, while a marker click still picks its own block exactly.
  */
 export function DiffRuler({
   rows,
@@ -120,6 +134,27 @@ export function DiffRuler({
     [viewport, rows.length, trackHeight]
   )
 
+  /**
+   * Track-level hit: the whole bar is clickable, not just the (often sub-pixel)
+   * markers. This only turns the click's vertical offset into a track ratio;
+   * row and block resolution stays in `@core/text/ruler`.
+   */
+  function selectAtPointer(event: MouseEvent<HTMLDivElement>): void {
+    if (rows.length === 0) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    // jsdom (and a pre-layout element) reports a zero rect; the measured
+    // clientHeight is the fallback.
+    const height = rect.height > 0 ? rect.height : trackHeight
+    if (!(height > 0)) return
+
+    // Clamp to the track; `ratioToRow` reads 1 as the last row, so a click
+    // above or below the bar still lands on its nearest end row.
+    const offset = event.clientY - rect.top
+    const ratio = Number.isFinite(offset) ? Math.min(1, Math.max(0, offset / height)) : 0
+    const target = resolveJumpTargetAtRatio(blocks, ratio, rows.length, DIFF_ROW_HEIGHT)
+    if (target.blockIndex >= 0) onSelectBlock(target.blockIndex)
+  }
+
   return (
     <div
       ref={track}
@@ -128,6 +163,7 @@ export function DiffRuler({
       aria-orientation="vertical"
       aria-label={t('files.code.ruler.label')}
       tabIndex={0}
+      onClick={selectAtPointer}
       onKeyDown={(event) => {
         if (event.key === 'ArrowDown') {
           event.preventDefault()
@@ -147,6 +183,10 @@ export function DiffRuler({
           activeBlock !== null &&
           band.startRow <= activeBlock.endRow &&
           band.endRow >= activeBlock.startRow
+        // Paint every marker at least clickable, then pull it back inside the
+        // track; the `data-*` row range stays the projected one.
+        const height = Math.min(trackHeight, Math.max(RULER_MARKER_MIN_HEIGHT, band.height))
+        const top = Math.min(Math.max(0, band.top), Math.max(0, trackHeight - height))
 
         return (
           <div
@@ -161,10 +201,13 @@ export function DiffRuler({
             data-diff-status={band.status}
             data-start-row={band.startRow}
             data-end-row={band.endRow}
-            onClick={() => {
+            onClick={(event) => {
+              // A marker picks its own block exactly; the track handler must not
+              // fire a second, ratio-based selection on top of it.
+              event.stopPropagation()
               if (blockIndex >= 0) onSelectBlock(blockIndex)
             }}
-            style={{ top: band.top, height: band.height }}
+            style={{ top, height }}
             className={cx(
               'absolute inset-x-1 cursor-pointer',
               DIFF_DOT_CLASSES[band.status],
