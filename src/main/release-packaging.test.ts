@@ -1697,18 +1697,15 @@ describe('release notes changelog', () => {
     expect(releaseNotes).not.toContain('应该通过')
     expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
     expect(releaseNotes).not.toMatch(/[0-9a-f]{40,64}/)
-    // No unmeasured memory or size figure is claimed for this convergence.
-    expect(releaseNotes.match(/\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)/g) ?? []).toEqual([])
-    // The unmeasured runtime posture is stated explicitly and handed to the
-    // product-qa session that will fill its run id.
-    const pendingParagraphs = releaseNotes
-      .split(/\n\s*\n/)
-      .filter((paragraph) => paragraph.includes('L1 前待实机'))
-    expect(pendingParagraphs.length).toBeGreaterThan(0)
-    for (const paragraph of pendingParagraphs) {
-      expect(paragraph).toContain('product-qa')
-      expect(paragraph).toContain('run id 待该场次回填')
-    }
+    // Whitelist for the v0.2.10 measured figures, in document order; any other
+    // number or a different order still fails closed.
+    expect(releaseNotes.match(/\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)/g) ?? []).toEqual(['451.6 MiB', '909.0 MiB', '2.25 GiB', '2.5 GiB', '9.29 GiB', '9.62 GiB'])
+    // Every measured claim is bound to the product-qa run and the measured
+    // commit; the placeholder handoff is gone.
+    expect(releaseNotes).toContain('trun_08764efa44c39426')
+    expect(releaseNotes).toContain('2bcdc53e')
+    expect(releaseNotes).not.toContain('L1 前待实机')
+    expect(releaseNotes).not.toContain('run id 待该场次回填')
   })
 
   it('keeps the v0.2.7 bilingual UI release notes as shipped history', () => {
