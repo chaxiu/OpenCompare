@@ -31,6 +31,8 @@ export const files = {
   'files.code.modified': '已修改（未保存）',
   'files.code.openLeftTitle': '打开左侧本地文件',
   'files.code.openRightTitle': '打开右侧本地文件',
+  'files.code.ruler.label': '差异指示条',
+  'files.code.ruler.marker': '{status} · 第 {start}–{end} 行',
   'files.merge.prevConflict': '上一个冲突块',
   'files.merge.nextConflict': '下一个冲突块',
   'files.merge.pending': '待决冲突',

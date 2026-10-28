@@ -26,6 +26,7 @@ import type { PlatformPort } from '@shared/platform/types'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { DiffBadge, DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_ROW_HEIGHT, DiffPane } from '@renderer/components/DiffPane'
+import { DiffRuler } from '@renderer/components/DiffRuler'
 import { MergePane } from '@renderer/components/MergePane'
 import type { MergeLineView } from '@renderer/components/MergePane'
 import { Panel } from '@renderer/components/Panel'
@@ -115,6 +116,8 @@ function CodeDiffView({
   const [rightText, setRightText] = useState(initial.rightText)
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const [active, setActive] = useState(0)
+  // Bumped on every explicit jump so re-selecting the current block re-scrolls.
+  const [jumpToken, setJumpToken] = useState(0)
 
   const leftScroll = useRef<HTMLDivElement>(null)
   const rightScroll = useRef<HTMLDivElement>(null)
@@ -158,7 +161,7 @@ function CodeDiffView({
     for (const pane of [leftScroll.current, rightScroll.current]) {
       if (pane) pane.scrollTop = top
     }
-  }, [activeIndex, diff])
+  }, [activeIndex, diff, jumpToken])
 
   /** Mirrors the scrolled pane onto the other; identical row counts keep it exact. */
   function syncScroll(from: ScrollBox, to: ScrollBox): void {
@@ -172,6 +175,20 @@ function CodeDiffView({
   function step(delta: number): void {
     if (blockCount === 0) return
     setActive((current) => (Math.min(current, blockCount - 1) + delta + blockCount) % blockCount)
+    setJumpToken((token) => token + 1)
+  }
+
+  /** Selects a block from the ruler; the shared `active` state drives everything. */
+  function selectBlock(index: number): void {
+    if (blockCount === 0 || index < 0) return
+    setActive(index)
+    setJumpToken((token) => token + 1)
+  }
+
+  /** Re-targets the current block (ruler `Enter`), even if it is already active. */
+  function jumpActive(): void {
+    if (blockCount === 0) return
+    setJumpToken((token) => token + 1)
   }
 
   function overwrite(direction: OverwriteDirection): void {
@@ -336,46 +353,58 @@ function CodeDiffView({
         ) : null}
       </div>
 
-      <SplitPane
-        panes={[
-          <Panel
-            key="left"
-            title={leftPath}
-            subtitle={t('files.code.sideLeft')}
-            meta={
-              leftDirty ? (
-                <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
-              ) : null
-            }
-          >
-            <DiffPane
-              rows={diff.rows}
-              side="left"
-              activeBlock={activeBlock}
-              scrollRef={leftScroll}
-              onScroll={() => syncScroll(leftScroll, rightScroll)}
-            />
-          </Panel>,
-          <Panel
-            key="right"
-            title={rightPath}
-            subtitle={t('files.code.sideRight')}
-            meta={
-              rightDirty ? (
-                <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
-              ) : null
-            }
-          >
-            <DiffPane
-              rows={diff.rows}
-              side="right"
-              activeBlock={activeBlock}
-              scrollRef={rightScroll}
-              onScroll={() => syncScroll(rightScroll, leftScroll)}
-            />
-          </Panel>
-        ]}
-      />
+      <div className="flex min-h-0 min-w-0 flex-1 gap-2">
+        <SplitPane
+          panes={[
+            <Panel
+              key="left"
+              title={leftPath}
+              subtitle={t('files.code.sideLeft')}
+              meta={
+                leftDirty ? (
+                  <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
+                ) : null
+              }
+            >
+              <DiffPane
+                rows={diff.rows}
+                side="left"
+                activeBlock={activeBlock}
+                scrollRef={leftScroll}
+                onScroll={() => syncScroll(leftScroll, rightScroll)}
+              />
+            </Panel>,
+            <Panel
+              key="right"
+              title={rightPath}
+              subtitle={t('files.code.sideRight')}
+              meta={
+                rightDirty ? (
+                  <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
+                ) : null
+              }
+            >
+              <DiffPane
+                rows={diff.rows}
+                side="right"
+                activeBlock={activeBlock}
+                scrollRef={rightScroll}
+                onScroll={() => syncScroll(rightScroll, leftScroll)}
+              />
+            </Panel>
+          ]}
+        />
+        <DiffRuler
+          rows={diff.rows}
+          blocks={diff.blocks}
+          activeBlock={activeBlock}
+          leftScroll={leftScroll}
+          rightScroll={rightScroll}
+          onSelectBlock={selectBlock}
+          onStepBlock={step}
+          onJumpActive={jumpActive}
+        />
+      </div>
     </div>
   )
 }

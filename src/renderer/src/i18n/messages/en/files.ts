@@ -33,6 +33,8 @@ export const files: Record<keyof typeof zhFiles, string> = {
   'files.code.modified': 'Modified (unsaved)',
   'files.code.openLeftTitle': 'Open left local file',
   'files.code.openRightTitle': 'Open right local file',
+  'files.code.ruler.label': 'Difference ruler',
+  'files.code.ruler.marker': '{status} · lines {start}–{end}',
   'files.merge.prevConflict': 'Previous conflict',
   'files.merge.nextConflict': 'Next conflict',
   'files.merge.pending': 'Pending conflicts',
