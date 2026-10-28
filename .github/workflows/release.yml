@@ -192,11 +192,39 @@ jobs:
       # split the uploaded assets across them. The matrix now uploads into this
       # single release instead. Any duplicate releases left behind by an earlier
       # race are pruned so exactly one remains for the tag.
+      # The release body comes from the repository's own release notes for the
+      # checked-out tag plus a Full Changelog link; a missing or empty file fails
+      # closed instead of publishing an empty body.
       - name: Pre-create the tag's release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          version="$(node -p "require('./package.json').version")"
+          notes_file="docs/release-notes/v${version}.md"
+          if [ ! -f "${notes_file}" ]; then
+            echo "::error::Missing release notes ${notes_file}; refusing to publish without a release body."
+            exit 1
+          fi
+          if [ -z "$(tr -d '[:space:]' < "${notes_file}")" ]; then
+            echo "::error::Release notes ${notes_file} are empty; refusing to publish without a release body."
+            exit 1
+          fi
+
+          last="$(gh release list --exclude-drafts --limit 100 --json tagName \
+            --jq "[.[] | select(.tagName != \"${RELEASE_TAG}\")][0].tagName // \"\"")"
+          if [ -z "${last}" ]; then
+            echo "::error::Could not resolve the previous published release before ${RELEASE_TAG}; refusing to publish without a changelog base."
+            exit 1
+          fi
+
+          body_file="${RUNNER_TEMP}/release-body-${RELEASE_TAG}.md"
+          {
+            cat "${notes_file}"
+            echo
+            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${last}...${RELEASE_TAG}"
+          } > "${body_file}"
+
           readarray -t ids < <(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
             --jq ".[] | select(.tag_name == \"${RELEASE_TAG}\") | .id")
 
@@ -206,13 +234,21 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --title "${RELEASE_TAG}" \
               --draft \
-              --generate-notes
+              --notes-file "${body_file}"
           else
             echo "Keeping release ${ids[0]} for ${RELEASE_TAG}."
             for id in "${ids[@]:1}"; do
               echo "Pruning duplicate release ${id} for ${RELEASE_TAG}."
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
             done
+            if [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${ids[0]}" --jq '.draft')" = "true" ]; then
+              echo "Release ${ids[0]} for ${RELEASE_TAG} is still a draft; updating its body."
+              gh release edit "${RELEASE_TAG}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --notes-file "${body_file}"
+            else
+              echo "Release ${ids[0]} for ${RELEASE_TAG} is already public; leaving its body untouched."
+            fi
           fi
 
   release:
