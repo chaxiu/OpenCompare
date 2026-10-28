@@ -266,6 +266,11 @@ describe('diff ruler at 358k rows', () => {
   /* ac-scale-row-coverage                                             */
   /* ---------------------------------------------------------------- */
 
+  // Explicit per-test timeout instead of the 5000ms default: CI attempt1 measured
+  // 6,816ms for this case ("Error: Test timed out in 5000ms."), while the same
+  // tree runs the full local suite in 27.42s (69 files / 1104 passed). The 30s
+  // cap keeps ~4.4x headroom; the 358k scale and the row-by-row coverage
+  // assertions below are unchanged.
   it('covers every non-same row with a same-status marker in one synchronised pass', () => {
     const rows = cyclicRows(ALTERNATING_CYCLE)
     const blocks = sampledBlocks(rows.length)
@@ -301,7 +306,7 @@ describe('diff ruler at 358k rows', () => {
       expect(marker.startRow).toBeLessThanOrEqual(index)
       expect(marker.endRow).toBeGreaterThanOrEqual(index)
     })
-  })
+  }, 30_000)
 
   /* ---------------------------------------------------------------- */
   /* ac-scale-no-reproject (+ the ruler never re-runs the diff)        */
