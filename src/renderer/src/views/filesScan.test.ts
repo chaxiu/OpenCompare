@@ -10,6 +10,7 @@ const FILES_COPY_FILES = [
   'src/renderer/src/views/CsvView.tsx',
   'src/renderer/src/views/StructuredView.tsx',
   'src/renderer/src/components/DiffPane.tsx',
+  'src/renderer/src/components/DiffRuler.tsx',
   'src/renderer/src/components/MergePane.tsx',
   'src/renderer/src/components/CodeBlock.tsx'
 ] as const
