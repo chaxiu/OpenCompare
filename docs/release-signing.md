@@ -74,9 +74,9 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 仅 tag 可达提交的 diff 若删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`），即使 `git cherry` 判为 `-` 也非零退出。
 - 祖先门只做只读 git 查询，不创建、移动、删除任何 tag / ref，不 push，也不调用 `gh release` 写操作。
 
-**补发用法（不改 tag、不升版本）**：`v0.2.9` 已发布；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.10`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
+**补发用法（不改 tag、不升版本）**：`v0.2.9` 已发布；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.11`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
 
-`v0.2.10` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main`，发布说明见 `docs/release-notes/v0.2.10.md`；最新公开 Release 仍为 `v0.2.9`，README 状态行与 `latestPublishedTag` 保持不变，待该版本发布后的收尾提交再同步。
+`v0.2.11` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main`，发布说明见 `docs/release-notes/v0.2.11.md`；最新公开 Release 仍为 `v0.2.9`，README 状态行与 `latestPublishedTag` 保持不变，待该版本发布后的收尾提交再同步。
 
 ## 六、打包后硬校验（CI，上传前）
 

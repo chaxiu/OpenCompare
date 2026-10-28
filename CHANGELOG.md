@@ -2,7 +2,7 @@
 
 OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/)。
 
-## v0.2.10
+## v0.2.11
 
 本版只有一项面向用户的变化：双栏文本 / 代码对比的侧边新增一条常驻的竖向行级四态差异指示条，用来先看清整份文件的差异分布，再直达目标差异行。对比与合并算法、目录扫描与快照格式均未改动。
 
@@ -20,7 +20,7 @@ OpenCompare 的版本变更记录。格式遵循 [Keep a Changelog](https://keep
 
 ### 升级方式
 
-建议从 v0.2.9 升级。下载 v0.2.10 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `OpenCompare-Setup-0.2.10.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
+建议从 v0.2.9 升级。下载 v0.2.11 对应平台的新安装包覆盖安装（macOS `.dmg` / `.zip`，Windows `OpenCompare-Setup-0.2.11.exe`，Linux `.AppImage` / `.deb`）。签名与公证口径不变：macOS 包经 Developer ID 签名 + Apple 公证，凭据缺失时 fail-closed。
 
 ## v0.2.9
 
