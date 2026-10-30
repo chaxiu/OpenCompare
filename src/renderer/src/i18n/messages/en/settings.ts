@@ -5,6 +5,10 @@ export const settings: Record<keyof typeof zhSettings, string> = {
   'settings.title': 'Settings',
   'settings.language': 'Language',
   'settings.language.name': 'English',
+  'settings.theme': 'Theme',
+  'settings.theme.light': 'Light',
+  'settings.theme.dark': 'Dark',
+  'settings.theme.system': 'Follow system',
   'settings.close': 'Close settings',
   'settings.saved': 'Settings saved',
   'settings.saveError': 'Could not save settings: {reason}'

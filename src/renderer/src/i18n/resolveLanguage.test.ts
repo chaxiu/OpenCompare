@@ -47,7 +47,7 @@ describe('loadInitialLanguage', () => {
   })
 
   it('honours the stored language', async () => {
-    const platform = fakePlatform({ language: 'en' }, 'zh-CN')
+    const platform = fakePlatform({ language: 'en', theme: 'dark' }, 'zh-CN')
 
     await expect(loadInitialLanguage(platform)).resolves.toBe('en')
     expect(platform.writeUserSettings).not.toHaveBeenCalled()

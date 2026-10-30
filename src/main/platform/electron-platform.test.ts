@@ -1456,21 +1456,32 @@ describe('electron user settings', () => {
   const settingsFile = (): string => join(appState.userData, 'settings.json')
 
   it('round-trips a write and read through the real IPC handlers', async () => {
-    await platform.writeUserSettings({ language: 'en' })
+    await platform.writeUserSettings({ language: 'en', theme: 'light' })
 
     // A fresh registration reads the persisted record, exactly like a restart.
     registerPlatformIpc()
-    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'en' })
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'en', theme: 'light' })
 
     // One document under userData, no leftover temporary file.
     await expect(readdir(appState.userData)).resolves.toEqual(['settings.json'])
-    expect(JSON.parse(await readFile(settingsFile(), 'utf8'))).toEqual({ language: 'en' })
+    expect(JSON.parse(await readFile(settingsFile(), 'utf8'))).toEqual({
+      language: 'en',
+      theme: 'light'
+    })
   })
 
-  it('keeps only the language field of a stored record', async () => {
-    await writeFile(settingsFile(), '{"language":"zh","theme":"dark"}', 'utf8')
+  it('upgrades a record without a theme and falls back for an unknown one', async () => {
+    await writeFile(settingsFile(), '{"language":"zh"}', 'utf8')
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'dark' })
 
-    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh' })
+    await writeFile(settingsFile(), '{"language":"zh","theme":"system"}', 'utf8')
+    await expect(platform.readUserSettings()).resolves.toEqual({
+      language: 'zh',
+      theme: 'system'
+    })
+
+    await writeFile(settingsFile(), '{"language":"zh","theme":"sepia"}', 'utf8')
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'dark' })
   })
 
   it('reads a missing, corrupt or unsupported record as no record', async () => {

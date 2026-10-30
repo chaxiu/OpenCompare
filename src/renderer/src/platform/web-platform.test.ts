@@ -289,12 +289,25 @@ describe('web user settings', () => {
 
   it('persists through the single localStorage key and reads back from another port', async () => {
     const first = createWebPlatformPort()
-    await first.writeUserSettings({ language: 'en' })
+    await first.writeUserSettings({ language: 'en', theme: 'light' })
 
     const second = createWebPlatformPort()
-    await expect(second.readUserSettings()).resolves.toEqual({ language: 'en' })
+    await expect(second.readUserSettings()).resolves.toEqual({ language: 'en', theme: 'light' })
     expect(localStorage.length).toBe(1)
     expect(localStorage.key(0)).toBe('opencompare.userSettings')
+  })
+
+  it('upgrades an old record without a theme and falls back for an unknown one', async () => {
+    const platform = createWebPlatformPort()
+
+    localStorage.setItem('opencompare.userSettings', '{"language":"zh"}')
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'dark' })
+
+    localStorage.setItem('opencompare.userSettings', '{"language":"zh","theme":"light"}')
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'light' })
+
+    localStorage.setItem('opencompare.userSettings', '{"language":"zh","theme":"sepia"}')
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'dark' })
   })
 
   it('reads a missing, corrupt or unsupported record as no record', async () => {
@@ -316,9 +329,9 @@ describe('web user settings', () => {
       throw new Error('storage blocked')
     })
 
-    await platform.writeUserSettings({ language: 'zh' })
+    await platform.writeUserSettings({ language: 'zh', theme: 'system' })
 
-    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh' })
+    await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'system' })
     await expect(platform.systemLocale()).resolves.toBe(navigator.language)
   })
 })

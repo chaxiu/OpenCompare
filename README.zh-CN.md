@@ -10,6 +10,8 @@ OpenCompare 是面向 Beyond Compare 5 Pro 使用场景的现代跨平台桌面�
 
 ![OpenCompare 工作台双目录对比](docs/assets/opencompare-workbench.png)
 
+![OpenCompare 代码视图的文件 diff 与右侧指示条](docs/assets/opencompare-file-diff.png)
+
 ## 下载与安装
 
 - **macOS arm64**：从 [Releases](https://github.com/chaxiu/OpenCompare/releases) 下载 `.dmg`，打开后将 OpenCompare 拖入 Applications，再从 Applications 启动。

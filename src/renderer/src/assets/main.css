@@ -1,9 +1,14 @@
 @import 'tailwindcss';
 
 /*
- * OpenCompare design tokens — the single source of truth for the dark
- * industrial workbench. Components reference these tokens only; colours,
- * type sizes, radii, elevation and motion never appear as literals elsewhere.
+ * OpenCompare design tokens — the single source of truth for both themes.
+ * Components reference these tokens only; colours, type sizes, radii, elevation
+ * and motion never appear as literals elsewhere.
+ *
+ * The Tailwind theme block below carries the dark values. The light theme
+ * overrides the exact same `--color-*` names in one block further down; there is
+ * no second palette file and no renamed token, so a component looks identical in
+ * both themes.
  *
  * `--color-diff-*` is the product's core visual language (same / added /
  * removed / modified / conflict) and must be reused by every comparison view.
@@ -71,6 +76,54 @@
   --duration-fast: 110ms;
   --duration-base: 170ms;
   --ease-ui: cubic-bezier(0.22, 0, 0, 1);
+}
+
+/*
+ * Light theme: the same token names, overridden in place. The block is
+ * unlayered, so it wins over the Tailwind theme defaults without repeating the
+ * theme structure.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Layered neutral surfaces */
+  --color-surface-base: #f6f7f9;
+  --color-surface-sunken: #eceef3;
+  --color-surface-raised: #ffffff;
+  --color-surface-overlay: #ffffff;
+  --color-surface-hover: #e9edf3;
+
+  /* Content */
+  --color-content-primary: #14181f;
+  --color-content-secondary: #4b5563;
+  --color-content-muted: #6b7280;
+  --color-content-inverse: #f6f7f9;
+
+  /* Lines */
+  --color-line-subtle: #e3e7ee;
+  --color-line-strong: #c6cdd8;
+
+  /* Single accent */
+  --color-accent: #2563eb;
+  --color-accent-strong: #1d4ed8;
+  --color-accent-soft: #dbe7fd;
+  --color-focus: #2563eb;
+
+  /* Danger */
+  --color-danger: #d1242f;
+  --color-danger-strong: #b31d28;
+  --color-danger-soft: #fde8ea;
+
+  /* Diff semantics */
+  --color-diff-same: #5c6675;
+  --color-diff-added: #1a7f37;
+  --color-diff-removed: #cf222e;
+  --color-diff-modified: #9a6700;
+  --color-diff-conflict: #8250df;
+  --color-diff-added-soft: #e7f4ea;
+  --color-diff-removed-soft: #fdecee;
+  --color-diff-modified-soft: #fbf0d9;
+  --color-diff-conflict-soft: #f2ebfd;
 }
 
 @layer base {

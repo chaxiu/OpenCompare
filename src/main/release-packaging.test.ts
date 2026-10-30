@@ -2110,20 +2110,68 @@ describe('bilingual README parity', () => {
     }
   })
 
-  it('ships one real workbench screenshot referenced by both READMEs', () => {
-    const screenshot = join(repoRoot, 'docs/assets/opencompare-workbench.png')
-    expect(existsSync(screenshot)).toBe(true)
-    const bytes = readFileSync(screenshot)
-    expect(bytes.subarray(0, 4).equals(PNG_SIGNATURE)).toBe(true)
-    expect(bytes.readUInt32BE(16)).toBeGreaterThanOrEqual(1000)
-    expect(bytes.readUInt32BE(20)).toBeGreaterThanOrEqual(600)
-    expect(bytes.length).toBeGreaterThan(10 * 1024)
-    for (const doc of [readmeEn, readmeZh]) {
-      expect(doc).toContain('docs/assets/opencompare-workbench.png')
+  const README_SCREENSHOTS = ['opencompare-workbench.png', 'opencompare-file-diff.png'] as const
+
+  it('ships both real screenshots referenced by both READMEs', () => {
+    const gitignore = readFileSync(join(repoRoot, '.gitignore'), 'utf8')
+    for (const name of README_SCREENSHOTS) {
+      const reference = `docs/assets/${name}`
+      const screenshot = join(repoRoot, reference)
+      expect(existsSync(screenshot), reference).toBe(true)
+      const bytes = readFileSync(screenshot)
+      expect(bytes.subarray(0, 4).equals(PNG_SIGNATURE), reference).toBe(true)
+      expect(bytes.readUInt32BE(16), `${reference} width`).toBeGreaterThanOrEqual(1000)
+      expect(bytes.readUInt32BE(20), `${reference} height`).toBeGreaterThanOrEqual(600)
+      expect(bytes.length, `${reference} size`).toBeGreaterThan(10 * 1024)
+      for (const doc of [readmeEn, readmeZh]) {
+        expect(doc).toContain(reference)
+      }
+      expect(gitignore).not.toContain(name)
     }
-    expect(readFileSync(join(repoRoot, '.gitignore'), 'utf8')).not.toMatch(
-      /opencompare-workbench/
+  })
+
+  it('captures the screenshots from the built app instead of built-in samples', () => {
+    const script = readFileSync(
+      join(repoRoot, 'scripts/capture-readme-screenshots.mjs'),
+      'utf8'
     )
+    expect(script).not.toMatch(/shared\/fixtures/)
+    expect(script).not.toMatch(/\/samples\//)
+    expect(script).toContain('out/renderer/index.html')
+    expect(script).toContain('captureScreenshot')
+    // The README one-liner runs the same script through the package script.
+    const screenshots = (JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>
+    }).scripts?.screenshots
+    expect(screenshots).toContain('scripts/capture-readme-screenshots.mjs')
+  })
+
+  it('documents the capture command, sessions and a resolvable commit', () => {
+    const path = join(repoRoot, 'docs/screenshots.md')
+    expect(existsSync(path)).toBe(true)
+    const doc = readFileSync(path, 'utf8')
+    for (const name of README_SCREENSHOTS) {
+      expect(doc).toContain(`docs/assets/${name}`)
+    }
+    expect(doc).toContain('node scripts/capture-readme-screenshots.mjs')
+    expect(doc).toContain('pnpm build')
+    // Each image says which real session it shows.
+    expect(doc).toMatch(/directory trees/i)
+    expect(doc).toMatch(/indicator bar/i)
+
+    const commits = [...new Set(doc.match(/\b[0-9a-f]{40}\b/g) ?? [])]
+    expect(commits.length).toBeGreaterThan(0)
+    // Deliberate exception to this file's tmpdir-only git rule: the shipped
+    // screenshot document pins the commit it was captured on, so the gate reads
+    // the repository metadata once to prove that commit still resolves.
+    const captureRepo = fileURLToPath(new URL('../../', import.meta.url))
+    for (const sha of commits) {
+      const resolved = spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], {
+        cwd: captureRepo,
+        stdio: 'ignore'
+      })
+      expect(resolved.status, `${sha} is not a resolvable commit`).toBe(0)
+    }
   })
 
   it('documents the three platform downloads in both READMEs', () => {
