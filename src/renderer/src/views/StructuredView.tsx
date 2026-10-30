@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
-import { AlertTriangle, ArrowRight, Braces, FolderOpen } from 'lucide-react'
+import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { STRUCTURED_STATUSES, diffStructured, filterStructuredChanges } from '@core/structured/diff'
 import type {
   StructuredChange,
@@ -15,6 +15,7 @@ import { ToolbarButton } from '@renderer/components/Button'
 import { CodeBlock } from '@renderer/components/CodeBlock'
 import { DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_BADGE_CLASSES } from '@renderer/components/diffSemantics'
+import { Icon } from '@renderer/components/Icon'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
@@ -131,7 +132,7 @@ function ChangeRow({ change }: { readonly change: StructuredChange }): JSX.Eleme
         >
           {change.left ?? '—'}
         </span>
-        <ArrowRight aria-hidden className="size-3 shrink-0 text-content-muted" />
+        <Icon name={UI_ICON_ACTIONS.changeArrow} className="text-content-muted" />
         <span
           className={cx(
             'max-w-40 truncate',
@@ -237,7 +238,7 @@ export function StructuredView({
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
         <StateView
-          icon={<Braces aria-hidden className="size-5" />}
+          icon={<Icon name={UI_ICON_ACTIONS.viewStructured} size={20} />}
           title={t('files.structured.emptyTitle')}
           description={t('files.structured.emptyDescription')}
         />
@@ -296,14 +297,14 @@ export function StructuredView({
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <ToolbarButton
           size="sm"
-          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
           onClick={() => void open('left')}
         >
           {t('files.action.openLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
-          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
           onClick={() => void open('right')}
         >
           {t('files.action.openRight')}
@@ -350,7 +351,7 @@ export function StructuredView({
               <div className="flex h-full min-h-0 flex-col">
                 <StateView
                   tone="danger"
-                  icon={<AlertTriangle aria-hidden className="size-5" />}
+                  icon={<Icon name={UI_ICON_ACTIONS.warning} size={20} />}
                   title={t('files.structured.errorTitle')}
                   description={comparison.error}
                   hint={t('files.structured.errorHint')}

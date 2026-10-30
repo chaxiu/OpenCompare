@@ -39,7 +39,6 @@
     "@tanstack/react-virtual": "^3.14.21",
     "diff": "^9.0.0",
     "jsonc-parser": "^3.3.1",
-    "lucide-react": "^1.59.0",
     "node-diff3": "^3.2.1",
     "papaparse": "^5.7.0",
     "react": "^19.3.1",

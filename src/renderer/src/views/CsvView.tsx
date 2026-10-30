@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { AlertTriangle, Check, FolderOpen } from 'lucide-react'
+import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { CsvSample } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
 import { alignCsvTables, commonCsvColumns } from '@core/csv/align'
 import type { CsvAlignCounts, CsvAlignedCell, CsvAlignedRow, CsvColumnRef } from '@core/csv/align'
 import { ToolbarButton } from '@renderer/components/Button'
 import { DiffDot } from '@renderer/components/DiffBadge'
+import { Icon } from '@renderer/components/Icon'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { cx } from '@renderer/components/utils'
@@ -329,7 +330,7 @@ export function CsvView({
                     : 'border-line-subtle bg-surface-raised text-content-secondary hover:border-line-strong hover:text-content-primary'
                 )}
               >
-                {active ? <Check aria-hidden className="size-3" /> : null}
+                {active ? <Icon name={UI_ICON_ACTIONS.check} /> : null}
                 {name}
               </button>
             )
@@ -362,7 +363,7 @@ export function CsvView({
               aria-label={t('files.csv.duplicates')}
               title={duplicateHint}
             >
-              <AlertTriangle aria-hidden className="size-3" />
+              <Icon name={UI_ICON_ACTIONS.warning} />
               {t('files.csv.duplicateCount', { count: align.duplicateKeys.length })}
             </span>
           ) : null}
@@ -375,14 +376,14 @@ export function CsvView({
           <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
           <ToolbarButton
             size="sm"
-            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
             onClick={() => void open('left')}
           >
             {t('files.action.openLeft')}
           </ToolbarButton>
           <ToolbarButton
             size="sm"
-            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
             onClick={() => void open('right')}
           >
             {t('files.action.openRight')}

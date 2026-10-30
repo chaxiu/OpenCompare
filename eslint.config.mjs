@@ -48,6 +48,30 @@ export default tseslint.config(
               name: 'electron',
               message:
                 'Renderer code must reach the platform through PlatformPort, never Electron APIs directly.'
+            },
+            {
+              name: 'lucide-react',
+              message:
+                'Icons come from @renderer/components/Icon and the vendored table in assets/icons, never from an icon package.'
+            }
+          ],
+          // The renderer has exactly one icon source; every other icon set is out.
+          patterns: [
+            {
+              group: [
+                '@tabler/icons*',
+                '@heroicons/*',
+                'heroicons',
+                'feather-icons',
+                'react-icons/*',
+                '@fortawesome/*',
+                'bootstrap-icons',
+                '@mdi/*',
+                'lucide-react/*',
+                'lucide-*'
+              ],
+              message:
+                'Icons come from @renderer/components/Icon and the vendored table in assets/icons, never from an icon package.'
             }
           ]
         }

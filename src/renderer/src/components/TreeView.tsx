@@ -1,17 +1,27 @@
 import type { JSX } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ChevronRight, FileCode2, FileText, Folder, FolderOpen } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
+import type { IconName } from '@renderer/assets/icons'
 import type { DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import { DIRECTORY_ROW_HEIGHT, createDirectoryScrollMap } from '@core/directory/rows'
 import { useI18n } from '@renderer/i18n/context'
 import { DiffBadge } from './DiffBadge'
+import { Icon } from './Icon'
 import { cx } from './utils'
 
 const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|md|css|html|py|go|rs|java|json|ya?ml)$/i
 
 /** Extra rows above and below the viewport so fast scrolling never shows gaps. */
 const ROW_OVERSCAN = 10
+
+/** Directory glyph (open / closed) vs. code / text file, from the icon table. */
+function nodeGlyphIcon(node: DirectoryDiffNode, open: boolean): IconName {
+  if (node.kind === 'directory') {
+    return open ? UI_ICON_ACTIONS.folderOpen : UI_ICON_ACTIONS.folder
+  }
+  return CODE_FILE.test(node.name) ? UI_ICON_ACTIONS.codeFile : UI_ICON_ACTIONS.file
+}
 
 function CountSummary({
   counts
@@ -62,13 +72,7 @@ function TreeRow({
 }): JSX.Element {
   const { t } = useI18n()
   const isDirectory = node.kind === 'directory'
-  const Icon = isDirectory
-    ? open
-      ? FolderOpen
-      : Folder
-    : CODE_FILE.test(node.name)
-      ? FileCode2
-      : FileText
+  const icon = nodeGlyphIcon(node, open)
 
   return (
     <div
@@ -103,14 +107,17 @@ function TreeRow({
           }}
           className="focus-ring transition-fast -ml-1 flex size-4 shrink-0 items-center justify-center rounded-xs text-content-muted hover:text-content-primary"
         >
-          <ChevronRight aria-hidden className={cx('size-3.5 transition-fast', open && 'rotate-90')} />
+          <Icon
+            name={UI_ICON_ACTIONS.treeToggle}
+            className={cx('transition-fast', open && 'rotate-90')}
+          />
         </button>
       ) : (
         <span aria-hidden className="size-4 shrink-0" />
       )}
       <Icon
-        aria-hidden
-        className={cx('size-3.5 shrink-0', isDirectory ? 'text-content-muted' : 'text-content-secondary')}
+        name={icon}
+        className={cx(isDirectory ? 'text-content-muted' : 'text-content-secondary')}
       />
       <span className="truncate font-mono text-xs text-content-secondary">{node.name}</span>
       <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">

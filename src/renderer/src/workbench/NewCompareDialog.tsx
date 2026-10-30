@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react'
 import type { FormEvent, JSX, KeyboardEvent } from 'react'
-import { FileCode2, FolderOpen, GitCompare } from 'lucide-react'
+import { SHELL_ENTRY_ICONS } from '@renderer/assets/icons'
 import { isSupportedComparisonFile } from '@shared/fileExtensions'
 import { parseManualPaths, resolveCompareRequest } from '@shared/compareRequest'
 import type { CompareErrorCode, ComparePaths, CompareRequest } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
+import { Icon } from '@renderer/components/Icon'
 import { useI18n } from '@renderer/i18n/context'
 import type { Translate } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
@@ -292,7 +293,7 @@ export function NewCompareDialog({
           </ToolbarButton>
           <ToolbarButton
             variant="primary"
-            icon={<GitCompare aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['new-compare']} />}
             onClick={() => void submit()}
             disabled={submitting}
           >
@@ -344,7 +345,7 @@ export function NewCompareDialog({
 
         <div className="flex flex-wrap items-center gap-2">
           <ToolbarButton
-            icon={<FileCode2 aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['open-file']} />}
             onClick={() => void pick(onPickFiles)}
             disabled={submitting}
             title={t('shell.compare.pickFilesTitle')}
@@ -352,7 +353,7 @@ export function NewCompareDialog({
             {t('shell.compare.pickFiles')}
           </ToolbarButton>
           <ToolbarButton
-            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
             onClick={() => void pick(onPickDirectories)}
             disabled={submitting}
             title={t('shell.compare.pickFoldersTitle')}

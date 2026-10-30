@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { ICON_NAMES, ICON_SIZES, strokeWidthFor } from '@renderer/assets/icons'
+import type { IconSize } from '@renderer/assets/icons'
 import { translate } from '@renderer/i18n/context'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from './Workbench'
@@ -408,5 +410,61 @@ describe('workbench shell entry manifest', () => {
     collect()
 
     expect([...seen].sort()).toEqual([...SHELL_ENTRY_IDS].sort())
+  })
+})
+
+describe('workbench icon surface', () => {
+  it('draws every icon at 16, 20 or 24 with the matching optical stroke', async () => {
+    setWindowWidth(TIER_WIDTHS.compact)
+    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    await loadSamples()
+
+    const check = (): void => {
+      const icons = Array.from(container.querySelectorAll('svg[data-icon]'))
+      expect(icons.length).toBeGreaterThan(0)
+      for (const icon of icons) {
+        const size = Number(icon.getAttribute('width'))
+        expect(ICON_SIZES).toContain(size)
+        expect(icon.getAttribute('height')).toBe(String(size))
+        expect(Number(icon.getAttribute('stroke-width'))).toBe(strokeWidthFor(size as IconSize))
+        expect(ICON_NAMES).toContain(icon.getAttribute('data-icon'))
+        // The size is an attribute of the component, never a utility class.
+        expect(classList(icon).filter((token) => token.startsWith('size-'))).toEqual([])
+      }
+    }
+
+    check()
+    showSession(/3-Way Merge/)
+    await waitFor(() => expect(renderedEntries(container)).toContain('merge-accept'))
+    check()
+    const modeTabs = screen.getByRole('tablist', { name: zh('files.code.modeLabel') })
+    fireEvent.click(within(modeTabs).getByRole('tab', { name: zh('files.code.mode.diff') }))
+    await waitFor(() => expect(renderedEntries(container)).toContain('override'))
+    check()
+    showSession(/CSV 主键对比/)
+    await waitFor(() =>
+      expect(screen.getByRole('toolbar', { name: zh('files.csv.tools') })).toBeDefined()
+    )
+    check()
+    showSession(/JSON \/ YAML/)
+    await waitFor(() =>
+      expect(screen.getByRole('tablist', { name: zh('files.structured.filterLabel') })).toBeDefined()
+    )
+    check()
+  })
+
+  it('leaves no icon-only button without an accessible name', async () => {
+    setWindowWidth(TIER_WIDTHS.compact)
+    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    await loadSamples()
+
+    const unnamed = Array.from(container.querySelectorAll('button'))
+      .filter(isRendered)
+      .filter((button) => button.querySelector('svg[data-icon]') !== null)
+      .filter((button) => (button.textContent ?? '').trim().length === 0)
+      .filter((button) => (button.getAttribute('aria-label') ?? '').trim().length === 0)
+      .map((button) => button.outerHTML)
+
+    expect(unnamed).toEqual([])
   })
 })

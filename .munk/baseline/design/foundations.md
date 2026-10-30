@@ -15,3 +15,13 @@ Colors, typography, spacing, tokens (SSOT).
 - 动效：`--duration-fast`(110ms) / `--duration-base`(170ms) / `--ease-ui`。
 - 复用型低层行为：`@utility transition-ui` / `transition-fast` / `focus-ring` / `tabular`。
 - 组件内无硬编码颜色与像素色值；基色切换主题只需改这一处。
+
+## 图标尺寸与描边（光学缩放）
+
+- **只有三档**：16 / 20 / 24；不存在 12 / 14 等中间档，原 `size-3`(12) / `size-3.5`(14) 已统一升到 16。
+- 尺寸由 `Icon` 的 `size` 属性决定（`width`/`height` 属性），**不用** `className="size-*"` 工具类；图标不再从图标包引入。
+- 描边宽度按档光学缩放（`strokeWidthFor`）：24 → **2**（设计基准），20 → **1.5**，16 → **1.25**——24px 的 2px 描边直接用在 16px 上会显粗，故最小档最细且三档互不相等。
+- 颜色一律 `stroke="currentColor"`（继承按钮文字色），`fill="none"`，线帽 / 线接 `round`；图标本身不携带任何色值。
+- 图标恒 `aria-hidden`，可访问名只落在按钮（`IconButton.label`）；icon-only 按钮必须有 `aria-label` 或文案，不得用 emoji / 单个字符充当图标。
+- 差异状态记号（`+ − ± ~ =`）与排版记号（`→ ↔ ← ∅`）是文字语义标识，**不是图标**，不纳入图标体系。
+- 来源与契约（32 个 vendored Lucide SVG、`ICON_PATHS` / `SHELL_ENTRY_ICONS` / `UI_ICON_ACTIONS`）见 `.munk/baseline/domains/icon-system/product.md`。

@@ -1,16 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import {
-  Cloud,
-  Download,
-  FileDown,
-  FolderSearch,
-  LoaderCircle,
-  Shuffle,
-  Sparkles,
-  SplitSquareHorizontal,
-  Upload
-} from 'lucide-react'
+import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { SampleComposition } from '@shared/fixtures'
 import { trackLive } from '@shared/perf/liveness'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
@@ -20,6 +10,7 @@ import { buildDirectoryRowModel } from '@core/directory/rows'
 import type { DirectoryReportProgress } from '@core/directory/report'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
+import { Icon } from '@renderer/components/Icon'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
@@ -211,7 +202,7 @@ export function DirectoryView({
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <ToolbarButton
               size="sm"
-              icon={<FolderSearch aria-hidden className="size-3.5" />}
+              icon={<Icon name={UI_ICON_ACTIONS.pickFolder} />}
               onClick={() => onPick('left')}
               disabled={busy || !pickerAvailable}
               title={pickerAvailable ? t('directory.toolbar.pickLeftTitle') : undefined}
@@ -220,7 +211,7 @@ export function DirectoryView({
             </ToolbarButton>
             <ToolbarButton
               size="sm"
-              icon={<FolderSearch aria-hidden className="size-3.5" />}
+              icon={<Icon name={UI_ICON_ACTIONS.pickFolder} />}
               onClick={() => onPick('right')}
               disabled={busy || !pickerAvailable}
               title={pickerAvailable ? t('directory.toolbar.pickRightTitle') : undefined}
@@ -229,7 +220,7 @@ export function DirectoryView({
             </ToolbarButton>
             <ToolbarButton
               size="sm"
-              icon={<Sparkles aria-hidden className="size-3.5" />}
+              icon={<Icon name={SHELL_ENTRY_ICONS.samples} />}
               onClick={onLoadSample}
               disabled={busy}
               title={t('directory.toolbar.loadSampleTitle')}
@@ -237,7 +228,7 @@ export function DirectoryView({
               {t('directory.toolbar.loadSample')}
             </ToolbarButton>
             {busy ? (
-              <LoaderCircle aria-hidden className="size-3.5 animate-spin text-content-muted" />
+              <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin text-content-muted" />
             ) : null}
           </span>
         </div>
@@ -258,7 +249,7 @@ export function DirectoryView({
           <ToolbarButton
             size="sm"
             data-shell-entry="sync"
-            icon={<SplitSquareHorizontal aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.sync} />}
             onClick={() => onPreviewSync(direction, mode)}
             disabled={busy}
             title={t('directory.toolbar.previewSyncTitle')}
@@ -268,7 +259,7 @@ export function DirectoryView({
           <ToolbarButton
             size="sm"
             data-shell-entry="template"
-            icon={<Shuffle aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.template} />}
             onClick={onPreviewTemplate}
             disabled={busy}
             title={t('directory.toolbar.templateTitle')}
@@ -281,7 +272,7 @@ export function DirectoryView({
           <span data-shell-entry="snapshot-export" className="flex shrink-0 items-center gap-1.5">
             <ToolbarButton
               size="sm"
-              icon={<Download aria-hidden className="size-3.5" />}
+              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />}
               onClick={() => onExportSnapshot('left')}
               disabled={busy}
               title={t('directory.toolbar.exportLeftTitle')}
@@ -290,7 +281,7 @@ export function DirectoryView({
             </ToolbarButton>
             <ToolbarButton
               size="sm"
-              icon={<Download aria-hidden className="size-3.5" />}
+              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />}
               onClick={() => onExportSnapshot('right')}
               disabled={busy}
               title={t('directory.toolbar.exportRightTitle')}
@@ -301,7 +292,7 @@ export function DirectoryView({
           <span data-shell-entry="snapshot-import" className="flex shrink-0 items-center gap-1.5">
             <ToolbarButton
               size="sm"
-              icon={<Upload aria-hidden className="size-3.5" />}
+              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />}
               onClick={() => leftInputRef.current?.click()}
               disabled={busy}
               title={t('directory.toolbar.importLeftTitle')}
@@ -310,7 +301,7 @@ export function DirectoryView({
             </ToolbarButton>
             <ToolbarButton
               size="sm"
-              icon={<Upload aria-hidden className="size-3.5" />}
+              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />}
               onClick={() => rightInputRef.current?.click()}
               disabled={busy}
               title={t('directory.toolbar.importRightTitle')}
@@ -320,7 +311,7 @@ export function DirectoryView({
           </span>
           <ToolbarButton
             size="sm"
-            icon={<Cloud aria-hidden className="size-3.5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.remoteSample} />}
             onClick={onLoadRemoteSnapshotSample}
             disabled={busy}
             title={t('directory.toolbar.demoRemoteTitle')}
@@ -330,7 +321,7 @@ export function DirectoryView({
           <ToolbarButton
             size="sm"
             data-shell-entry="report-export"
-            icon={<FileDown aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['report-export']} />}
             onClick={onExportReport}
             disabled={busy || reportExporting}
             title={t('directory.report.toolbar.exportTitle')}
@@ -365,7 +356,7 @@ export function DirectoryView({
               type="checkbox"
               checked={hideLocalPaths}
               onChange={(event) => onHideLocalPathsChange(event.target.checked)}
-              className="size-3.5 shrink-0 accent-accent"
+              className="size-4 shrink-0 accent-accent"
             />
             {t('directory.report.toolbar.hideLocalPaths')}
           </label>

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
-import { LoaderCircle } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { SyncPlanGroup } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
+import { Icon } from '@renderer/components/Icon'
 import { formatBytes } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { SyncPreview } from '@renderer/workbench/directoryOps'
@@ -124,7 +125,7 @@ export function DirectorySyncDialog({
             onClick={() => onConfirm(deletePaths)}
             disabled={busy || empty}
           >
-            {busy ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
+            {busy ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
             {busy ? t('directory.sync.syncing') : t('directory.sync.apply')}
           </ToolbarButton>
         </>
@@ -199,7 +200,7 @@ export function DirectorySyncDialog({
                         aria-label={t('directory.sync.deleteItem', {
                           path: item.relativePath
                         })}
-                        className="size-3.5 shrink-0 accent-danger"
+                        className="size-4 shrink-0 accent-danger"
                       />
                       <span className="truncate font-mono text-xs text-content-secondary">
                         {item.relativePath}
