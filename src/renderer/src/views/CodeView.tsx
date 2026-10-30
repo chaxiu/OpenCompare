@@ -1,16 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
-import {
-  ArrowLeft,
-  ArrowRight,
-  ChevronDown,
-  ChevronUp,
-  ClipboardCopy,
-  Download,
-  FolderOpen,
-  RotateCcw,
-  Save
-} from 'lucide-react'
+import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { diffLineTexts, overwriteBlock } from '@core/text/diff'
 import type { OverwriteDirection } from '@core/text/diff'
 import { splitLines } from '@core/text/lines'
@@ -27,6 +17,7 @@ import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { DiffBadge, DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_ROW_HEIGHT, DiffPane } from '@renderer/components/DiffPane'
 import { DiffRuler } from '@renderer/components/DiffRuler'
+import { Icon } from '@renderer/components/Icon'
 import { MergePane } from '@renderer/components/MergePane'
 import type { MergeLineView } from '@renderer/components/MergePane'
 import { Panel } from '@renderer/components/Panel'
@@ -295,14 +286,14 @@ function CodeDiffView({
         <IconButton
           data-shell-entry="prev-diff"
           label={t('files.code.prevDifference')}
-          icon={<ChevronUp aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['prev-diff']} />}
           onClick={() => step(-1)}
           disabled={blockCount === 0}
         />
         <IconButton
           data-shell-entry="next-diff"
           label={t('files.code.nextDifference')}
-          icon={<ChevronDown aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['next-diff']} />}
           onClick={() => step(1)}
           disabled={blockCount === 0}
         />
@@ -317,7 +308,7 @@ function CodeDiffView({
         <span data-shell-entry="override" className="flex shrink-0 items-center gap-1.5">
           <ToolbarButton
             size="sm"
-            icon={<ArrowRight aria-hidden className="size-3.5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.overwriteRight} />}
             onClick={() => overwrite('to-right')}
             disabled={activeBlock === null}
           >
@@ -325,7 +316,7 @@ function CodeDiffView({
           </ToolbarButton>
           <ToolbarButton
             size="sm"
-            icon={<ArrowLeft aria-hidden className="size-3.5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.overwriteLeft} />}
             onClick={() => overwrite('to-left')}
             disabled={activeBlock === null}
           >
@@ -335,7 +326,7 @@ function CodeDiffView({
         <ToolbarButton
           size="sm"
           variant="ghost"
-          icon={<RotateCcw aria-hidden className="size-3.5" />}
+          icon={<Icon name={UI_ICON_ACTIONS.reset} />}
           onClick={reset}
         >
           {t('files.code.reset')}
@@ -344,7 +335,7 @@ function CodeDiffView({
         <span data-shell-entry="save" className="flex shrink-0 items-center gap-1.5">
           <ToolbarButton
             size="sm"
-            icon={<Save aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
             onClick={() => void save('left')}
             disabled={!leftDirty}
             title={t('files.code.saveLeftTitle')}
@@ -353,7 +344,7 @@ function CodeDiffView({
           </ToolbarButton>
           <ToolbarButton
             size="sm"
-            icon={<Save aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
             onClick={() => void save('right')}
             disabled={!rightDirty}
             title={t('files.code.saveRightTitle')}
@@ -373,14 +364,14 @@ function CodeDiffView({
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <ToolbarButton
           size="sm"
-          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
           onClick={() => void open('left')}
         >
           {t('files.action.openLeft')}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
-          icon={<FolderOpen aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
           onClick={() => void open('right')}
         >
           {t('files.action.openRight')}
@@ -605,14 +596,14 @@ function CodeMergeView({
         <IconButton
           data-shell-entry="prev-diff"
           label={t('files.merge.prevConflict')}
-          icon={<ChevronUp aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['prev-diff']} />}
           onClick={() => step(-1)}
           disabled={conflictCount === 0}
         />
         <IconButton
           data-shell-entry="next-diff"
           label={t('files.merge.nextConflict')}
-          icon={<ChevronDown aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['next-diff']} />}
           onClick={() => step(1)}
           disabled={conflictCount === 0}
         />
@@ -644,7 +635,7 @@ function CodeMergeView({
             key={which}
             size="sm"
             aria-label={t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })}
-            icon={<FolderOpen aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
             onClick={() => void openSide(which)}
           >
             {openSideCopyShown
@@ -667,7 +658,7 @@ function CodeMergeView({
           <ToolbarButton
             size="sm"
             aria-label={t('files.action.copy')}
-            icon={<ClipboardCopy aria-hidden className="size-3.5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.copy} />}
             onClick={() => void copyText()}
             disabled={render.unresolved > 0}
           >
@@ -677,7 +668,7 @@ function CodeMergeView({
             size="sm"
             data-shell-entry="export"
             variant="primary"
-            icon={<Download aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.export} />}
             onClick={() => void saveText()}
             disabled={render.unresolved > 0}
           >

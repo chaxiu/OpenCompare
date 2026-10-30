@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { GitCompare } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { Language, PlatformPort } from '@shared/platform/types'
+import { Icon } from './components/Icon'
 import { I18nProvider } from './i18n/I18nProvider'
 import { loadInitialLanguage } from './i18n/resolveLanguage'
 import { PerfRunner } from './perf/PerfRunner'
@@ -26,7 +27,7 @@ function StartupFrame(): JSX.Element {
       className="flex h-full items-center justify-center bg-surface-base text-accent"
     >
       <span className="flex size-11 items-center justify-center rounded-lg border border-line-subtle bg-surface-raised">
-        <GitCompare className="size-5" />
+        <Icon name={UI_ICON_ACTIONS.brand} size={20} />
       </span>
     </div>
   )

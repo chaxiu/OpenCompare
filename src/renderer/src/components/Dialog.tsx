@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import type { JSX, ReactNode, RefObject } from 'react'
-import { X } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { useI18n } from '@renderer/i18n/context'
 import { IconButton } from './Button'
+import { Icon } from './Icon'
 
 export interface DialogProps {
   /** Accessible name; also rendered as the visible title. */
@@ -56,7 +57,7 @@ export function Dialog({
           <h2 className="truncate text-xs font-semibold text-content-primary">{title}</h2>
           <IconButton
             label={t('common.close')}
-            icon={<X aria-hidden className="size-3.5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.close} />}
             onClick={onClose}
             className="ml-auto"
           />

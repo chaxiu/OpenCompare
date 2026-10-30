@@ -21,3 +21,6 @@ Component conventions (or pointers to the in-repo UI kit).
 | `diffSemantics.ts` | `DIFF_STATUSES` / `DIFF_LABELS` / 颜色类映射 | 差异语义词汇表 |
 | `TreeView.tsx` | `TreeView` | 只读目录树（展开 / 折叠、差异标签）：按 `DirectoryRowModel` + `@tanstack/react-virtual` 窗口化，只渲染视口行 + 常量 overscan，行高 `DIRECTORY_ROW_HEIGHT`(24px) 单一常量 |
 | `CodeBlock.tsx` | `CodeBlock` | 等宽代码块 + 行号槽 |
+| `Icon.tsx` | `Icon`（`{ name, size?: 16 \| 20 \| 24, className }`） | **渲染侧唯一 `<svg>` 出口**：几何来自 vendored 表 `@renderer/assets/icons` 的 `ICON_PATHS`，`stroke="currentColor"` / `fill="none"` / round 线帽线接 / 恒 `aria-hidden` / `data-icon={name}`；尺寸只经 `size` 属性（`className="size-*"` 被测试拦下），描边按 `strokeWidthFor(size)` 光学缩放。图标名只能来自 `SHELL_ENTRY_ICONS` / `UI_ICON_ACTIONS` / 派生函数，`<Icon name="…">` 字面量 0 处 |
+
+图标来源：`src/renderer/src/assets/icons/`（一图标一 SVG，文件名 = 上游 Lucide 名 kebab-case，头注释 `lucide:<name>@<version>`）——**不引任何图标包**，`lucide-react` 已从依赖移除，ESLint renderer 段拦 `lucide-react` 与其它图标集。词表与 AC 见 `.munk/baseline/domains/icon-system/product.md`。

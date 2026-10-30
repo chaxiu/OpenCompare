@@ -1,20 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, JSX } from 'react'
-import {
-  AlertTriangle,
-  ArrowLeft,
-  Braces,
-  FileCode2,
-  FolderOpen,
-  FolderTree,
-  GitCompare,
-  Layers,
-  LoaderCircle,
-  RefreshCw,
-  Settings,
-  Sparkles,
-  Table2
-} from 'lucide-react'
+import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { CODE_SCENE, CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { SampleComposition, SceneId } from '@shared/fixtures'
 import type { CompareRequest, CompareRequestPayload } from '@shared/compareRequest'
@@ -31,6 +17,7 @@ import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { DropdownMenu } from '@renderer/components/DropdownMenu'
 import type { DropdownItem } from '@renderer/components/DropdownMenu'
+import { Icon } from '@renderer/components/Icon'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
@@ -201,22 +188,22 @@ const VIEW_OPTIONS: readonly {
   {
     value: 'directory',
     labelKey: 'shell.view.directory',
-    icon: <FolderTree aria-hidden className="size-3.5" />
+    icon: <Icon name={UI_ICON_ACTIONS.viewDirectory} />
   },
   {
     value: 'code',
     labelKey: 'shell.view.code',
-    icon: <FileCode2 aria-hidden className="size-3.5" />
+    icon: <Icon name={UI_ICON_ACTIONS.viewCode} />
   },
   {
     value: 'csv',
     labelKey: 'shell.view.csv',
-    icon: <Table2 aria-hidden className="size-3.5" />
+    icon: <Icon name={UI_ICON_ACTIONS.viewCsv} />
   },
   {
     value: 'structured',
     labelKey: 'shell.view.structured',
-    icon: <Braces aria-hidden className="size-3.5" />
+    icon: <Icon name={UI_ICON_ACTIONS.viewStructured} />
   }
 ]
 
@@ -242,7 +229,7 @@ function sampleMenu(t: Translate): readonly DropdownItem[] {
       id: 'load-all',
       label: t('shell.sampleMenu.all.label'),
       description: t('shell.sampleMenu.all.description'),
-      icon: <Sparkles aria-hidden className="size-3.5" />
+      icon: <Icon name={UI_ICON_ACTIONS.sample} />
     },
     {
       id: 'load-directory',
@@ -1240,7 +1227,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           size="sm"
           data-shell-entry="drilldown-back"
           aria-label={label}
-          icon={<ArrowLeft aria-hidden className="size-3.5" />}
+          icon={<Icon name={SHELL_ENTRY_ICONS['drilldown-back']} />}
           onClick={() => backToDirectory(sourceId)}
           title={t('shell.notice.returnTitle')}
         >
@@ -1413,7 +1400,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       >
         <div className="flex shrink-0 items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-sm bg-accent-soft text-accent">
-            <GitCompare aria-hidden className="size-4" />
+            <Icon name={UI_ICON_ACTIONS.brand} />
           </span>
           <div className="leading-tight">
             <h1 className="text-sm font-semibold tracking-tight">OpenCompare</h1>
@@ -1438,7 +1425,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             size="sm"
             data-shell-entry="new-compare"
             aria-label={t('shell.toolbar.newCompare')}
-            icon={<GitCompare aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['new-compare']} />}
             onClick={() => setCompareDialogOpen(true)}
             disabled={directoryBusy}
             title={t('shell.toolbar.newCompareTitle')}
@@ -1453,7 +1440,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
                 size="sm"
                 data-shell-entry="open-file"
                 aria-label={t('shell.toolbar.openFile')}
-                icon={<FileCode2 aria-hidden className="size-3.5" />}
+                icon={<Icon name={SHELL_ENTRY_ICONS['open-file']} />}
                 onClick={() => void pickFilePair()}
                 disabled={directoryBusy}
                 title={t('shell.toolbar.openFileTitle')}
@@ -1464,7 +1451,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
                 size="sm"
                 data-shell-entry="open-folder"
                 aria-label={t('shell.toolbar.openFolder')}
-                icon={<FolderOpen aria-hidden className="size-3.5" />}
+                icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
                 onClick={() => void pickDirectoryPair()}
                 disabled={directoryBusy}
                 title={t('shell.toolbar.openFolderTitle')}
@@ -1477,7 +1464,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             size="sm"
             data-shell-entry="samples"
             aria-label={t('shell.toolbar.loadSamples')}
-            icon={<Sparkles aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.samples} />}
             onClick={() => void load()}
             disabled={status === 'loading'}
             title={t('shell.toolbar.loadSamplesTitle')}
@@ -1490,7 +1477,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             iconOnly={!labelShown('samples-menu')}
             label={t('shell.toolbar.samples')}
             menuLabel={t('shell.toolbar.samplesMenu')}
-            icon={<Layers aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS['samples-menu']} />}
             items={sampleMenu(t)}
             onSelect={handleMenuSelect}
           />
@@ -1499,7 +1486,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <IconButton
             data-shell-entry="settings"
             label={t('shell.settings.open')}
-            icon={<Settings aria-hidden className="size-3.5" />}
+            icon={<Icon name={SHELL_ENTRY_ICONS.settings} />}
             onClick={() => setSettingsOpen(true)}
           />
         </div>
@@ -1638,28 +1625,28 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       <main className="flex min-h-0 flex-1 flex-col">
         {status === 'empty' ? (
           <StateView
-            icon={<GitCompare aria-hidden className="size-5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.brand} size={20} />}
             title={t('shell.empty.title')}
             description={t('shell.empty.description')}
             action={
               <>
                 <ToolbarButton
                   variant="primary"
-                  icon={<GitCompare aria-hidden className="size-3.5" />}
+                  icon={<Icon name={SHELL_ENTRY_ICONS['new-compare']} />}
                   onClick={() => setCompareDialogOpen(true)}
                   disabled={directoryBusy}
                 >
                   {t('shell.toolbar.newCompare')}
                 </ToolbarButton>
                 <ToolbarButton
-                  icon={<FileCode2 aria-hidden className="size-3.5" />}
+                  icon={<Icon name={SHELL_ENTRY_ICONS['open-file']} />}
                   onClick={() => void pickFilePair()}
                   disabled={directoryBusy}
                 >
                   {t('shell.toolbar.openFile')}
                 </ToolbarButton>
                 <ToolbarButton
-                  icon={<FolderOpen aria-hidden className="size-3.5" />}
+                  icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
                   onClick={() => void pickDirectoryPair()}
                   disabled={directoryBusy}
                 >
@@ -1673,7 +1660,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
 
         {status === 'loading' ? (
           <StateView
-            icon={<LoaderCircle aria-hidden className="size-5 animate-spin" />}
+            icon={<Icon name={UI_ICON_ACTIONS.loading} size={20} className="animate-spin" />}
             title={t('shell.loading.title')}
             description={t('shell.loading.description')}
           />
@@ -1682,13 +1669,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         {status === 'error' ? (
           <StateView
             tone="danger"
-            icon={<AlertTriangle aria-hidden className="size-5" />}
+            icon={<Icon name={UI_ICON_ACTIONS.warning} size={20} />}
             title={t('shell.error.title')}
             description={error === null ? t('shell.error.unknown') : noticeText(error, t)}
             action={
               <ToolbarButton
                 variant="danger"
-                icon={<RefreshCw aria-hidden className="size-3.5" />}
+                icon={<Icon name={UI_ICON_ACTIONS.refresh} />}
                 onClick={() => void load()}
               >
                 {t('common.retry')}

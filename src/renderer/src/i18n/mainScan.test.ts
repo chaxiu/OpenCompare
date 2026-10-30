@@ -11,6 +11,7 @@ const ROOT = process.cwd()
  * excluded by the scanner itself.
  */
 const SCAN_ROOTS = [
+  'src/renderer/src/assets/icons',
   'src/renderer/src/workbench',
   'src/renderer/src/views',
   'src/renderer/src/components',

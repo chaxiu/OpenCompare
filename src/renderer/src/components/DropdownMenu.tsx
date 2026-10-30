@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { ToolbarButton } from './Button'
+import { Icon } from './Icon'
 import type { ButtonSize, ButtonVariant } from './Button'
 import { cx } from './utils'
 
@@ -76,9 +77,9 @@ export function DropdownMenu({
         {icon}
         {iconOnly ? null : label}
         {iconOnly ? null : (
-          <ChevronDown
-            aria-hidden
-            className={cx('transition-fast size-3.5', open ? 'rotate-180' : undefined)}
+          <Icon
+            name={UI_ICON_ACTIONS.menu}
+            className={cx('transition-fast', open ? 'rotate-180' : undefined)}
           />
         )}
       </ToolbarButton>

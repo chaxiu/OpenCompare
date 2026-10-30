@@ -1,7 +1,8 @@
 import type { JSX, ReactNode } from 'react'
-import { X } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { useI18n } from '@renderer/i18n/context'
 import { IconButton } from './Button'
+import { Icon } from './Icon'
 import { cx } from './utils'
 
 export interface SessionTab {
@@ -71,7 +72,7 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
             {onClose ? (
               <IconButton
                 label={t('common.closeTitle', { title: tab.title })}
-                icon={<X aria-hidden className="size-3.5" />}
+                icon={<Icon name={UI_ICON_ACTIONS.close} />}
                 onClick={() => onClose(tab.id)}
                 className="mr-0.5"
               />

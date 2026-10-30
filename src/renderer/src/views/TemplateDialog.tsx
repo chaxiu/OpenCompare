@@ -1,7 +1,8 @@
 import type { JSX } from 'react'
-import { LoaderCircle } from 'lucide-react'
+import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
+import { Icon } from '@renderer/components/Icon'
 import { formatBytes } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { TemplatePreview } from '@renderer/workbench/directoryOps'
@@ -73,7 +74,7 @@ export function TemplateDialog({
             onClick={onConfirm}
             disabled={busy || result.matched.length === 0}
           >
-            {busy ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
+            {busy ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
             {busy ? t('directory.template.placing') : t('directory.template.place')}
           </ToolbarButton>
         </>
