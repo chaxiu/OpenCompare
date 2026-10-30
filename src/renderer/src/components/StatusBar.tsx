@@ -1,12 +1,21 @@
 import type { JSX, ReactNode } from 'react'
 import type { DiffStatus, SampleComposition } from '@shared/fixtures'
 import { useI18n } from '@renderer/i18n/context'
+import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 import { DiffDot } from './DiffBadge'
 import { DIFF_LABEL_KEYS, DIFF_STATUSES } from './diffSemantics'
+import { cx } from './utils'
 
 export function StatusBar({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-3 overflow-x-auto border-t border-line-subtle bg-surface-sunken px-3 text-2xs text-content-muted">
+    <footer
+      data-shell-level="status"
+      className={cx(
+        'flex shrink-0 items-center overflow-x-auto border-t border-line-subtle bg-surface-sunken text-2xs text-content-muted',
+        levelRowClasses('status'),
+        levelBandClasses('status')
+      )}
+    >
       {children}
     </footer>
   )

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import type { JSX, ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AlertTriangle, Check, FolderOpen } from 'lucide-react'
 import type { CsvSample } from '@shared/fixtures'
@@ -18,6 +18,7 @@ import { DELIMITED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import { parseCsvTable } from '@renderer/workbench/session'
 import type { CsvTables } from '@renderer/workbench/session'
+import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 
 /** Row alignment counts reported up to the workbench status bar. */
 export interface CsvAlignState {
@@ -198,10 +199,13 @@ export function CsvView({
   defaultKeyColumns,
   tables,
   platform,
+  toolbarLeading,
   onAlignStateChange,
   onOpenSide
 }: {
   readonly sessionId: string
+  /** Drilldown back row handed down by the shell; first row of the level. */
+  readonly toolbarLeading?: ReactNode
   readonly left: CsvSample
   readonly right: CsvSample
   /** Declared primary keys; empty for a drilldown session. */
@@ -286,17 +290,29 @@ export function CsvView({
     .join('\n')
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
-        role="toolbar"
-        aria-label={t('files.csv.tools')}
-        className="flex shrink-0 flex-wrap items-center gap-2"
+        data-shell-level="view-toolbar"
+        className={cx(
+          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          levelBandClasses('view-toolbar')
+        )}
       >
+        {toolbarLeading ? (
+          <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+            {toolbarLeading}
+          </div>
+        ) : null}
+        <div
+          role="toolbar"
+          aria-label={t('files.csv.tools')}
+          className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}
+        >
         <span className="text-2xs text-content-muted">{t('files.csv.keyColumns')}</span>
         <div
           role="group"
           aria-label={t('files.csv.keyColumnsGroup')}
-          className="flex flex-wrap items-center gap-1"
+          className="flex min-w-0 items-center gap-1 overflow-x-auto"
         >
           {candidates.map((name) => {
             const active = keyColumns.includes(name)
@@ -331,7 +347,7 @@ export function CsvView({
           onChange={setFilter}
         />
 
-        <span className="ml-auto flex shrink-0 flex-wrap items-center gap-3 text-2xs text-content-muted">
+        <span className="ml-auto flex shrink-0 items-center gap-3 text-2xs text-content-muted">
           {notice ? (
             <span
               role="status"
@@ -372,8 +388,13 @@ export function CsvView({
             {t('files.action.openRight')}
           </ToolbarButton>
         </span>
+        </div>
       </div>
 
+      <div
+        data-shell-level="panels"
+        className={cx('flex min-h-0 min-w-0 flex-1 flex-col', levelBandClasses('panels'))}
+      >
       <Panel
         title={`${basename(leftSide.path)} ↔ ${basename(rightSide.path)}`}
         subtitle={t('files.csv.aligned', {
@@ -393,6 +414,7 @@ export function CsvView({
           <CsvAlignedTable columns={align.columns} rows={visible} />
         )}
       </Panel>
+      </div>
     </div>
   )
 }
