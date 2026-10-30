@@ -52,9 +52,9 @@ const pendingWord = ['待', '发布'].join('')
 // converged version in package.json. Once a release lands, one wrap-up commit
 // updates both README line 5 and this constant together, so the two are equal
 // right after a wrap-up and may differ by one unreleased version in between.
-// This tree is a convergence: the newest published anchor (`v0.2.9`) trails
+// This tree is a convergence: the newest published anchor (`v0.2.11`) trails
 // the converged version, so the two must stay apart.
-const latestPublishedTag = 'v0.2.9'
+const latestPublishedTag = 'v0.2.11'
 // The previous public release. Pinned on its own so flipping the newest anchor
 // never retargets the history assertions below.
 const previousPublishedTag = 'v0.2.8'
@@ -69,6 +69,7 @@ const publishedTags = [
   'v0.2.6',
   'v0.2.7',
   'v0.2.8',
+  'v0.2.9',
   latestPublishedTag
 ]
 const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
@@ -224,6 +225,20 @@ const historicalNotesV022 = existsSync(historicalNotesV022Path)
 const historicalNotesV027Path = join(repoRoot, 'docs/release-notes/v0.2.7.md')
 const historicalNotesV027 = existsSync(historicalNotesV027Path)
   ? readFileSync(historicalNotesV027Path, 'utf8')
+  : ''
+
+// v0.2.9 shipped before the newest published anchor moved forward; the HTML
+// report and Open Rebuilds facts are pinned to this explicit file.
+const historicalNotesV029Path = join(repoRoot, 'docs/release-notes/v0.2.9.md')
+const historicalNotesV029 = existsSync(historicalNotesV029Path)
+  ? readFileSync(historicalNotesV029Path, 'utf8')
+  : ''
+
+// v0.2.11 shipped before the converged version; its ruler facts and measured
+// figures are pinned to this explicit file instead of following the current tag.
+const historicalNotesV0211Path = join(repoRoot, 'docs/release-notes/v0.2.11.md')
+const historicalNotesV0211 = existsSync(historicalNotesV0211Path)
+  ? readFileSync(historicalNotesV0211Path, 'utf8')
   : ''
 
 const firstHeading = (markdown: string): string =>
@@ -1345,10 +1360,10 @@ describe('release notes changelog', () => {
   })
 
   it('covers the v0.2.9 shipped changelog entry with the four shipped change areas', () => {
-    const start = changelog.indexOf(`## ${latestPublishedTag}`)
-    // The newest published entry ends at the previous published heading, so a
-    // convergence entry above it never leaks into this slice.
-    const end = changelog.indexOf(`## ${previousPublishedTag}`)
+    const start = changelog.indexOf('## v0.2.9')
+    // The shipped entry ends at the v0.2.8 heading, so a convergence entry above
+    // it never leaks into this slice.
+    const end = changelog.indexOf('## v0.2.8')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const section = changelog.slice(start, end)
@@ -1371,11 +1386,11 @@ describe('release notes changelog', () => {
     expect(section.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
   })
 
-  it('covers the current changelog entry with the ruler change and its stated limits', () => {
-    const start = changelog.indexOf(`## ${currentTag}`)
-    // The converged entry is the newest heading, so its slice ends at the
-    // published entry below it.
-    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+  it('covers the v0.2.11 changelog entry with the ruler change and its stated limits', () => {
+    const start = changelog.indexOf('## v0.2.11')
+    // The shipped entry ends at the v0.2.9 heading, so a convergence entry above
+    // it never leaks into this slice.
+    const end = changelog.indexOf('## v0.2.9')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const section = changelog.slice(start, end)
@@ -1404,10 +1419,10 @@ describe('release notes changelog', () => {
 
   it('restates the report caps as the existing released posture instead of a new change', () => {
     const releasedEntry = changelog.slice(
-      changelog.indexOf(`## ${latestPublishedTag}`),
-      changelog.indexOf(`## ${previousPublishedTag}`)
+      changelog.indexOf('## v0.2.9'),
+      changelog.indexOf('## v0.2.8')
     )
-    for (const doc of [releasedEntry, lastReleasedNotes]) {
+    for (const doc of [releasedEntry, historicalNotesV029]) {
       const capParagraphs = doc
         .split(/\n\s*\n/)
         .filter((paragraph) => paragraph.includes('200,000') || paragraph.includes('10 MB'))
@@ -1509,6 +1524,31 @@ describe('release notes changelog', () => {
     )
     // The converged entry alone; no ghost version in between.
     expect(headings).toEqual([currentTag])
+  })
+
+  it('ships the converged notes and changelog entry without unmeasured figures', () => {
+    const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const currentEntry = changelog.slice(start, end)
+    expect(firstHeading(releaseNotes)).toContain(currentTag)
+    for (const doc of [releaseNotes, currentEntry]) {
+      expect(doc).toContain('升级方式')
+      // The UI phase-one facts shipped on main; the converged copy states them
+      // without claiming a release, a fix pass or a measured run.
+      for (const phrase of ['壳层', '图标', 'lucide-react', '主题', 'tab', '截图']) {
+        expect(doc).toContain(phrase)
+      }
+      for (const banned of ['200,000', '10 MB', '本版新增', '待验证', '预计通过', '应该通过']) {
+        expect(doc).not.toContain(banned)
+      }
+      expect(doc).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+      expect(doc).not.toMatch(/[0-9a-f]{40,64}/)
+      // No unmeasured memory, size or first-open figure may leak into a
+      // convergence note.
+      expect(doc.match(/\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)/g) ?? []).toEqual([])
+    }
   })
 
   it('keeps the v0.2.2 changelog entry as history', () => {
@@ -1637,7 +1677,8 @@ describe('release notes changelog', () => {
   })
 
   it('documents the v0.2.9 release notes with the HTML report and the Open Rebuilds rename', () => {
-    expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
+    expect(existsSync(historicalNotesV029Path)).toBe(true)
+    expect(firstHeading(historicalNotesV029)).toContain('v0.2.9')
     for (const phrase of [
       'HTML',
       '自包含',
@@ -1654,27 +1695,28 @@ describe('release notes changelog', () => {
       'Open Rebuilds',
       'https://github.com/munk-sh/open-rebuilds',
       '升级方式',
-      latestPublishedTag
+      'v0.2.9'
     ]) {
-      expect(lastReleasedNotes).toContain(phrase)
+      expect(historicalNotesV029).toContain(phrase)
     }
-    expect(lastReleasedNotes).not.toContain('待验证')
-    expect(lastReleasedNotes).not.toContain('预计通过')
-    expect(lastReleasedNotes).not.toContain('应该通过')
-    expect(lastReleasedNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
-    expect(lastReleasedNotes).not.toMatch(/[0-9a-f]{64}/)
+    expect(historicalNotesV029).not.toContain('待验证')
+    expect(historicalNotesV029).not.toContain('预计通过')
+    expect(historicalNotesV029).not.toContain('应该通过')
+    expect(historicalNotesV029).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(historicalNotesV029).not.toMatch(/[0-9a-f]{64}/)
     // The documented byte cap is the only MB figure the notes may carry.
-    expect(lastReleasedNotes.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
+    expect(historicalNotesV029.match(/\b\d+(?:[.,]\d+)?\s*MB\b/g) ?? []).toEqual(['10 MB'])
     // Whitelist for the v0.2.9 measured memory figures; any other GiB/MiB/GB
     // number still fails closed.
-    expect(lastReleasedNotes.match(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/g) ?? []).toEqual([
+    expect(historicalNotesV029.match(/\b\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB)\b/g) ?? []).toEqual([
       '1,325 MiB',
       '764.9 MiB'
     ])
   })
 
-  it('documents the current release notes with the ruler change and its stated limits', () => {
-    expect(firstHeading(releaseNotes)).toContain(currentTag)
+  it('documents the v0.2.11 release notes with the ruler change and its stated limits', () => {
+    expect(existsSync(historicalNotesV0211Path)).toBe(true)
+    expect(firstHeading(historicalNotesV0211)).toContain('v0.2.11')
     for (const phrase of [
       '指示条',
       '四态',
@@ -1690,22 +1732,22 @@ describe('release notes changelog', () => {
       '不改对比与合并算法',
       '升级方式'
     ]) {
-      expect(releaseNotes).toContain(phrase)
+      expect(historicalNotesV0211).toContain(phrase)
     }
-    expect(releaseNotes).not.toContain('待验证')
-    expect(releaseNotes).not.toContain('预计通过')
-    expect(releaseNotes).not.toContain('应该通过')
-    expect(releaseNotes).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
-    expect(releaseNotes).not.toMatch(/[0-9a-f]{40,64}/)
-    // Whitelist for the v0.2.10 measured figures, in document order; any other
+    expect(historicalNotesV0211).not.toContain('待验证')
+    expect(historicalNotesV0211).not.toContain('预计通过')
+    expect(historicalNotesV0211).not.toContain('应该通过')
+    expect(historicalNotesV0211).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    expect(historicalNotesV0211).not.toMatch(/[0-9a-f]{40,64}/)
+    // Whitelist for the v0.2.11 measured figures, in document order; any other
     // number or a different order still fails closed.
-    expect(releaseNotes.match(/\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)/g) ?? []).toEqual(['451.6 MiB', '909.0 MiB', '2.25 GiB', '2.5 GiB', '9.29 GiB', '9.62 GiB'])
+    expect(historicalNotesV0211.match(/\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)/g) ?? []).toEqual(['451.6 MiB', '909.0 MiB', '2.25 GiB', '2.5 GiB', '9.29 GiB', '9.62 GiB'])
     // Every measured claim is bound to the product-qa run and the measured
     // commit; the placeholder handoff is gone.
-    expect(releaseNotes).toContain('trun_08764efa44c39426')
-    expect(releaseNotes).toContain('2bcdc53e')
-    expect(releaseNotes).not.toContain('L1 前待实机')
-    expect(releaseNotes).not.toContain('run id 待该场次回填')
+    expect(historicalNotesV0211).toContain('trun_08764efa44c39426')
+    expect(historicalNotesV0211).toContain('2bcdc53e')
+    expect(historicalNotesV0211).not.toContain('L1 前待实机')
+    expect(historicalNotesV0211).not.toContain('run id 待该场次回填')
   })
 
   it('keeps the v0.2.7 bilingual UI release notes as shipped history', () => {
@@ -1868,9 +1910,12 @@ describe('release document consistency', () => {
 // live in the release evidence record asserted further below.
 const readmeStatusLine = (markdown: string): string => markdown.split(/\r?\n/)[4] ?? ''
 
-// The newest published evidence record is a release-time fact; pinning its
-// anchors here makes a fabricated or hand-edited record fail `pnpm test`.
-const releaseEvidencePath = join(repoRoot, `docs/release-evidence/${latestPublishedTag}.md`)
+// The newest archived evidence record belongs to v0.2.9: v0.2.10 and v0.2.11
+// shipped without a follow-up evidence file, so the record is pinned as an
+// explicit historical path instead of following the moving released anchor.
+// Pinning its anchors here makes a fabricated or hand-edited record fail
+// `pnpm test`.
+const releaseEvidencePath = join(repoRoot, 'docs/release-evidence/v0.2.9.md')
 const releaseEvidence = existsSync(releaseEvidencePath)
   ? readFileSync(releaseEvidencePath, 'utf8')
   : ''
@@ -2723,8 +2768,8 @@ describe('v0.2.8 verified release evidence record', () => {
   })
 })
 
-describe(`${latestPublishedTag} verified release evidence record`, () => {
-  const evidenceTag = latestPublishedTag
+describe('v0.2.9 verified release evidence record', () => {
+  const evidenceTag = 'v0.2.9'
   const assetVersion = evidenceTag.slice(1)
   const releasedCommit = '35d4000f6d7d245dab577a52f639f3daab2726c0'
 
