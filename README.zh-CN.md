@@ -69,6 +69,8 @@ src/shared/     跨进程共享类型、PlatformPort 契约与内置样本
 
 Performance & memory evidence：[只读诊断](docs/perf/upsert-memory-diagnosis-2026-10-23.md) 与 [大目录内存](docs/perf/large-directory-memory.md)。
 
+教训与口径沿革：[历史结论、一次性事故与已闭环实测口径](docs/lessons.md)。
+
 ## Open Rebuilds 001 平替
 
 OpenCompare 是 Beyond Compare 5 Pro 的免费 MIT 平替，收录为 [Open Rebuilds](https://github.com/munk-sh/open-rebuilds) 系列第 001 号项目。
