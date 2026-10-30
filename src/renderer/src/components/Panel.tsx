@@ -1,4 +1,5 @@
 import type { JSX, ReactNode, Ref, UIEvent } from 'react'
+import { levelHeaderClasses } from '@renderer/workbench/shellLayout'
 import { cx } from './utils'
 
 export interface PanelProps {
@@ -37,7 +38,12 @@ export function Panel({
         className
       )}
     >
-      <header className="flex h-8 shrink-0 items-center gap-2 border-b border-line-subtle bg-surface-overlay px-2.5">
+      <header
+        className={cx(
+          'flex shrink-0 items-center border-b border-line-subtle bg-surface-overlay',
+          levelHeaderClasses('panels')
+        )}
+      >
         <span
           className="truncate font-mono text-2xs font-medium text-content-secondary"
           title={title}

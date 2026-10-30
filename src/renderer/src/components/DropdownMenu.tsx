@@ -22,6 +22,10 @@ export interface DropdownMenuProps {
   readonly icon?: ReactNode
   /** Accessible name of the menu; defaults to `label`. */
   readonly menuLabel?: string
+  /** Hides the copy while keeping the entry, its accessible name and the menu. */
+  readonly iconOnly?: boolean
+  /** Stable shell-layout hook for the trigger. */
+  readonly entryId?: string
 }
 
 /** Toolbar button that opens a small action menu. Closes on select, Escape or outside click. */
@@ -32,7 +36,9 @@ export function DropdownMenu({
   variant = 'default',
   size = 'md',
   icon,
-  menuLabel
+  menuLabel,
+  iconOnly = false,
+  entryId
 }: DropdownMenuProps): JSX.Element {
   const [open, setOpen] = useState(false)
   const container = useRef<HTMLDivElement>(null)
@@ -60,16 +66,21 @@ export function DropdownMenu({
       <ToolbarButton
         variant={variant}
         size={size}
+        data-shell-entry={entryId}
+        aria-label={iconOnly ? label : undefined}
+        title={iconOnly ? label : undefined}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
         {icon}
-        {label}
-        <ChevronDown
-          aria-hidden
-          className={cx('transition-fast size-3.5', open ? 'rotate-180' : undefined)}
-        />
+        {iconOnly ? null : label}
+        {iconOnly ? null : (
+          <ChevronDown
+            aria-hidden
+            className={cx('transition-fast size-3.5', open ? 'rotate-180' : undefined)}
+          />
+        )}
       </ToolbarButton>
 
       {open ? (

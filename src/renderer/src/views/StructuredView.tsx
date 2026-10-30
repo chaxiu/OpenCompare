@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { JSX } from 'react'
+import type { JSX, ReactNode } from 'react'
 import { AlertTriangle, ArrowRight, Braces, FolderOpen } from 'lucide-react'
 import { STRUCTURED_STATUSES, diffStructured, filterStructuredChanges } from '@core/structured/diff'
 import type {
@@ -26,6 +26,7 @@ import { classifyFile } from '@renderer/workbench/fileKinds'
 import { STRUCTURED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair } from '@renderer/workbench/session'
+import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 
 const FORMAT_OPTIONS: readonly { readonly value: StructuredFormat; readonly key: MessageKey }[] = [
   { value: 'json', key: 'files.structured.format.json' },
@@ -162,9 +163,12 @@ export function StructuredView({
   pair,
   format,
   platform,
+  toolbarLeading,
   onOpenSide
 }: {
   readonly fixture?: StructuredSceneFixture
+  /** Drilldown back row handed down by the shell; first row of the level. */
+  readonly toolbarLeading?: ReactNode
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
   readonly format?: StructuredFormat
@@ -242,8 +246,20 @@ export function StructuredView({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        data-shell-level="view-toolbar"
+        className={cx(
+          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          levelBandClasses('view-toolbar')
+        )}
+      >
+        {toolbarLeading ? (
+          <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+            {toolbarLeading}
+          </div>
+        ) : null}
+        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
         {adhoc ? (
           <span className="text-2xs text-content-muted">
             {t('files.structured.drilldown', { format: effective.toUpperCase() })}
@@ -300,8 +316,13 @@ export function StructuredView({
             {notice.text}
           </span>
         ) : null}
+        </div>
       </div>
 
+      <div
+        data-shell-level="panels"
+        className={cx('flex min-h-0 min-w-0 flex-1 flex-col', levelBandClasses('panels'))}
+      >
       {comparison.diff ? (
         <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-line-subtle bg-surface-sunken px-2 py-1">
           <StatusCounts counts={comparison.diff.counts} />
@@ -363,6 +384,7 @@ export function StructuredView({
           </Panel>
         ]}
       />
+      </div>
     </div>
   )
 }

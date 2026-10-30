@@ -25,8 +25,10 @@ import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
 import { CompositionLegend } from '@renderer/components/StatusBar'
 import { TreeView } from '@renderer/components/TreeView'
+import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
+import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 import type { SidePosition } from '@renderer/workbench/snapshotOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { FILTER_LABEL_KEYS, SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS } from './directoryCopy'
@@ -188,193 +190,214 @@ export function DirectoryView({
   }, [comparison, filter, collapsedPaths])
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <SegmentedControl
-          label={t('directory.filter.group')}
-          options={filterOptions}
-          value={filter}
-          onChange={onFilterChange}
-        />
-        <CompositionLegend composition={visibleCounts} />
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <ToolbarButton
-            size="sm"
-            icon={<FolderSearch aria-hidden className="size-3.5" />}
-            onClick={() => onPick('left')}
-            disabled={busy || !pickerAvailable}
-            title={pickerAvailable ? t('directory.toolbar.pickLeftTitle') : undefined}
-          >
-            {t('directory.toolbar.pickLeft')}
-          </ToolbarButton>
-          <ToolbarButton
-            size="sm"
-            icon={<FolderSearch aria-hidden className="size-3.5" />}
-            onClick={() => onPick('right')}
-            disabled={busy || !pickerAvailable}
-            title={pickerAvailable ? t('directory.toolbar.pickRightTitle') : undefined}
-          >
-            {t('directory.toolbar.pickRight')}
-          </ToolbarButton>
-          <ToolbarButton
-            size="sm"
-            icon={<Sparkles aria-hidden className="size-3.5" />}
-            onClick={onLoadSample}
-            disabled={busy}
-            title={t('directory.toolbar.loadSampleTitle')}
-          >
-            {t('directory.toolbar.loadSample')}
-          </ToolbarButton>
-          {busy ? (
-            <LoaderCircle aria-hidden className="size-3.5 animate-spin text-content-muted" />
-          ) : null}
-        </span>
-      </div>
-
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <SegmentedControl
-          label={t('directory.sync.direction')}
-          options={directionOptions}
-          value={direction}
-          onChange={setDirection}
-        />
-        <SegmentedControl
-          label={t('directory.sync.mode')}
-          options={modeOptions}
-          value={mode}
-          onChange={setMode}
-        />
-        <ToolbarButton
-          size="sm"
-          icon={<SplitSquareHorizontal aria-hidden className="size-3.5" />}
-          onClick={() => onPreviewSync(direction, mode)}
-          disabled={busy}
-          title={t('directory.toolbar.previewSyncTitle')}
-        >
-          {t('directory.toolbar.previewSync')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<Shuffle aria-hidden className="size-3.5" />}
-          onClick={onPreviewTemplate}
-          disabled={busy}
-          title={t('directory.toolbar.templateTitle')}
-        >
-          {t('directory.toolbar.template')}
-        </ToolbarButton>
-      </div>
-
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <ToolbarButton
-          size="sm"
-          icon={<Download aria-hidden className="size-3.5" />}
-          onClick={() => onExportSnapshot('left')}
-          disabled={busy}
-          title={t('directory.toolbar.exportLeftTitle')}
-        >
-          {t('directory.toolbar.exportLeft')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<Upload aria-hidden className="size-3.5" />}
-          onClick={() => leftInputRef.current?.click()}
-          disabled={busy}
-          title={t('directory.toolbar.importLeftTitle')}
-        >
-          {t('directory.toolbar.importLeft')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<Download aria-hidden className="size-3.5" />}
-          onClick={() => onExportSnapshot('right')}
-          disabled={busy}
-          title={t('directory.toolbar.exportRightTitle')}
-        >
-          {t('directory.toolbar.exportRight')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<Upload aria-hidden className="size-3.5" />}
-          onClick={() => rightInputRef.current?.click()}
-          disabled={busy}
-          title={t('directory.toolbar.importRightTitle')}
-        >
-          {t('directory.toolbar.importRight')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<Cloud aria-hidden className="size-3.5" />}
-          onClick={onLoadRemoteSnapshotSample}
-          disabled={busy}
-          title={t('directory.toolbar.demoRemoteTitle')}
-        >
-          {t('directory.toolbar.demoRemote')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<FileDown aria-hidden className="size-3.5" />}
-          onClick={onExportReport}
-          disabled={busy || reportExporting}
-          title={t('directory.report.toolbar.exportTitle')}
-        >
-          {t('directory.report.toolbar.export')}
-        </ToolbarButton>
-        {reportProgress ? (
-          <span
-            role="status"
-            className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
-          >
-            <span className="tabular">
-              {t('directory.report.progress', {
-                done: reportProgress.processedRows,
-                total: reportProgress.totalRows
-              })}
-            </span>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        data-shell-level="view-toolbar"
+        className={cx(
+          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          levelBandClasses('view-toolbar')
+        )}
+      >
+        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+          <span data-shell-entry="filter" className="flex shrink-0 items-center">
+            <SegmentedControl
+              label={t('directory.filter.group')}
+              options={filterOptions}
+              value={filter}
+              onChange={onFilterChange}
+            />
+          </span>
+          <CompositionLegend composition={visibleCounts} />
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <ToolbarButton
               size="sm"
-              onClick={onCancelReportExport}
-              title={t('directory.report.cancelTitle')}
+              icon={<FolderSearch aria-hidden className="size-3.5" />}
+              onClick={() => onPick('left')}
+              disabled={busy || !pickerAvailable}
+              title={pickerAvailable ? t('directory.toolbar.pickLeftTitle') : undefined}
             >
-              {t('directory.report.cancel')}
+              {t('directory.toolbar.pickLeft')}
+            </ToolbarButton>
+            <ToolbarButton
+              size="sm"
+              icon={<FolderSearch aria-hidden className="size-3.5" />}
+              onClick={() => onPick('right')}
+              disabled={busy || !pickerAvailable}
+              title={pickerAvailable ? t('directory.toolbar.pickRightTitle') : undefined}
+            >
+              {t('directory.toolbar.pickRight')}
+            </ToolbarButton>
+            <ToolbarButton
+              size="sm"
+              icon={<Sparkles aria-hidden className="size-3.5" />}
+              onClick={onLoadSample}
+              disabled={busy}
+              title={t('directory.toolbar.loadSampleTitle')}
+            >
+              {t('directory.toolbar.loadSample')}
+            </ToolbarButton>
+            {busy ? (
+              <LoaderCircle aria-hidden className="size-3.5 animate-spin text-content-muted" />
+            ) : null}
+          </span>
+        </div>
+
+        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+          <SegmentedControl
+            label={t('directory.sync.direction')}
+            options={directionOptions}
+            value={direction}
+            onChange={setDirection}
+          />
+          <SegmentedControl
+            label={t('directory.sync.mode')}
+            options={modeOptions}
+            value={mode}
+            onChange={setMode}
+          />
+          <ToolbarButton
+            size="sm"
+            data-shell-entry="sync"
+            icon={<SplitSquareHorizontal aria-hidden className="size-3.5" />}
+            onClick={() => onPreviewSync(direction, mode)}
+            disabled={busy}
+            title={t('directory.toolbar.previewSyncTitle')}
+          >
+            {t('directory.toolbar.previewSync')}
+          </ToolbarButton>
+          <ToolbarButton
+            size="sm"
+            data-shell-entry="template"
+            icon={<Shuffle aria-hidden className="size-3.5" />}
+            onClick={onPreviewTemplate}
+            disabled={busy}
+            title={t('directory.toolbar.templateTitle')}
+          >
+            {t('directory.toolbar.template')}
+          </ToolbarButton>
+        </div>
+
+        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+          <span data-shell-entry="snapshot-export" className="flex shrink-0 items-center gap-1.5">
+            <ToolbarButton
+              size="sm"
+              icon={<Download aria-hidden className="size-3.5" />}
+              onClick={() => onExportSnapshot('left')}
+              disabled={busy}
+              title={t('directory.toolbar.exportLeftTitle')}
+            >
+              {t('directory.toolbar.exportLeft')}
+            </ToolbarButton>
+            <ToolbarButton
+              size="sm"
+              icon={<Download aria-hidden className="size-3.5" />}
+              onClick={() => onExportSnapshot('right')}
+              disabled={busy}
+              title={t('directory.toolbar.exportRightTitle')}
+            >
+              {t('directory.toolbar.exportRight')}
             </ToolbarButton>
           </span>
-        ) : null}
-        <label
-          className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
-          title={t('directory.report.toolbar.hideLocalPathsTitle')}
-        >
+          <span data-shell-entry="snapshot-import" className="flex shrink-0 items-center gap-1.5">
+            <ToolbarButton
+              size="sm"
+              icon={<Upload aria-hidden className="size-3.5" />}
+              onClick={() => leftInputRef.current?.click()}
+              disabled={busy}
+              title={t('directory.toolbar.importLeftTitle')}
+            >
+              {t('directory.toolbar.importLeft')}
+            </ToolbarButton>
+            <ToolbarButton
+              size="sm"
+              icon={<Upload aria-hidden className="size-3.5" />}
+              onClick={() => rightInputRef.current?.click()}
+              disabled={busy}
+              title={t('directory.toolbar.importRightTitle')}
+            >
+              {t('directory.toolbar.importRight')}
+            </ToolbarButton>
+          </span>
+          <ToolbarButton
+            size="sm"
+            icon={<Cloud aria-hidden className="size-3.5" />}
+            onClick={onLoadRemoteSnapshotSample}
+            disabled={busy}
+            title={t('directory.toolbar.demoRemoteTitle')}
+          >
+            {t('directory.toolbar.demoRemote')}
+          </ToolbarButton>
+          <ToolbarButton
+            size="sm"
+            data-shell-entry="report-export"
+            icon={<FileDown aria-hidden className="size-3.5" />}
+            onClick={onExportReport}
+            disabled={busy || reportExporting}
+            title={t('directory.report.toolbar.exportTitle')}
+          >
+            {t('directory.report.toolbar.export')}
+          </ToolbarButton>
+          {reportProgress ? (
+            <span
+              role="status"
+              className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
+            >
+              <span className="tabular">
+                {t('directory.report.progress', {
+                  done: reportProgress.processedRows,
+                  total: reportProgress.totalRows
+                })}
+              </span>
+              <ToolbarButton
+                size="sm"
+                onClick={onCancelReportExport}
+                title={t('directory.report.cancelTitle')}
+              >
+                {t('directory.report.cancel')}
+              </ToolbarButton>
+            </span>
+          ) : null}
+          <label
+            className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
+            title={t('directory.report.toolbar.hideLocalPathsTitle')}
+          >
+            <input
+              type="checkbox"
+              checked={hideLocalPaths}
+              onChange={(event) => onHideLocalPathsChange(event.target.checked)}
+              className="size-3.5 shrink-0 accent-accent"
+            />
+            {t('directory.report.toolbar.hideLocalPaths')}
+          </label>
           <input
-            type="checkbox"
-            checked={hideLocalPaths}
-            onChange={(event) => onHideLocalPathsChange(event.target.checked)}
-            className="size-3.5 shrink-0 accent-accent"
+            ref={leftInputRef}
+            type="file"
+            accept=".json,.ocsnap.json,application/json"
+            aria-label={t('directory.snapshot.pickLeftFile')}
+            className="sr-only"
+            onChange={(event) => {
+              selectedFile('left', event.target.files)
+              event.target.value = ''
+            }}
           />
-          {t('directory.report.toolbar.hideLocalPaths')}
-        </label>
-        <input
-          ref={leftInputRef}
-          type="file"
-          accept=".json,.ocsnap.json,application/json"
-          aria-label={t('directory.snapshot.pickLeftFile')}
-          className="sr-only"
-          onChange={(event) => {
-            selectedFile('left', event.target.files)
-            event.target.value = ''
-          }}
-        />
-        <input
-          ref={rightInputRef}
-          type="file"
-          accept=".json,.ocsnap.json,application/json"
-          aria-label={t('directory.snapshot.pickRightFile')}
-          className="sr-only"
-          onChange={(event) => {
-            selectedFile('right', event.target.files)
-            event.target.value = ''
-          }}
-        />
+          <input
+            ref={rightInputRef}
+            type="file"
+            accept=".json,.ocsnap.json,application/json"
+            aria-label={t('directory.snapshot.pickRightFile')}
+            className="sr-only"
+            onChange={(event) => {
+              selectedFile('right', event.target.files)
+              event.target.value = ''
+            }}
+          />
+        </div>
       </div>
 
+      <div
+        data-shell-level="panels"
+        className={cx('flex min-h-0 min-w-0 flex-1 flex-col', levelBandClasses('panels'))}
+      >
       {pickerAvailable ? null : (
         <p className="shrink-0 text-2xs text-content-muted">{t('directory.picker.unavailable')}</p>
       )}
@@ -448,6 +471,7 @@ export function DirectoryView({
       ) : null}
 
       <p className="shrink-0 text-2xs text-content-muted">{t('directory.drilldownHint')}</p>
+      </div>
 
       {syncPreview ? (
         <DirectorySyncDialog

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import type { JSX, ReactNode } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -37,6 +37,12 @@ import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
 import { pickTextFile, textFileFilter } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
+import {
+  controlPresentation,
+  levelBandClasses,
+  levelRowClasses
+} from '@renderer/workbench/shellLayout'
+import { useWidthTier } from '@renderer/workbench/useWidthTier'
 import type { CodeFileBuffer, FilePair } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
@@ -82,11 +88,14 @@ function CodeDiffView({
   pair,
   buffer,
   platform,
+  toolbarLeading,
   onDirtyChange,
   onBufferChange,
   onOpenSide
 }: {
   readonly pair: FilePair
+  /** First row of this view's `view-toolbar` level (mode switch, drilldown back). */
+  readonly toolbarLeading?: ReactNode
   /** Working copies kept on the session, used when the view remounts. */
   readonly buffer?: CodeFileBuffer
   readonly platform: PlatformPort
@@ -269,15 +278,29 @@ function CodeDiffView({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        data-shell-level="view-toolbar"
+        className={cx(
+          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          levelBandClasses('view-toolbar')
+        )}
+      >
+        {toolbarLeading ? (
+          <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+            {toolbarLeading}
+          </div>
+        ) : null}
+        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
         <IconButton
+          data-shell-entry="prev-diff"
           label={t('files.code.prevDifference')}
           icon={<ChevronUp aria-hidden className="size-3.5" />}
           onClick={() => step(-1)}
           disabled={blockCount === 0}
         />
         <IconButton
+          data-shell-entry="next-diff"
           label={t('files.code.nextDifference')}
           icon={<ChevronDown aria-hidden className="size-3.5" />}
           onClick={() => step(1)}
@@ -291,22 +314,24 @@ function CodeDiffView({
           {activeBlock ? <DiffBadge status={activeBlock.status} /> : null}
         </span>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <ToolbarButton
-          size="sm"
-          icon={<ArrowRight aria-hidden className="size-3.5" />}
-          onClick={() => overwrite('to-right')}
-          disabled={activeBlock === null}
-        >
-          {t('files.code.overwriteRight')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<ArrowLeft aria-hidden className="size-3.5" />}
-          onClick={() => overwrite('to-left')}
-          disabled={activeBlock === null}
-        >
-          {t('files.code.overwriteLeft')}
-        </ToolbarButton>
+        <span data-shell-entry="override" className="flex shrink-0 items-center gap-1.5">
+          <ToolbarButton
+            size="sm"
+            icon={<ArrowRight aria-hidden className="size-3.5" />}
+            onClick={() => overwrite('to-right')}
+            disabled={activeBlock === null}
+          >
+            {t('files.code.overwriteRight')}
+          </ToolbarButton>
+          <ToolbarButton
+            size="sm"
+            icon={<ArrowLeft aria-hidden className="size-3.5" />}
+            onClick={() => overwrite('to-left')}
+            disabled={activeBlock === null}
+          >
+            {t('files.code.overwriteLeft')}
+          </ToolbarButton>
+        </span>
         <ToolbarButton
           size="sm"
           variant="ghost"
@@ -316,24 +341,26 @@ function CodeDiffView({
           {t('files.code.reset')}
         </ToolbarButton>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <ToolbarButton
-          size="sm"
-          icon={<Save aria-hidden className="size-3.5" />}
-          onClick={() => void save('left')}
-          disabled={!leftDirty}
-          title={t('files.code.saveLeftTitle')}
-        >
-          {t('files.code.saveLeft')}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          icon={<Save aria-hidden className="size-3.5" />}
-          onClick={() => void save('right')}
-          disabled={!rightDirty}
-          title={t('files.code.saveRightTitle')}
-        >
-          {t('files.code.saveRight')}
-        </ToolbarButton>
+        <span data-shell-entry="save" className="flex shrink-0 items-center gap-1.5">
+          <ToolbarButton
+            size="sm"
+            icon={<Save aria-hidden className="size-3.5" />}
+            onClick={() => void save('left')}
+            disabled={!leftDirty}
+            title={t('files.code.saveLeftTitle')}
+          >
+            {t('files.code.saveLeft')}
+          </ToolbarButton>
+          <ToolbarButton
+            size="sm"
+            icon={<Save aria-hidden className="size-3.5" />}
+            onClick={() => void save('right')}
+            disabled={!rightDirty}
+            title={t('files.code.saveRightTitle')}
+          >
+            {t('files.code.saveRight')}
+          </ToolbarButton>
+        </span>
         {dirty ? (
           <span role="status" className="text-2xs text-diff-modified">
             {leftDirty && rightDirty
@@ -369,9 +396,13 @@ function CodeDiffView({
             {notice.text}
           </span>
         ) : null}
+        </div>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 gap-2">
+      <div
+        data-shell-level="panels"
+        className={cx('flex min-h-0 min-w-0 flex-1', levelBandClasses('panels'))}
+      >
         <SplitPane
           panes={[
             <Panel
@@ -454,9 +485,12 @@ function CodeMergeView({
   activeConflict,
   onSelectConflict,
   platform,
+  toolbarLeading,
   onOpenSide
 }: {
   readonly sides: MergeSides
+  /** First row of this view's `view-toolbar` level (mode switch). */
+  readonly toolbarLeading?: ReactNode
   readonly model: MergeModel
   readonly resolutions: MergeResolutions
   readonly onResolve: (id: string, accept: MergeAccept) => void
@@ -466,6 +500,10 @@ function CodeMergeView({
   readonly onOpenSide: (which: MergeSideKey, picked: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
+  // The layout table owns the collapse rule; the row only asks it.
+  const tier = useWidthTier()
+  const openSideCopyShown = controlPresentation('merge-open-sides', tier) === 'label'
+  const copyCopyShown = controlPresentation('merge-copy', tier) === 'label'
   const baseScroll = useRef<HTMLDivElement>(null)
   const oursScroll = useRef<HTMLDivElement>(null)
   const theirsScroll = useRef<HTMLDivElement>(null)
@@ -550,15 +588,29 @@ function CodeMergeView({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        data-shell-level="view-toolbar"
+        className={cx(
+          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          levelBandClasses('view-toolbar')
+        )}
+      >
+        {toolbarLeading ? (
+          <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+            {toolbarLeading}
+          </div>
+        ) : null}
+        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
         <IconButton
+          data-shell-entry="prev-diff"
           label={t('files.merge.prevConflict')}
           icon={<ChevronUp aria-hidden className="size-3.5" />}
           onClick={() => step(-1)}
           disabled={conflictCount === 0}
         />
         <IconButton
+          data-shell-entry="next-diff"
           label={t('files.merge.nextConflict')}
           icon={<ChevronDown aria-hidden className="size-3.5" />}
           onClick={() => step(1)}
@@ -571,28 +623,33 @@ function CodeMergeView({
           </span>
         </span>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        {ACCEPT_OPTIONS.map((option) => (
-          <ToolbarButton
-            key={option.value}
-            size="sm"
-            variant={activeId && resolutions[activeId] === option.value ? 'primary' : 'default'}
-            onClick={() => {
-              if (activeId) onResolve(activeId, option.value)
-            }}
-            disabled={activeId === null}
-          >
-            {t(option.key)}
-          </ToolbarButton>
-        ))}
+        <span data-shell-entry="merge-accept" className="flex shrink-0 items-center gap-1.5">
+          {ACCEPT_OPTIONS.map((option) => (
+            <ToolbarButton
+              key={option.value}
+              size="sm"
+              variant={activeId && resolutions[activeId] === option.value ? 'primary' : 'default'}
+              onClick={() => {
+                if (activeId) onResolve(activeId, option.value)
+              }}
+              disabled={activeId === null}
+            >
+              {t(option.key)}
+            </ToolbarButton>
+          ))}
+        </span>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         {(Object.keys(MERGE_SIDE_KEYS) as MergeSideKey[]).map((which) => (
           <ToolbarButton
             key={which}
             size="sm"
+            aria-label={t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })}
             icon={<FolderOpen aria-hidden className="size-3.5" />}
             onClick={() => void openSide(which)}
           >
-            {t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })}
+            {openSideCopyShown
+              ? t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })
+              : null}
           </ToolbarButton>
         ))}
         <span className="ml-auto flex shrink-0 items-center gap-2">
@@ -609,14 +666,16 @@ function CodeMergeView({
           ) : null}
           <ToolbarButton
             size="sm"
+            aria-label={t('files.action.copy')}
             icon={<ClipboardCopy aria-hidden className="size-3.5" />}
             onClick={() => void copyText()}
             disabled={render.unresolved > 0}
           >
-            {t('files.action.copy')}
+            {copyCopyShown ? t('files.action.copy') : null}
           </ToolbarButton>
           <ToolbarButton
             size="sm"
+            data-shell-entry="export"
             variant="primary"
             icon={<Download aria-hidden className="size-3.5" />}
             onClick={() => void saveText()}
@@ -625,8 +684,13 @@ function CodeMergeView({
             {t('files.merge.export')}
           </ToolbarButton>
         </span>
+        </div>
       </div>
 
+      <div
+        data-shell-level="panels"
+        className={cx('flex min-h-0 min-w-0 flex-1 flex-col', levelBandClasses('panels'))}
+      >
       <SplitPane
         panes={[
           <Panel key="base" title={sides.base.path} subtitle={t(MERGE_SIDE_KEYS.base)}>
@@ -720,6 +784,7 @@ function CodeMergeView({
           </div>
         </Panel>
       </div>
+      </div>
     </div>
   )
 }
@@ -740,6 +805,7 @@ export function CodeView({
   pair,
   buffer,
   platform,
+  toolbarLeading,
   onMergeStateChange,
   onDirtyChange,
   onBufferChange,
@@ -753,6 +819,8 @@ export function CodeView({
   /** Working copies kept on the session, used when the view remounts. */
   readonly buffer?: CodeFileBuffer
   readonly platform: PlatformPort
+  /** Drilldown back row handed down by the shell; first row of the level. */
+  readonly toolbarLeading?: ReactNode
   readonly onMergeStateChange?: (state: CodeMergeState) => void
   /** Reports the diff pair's unsaved state up to the session model. */
   readonly onDirtyChange?: (dirty: boolean) => void
@@ -800,36 +868,41 @@ export function CodeView({
     setActiveConflict(0)
   }
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
-      <div className="flex shrink-0 items-center gap-2">
-        {adhoc ? (
-          <span className="text-2xs text-content-muted">{t('files.code.drilldown')}</span>
-        ) : (
-          <>
-            <SegmentedControl
-              label={t('files.code.modeLabel')}
-              options={MODE_OPTIONS.map((option) => ({
-                value: option.value,
-                label: t(option.key)
-              }))}
-              value={mode}
-              onChange={setMode}
-            />
-            <span className="hidden text-2xs text-content-muted md:inline">
-              {mode === 'diff'
-                ? t('files.code.modeHint.diff')
-                : t('files.code.modeHint.merge')}
-            </span>
-          </>
-        )}
-      </div>
+  // Mode switch and the drilldown back row share the level's first row, so the
+  // view never grows a second toolbar band.
+  const modeRow = (
+    <>
+      {toolbarLeading}
+      {adhoc ? (
+        <span className="text-2xs text-content-muted">{t('files.code.drilldown')}</span>
+      ) : (
+        <>
+          <SegmentedControl
+            label={t('files.code.modeLabel')}
+            options={MODE_OPTIONS.map((option) => ({
+              value: option.value,
+              label: t(option.key)
+            }))}
+            value={mode}
+            onChange={setMode}
+          />
+          <span className="shrink-0 text-2xs text-content-muted">
+            {mode === 'diff' ? t('files.code.modeHint.diff') : t('files.code.modeHint.merge')}
+          </span>
+          <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        </>
+      )}
+    </>
+  )
 
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {effectiveMode === 'diff' && diffPair ? (
         <CodeDiffView
           pair={diffPair}
           buffer={buffer}
           platform={platform}
+          toolbarLeading={modeRow}
           onDirtyChange={onDirtyChange}
           onBufferChange={onBufferChange}
           onOpenSide={onOpenSide}
@@ -843,6 +916,7 @@ export function CodeView({
           activeConflict={activeConflict}
           onSelectConflict={setActiveConflict}
           platform={platform}
+          toolbarLeading={modeRow}
           onOpenSide={replaceMergeSide}
         />
       ) : null}

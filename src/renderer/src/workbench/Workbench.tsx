@@ -96,6 +96,9 @@ import {
 import type { ComparisonSides, SidePosition } from './snapshotOps'
 import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import type { CodeFileBuffer, WorkbenchSession } from './session'
+import { entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
+import type { ShellEntryId } from './shellLayout'
+import { useWidthTier } from './useWidthTier'
 
 type WorkbenchStatus = 'empty' | 'loading' | 'ready' | 'error'
 
@@ -344,6 +347,9 @@ function sampleErrorNotice(cause: unknown): Notice {
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
 export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
   const { language, t } = useI18n()
+  const tier = useWidthTier()
+  /** Whether an entry shows its copy at this window width (never an entry drop). */
+  const labelShown = (entry: ShellEntryId): boolean => entryPresentation(entry, tier) === 'label'
   const [status, setStatus] = useState<WorkbenchStatus>('empty')
   const [sessions, setSessions] = useState<readonly WorkbenchSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -1220,40 +1226,48 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }
 
-  function renderScene(session: WorkbenchSession): JSX.Element | null {
-    const body = renderSceneBody(session)
-    const sourceId = session.parentDirectoryId
-    if (!sourceId) return body
-
-    // A drilled-down file view carries an explicit way back to the directory
-    // session it came from; the tree's own state is kept by the shell.
+  /**
+   * A drilled-down file view carries an explicit way back to the directory
+   * session it came from. The row is the first row of that view's
+   * `view-toolbar` level (the view renders it), so the level stays single.
+   */
+  function drilldownLeading(sourceId: string): JSX.Element {
     const source = sessions.find((item) => item.id === sourceId)
+    const label = t('shell.notice.returnAction')
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-subtle bg-surface-sunken px-2">
-          <ToolbarButton
-            size="sm"
-            icon={<ArrowLeft aria-hidden className="size-3.5" />}
-            onClick={() => backToDirectory(sourceId)}
-            title={t('shell.notice.returnTitle')}
-          >
-            {t('shell.notice.returnAction')}
-          </ToolbarButton>
-          <span
-            className="truncate text-2xs text-content-muted"
-            title={source ? renderSessionText(describeSession(source).subtitle, t) : undefined}
-          >
-            {t('shell.notice.sourceDirectory', {
-              title: source ? renderSessionText(describeSession(source).title, t) : sourceId
-            })}
-          </span>
-        </div>
-        {body}
-      </div>
+      <>
+        <ToolbarButton
+          size="sm"
+          data-shell-entry="drilldown-back"
+          aria-label={label}
+          icon={<ArrowLeft aria-hidden className="size-3.5" />}
+          onClick={() => backToDirectory(sourceId)}
+          title={t('shell.notice.returnTitle')}
+        >
+          {labelShown('drilldown-back') ? label : null}
+        </ToolbarButton>
+        <span
+          className="min-w-0 truncate text-2xs text-content-muted"
+          title={source ? renderSessionText(describeSession(source).subtitle, t) : undefined}
+        >
+          {t('shell.notice.sourceDirectory', {
+            title: source ? renderSessionText(describeSession(source).title, t) : sourceId
+          })}
+        </span>
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+      </>
     )
   }
 
-  function renderSceneBody(session: WorkbenchSession): JSX.Element | null {
+  function renderScene(session: WorkbenchSession): JSX.Element | null {
+    const sourceId = session.parentDirectoryId
+    return renderSceneBody(session, sourceId ? drilldownLeading(sourceId) : null)
+  }
+
+  function renderSceneBody(
+    session: WorkbenchSession,
+    toolbarLeading: JSX.Element | null
+  ): JSX.Element | null {
     switch (session.scene) {
       case 'directory': {
         const comparison = session.directory
@@ -1314,6 +1328,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             pair={session.adhoc.pair}
             buffer={session.codeBuffer}
             platform={platform}
+            toolbarLeading={toolbarLeading}
             onDirtyChange={(dirty) => handleSessionDirty(session.id, dirty)}
             onBufferChange={(buffer) => handleSessionBuffer(session.id, buffer)}
             onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
@@ -1324,6 +1339,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             fixture={CODE_SCENE}
             defaultMode={session.columns === 3 ? 'merge' : 'diff'}
             platform={platform}
+            toolbarLeading={toolbarLeading}
             onMergeStateChange={(state) => handleMergeState(session.id, state)}
           />
         )
@@ -1340,6 +1356,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               defaultKeyColumns={[]}
               tables={tables}
               platform={platform}
+              toolbarLeading={toolbarLeading}
               onAlignStateChange={handleCsvAlign}
               onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
             />
@@ -1354,6 +1371,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             defaultKeyColumns={CSV_SCENE.keyColumns}
             tables={session.tables}
             platform={platform}
+            toolbarLeading={toolbarLeading}
             onAlignStateChange={handleCsvAlign}
           />
         ) : null
@@ -1365,10 +1383,16 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             pair={session.adhoc.pair}
             format={session.adhoc.format}
             platform={platform}
+            toolbarLeading={toolbarLeading}
             onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
           />
         ) : (
-          <StructuredView key={session.id} fixture={STRUCTURED_SCENE} platform={platform} />
+          <StructuredView
+            key={session.id}
+            fixture={STRUCTURED_SCENE}
+            platform={platform}
+            toolbarLeading={toolbarLeading}
+          />
         )
     }
   }
@@ -1379,7 +1403,14 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line-subtle bg-surface-sunken px-3">
+      <header
+        data-shell-level="app"
+        className={cx(
+          'flex shrink-0 items-center border-b border-line-subtle bg-surface-sunken',
+          levelRowClasses('app'),
+          levelBandClasses('app')
+        )}
+      >
         <div className="flex shrink-0 items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-sm bg-accent-soft text-accent">
             <GitCompare aria-hidden className="size-4" />
@@ -1404,44 +1435,59 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {/* The manual entry is permanent: with or without sessions on screen. */}
           <ToolbarButton
+            size="sm"
+            data-shell-entry="new-compare"
+            aria-label={t('shell.toolbar.newCompare')}
             icon={<GitCompare aria-hidden className="size-3.5" />}
             onClick={() => setCompareDialogOpen(true)}
             disabled={directoryBusy}
             title={t('shell.toolbar.newCompareTitle')}
           >
-            {t('shell.toolbar.newCompare')}
+            {labelShown('new-compare') ? t('shell.toolbar.newCompare') : null}
           </ToolbarButton>
           {/* With a session on screen the empty-state CTAs are gone, so the
               toolbar keeps both real-open actions one click away. */}
           {status === 'empty' ? null : (
             <>
               <ToolbarButton
+                size="sm"
+                data-shell-entry="open-file"
+                aria-label={t('shell.toolbar.openFile')}
                 icon={<FileCode2 aria-hidden className="size-3.5" />}
                 onClick={() => void pickFilePair()}
                 disabled={directoryBusy}
                 title={t('shell.toolbar.openFileTitle')}
               >
-                {t('shell.toolbar.openFile')}
+                {labelShown('open-file') ? t('shell.toolbar.openFile') : null}
               </ToolbarButton>
               <ToolbarButton
+                size="sm"
+                data-shell-entry="open-folder"
+                aria-label={t('shell.toolbar.openFolder')}
                 icon={<FolderOpen aria-hidden className="size-3.5" />}
                 onClick={() => void pickDirectoryPair()}
                 disabled={directoryBusy}
                 title={t('shell.toolbar.openFolderTitle')}
               >
-                {t('shell.toolbar.openFolder')}
+                {labelShown('open-folder') ? t('shell.toolbar.openFolder') : null}
               </ToolbarButton>
             </>
           )}
           <ToolbarButton
+            size="sm"
+            data-shell-entry="samples"
+            aria-label={t('shell.toolbar.loadSamples')}
             icon={<Sparkles aria-hidden className="size-3.5" />}
             onClick={() => void load()}
             disabled={status === 'loading'}
             title={t('shell.toolbar.loadSamplesTitle')}
           >
-            {t('shell.toolbar.loadSamples')}
+            {labelShown('samples') ? t('shell.toolbar.loadSamples') : null}
           </ToolbarButton>
           <DropdownMenu
+            size="sm"
+            entryId="samples-menu"
+            iconOnly={!labelShown('samples-menu')}
             label={t('shell.toolbar.samples')}
             menuLabel={t('shell.toolbar.samplesMenu')}
             icon={<Layers aria-hidden className="size-3.5" />}
@@ -1451,6 +1497,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           {/* Settings stays reachable in every workbench state, so the language
               can be switched during an empty screen or a running scan. */}
           <IconButton
+            data-shell-entry="settings"
             label={t('shell.settings.open')}
             icon={<Settings aria-hidden className="size-3.5" />}
             onClick={() => setSettingsOpen(true)}
@@ -1459,105 +1506,132 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       </header>
 
       {status === 'ready' && sessions.length > 0 ? (
-        <div className="flex h-9 shrink-0 items-center border-b border-line-subtle bg-surface-base pr-2">
-          <SessionTabs
-            tabs={sessions.map((session) => {
-              const display = describeSession(session)
-              return {
-                id: session.id,
-                title: renderSessionText(display.title, t),
-                subtitle: renderSessionText(display.subtitle, t),
-                icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon,
-                dirty: session.dirty ?? false
-              }
-            })}
-            activeId={activeId}
-            onSelect={selectSession}
-            onClose={requestCloseSession}
-          />
+        <div
+          data-shell-level="sessions"
+          className={cx(
+            'flex shrink-0 border-b border-line-subtle bg-surface-base',
+            levelRowClasses('sessions'),
+            levelBandClasses('sessions')
+          )}
+        >
+          <div data-shell-entry="tab-select" className="flex min-w-0 flex-1 items-center">
+            <SessionTabs
+              tabs={sessions.map((session) => {
+                const display = describeSession(session)
+                return {
+                  id: session.id,
+                  title: renderSessionText(display.title, t),
+                  subtitle: renderSessionText(display.subtitle, t),
+                  icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon,
+                  dirty: session.dirty ?? false
+                }
+              })}
+              activeId={activeId}
+              onSelect={selectSession}
+              onClose={requestCloseSession}
+            />
+          </div>
         </div>
       ) : null}
 
-      {notice ? (
-        <p
-          role="alert"
+      {/* Notices and the live directory progress share one event band: it only
+          exists while one of them has something to say. */}
+      {notice || directoryProgress ? (
+        <div
+          data-shell-level="events"
           className={cx(
-            'shrink-0 border-b border-line-subtle bg-surface-base px-3 py-1 text-2xs',
-            noticeTone === 'info' ? 'text-diff-added' : 'text-danger'
+            'flex shrink-0 flex-col border-b border-line-subtle',
+            levelBandClasses('events')
           )}
         >
-          {noticeText(notice, t)}
-        </p>
-      ) : null}
+          {notice ? (
+            <p
+              role="alert"
+              className={cx(
+                'flex items-center bg-surface-base text-2xs',
+                levelRowClasses('events'),
+                noticeTone === 'info' ? 'text-diff-added' : 'text-danger'
+              )}
+            >
+              <span className="min-w-0 truncate" title={noticeText(notice, t)}>
+                {noticeText(notice, t)}
+              </span>
+            </p>
+          ) : null}
 
-      {/* Directory-comparison progress lives on the shell so the empty state and
-          an open session show the very same live bar. */}
-      {directoryProgress ? (
-        <div
-          role="status"
-          aria-label={t('shell.progress.label')}
-          aria-live="polite"
-          className="flex shrink-0 items-center gap-3 border-b border-line-subtle bg-surface-sunken px-3 py-1 text-2xs"
-        >
-          <span className="shrink-0 font-medium text-content-primary">
-            {t(
-              directoryProgress.phase === 'scan'
-                ? 'shell.progress.scanning'
-                : 'shell.progress.digesting'
-            )}
-          </span>
-          <span aria-hidden className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-surface-hover">
-            <span className="block h-full w-1/2 animate-pulse rounded-full bg-accent" />
-          </span>
-          <span className="shrink-0 text-content-secondary">
-            {directoryProgress.phase === 'scan'
-              ? t(
-                  countKey(
-                    'shell.progress.scanned.one',
-                    'shell.progress.scanned.other',
-                    directoryProgress.files
-                  ),
-                  { count: directoryProgress.files }
-                )
-              : t(
-                  countKey(
-                    'shell.progress.verified.one',
-                    'shell.progress.verified.other',
-                    directoryProgress.phaseFiles
-                  ),
-                  { count: directoryProgress.phaseFiles }
-                )}
-          </span>
-          {directoryProgress.phase === 'digest' ? (
-            <>
-              <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-              {/* The phase increment above is this run's progress; this is the
-                  whole pipeline, so the number never drops at the hand-over. */}
-              <span className="shrink-0 text-content-secondary">
+          {/* Directory-comparison progress lives on the shell so the empty state
+              and an open session show the very same live bar. */}
+          {directoryProgress ? (
+            <div
+              role="status"
+              aria-label={t('shell.progress.label')}
+              aria-live="polite"
+              className={cx(
+                'flex items-center bg-surface-sunken text-2xs',
+                levelRowClasses('events')
+              )}
+            >
+              <span className="shrink-0 font-medium text-content-primary">
                 {t(
-                  countKey(
-                    'shell.progress.cumulative.one',
-                    'shell.progress.cumulative.other',
-                    directoryProgress.files
-                  ),
-                  { count: directoryProgress.files }
+                  directoryProgress.phase === 'scan'
+                    ? 'shell.progress.scanning'
+                    : 'shell.progress.digesting'
                 )}
               </span>
-            </>
+              <span aria-hidden className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-surface-hover">
+                <span className="block h-full w-1/2 animate-pulse rounded-full bg-accent" />
+              </span>
+              <span className="shrink-0 text-content-secondary">
+                {directoryProgress.phase === 'scan'
+                  ? t(
+                      countKey(
+                        'shell.progress.scanned.one',
+                        'shell.progress.scanned.other',
+                        directoryProgress.files
+                      ),
+                      { count: directoryProgress.files }
+                    )
+                  : t(
+                      countKey(
+                        'shell.progress.verified.one',
+                        'shell.progress.verified.other',
+                        directoryProgress.phaseFiles
+                      ),
+                      { count: directoryProgress.phaseFiles }
+                    )}
+              </span>
+              {directoryProgress.phase === 'digest' ? (
+                <>
+                  <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+                  {/* The phase increment above is this run's progress; this is the
+                      whole pipeline, so the number never drops at the hand-over. */}
+                  <span className="shrink-0 text-content-secondary">
+                    {t(
+                      countKey(
+                        'shell.progress.cumulative.one',
+                        'shell.progress.cumulative.other',
+                        directoryProgress.files
+                      ),
+                      { count: directoryProgress.files }
+                    )}
+                  </span>
+                </>
+              ) : null}
+              <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+              <span className="shrink-0 text-content-muted">
+                {t('shell.progress.processed', { size: formatBytes(directoryProgress.bytes) })}
+              </span>
+              <ToolbarButton
+                size="sm"
+                className="ml-auto"
+                onClick={cancelDirectoryCompare}
+                disabled={directoryProgress.cancelling}
+                title={t('shell.progress.cancelTitle')}
+              >
+                {t('shell.progress.cancel')}
+              </ToolbarButton>
+            </div>
           ) : null}
-          <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-          <span className="shrink-0 text-content-muted">
-            {t('shell.progress.processed', { size: formatBytes(directoryProgress.bytes) })}
-          </span>
-          <ToolbarButton
-            size="sm"
-            className="ml-auto"
-            onClick={cancelDirectoryCompare}
-            disabled={directoryProgress.cancelling}
-            title={t('shell.progress.cancelTitle')}
-          >
-            {t('shell.progress.cancel')}
-          </ToolbarButton>
         </div>
       ) : null}
 
