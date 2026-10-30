@@ -163,6 +163,8 @@
 
 ## 最近交付证明
 
+- 交叉引用（非本域 AC）：`wi_ws_b32f99362fb6b51b`（2026-10-30，`kind: fix`）只改 `DirectoryView.tsx` 的三条 `view-toolbar` **行容器** class（追加 `min-w-0 overflow-x-auto scrollbar-none`）以修窄档横向溢出；目录树 / 行模型 / 过滤 / 折叠 / 选中 / 下钻 / 同步 / 模板语义零改动，AC 定义与门禁记录归 `domains/workbench`「视图工具区窄档横向滚动兜底」小节。
+
 - WI：`wi_ws_601ef56ae8fd93a4`（取消结构化返回、零日志噪声与零残留，`kind: fix`）
 - 日期：2026-10-22
 - 结果：code_gates passed（含新增 `cancel-gate`；本轮 `needSelfTest=false`，UI 自测跳过）。

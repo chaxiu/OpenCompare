@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ICON_NAMES, ICON_SIZES, strokeWidthFor } from '@renderer/assets/icons'
@@ -231,6 +232,66 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
         expect(classList(child).some((token) => token.startsWith('flex-wrap'))).toBe(false)
       }
     }
+  })
+
+  it('keeps a narrow toolbar row scrollable instead of clipped or wrapped', async () => {
+    setWindowWidth(960)
+    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    await loadSamples()
+
+    const toolbar = levelElement(container, 'view-toolbar')
+    // The band keeps its table tokens: the scroll guard lives on the rows only.
+    hasClasses(toolbar, levelBandClasses('view-toolbar'))
+    expect(classList(toolbar)).not.toContain('overflow-x-auto')
+    expect(classList(toolbar)).not.toContain('min-w-0')
+    expect(classList(toolbar).filter((token) => token.includes(':'))).toEqual([])
+
+    const rows = Array.from(toolbar.children)
+    expect(rows.length).toBe(3)
+    for (const row of rows) {
+      hasClasses(row, levelRowClasses('view-toolbar'))
+      hasClasses(row, 'shrink-0 min-w-0 overflow-x-auto scrollbar-none')
+      expect(classList(row).some((token) => token.startsWith('flex-wrap'))).toBe(false)
+      expect(classList(row).filter((token) => token.includes(':'))).toEqual([])
+    }
+    expect(Array.from(toolbar.querySelectorAll('[class*="flex-wrap"]'))).toEqual([])
+
+    // `scrollbar-none` hides the global 10px scrollbar inside the 28px rows
+    // only, so no other element loses its scrollbar affordance.
+    const scrollers = Array.from(container.querySelectorAll('.scrollbar-none'))
+    expect(scrollers.length).toBe(3)
+    for (const scroller of scrollers) expect(toolbar.contains(scroller)).toBe(true)
+    const css = readFileSync('src/renderer/src/assets/main.css', 'utf8')
+    const start = css.indexOf('@utility scrollbar-none')
+    expect(start).toBeGreaterThan(-1)
+    const nextUtility = css.indexOf('@utility', start + 1)
+    const utility = css.slice(start, nextUtility === -1 ? css.length : nextUtility)
+    expect(utility).toContain('scrollbar-width: none')
+    expect(utility).toContain('&::-webkit-scrollbar')
+    expect(utility).toContain('display: none')
+
+    // At 960 the first row's filter, legend and actions stay reachable by name.
+    expect(container.querySelectorAll('[data-shell-entry="filter"]').length).toBe(1)
+    const filterGroup = screen.getByRole('tablist', { name: zh('directory.filter.group') })
+    expect(within(filterGroup).getAllByRole('tab').length).toBeGreaterThan(1)
+    const firstRowText = rows[0].textContent ?? ''
+    expect(firstRowText).toContain(zh('common.diff.same'))
+    expect(firstRowText).toContain(zh('common.diff.added'))
+    for (const key of [
+      'directory.toolbar.pickLeft',
+      'directory.toolbar.pickRight',
+      'directory.toolbar.loadSample'
+    ] as const) {
+      const buttons = screen.getAllByRole('button', { name: zh(key) })
+      expect(buttons.length).toBe(1)
+      expect(isRendered(buttons[0])).toBe(true)
+    }
+
+    // The third row is not folded into a menu either: its snapshot export and
+    // the local-path switch are both still rendered.
+    const exportEntry = entryElement(container, 'snapshot-export')
+    expect(isRendered(exportEntry)).toBe(true)
+    expect(rows[2].textContent ?? '').toContain(zh('directory.report.toolbar.hideLocalPaths'))
   })
 
   it('renders every entry once with the presentation the table declares', async () => {

@@ -189,7 +189,12 @@ export function DirectoryView({
           levelBandClasses('view-toolbar')
         )}
       >
-        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+        <div
+          className={cx(
+            'flex shrink-0 items-center min-w-0 overflow-x-auto scrollbar-none',
+            levelRowClasses('view-toolbar')
+          )}
+        >
           <span data-shell-entry="filter" className="flex shrink-0 items-center">
             <SegmentedControl
               label={t('directory.filter.group')}
@@ -233,7 +238,12 @@ export function DirectoryView({
           </span>
         </div>
 
-        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+        <div
+          className={cx(
+            'flex shrink-0 items-center min-w-0 overflow-x-auto scrollbar-none',
+            levelRowClasses('view-toolbar')
+          )}
+        >
           <SegmentedControl
             label={t('directory.sync.direction')}
             options={directionOptions}
@@ -268,7 +278,12 @@ export function DirectoryView({
           </ToolbarButton>
         </div>
 
-        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
+        <div
+          className={cx(
+            'flex shrink-0 items-center min-w-0 overflow-x-auto scrollbar-none',
+            levelRowClasses('view-toolbar')
+          )}
+        >
           <span data-shell-entry="snapshot-export" className="flex shrink-0 items-center gap-1.5">
             <ToolbarButton
               size="sm"
