@@ -7,10 +7,10 @@
 
 ## 最近执行
 
-- `code_gates`：**passed**（9 gates，attempt 001 全 `exitCode 0`，`.munk/runs/run_ws_5b2dd0e90e86f46b/code-gates/attempts/001`）
-- `pnpm test`（`test` 门）：80 files / **1245 passed** + 1 skipped（1246），28.50s
-- 基线对照：上一轮 `wi_ws_f4f0eb3a3385c708` 为 80 files / 1243 passed + 1 skipped（1244）→ 净增 2 例，无删除
-- 补充改动后复跑（notes 增窄窗口工具栏一行之后）：`pnpm test src/main/release-packaging.test.ts` = 1 file / **202 passed**（1.07s）；`pnpm test` = 80 files / **1245 passed** + 1 skipped（28.46s），零红
+- workItemId: wi_ws_0a26040fef375884
+- at: 2026-10-30
+- status: pass
+- note: 15 条 prd AC 全部满足，无偏差。本轮 `needSelfTest=false`，跳过 UI 自测，以 Host `code_gates` 为交付门槛（9 gates，attempt 001，`.munk/runs/run_ws_5b2dd0e90e86f46b/code-gates/attempts/001`，全 exit 0；`pnpm test` 80 files / 1245 passed + 1 skipped（1246）/ 28.50s，基线 1243 净增 2 例；`pnpm test src/main/release-packaging.test.ts` 202 passed）。交付后按产品方补充要求，notes 壳层小节增一行「窄窗口工具栏：目录工作台窄窗口（≤1024）首行工具栏溢出修复」，改后复跑 `release-packaging.test.ts` 202 passed 与全量 1245 passed + 1 skipped（28.46s），零红。边界：不打 tag / 不 push 分支 / 不 dispatch / 不 publish / 不建 Release 与证据文件；v0.2.12 发布后的 README 第 5 行 + `latestPublishedTag` 收尾前移是独立动作。
 
 ## 验收逐条
 
