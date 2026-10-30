@@ -16,6 +16,7 @@ const SCAN_ROOTS = [
   'src/renderer/src/views',
   'src/renderer/src/components',
   'src/renderer/src/i18n',
+  'src/renderer/src/theme',
   'src/renderer/src/App.tsx',
   'src/renderer/src/main.tsx',
   'src/renderer/src/env.d.ts'

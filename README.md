@@ -10,6 +10,8 @@ OpenCompare is a modern cross-platform desktop diff and three-way merge tool for
 
 ![OpenCompare workbench comparing two directory trees](docs/assets/opencompare-workbench.png)
 
+![OpenCompare code view showing a file diff with the indicator bar](docs/assets/opencompare-file-diff.png)
+
 ## Download and install
 
 - **macOS arm64**: download the `.dmg` from [Releases](https://github.com/chaxiu/OpenCompare/releases), drag OpenCompare into Applications, then launch it.

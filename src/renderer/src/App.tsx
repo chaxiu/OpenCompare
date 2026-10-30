@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
-import type { Language, PlatformPort } from '@shared/platform/types'
+import type { Language, PlatformPort, Theme } from '@shared/platform/types'
 import { Icon } from './components/Icon'
 import { I18nProvider } from './i18n/I18nProvider'
 import { loadInitialLanguage } from './i18n/resolveLanguage'
 import { PerfRunner } from './perf/PerfRunner'
 import { createPlatformPort } from './platform'
+import { ThemeProvider } from './theme/ThemeProvider'
+import { loadInitialTheme } from './theme/theme'
 import { Workbench } from './workbench/Workbench'
 
 /** Only the harness window is loaded with `?perf=1`; every normal launch lacks it. */
@@ -33,24 +35,34 @@ function StartupFrame(): JSX.Element {
   )
 }
 
-/** Reads the start-up language, then mounts the workbench exactly once. */
+/** Start-up preferences read once before the workbench is mounted. */
+interface StartupPreferences {
+  readonly language: Language
+  readonly theme: Theme
+}
+
+/** Reads the start-up preferences, then mounts the workbench exactly once. */
 function LocalizedWorkbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
-  const [language, setLanguage] = useState<Language | null>(null)
+  const [preferences, setPreferences] = useState<StartupPreferences | null>(null)
 
   useEffect(() => {
     let active = true
-    void loadInitialLanguage(platform).then((resolved) => {
-      if (active) setLanguage(resolved)
-    })
+    void Promise.all([loadInitialLanguage(platform), loadInitialTheme(platform)]).then(
+      ([language, theme]) => {
+        if (active) setPreferences({ language, theme })
+      }
+    )
     return () => {
       active = false
     }
   }, [platform])
 
-  if (language === null) return <StartupFrame />
+  if (preferences === null) return <StartupFrame />
   return (
-    <I18nProvider initialLanguage={language}>
-      <Workbench platform={platform} />
+    <I18nProvider initialLanguage={preferences.language}>
+      <ThemeProvider initialTheme={preferences.theme}>
+        <Workbench platform={platform} />
+      </ThemeProvider>
     </I18nProvider>
   )
 }

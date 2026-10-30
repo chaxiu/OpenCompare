@@ -166,7 +166,7 @@ describe('start-up language', () => {
     expect(screen.queryByRole('tablist')).toBeNull()
 
     await act(async () => {
-      resolveSettings({ language: 'en' })
+      resolveSettings({ language: 'en', theme: 'dark' })
       await settings
     })
 

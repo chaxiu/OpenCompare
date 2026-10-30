@@ -15,12 +15,22 @@ export type PlatformKind = 'electron' | 'web'
 export type Language = 'zh' | 'en'
 
 /**
- * The user's persisted preferences. Read at startup, written only when the user
- * picks a language; `language` is the single field and unknown fields are
- * ignored on read.
+ * Theme modes the user can pick. `system` follows the OS preference; the other
+ * two are explicit. `dark` is the fallback when no usable record exists.
+ */
+export type Theme = 'light' | 'dark' | 'system'
+
+/** The concrete theme applied to the document (never `system`). */
+export type ResolvedTheme = 'light' | 'dark'
+
+/**
+ * The user's persisted preferences. Read at startup and rewritten as a whole
+ * record whenever the user picks a language or theme, so a write can never drop
+ * the other field; unknown fields are ignored on read.
  */
 export interface UserSettings {
   readonly language: Language
+  readonly theme: Theme
 }
 
 /** What a symbolic link resolves to, without the scan ever entering it. */

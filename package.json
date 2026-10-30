@@ -32,6 +32,7 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
+    "screenshots": "electron-vite build && node scripts/capture-readme-screenshots.mjs",
     "test:cancel": "vitest run src/cancel-gate.test.ts",
     "test:memory": "vitest run src/memory-gate.test.ts"
   },

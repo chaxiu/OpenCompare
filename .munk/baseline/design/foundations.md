@@ -16,6 +16,16 @@ Colors, typography, spacing, tokens (SSOT).
 - 复用型低层行为：`@utility transition-ui` / `transition-fast` / `focus-ring` / `tabular`。
 - 组件内无硬编码颜色与像素色值；基色切换主题只需改这一处。
 
+## 主题（亮 / 暗 / 跟随系统）
+
+- **两套色板，一个文件**：暗色取值留在既有 `@theme` 块；亮色在**同一份 `main.css`** 的 `:root[data-theme='light']` 块里按**完全相同的 27 个 `--color-*` 名**覆盖。不新增 token 名、不新开第二色板文件、不复制 `@theme` 结构。
+- **根节点承载**：`<html data-theme="light|dark">` 决定当前色板，同一处写 `color-scheme`；`system` 模式经 `prefers-color-scheme: light` 解析成 `light` / `dark` 后再落地，`data-theme` 永远不出现 `system`。
+- **默认暗色**：缺省 / 损坏 / 未知主题值一律回退 `dark`（既有安装保持当前外观），`system` 是用户显式选择项。
+- **差异语义两套都在**：`--color-diff-{same,added,removed,modified,conflict}` 与 `-soft` 在亮暗两套里都存在（`same` 无独立 `-soft`，其背景沿用 `surface-sunken`）；四态在同一主题内 CIE76 Lab ΔE ≥ 12，对各自背景与 `surface-base` 对比度 ≥ 3.0。
+- **可读性硬线**：`content-primary` / `surface-base` ≥ 4.5、`content-secondary` / `surface-base` ≥ 3.0（两套主题都成立）。
+- **改色纪律**：改任何 `--color-*` 取值都要重跑对比度 / ΔE 断言（`src/core/theme/contrast.test.ts` 从 `main.css` 文本实读，不抄色值）并同步更新实测表；组件继续只引用 token，界面代码里零 `#hex` / `rgb(` / `hsl(` 字面量。
+- 完整契约（解析 / 持久化 / 跟随系统 / 零 IO / 零重挂）见 `.munk/baseline/domains/theme/product.md`。
+
 ## 图标尺寸与描边（光学缩放）
 
 - **只有三档**：16 / 20 / 24；不存在 12 / 14 等中间档，原 `size-3`(12) / `size-3.5`(14) 已统一升到 16。

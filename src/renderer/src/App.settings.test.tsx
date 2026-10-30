@@ -167,7 +167,9 @@ describe('settings language options', () => {
 
 describe('language switch', () => {
   it('switches every shell surface in the same click, before the write settles', async () => {
-    const readUserSettings = vi.fn(async (): Promise<UserSettings | null> => ({ language: 'en' }))
+    const readUserSettings = vi.fn(
+      async (): Promise<UserSettings | null> => ({ language: 'en', theme: 'dark' })
+    )
     const writeUserSettings = vi.fn(
       (): Promise<void> => new Promise<void>(() => undefined)
     )
@@ -207,7 +209,7 @@ describe('language switch', () => {
       await Promise.resolve()
     })
     expect(writeUserSettings).toHaveBeenCalledTimes(1)
-    expect(writeUserSettings).toHaveBeenCalledWith({ language: 'zh' })
+    expect(writeUserSettings).toHaveBeenCalledWith({ language: 'zh', theme: 'dark' })
     expect(readUserSettings.mock.calls.length).toBe(readsAtStartup)
 
     fireEvent.click(languageOptions(settingsDialog('zh'), 'zh')[0])
@@ -252,8 +254,11 @@ describe('language switch', () => {
       await firstGate
     })
     await waitFor(() => expect(writes).toHaveLength(2))
-    expect(writes).toEqual([{ language: 'zh' }, { language: 'en' }])
-    await expect(port.readUserSettings()).resolves.toEqual({ language: 'en' })
+    expect(writes).toEqual([
+      { language: 'zh', theme: 'dark' },
+      { language: 'en', theme: 'dark' }
+    ])
+    await expect(port.readUserSettings()).resolves.toEqual({ language: 'en', theme: 'dark' })
   })
 
   it('keeps the chosen language and reports a failed write in place', async () => {
@@ -455,7 +460,11 @@ describe('language persistence', () => {
 
     expect(await screen.findByRole('heading', { name: EMPTY_ZH })).toBeDefined()
     expect(second.write).toBe(0)
-    expect(second.read).toBe(1)
-    await expect(createWebPlatformPort().readUserSettings()).resolves.toEqual({ language: 'zh' })
+    // Start-up reads the record once for the language and once for the theme.
+    expect(second.read).toBe(2)
+    await expect(createWebPlatformPort().readUserSettings()).resolves.toEqual({
+      language: 'zh',
+      theme: 'dark'
+    })
   })
 })

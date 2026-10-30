@@ -83,9 +83,10 @@ describe('preload bridge', () => {
     await platform.readUserSettings()
     expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.readUserSettings)
 
-    await platform.writeUserSettings({ language: 'en' })
+    await platform.writeUserSettings({ language: 'en', theme: 'dark' })
     expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.writeUserSettings, {
-      language: 'en'
+      language: 'en',
+      theme: 'dark'
     })
 
     await platform.systemLocale()
