@@ -256,7 +256,9 @@ describe('English shell copy', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
     const tablist = await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
 
-    const tabs = within(tablist).getAllByRole('tab').map((tab) => tab.textContent ?? '')
+    const tabs = within(tablist)
+      .getAllByRole('tab')
+      .map((tab) => tab.getAttribute('aria-label') ?? '')
     expect(tabs[0]).toContain('baseline ↔ candidate')
     expect(tabs[1]).toContain('Code diff & 3-way merge')
     expect(tabs[2]).toContain('CSV key comparison')
@@ -277,7 +279,14 @@ describe('English shell copy', () => {
     submitDialog()
 
     const tablist = await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
-    expect(tablist.textContent).toContain('/memory/left a.txt ↔ /memory/right b.txt · Code / text')
+    const filePairLabels = within(tablist)
+      .getAllByRole('tab')
+      .map((tab) => tab.getAttribute('aria-label') ?? '')
+    expect(
+      filePairLabels.some((label) =>
+        label.includes('/memory/left a.txt ↔ /memory/right b.txt · Code / text')
+      )
+    ).toBe(true)
 
     const directoryPort: PlatformPort = {
       ...createWebPlatformPort(),
@@ -291,10 +300,15 @@ describe('English shell copy', () => {
       { name: 'Sessions' },
       { timeout: 4000 }
     )
-    expect(directoryTabs.textContent).toContain('baseline ↔ candidate')
-    expect(directoryTabs.textContent).toContain(
-      `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
-    )
+    const directoryLabels = within(directoryTabs)
+      .getAllByRole('tab')
+      .map((tab) => tab.getAttribute('aria-label') ?? '')
+    expect(directoryLabels.some((label) => label.includes('baseline ↔ candidate'))).toBe(true)
+    expect(
+      directoryLabels.some((label) =>
+        label.includes(`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`)
+      )
+    ).toBe(true)
   })
 
   it('overrides the code conflict stat by stable key, not by label text', async () => {

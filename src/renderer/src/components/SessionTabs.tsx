@@ -1,6 +1,8 @@
 import type { JSX, ReactNode } from 'react'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { useI18n } from '@renderer/i18n/context'
+import { TAB_TIER_BUDGETS, clipSubtitle, clipTitle } from '@renderer/workbench/sessionTabText'
+import { useWidthTier } from '@renderer/workbench/useWidthTier'
 import { IconButton } from './Button'
 import { Icon } from './Icon'
 import { cx } from './utils'
@@ -25,6 +27,9 @@ export interface SessionTabsProps {
 /** Horizontal session switcher — one tab per open session. */
 export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsProps): JSX.Element {
   const { t } = useI18n()
+  // The tier table owns every length: the component never invents a breakpoint.
+  const budget = TAB_TIER_BUDGETS[useWidthTier()]
+
   return (
     <div
       role="tablist"
@@ -33,9 +38,19 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
     >
       {tabs.map((tab) => {
         const active = tab.id === activeId
+        const title = clipTitle(tab.title, budget.titleCols)
+        const subtitle =
+          tab.subtitle !== undefined && budget.subtitleCols > 0
+            ? clipSubtitle(tab.subtitle, budget.subtitleCols)
+            : null
+        // The clipped copy stays readable in full through the native tooltip
+        // and the accessible name, even where the tier hides the subtitle.
+        const fullLabel = tab.subtitle === undefined ? tab.title : `${tab.title} — ${tab.subtitle}`
         return (
           <div
             key={tab.id}
+            data-session-tab={tab.id}
+            style={{ maxWidth: `${budget.tabMaxWidthPx}px` }}
             className={cx(
               'transition-fast relative flex h-7 shrink-0 items-center rounded-sm border',
               active
@@ -47,13 +62,22 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
               type="button"
               role="tab"
               aria-selected={active}
+              aria-label={fullLabel}
+              // The clipped copy keeps the dirty state audible through the
+              // description instead of the (now overridden) inner sr-only text.
+              aria-description={tab.dirty ? t('common.unsavedChanges') : undefined}
+              title={fullLabel}
               onClick={() => onSelect(tab.id)}
               className="focus-ring flex h-full min-w-0 items-center gap-2 rounded-sm px-2.5 text-xs whitespace-nowrap"
             >
               {tab.icon}
-              <span className="font-medium">{tab.title}</span>
-              {tab.subtitle ? (
-                <span className="hidden text-2xs text-content-muted lg:inline">{tab.subtitle}</span>
+              <span data-tab-part="title" className="min-w-0 truncate font-medium">
+                {title.text}
+              </span>
+              {subtitle ? (
+                <span data-tab-part="subtitle" className="min-w-0 truncate text-2xs text-content-muted">
+                  {subtitle.text}
+                </span>
               ) : null}
               {tab.dirty ? (
                 <>

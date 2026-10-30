@@ -130,8 +130,10 @@ describe('snapshot workbench integration', () => {
 
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
     expect(
-      await screen.findAllByText(/\/snapshots\/right\/remote-prod\/src\/core\/engine\.ts/)
-    ).not.toHaveLength(0)
+      await screen.findByRole('tab', {
+        name: /\/snapshots\/right\/remote-prod\/src\/core\/engine\.ts/
+      })
+    ).toBeDefined()
     expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
 
     fireEvent.click(
@@ -143,8 +145,10 @@ describe('snapshot workbench integration', () => {
     await waitFor(() => expect(screen.getAllByText('report.csv').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
     expect(
-      await screen.findAllByText(/\/snapshots\/right\/remote-prod\/src\/data\/report\.csv/)
-    ).not.toHaveLength(0)
+      await screen.findByRole('tab', {
+        name: /\/snapshots\/right\/remote-prod\/src\/data\/report\.csv/
+      })
+    ).toBeDefined()
 
     fireEvent.click(
       within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', {
@@ -154,8 +158,10 @@ describe('snapshot workbench integration', () => {
     await waitFor(() => expect(screen.getAllByText('deploy.yaml').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
     expect(
-      await screen.findAllByText(/\/snapshots\/right\/remote-prod\/config\/deploy\.yaml/)
-    ).not.toHaveLength(0)
+      await screen.findByRole('tab', {
+        name: /\/snapshots\/right\/remote-prod\/config\/deploy\.yaml/
+      })
+    ).toBeDefined()
     expect(screen.getByText(/YAML 原文/)).toBeDefined()
   })
 

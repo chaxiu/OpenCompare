@@ -320,7 +320,7 @@ describe('workbench shell', () => {
     const directoryTab = within(screen.getByRole('tablist', { name: '会话' })).getByRole('tab', {
       name: /baseline ↔ candidate/
     })
-    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+    expect(directoryTab.getAttribute('aria-label') ?? '').toContain(DIRECTORY_SAMPLE_PATHS.right)
 
     fireEvent.click(screen.getByRole('button', { name: '预览并同步' }))
     const dialog = await screen.findByRole('dialog', { name: /左 → 右 · 增量同步预览/ })
@@ -335,9 +335,10 @@ describe('workbench shell', () => {
     const tabs = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
     expect(tabs).toHaveLength(tabCount)
     expect(directoryTab.getAttribute('aria-selected')).toBe('true')
-    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.left)
-    expect(directoryTab.textContent).toContain('/memory/')
-    expect(directoryTab.textContent).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
+    const refreshedLabel = directoryTab.getAttribute('aria-label') ?? ''
+    expect(refreshedLabel).toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(refreshedLabel).toContain('/memory/')
+    expect(refreshedLabel).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
   })
 
   it('previews the template placement and extracts it into a writable root', async () => {
@@ -399,12 +400,10 @@ describe('real file workbench', () => {
     expect(
       await screen.findByRole('tab', { name: /baseline ↔ incoming/ }, { timeout: 4000 })
     ).toBeDefined()
-    // The tab subtitle carries the two real roots of this pair.
+    // The tab's full label carries the two real roots of this pair.
     expect(
-      screen.getByText(
-        `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.incoming}`
-      )
-    ).toBeDefined()
+      (screen.getByRole('tab', { name: /baseline ↔ incoming/ }).getAttribute('aria-label') ?? '')
+    ).toContain(`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.incoming}`)
     expect(screen.getAllByText('engine.ts').length).toBeGreaterThan(0)
 
     // A second pair adds its own tab instead of overwriting the first one.
@@ -634,7 +633,7 @@ describe('real file workbench', () => {
     )
     expect(digestCalls).toBe(digestsBefore)
     const aliasTab = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')[1]
-    expect(aliasTab.textContent).toContain('/memory/alias/left')
+    expect(aliasTab.getAttribute('aria-label') ?? '').toContain('/memory/alias/left')
   })
 
   it('keeps one tab when the same directory pair is compared again', async () => {
@@ -1547,7 +1546,7 @@ describe('new compare dialog', () => {
 
     const tab = await screen.findByRole('tab', { name: /左 a\.txt/ }, { timeout: 4000 })
     expect(tab.getAttribute('aria-selected')).toBe('true')
-    expect(tab.textContent).toContain(`${LEFT_SPACED} ↔ ${RIGHT_SPACED}`)
+    expect(tab.getAttribute('aria-label') ?? '').toContain(`${LEFT_SPACED} ↔ ${RIGHT_SPACED}`)
     expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
   })
 
@@ -1591,9 +1590,10 @@ describe('new compare dialog', () => {
     submitDialog()
 
     const tab = await screen.findByRole('tab', { name: /左 a\.txt/ }, { timeout: 4000 })
-    expect(tab.textContent).toContain(`${LEFT_SPACED} ↔ ${RIGHT_SPACED}`)
-    expect(tab.textContent).not.toContain('"')
-    expect(tab.textContent).not.toContain('“')
+    const quotedLabel = tab.getAttribute('aria-label') ?? ''
+    expect(quotedLabel).toContain(`${LEFT_SPACED} ↔ ${RIGHT_SPACED}`)
+    expect(quotedLabel).not.toContain('"')
+    expect(quotedLabel).not.toContain('“')
     expect(stats).toEqual([LEFT_SPACED, RIGHT_SPACED])
     expect(reads).toEqual([LEFT_SPACED, RIGHT_SPACED])
   })
@@ -1621,7 +1621,7 @@ describe('new compare dialog', () => {
     submitDialog()
 
     const tab = await screen.findByRole('tab', { name: /a\.txt/ }, { timeout: 4000 })
-    expect(tab.textContent).toContain('/Users/demo/项目/a.txt ↔ /memory/a.txt')
+    expect(tab.getAttribute('aria-label') ?? '').toContain('/Users/demo/项目/a.txt ↔ /memory/a.txt')
     expect(stats).toEqual(['/Users/demo/项目/a.txt', '/memory/a.txt'])
   })
 
@@ -2462,8 +2462,11 @@ describe('directory progress and cancel UI', () => {
     ).toBeDefined()
     await waitFor(() => expect(progressBar()).toBeNull())
     expect(
-      screen.getByText('/memory/cancel/left ↔ /memory/cancel/right')
-    ).toBeDefined()
+      within(screen.getByRole('tablist', { name: '会话' }))
+        .getAllByRole('tab')
+        .map((item) => item.getAttribute('aria-label') ?? '')
+        .some((label) => label.includes('/memory/cancel/left ↔ /memory/cancel/right'))
+    ).toBe(true)
   })
 
   /**
@@ -2598,10 +2601,13 @@ describe('session tab labels follow the session facts', () => {
     return screen.getByRole('tablist', { name: '会话' })
   }
 
+  /** Full label of one tab: the clipped spans stay visible, the label does not. */
+  function fullTabText(item: HTMLElement): string {
+    return item.getAttribute('aria-label') ?? item.textContent ?? ''
+  }
+
   function tabTexts(): string[] {
-    return within(sessionTabs())
-      .getAllByRole('tab')
-      .map((item) => item.textContent ?? '')
+    return within(sessionTabs()).getAllByRole('tab').map(fullTabText)
   }
 
   function tab(name: RegExp): HTMLElement {
@@ -2629,14 +2635,15 @@ describe('session tab labels follow the session facts', () => {
   }
 
   /**
-   * Title and subtitle of one tab, read from their own spans: the label is the
-   * first `font-medium` span, the path line the following `text-2xs` span.
+   * Title and subtitle of one tab, read from its full accessible name: the
+   * visible spans are clipped per width tier, the label carries the derived
+   * text unchanged.
    */
   function tabLabels(item: HTMLElement): { title: string; subtitle: string } {
-    return {
-      title: item.querySelector('.font-medium')?.textContent ?? '',
-      subtitle: item.querySelector('.text-2xs')?.textContent ?? ''
-    }
+    const label = fullTabText(item)
+    const at = label.indexOf(' — ')
+    if (at < 0) return { title: label, subtitle: '' }
+    return { title: label.slice(0, at), subtitle: label.slice(at + 3) }
   }
 
   /** One `{ title, subtitle }` pair per tab, in tablist order. */
@@ -2671,18 +2678,18 @@ describe('session tab labels follow the session facts', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
     const engine = await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
     // Both sides share a file name: the title is that name, the subtitle both paths.
-    expect(engine.textContent).toContain(LEFT_ENGINE)
-    expect(engine.textContent).toContain(RIGHT_ENGINE)
+    expect(fullTabText(engine)).toContain(LEFT_ENGINE)
+    expect(fullTabText(engine)).toContain(RIGHT_ENGINE)
 
     await clickOpenFile()
     await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })
 
     // Each tab keeps its own pair; the first one was not re-labelled by the second.
-    expect(tab(/engine\.ts/).textContent).toContain(LEFT_ENGINE)
-    expect(tab(/engine\.ts/).textContent).toContain(RIGHT_ENGINE)
-    expect(tab(/engine\.ts/).textContent).not.toContain(LEFT_REPORT)
-    expect(tab(/report\.csv/).textContent).toContain(LEFT_REPORT)
-    expect(tab(/report\.csv/).textContent).toContain(RIGHT_REPORT)
+    expect(fullTabText(tab(/engine\.ts/))).toContain(LEFT_ENGINE)
+    expect(fullTabText(tab(/engine\.ts/))).toContain(RIGHT_ENGINE)
+    expect(fullTabText(tab(/engine\.ts/))).not.toContain(LEFT_REPORT)
+    expect(fullTabText(tab(/report\.csv/))).toContain(LEFT_REPORT)
+    expect(fullTabText(tab(/report\.csv/))).toContain(RIGHT_REPORT)
     expect(tabTexts()).toHaveLength(2)
   })
 
@@ -2711,12 +2718,12 @@ describe('session tab labels follow the session facts', () => {
       { timeout: 4000 }
     )
     expect(swapped.getAttribute('aria-selected')).toBe('true')
-    expect(swapped.textContent).toContain(DIRECTORY_SAMPLE_PATHS.left)
-    expect(swapped.textContent).toContain(DIRECTORY_SAMPLE_PATHS.incoming)
-    expect(swapped.textContent).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
+    expect(fullTabText(swapped)).toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(fullTabText(swapped)).toContain(DIRECTORY_SAMPLE_PATHS.incoming)
+    expect(fullTabText(swapped)).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
 
     // The tab that was not swapped keeps its own pair.
-    expect(tab(/baseline ↔ candidate/).textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+    expect(fullTabText(tab(/baseline ↔ candidate/))).toContain(DIRECTORY_SAMPLE_PATHS.right)
     expect(tabTexts()).toHaveLength(2)
   })
 
@@ -2741,9 +2748,9 @@ describe('session tab labels follow the session facts', () => {
       { name: /other\.ts ↔ engine\.ts/ },
       { timeout: 4000 }
     )
-    expect(opened.textContent).toContain(OTHER)
-    expect(opened.textContent).toContain(RIGHT_ENGINE)
-    expect(opened.textContent).not.toContain(LEFT_ENGINE)
+    expect(fullTabText(opened)).toContain(OTHER)
+    expect(fullTabText(opened)).toContain(RIGHT_ENGINE)
+    expect(fullTabText(opened)).not.toContain(LEFT_ENGINE)
     // The panel shows the same file the tab claims, and the stats follow it.
     expect(panelText(OTHER)).toContain('onlyHere = 1')
     expect(statusValue('行数（左）')).toBe('行数（左）1')
@@ -2775,13 +2782,13 @@ describe('session tab labels follow the session facts', () => {
       { name: /other\.csv ↔ report\.csv/ },
       { timeout: 4000 }
     )
-    expect(opened.textContent).toContain(OTHER)
-    expect(opened.textContent).toContain('· CSV')
+    expect(fullTabText(opened)).toContain(OTHER)
+    expect(fullTabText(opened)).toContain('· CSV')
     expect(statusValue('行数（左）')).toBe('行数（左）3')
 
     fireEvent.click(tab(/engine\.ts/))
     fireEvent.click(tab(/other\.csv ↔ report\.csv/))
-    expect(screen.getAllByText(/other\.csv ↔ report\.csv/).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('tab', { name: /other\.csv ↔ report\.csv/ }).length).toBeGreaterThan(0)
     expect(statusValue('行数（左）')).toBe('行数（左）3')
   })
 
@@ -2805,13 +2812,13 @@ describe('session tab labels follow the session facts', () => {
       { name: /other\.yaml ↔ config\.right\.json/ },
       { timeout: 4000 }
     )
-    expect(opened.textContent).toContain(OTHER)
-    expect(opened.textContent).toContain('· YAML')
+    expect(fullTabText(opened)).toContain(OTHER)
+    expect(fullTabText(opened)).toContain('· YAML')
 
     fireEvent.click(tab(/engine\.ts/))
     fireEvent.click(tab(/other\.yaml ↔ config\.right\.json/))
     expect(screen.getAllByTitle(OTHER).length).toBeGreaterThan(0)
-    expect(opened.textContent).toContain('· YAML')
+    expect(fullTabText(opened)).toContain('· YAML')
   })
 
   it('keeps a file, a directory and a drilldown tab apart, and restores the directory label', async () => {
@@ -2838,20 +2845,20 @@ describe('session tab labels follow the session facts', () => {
       { name: /baseline ↔ candidate/ },
       { timeout: 4000 }
     )
-    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.left)
-    expect(directoryTab.textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+    expect(fullTabText(directoryTab)).toContain(DIRECTORY_SAMPLE_PATHS.left)
+    expect(fullTabText(directoryTab)).toContain(DIRECTORY_SAMPLE_PATHS.right)
 
     fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
     const drilldown = await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
-    expect(drilldown.textContent).toContain(LEFT_ENGINE)
-    expect(drilldown.textContent).toContain(RIGHT_ENGINE)
+    expect(fullTabText(drilldown)).toContain(LEFT_ENGINE)
+    expect(fullTabText(drilldown)).toContain(RIGHT_ENGINE)
     expect(tabTexts()).toHaveLength(3)
 
     // Switching tabs never borrows another session's paths.
     fireEvent.click(tab(/a\.md ↔ b\.md/))
     expect(tab(/a\.md ↔ b\.md/).getAttribute('aria-selected')).toBe('true')
-    expect(tab(/a\.md ↔ b\.md/).textContent).not.toContain('/samples/directory')
-    expect(tab(/baseline ↔ candidate/).textContent).toContain(
+    expect(fullTabText(tab(/a\.md ↔ b\.md/))).not.toContain('/samples/directory')
+    expect(fullTabText(tab(/baseline ↔ candidate/))).toContain(
       `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
     )
 
@@ -2859,16 +2866,16 @@ describe('session tab labels follow the session facts', () => {
     fireEvent.click(tab(/engine\.ts/))
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
     await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
-    expect(tab(/baseline ↔ candidate/).textContent).toContain(
+    expect(fullTabText(tab(/baseline ↔ candidate/))).toContain(
       `${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
     )
-    expect(tab(/baseline ↔ candidate/).textContent).not.toContain('engine.ts')
+    expect(fullTabText(tab(/baseline ↔ candidate/))).not.toContain('engine.ts')
 
     // Closing a neighbour leaves the remaining labels untouched.
     fireEvent.click(screen.getByRole('button', { name: '关闭 a.md ↔ b.md' }))
     expect(tabTexts()).toHaveLength(2)
-    expect(tab(/engine\.ts/).textContent).toContain(LEFT_ENGINE)
-    expect(tab(/baseline ↔ candidate/).textContent).toContain(DIRECTORY_SAMPLE_PATHS.right)
+    expect(fullTabText(tab(/engine\.ts/))).toContain(LEFT_ENGINE)
+    expect(fullTabText(tab(/baseline ↔ candidate/))).toContain(DIRECTORY_SAMPLE_PATHS.right)
   })
 
   it('does not let a slow read clobber a session committed meanwhile', async () => {
@@ -2921,8 +2928,8 @@ describe('session tab labels follow the session facts', () => {
 
     // Both sessions survive the overlapping reads, each with its own paths.
     await waitFor(() => expect(tabTexts()).toHaveLength(2))
-    expect(tab(/one\.txt ↔ two\.txt/).textContent).toContain(SLOW_LEFT)
-    expect(tab(/alpha\.txt ↔ beta\.txt/).textContent).toContain(FAST_LEFT)
+    expect(fullTabText(tab(/one\.txt ↔ two\.txt/))).toContain(SLOW_LEFT)
+    expect(fullTabText(tab(/alpha\.txt ↔ beta\.txt/))).toContain(FAST_LEFT)
   })
 
   it('rebuilds a same-name pair from A to B without borrowing A paths', async () => {
