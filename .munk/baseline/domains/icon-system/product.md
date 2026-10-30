@@ -19,6 +19,7 @@ token 取值与差异语义色归 `design/foundations`；`IconButton` / `Toolbar
 - **依赖判定**：**已移除 `lucide-react`**（`package.json#dependencies` 与 `pnpm-lock.yaml` 均不再含该包；deps 键集 = `@tanstack/react-virtual` / `diff` / `jsonc-parser` / `node-diff3` / `papaparse` / `react` / `react-dom` / `yaml`），`src/shared/deps.test.ts` 改为断言 vendored 图标表（至少一个图标名可解析 + 版本常量形如 `x.y.z`）。不新增 npm 依赖。
 - **机器校验**：`eslint.config.mjs` 的 renderer 段 `no-restricted-imports` 增列 `lucide-react` 与其它图标集（`@tabler/icons*` / `@heroicons/*` / `heroicons` / `feather-icons` / `react-icons/*` / `@fortawesome/*` / `bootstrap-icons` / `@mdi/*` / `lucide-*`），复用既有机制、不新增 lint 插件。
 - **零网络 / 零 emoji**：图标随构建产物打包，运行时不拉取；界面不得用 emoji 或单个字符充当图标。
+- **对标图标语义判定**：`docs/ui-phase1-reference-audit.md` 表③（归 `domains/ui-reference-audit`）记录「图标语义差异 10 条 + 主动不做 9 条」的对标判断，图标名只取 `ICON_PATHS` / `ICON_NAMES` 现有取值；审计不改本域映射，后续要换字形须按本域三步流程改表并同批更新表③理由。
 
 ## 验收
 

@@ -1,6 +1,7 @@
 # OpenCompare — Agent Guide
 
 OpenCompare 是对标 Beyond Compare 5 Pro 的现代跨平台桌面对比与三向合并工具（本仓 `package.json` 根）。
+沿革与已闭环口径见 [docs/lessons.md](docs/lessons.md)：改壳层 / 图标 / 主题或发布口径前先读。
 
 ## 技术栈
 

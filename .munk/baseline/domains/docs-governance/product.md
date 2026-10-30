@@ -17,6 +17,7 @@
 - **历史不改写**：当时 `blocked` 的记录保持 `blocked`，不得按后来的复验结论重述；同一事实在两处出现时数字与判定必须一致，发现两种取数时如实并列（如 `9,674` 与 `9,682` 同源两取数）而不择一覆盖。
 - **与 README 的关系**：两版 README 的 docs 索引节（英文 `## Evidence and docs` / 中文 `## 证据与文档`）各追加**一行一个链接**指向 `docs/lessons.md`；英文链接文字为纯拉丁字符（如 `Lessons and decision history`），中文为「教训与口径沿革」。不新增 H2、不重排 9 节顺序、不再往 README 塞数字。
 - **带单位内存数字的去向**：`MiB` / `GiB` 等带单位数字只允许写进 `docs/lessons.md`，**禁止**写进两版 README（`release-packaging.test.ts` 的白名单断言会红）。
+- **仓根 `AGENTS.md` 的沿革入口行**：`docs/lessons.md` 建好后必须可从仓根产品约定发现——`AGENTS.md` 增加**恰好一行**指向 `docs/lessons.md` 的入口（现为第 4 行「沿革与已闭环口径见 [`docs/lessons.md`](docs/lessons.md)：改壳层 / 图标 / 主题或发布口径前先读。」）。只加这一行：不重排小节、不扩写、不改既有小节，`wc -l` 46 → 47；后续改壳层 / 图标 / 主题 / 发布口径的批次以该行指示为先读沿革。审计类文档（如 `docs/ui-phase1-reference-audit.md`，归 `ui-reference-audit` 域）不占用这行、也不新增第二行入口。
 
 ## 验收
 
@@ -39,6 +40,7 @@
 - **ac-diff-scope**：`git diff --name-status` 相对 main 只有三处：新增 `docs/lessons.md`、修改 `README.md`、修改 `README.zh-CN.md`；`src/`、`package.json`、`CHANGELOG.md`、`.github/workflows/release.yml`、`docs/release-notes/**`、`docs/release-evidence/**` 零 diff。
 - **ac-single-commit-clean**：单条 commit 经 delivery 合入 main；交付时工作区干净（`git status --porcelain` 为空）。
 - **ac-agents-measured**：交付说明给出产品目录 `AGENTS.md` 的实测 `wc -l` 行数与去标点 CJK 字符数（仅统计 U+4E00–U+9FFF），并写明统计命令；路径不可读时写「不可读」，不得估数。
+- **ac-agents-lessons-entry**：仓根 `AGENTS.md` 相对基线只有一次 `+1 / −0` 改动，该行含 `docs/lessons.md` 链接文字；`wc -l AGENTS.md` = 基线 46 + 1 = 47；该行之外 `git diff -U0 AGENTS.md` 无任何其它 hunk（不重排、不扩写、不改既有小节）。
 
 ## 非目标
 
@@ -60,6 +62,15 @@
 - 域 fold 由 Delivery 承担：本域记录现行文档归属与写作口径，历史域记录（`release` / `perf-memory` / `compare-request` 各自的 AC 原文与当时证据）按当初事实保留，不改写。
 
 ## 最近交付证明
+
+- WI：`wi_ws_0b248d40545e9eb4`（补上本域上一轮记下的缺口：仓根 `AGENTS.md` 加 **1 行** `docs/lessons.md` 入口；同一 WI 主体文档 `docs/ui-phase1-reference-audit.md` 归 `ui-reference-audit` 域，本域只承接入口行这个切片；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-10-30
+- 结果：code_gates passed（9 gates，attempt 001 全 exit 0，`.munk/runs/run_ws_16f6f7ea75b767c6/code-gates/attempts/001`）；`pnpm test` 75 files / 1202 passed + 1 skipped（1203），29.82s。
+- 改动面：`AGENTS.md` 仅 `+1 / −0`（新增第 4 行「沿革与已闭环口径见 [docs/lessons.md](docs/lessons.md)：改壳层 / 图标 / 主题或发布口径前先读。」），`wc -l` 46 → **47**；`git diff -U0 AGENTS.md` 无其它 hunk；`docs/lessons.md`、两版 README、`package.json`、`CHANGELOG.md`、`.github/**`、`docs/release-notes/**`、`docs/release-evidence/**` 零 diff。
+- 验收落点：`ac-agents-lessons-entry` 满足（行数 47、单次 +1、行内含 `docs/lessons.md`）。上一轮记的第③条缺口（仓根 `AGENTS.md` 未指向沿革）**本轮已闭环**。
+- 注：① 本 WI change pack 只有 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例；入口行 AC 的逐条实测记在 `ui-reference-audit` 域的 `qa/ui-phase1-reference-audit.md`。② 产品目录 `AGENTS.md` 的精简仍未做（不属本域非目标之内、也未由任何 WI 承接）——那才是「产品约定瘦身」的正项，行数仍是 68。③ 入口行落位选在第 4 行（沿革句紧跟首段定位句）而非新增小节，符合「只加一行、不重排」口径；后续再加 docs 入口不要再往这一行拼第二句。
+
+### 上一轮
 
 - WI：`wi_ws_080b8b27f763d761`（教训与口径沿革迁移到 `docs/lessons.md` + 两版 README docs 索引各加一行链接；纯文档、产品代码零 diff；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-10-30

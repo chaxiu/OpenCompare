@@ -25,6 +25,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **会话标签文案由会话事实派生（单一真源）**：tab 标题 / 副标题不再沿用创建时冻结的 `title` / `subtitle`，而在渲染期由会话当前事实派生——目录会话取 `directory.leftName/rightName` 与 `leftRoot/rightRoot`，文件会话取 `adhoc.pair` 两侧路径（两侧同名 → 标题为该文件名，否则 `左名 ↔ 右名`，副标题两侧完整路径）与 `delimiter` / `format`；内置样本仍按 session id 走字典 key，缺失侧仍走 `missingSidePath` + 既有 missing 字典文案。任何换路径动作（目录换侧、代码 / CSV / 结构化视图内「打开左 / 右文件」、下钻、同 id 原位刷新）都必须先落到会话事实（`setSessions` 函数式更新），视图局部 state 不是真源；因此 tab 与面板永远同帧一致，切 tab 往返与异步读盘收尾都不会让文案回到旧文件。
 - **跨场景 tab 文案回归矩阵（App 级，锁死上面这条单一真源）**：在既有 App 级测试基建（`src/renderer/src/App.test.tsx` 的 `scriptedPort` / `dropPaths` / 「打开文件」「打开文件夹」/ 新建对比对话框 / `sessionTabs`）上补齐四条跨场景矩阵——① 路径 A→B 重建（同名文件不同目录）；② 文件会话内视图「打开左文件」「打开右文件」；③ 目录会话下钻文件再「返回上级目录视图」；④ 文件 / 目录 / 下钻三类会话并存时连续切换与关闭非活动邻居。矩阵对 tablist 内**每个** tab 读其完整可访问名（`aria-label`，`标题 — 副标题` 形态）拆出标题与副标题做逐项相等比较——可见 span 自 tab 截断项起只承载按档位裁剪后的文本，故比较必须走 `aria-label`（原始派生全文）而非可见文本；不用整 tab 合并 `textContent` 包含判断、不用跨会话 `getAllByText` 代替 tablist 内断言；每条用例还断言任一 tab 的标题 + 副标题不包含其它会话的路径片段。矩阵暴露的残留缺陷在本域内修到代码闭环（不放宽既有实现或断言来消除失败），作为会话文案派生纪律的常驻回归网。
 - **索引与路由**：`ux/design-baseline.md`（token 路径、组件清单、主屏路径、取舍）折入 `.munk/baseline/design/*`；`AGENTS.md` 增视觉基线路由。
+- **对标参照审计**：壳层六层归属与 20 条入口的「保留 / 合并 / 降级到菜单 / 明确不做」判定归 `domains/ui-reference-audit`（`docs/ui-phase1-reference-audit.md`，只读判断、不改本域事实）；本域的 `SHELL_ENTRY_IDS` / `SHELL_ENTRIES` / `SHELL_LEVEL_ORDER` 是那份审计的唯一事实源，改壳层结构时须先读审计里对应行的判定。
 
 ## 验收
 
