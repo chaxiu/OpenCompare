@@ -495,6 +495,34 @@ describe('windowed diff scroll sync', () => {
     expect(left.scrollTop).toBe(42 * DIFF_ROW_HEIGHT)
   })
 
+  it('mirrors scrollTop 1:1 on the full-render path below the window threshold', () => {
+    const text = (side: string): string =>
+      Array.from({ length: 900 }, (_, index) => `${side}-${index}`).join('\n')
+    const { container } = render(
+      <CodeView
+        pair={{
+          left: { path: '/memory/small-left.ts', text: text('left') },
+          right: { path: '/memory/small-right.ts', text: text('right') }
+        }}
+        platform={createWebPlatformPort()}
+      />
+    )
+    const [left, right] = paneElements(container)
+
+    // Below the threshold both panes keep every aligned row in the DOM and have
+    // no virtual content box at all.
+    expect(renderedRows(left)).toHaveLength(900)
+    expect(renderedRows(right)).toHaveLength(renderedRows(left).length)
+    expect(contentOf(left).dataset.diffContentHeight).toBeUndefined()
+    expect(contentOf(right).dataset.diffContentHeight).toBeUndefined()
+
+    scrollTo(left, 123 * DIFF_ROW_HEIGHT)
+    expect(right.scrollTop).toBe(123 * DIFF_ROW_HEIGHT)
+
+    scrollTo(right, 42 * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(42 * DIFF_ROW_HEIGHT)
+  })
+
   it('follows a ruler jump to a distant block in the windowed path', () => {
     const lines = (dirty: readonly number[]): string =>
       Array.from({ length: 1_500 }, (_, index) =>
