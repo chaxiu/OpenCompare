@@ -5,7 +5,7 @@
 ## 触发方式
 
 - 推送 `v*` tag 即触发 GitHub Actions；构建统一 checkout `refs/tags/<tag>`，不改 tag、不升版本。
-- 若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`。该输入的 `tag` 默认值为 `default: 'v0.2.13'`（与 `package.json#version` 同源，即 `v${pkg.version}`），补发时不要指向新版本。
+- 若 tag 已推送但 Release 未完成，可从 `main` 手动触发同一工作流的 `workflow_dispatch`，输入已存在的 `tag`。该输入的 `tag` 默认值为 `default: 'v0.2.14'`（与 `package.json#version` 同源，即 `v${pkg.version}`），补发时不要指向新版本。
 
 ## 版本锚点与 README 状态行
 

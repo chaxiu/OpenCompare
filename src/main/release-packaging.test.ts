@@ -43,6 +43,16 @@ const ghostNotesPath = `docs/release-notes/${ghostTag}.md`
 const ghostReleaseLink = `releases/tag/${ghostTag}`
 const ghostEvidencePath = `docs/release-evidence/${ghostTag}.md`
 
+// The version folded into the current release was merged into main but never
+// tagged, so its notes were renamed into the current version instead of
+// shipping their own heading. The tag and its paths are assembled at runtime so
+// the negative assertions below can never match their own source text.
+const foldedTag = ['v0.2', '13'].join('.')
+const foldedNotesPath = `docs/release-notes/${foldedTag}.md`
+const foldedBilingualNotesPath = `docs/release-notes/${foldedTag}.zh-CN.md`
+const foldedReleaseLink = `releases/tag/${foldedTag}`
+const foldedEvidencePath = `docs/release-evidence/${foldedTag}.md`
+
 // The former pending-status word is assembled at runtime so the negative
 // assertions below can never match their own source text.
 const pendingWord = ['待', '发布'].join('')
@@ -51,8 +61,8 @@ const pendingWord = ['待', '发布'].join('')
 // explicitly and asserted against the README status line, not against the
 // converged version in package.json. Once a release lands, one wrap-up commit
 // updates both README line 5 and this constant together.
-// This tree is a v0.2.13 pre-release wrap-up: the newest published anchor
-// stays at v0.2.12 while package.json has already converged on v0.2.13.
+// This tree is a v0.2.14 pre-release wrap-up: the newest published anchor
+// stays at v0.2.12 while package.json has already converged on v0.2.14.
 const latestPublishedTag = 'v0.2.12'
 // The previous public release. Pinned on its own so flipping the newest anchor
 // never retargets the history assertions below.
@@ -713,9 +723,11 @@ describe('release version gate', () => {
     for (const line of [readmeStatusLine(readmeEn), readmeStatusLine(readmeZh)]) {
       expect(line).toContain(latestPublishedTag)
     }
-    // This tree is a v0.2.13 pre-release wrap-up: the newest published anchor
+    // This tree is a v0.2.14 pre-release wrap-up: the newest published anchor
     // still points at v0.2.12 and precedes the converged tag.
     expect(publishedTags).toContain(latestPublishedTag)
+    // The folded version was never tagged, so it must never join the shipped list.
+    expect(publishedTags).not.toContain(foldedTag)
     expect(latestPublishedTag).not.toBe(currentTag)
     expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, latestPublishedTag)).toBe(true)
@@ -1299,7 +1311,7 @@ describe('release notes changelog', () => {
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    // This tree is a v0.2.13 pre-release wrap-up: the converged entry sits above
+    // This tree is a v0.2.14 pre-release wrap-up: the converged entry sits above
     // the newest published entry, which stays at v0.2.12.
     expect(latestPublished).toBeGreaterThan(current)
     expect(changelog.indexOf('## v0.2.12')).toBe(changelog.indexOf(`## ${latestPublishedTag}`))
@@ -1661,8 +1673,8 @@ describe('release notes changelog', () => {
   })
 
   it('anchors the newest published release notes at the shipped tag', () => {
-    // This tree is a v0.2.13 pre-release wrap-up: the shipped notes stay at
-    // v0.2.12 while the converged notes already point at v0.2.13.
+    // This tree is a v0.2.14 pre-release wrap-up: the shipped notes stay at
+    // v0.2.12 while the converged notes already point at v0.2.14.
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(existsSync(releaseNotesPath)).toBe(true)
@@ -1870,6 +1882,18 @@ describe('release document consistency', () => {
 
   it('keeps a fake evidence file for the never-published version out of the repository', () => {
     expect(existsSync(join(repoRoot, ghostEvidencePath))).toBe(false)
+  })
+
+  it('folds the never-tagged version into the current entry and leaves no reference to it', () => {
+    expect(changelog).not.toMatch(new RegExp(`^## ${foldedTag}`, 'm'))
+    expect(existsSync(join(repoRoot, foldedNotesPath))).toBe(false)
+    expect(existsSync(join(repoRoot, foldedBilingualNotesPath))).toBe(false)
+    expect(existsSync(join(repoRoot, foldedEvidencePath))).toBe(false)
+    const offenders = documentPaths().filter((path) => {
+      const text = readFileSync(path, 'utf8')
+      return text.includes(foldedNotesPath) || text.includes(foldedReleaseLink)
+    })
+    expect(offenders.map((path) => relative(repoRoot, path))).toEqual([])
   })
 
   it('links only published tags or the current tag', () => {

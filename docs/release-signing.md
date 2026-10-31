@@ -41,7 +41,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 >
 > 录入完成后，推送 `v*` 标签（`package.json#version` 需与 tag 一致）即由 CI 产出签名 + 公证的 macOS 包，并发布为该版本唯一的公开 Release。
 
-## 三、正式版发布姿态（v0.2.13）
+## 三、正式版发布姿态（v0.2.14）
 
 - 发布已解冻：正式版经 **Developer ID 签名 + Apple 公证** 流程产出，由 `v*` tag 触发的 CI 发布为每个版本唯一的公开 Release（详见 `README.md` 的「发布流程」）。v0.2.0 从未公开发布，v0.2.1 以修正后的发布门测试首发，用户可见变化与 v0.2.0 相同。
 - v0.2.12 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.12>，发布说明见 `docs/release-notes/v0.2.12.md`，发布证据见 `docs/release-evidence/v0.2.12.md`（tag、公开 Release、Release CI run、11 件公开资产与 macOS 签名 / 公证结论）。macOS 公证由 CI 执行，实际结果以那次 CI 为准。
@@ -76,9 +76,9 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 仅 tag 可达提交的 diff 若删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`），即使 `git cherry` 判为 `-` 也非零退出。
 - 祖先门只做只读 git 查询，不创建、移动、删除任何 tag / ref，不 push，也不调用 `gh release` 写操作。
 
-**补发用法（不改 tag、不升版本）**：`v0.2.13` 的版本收敛已合入 `main`；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.13`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
+**补发用法（不改 tag、不升版本）**：`v0.2.14` 的版本收敛已合入 `main`；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.14`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
 
-`v0.2.13` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main`，发布说明见 `docs/release-notes/v0.2.13.md`；最新公开 Release 仍为 v0.2.12，README 状态行与 `latestPublishedTag` 保持指向该版本。
+`v0.2.14` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main`，发布说明见 `docs/release-notes/v0.2.14.md`；最新公开 Release 仍为 v0.2.12，README 状态行与 `latestPublishedTag` 保持指向该版本。
 
 ## 六、打包后硬校验（CI，上传前）
 
