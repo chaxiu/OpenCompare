@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-> 最新公开版本：[v0.2.11](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.11) — macOS 安装包经 Developer ID 签名与 Apple 公证。
+> 最新公开版本：[v0.2.12](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.12) — macOS 安装包经 Developer ID 签名与 Apple 公证。
 
 [![最新版本](https://img.shields.io/github/v/release/chaxiu/OpenCompare)](https://github.com/chaxiu/OpenCompare/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
