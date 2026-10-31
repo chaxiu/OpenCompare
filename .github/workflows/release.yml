@@ -534,7 +534,7 @@ jobs:
           shopt -s nullglob
           case "${{ matrix.target }}" in
             mac) required_exts=(dmg zip) ;;
-            win) required_exts=(exe) ;;
+            win) required_exts=(exe zip) ;;
             linux) required_exts=(AppImage deb) ;;
             *)
               echo "::error::Unknown matrix target '${{ matrix.target }}'; refusing to upload unverified artifacts." >&2
@@ -603,6 +603,46 @@ jobs:
               console.log(`${file} version=${metadata.version}`)
             '; then
               echo "::error::${file} update metadata does not match tag ${RELEASE_TAG}." >&2
+              status=1
+            fi
+          done
+          exit ${status}
+      # The portable zip is a download, not an update payload: Windows
+      # auto-update must keep resolving to the NSIS installer. electron-builder
+      # writes latest.yml from the nsis target today, but the zip target is new,
+      # so assert the feed instead of assuming it: a zip entry in files[] fails
+      # the run rather than shipping an update that hands out an unpacked app.
+      # Read-only and separate from the version/url gates above.
+      - name: Assert the Windows update feed points at the NSIS installer
+        if: matrix.target == 'win'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release/latest*.yml)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No latest*.yml update metadata found under release/." >&2
+            exit 1
+          fi
+          status=0
+          for file in "${files[@]}"; do
+            if ! FILE="${file}" node -e '
+              const fs = require("fs")
+              const { parse } = require("yaml")
+              const file = process.env.FILE
+              const metadata = parse(fs.readFileSync(file, "utf8")) || {}
+              const zipEntries = (metadata.files || [])
+                .map((entry) => String(entry.url || ""))
+                .filter((url) => url.toLowerCase().endsWith(".zip"))
+              if (zipEntries.length > 0) {
+                for (const url of zipEntries) {
+                  console.error(`::error::${file} files[].url ${url} points at a portable zip; Windows auto-update must use the NSIS installer.`)
+                }
+                process.exit(1)
+              }
+              console.log(`${file} files[] carries no zip entry`)
+            '; then
+              echo "::error::${file} lists a .zip artifact; refusing a Windows update feed that is not the NSIS installer." >&2
               status=1
             fi
           done
@@ -823,6 +863,23 @@ jobs:
           for suffix in .dmg .zip .exe .AppImage .deb latest-mac.yml latest.yml latest-linux.yml; do
             if ! has_asset "${suffix}"; then
               echo "::error::Release ${RELEASE_TAG} is missing a ${suffix} asset." >&2
+              status=1
+            fi
+          done
+          # A suffix check is not enough for Windows: the macOS `-mac.zip` also
+          # ends in .zip, so a missing portable zip would pass it. Both Windows
+          # assets are verified by their exact, versioned names instead.
+          has_exact_asset() {
+            local wanted="$1"
+            local name
+            while IFS= read -r name; do
+              if [ "${name}" = "${wanted}" ]; then return 0; fi
+            done <<< "${assets}"
+            return 1
+          }
+          for asset in "OpenCompare-Setup-${tag}.exe" "OpenCompare-${tag}-win-x64.zip"; do
+            if ! has_exact_asset "${asset}"; then
+              echo "::error::Release ${RELEASE_TAG} is missing the Windows asset ${asset}." >&2
               status=1
             fi
           done

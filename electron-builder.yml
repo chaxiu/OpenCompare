@@ -44,8 +44,15 @@ mac:
     - zip
 win:
   icon: build/icon.ico
+  # Windows ships two artifacts from the same build: the NSIS installer that
+  # latest.yml points at, and a portable zip that runs straight from the
+  # extracted folder. This win-level template is versioned and space-free so it
+  # renders as `OpenCompare-<version>-win-x64.zip`; `nsis.artifactName` below
+  # overrides it for the installer so its update URL keeps the Setup shape.
+  artifactName: '${productName}-${version}-win-${arch}.${ext}'
   target:
     - nsis
+    - zip
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

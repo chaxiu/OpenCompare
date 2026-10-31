@@ -22,7 +22,7 @@ README 第 5 行的「最新公开版本 / Latest public release」只指向**�
 门禁通过后，在 macOS / Windows / Linux 三个 runner 上分别构建平台产物：
 
 - **macOS**：`.dmg` / `.zip`。要求 Developer ID 签名与 Apple 公证凭据齐备，任一缺失即 fail-closed，不产出、不上传未签名裸包；凭据清单见 [`docs/release-signing.md`](release-signing.md)。
-- **Windows**：NSIS `.exe` 安装包。
+- **Windows**：NSIS `.exe` 安装包 + 免安装 `.zip`（解压即用，无安装步骤）；`latest.yml` 只指向 `.exe`，zip 不进自动更新。
 - **Linux**：`.AppImage` / `.deb`。
 
 每个平台都会断言产物文件名与 `latest*.yml` 内的 `version` / `files[].url` 等于 tag 版本。本地可先跑 `pnpm release:metadata --dir release`，校验每份 `latest*.yml` 的 `files[].url` 命中 `release/` 资产名、Windows 安装包为连字符形态，再汇聚上传到该 tag 的唯一 Release。
