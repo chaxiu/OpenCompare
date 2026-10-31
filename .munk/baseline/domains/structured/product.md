@@ -11,7 +11,7 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
   - 新增 / 删除的容器只记一条路径（子孙不展开计数）；`modified` / `typeChanged` 只记在叶值上。对象按排序键并集遍历，输出与输入键序无关。
   - 运行时汇总各状态计数 `counts`（不读样本 `composition` 答案键）；JSON 与 YAML 各自独立对比，不做跨格式比对。
   - 定位层 `locate.ts`：把 `diffStructured` 已产出的 JSON Pointer 路径映射为**某一侧原文**的 1-based 行/列区间（`SourceRange`）；对外 `createStructuredLocator(text, format)`（只解析一次，多次 `locate` 按段下钻）与 `locateStructuredPath(text, format, path)`。命中返回该节点**值**的区间（不含键 token / 注释 / 空行 / 行尾换行）；该侧不存在该节点时逐段下钻到最深仍存在的祖先并标 `exact:false`，祖先全无则回退根（`path:''`）。解析容错与 `parseStructured` 完全对齐，不可解析文本抛同一个 `StructuredParseError`。
-- **节点路径变更视图（`StructuredView.tsx`）**：一键状态过滤 `全部 / 新增 / 删除 / 修改 / 类型变更 / 相同`（即时生效，仅收窄列表，计数恒为当前对比结果运行时全集）；变更列表逐行展示状态标签、JSON Pointer 路径与原值 → 新值（状态色走差异语义 token `--color-diff-*` / `DiffBadge`，`typeChanged` 用 conflict 色调区分于 `modified`）；同屏左右原文对照（`CodeBlock`）；内置场景 JSON / YAML 格式切换（`SegmentedControl`）。
+- **节点路径变更视图（`StructuredView.tsx`）**：一键状态过滤 `全部 / 新增 / 删除 / 修改 / 类型变更 / 相同`（即时生效，仅收窄列表，计数恒为当前对比结果运行时全集）；变更列表逐行展示状态标签、JSON Pointer 路径与原值 → 新值（状态色走差异语义 token `--color-diff-*` / `DiffBadge`，`typeChanged` 用 conflict 色调区分于 `modified`）；同屏左右原文对照（`CodeBlock`）；内置场景 JSON / YAML 格式切换（`SegmentedControl`）。对比计算经 `structured-async-compare` 域在 renderer 后台执行，等待期渲染「对比中」加载态且过滤 / 格式控件仍可操作；结果落地后计数与列表中英双语与同步实现等价。
 - **两类数据源同一套引擎**：内置样本场景 `STRUCTURED_SCENE`（json/yaml 两对，可切换格式）与目录树双击下钻传入的 ad-hoc `pair`（含 `format`，格式固定、不显示格式切换控件）。
 - **解析错误态**：非法 JSON / YAML 给出可读错误提示（`StateView` 危险态），不崩溃、不白屏，左右原文与其余会话仍可用。
 - **本地结构化文件入口（`StructuredView` 顶栏）**：经 `PlatformPort.selectFile` 分别打开左 / 右本地 `.json` / `.yaml` 文件，按扩展名判定格式并重算语义差异；打开非 JSON/YAML 或解析失败时展示可读错误态而非崩溃。
@@ -50,7 +50,7 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 ## 非目标
 
 - **不做结构化编辑 / 合并 / 写回**：不做一键采纳、左右覆写、写回文件、导出对比报告；文件对话框能力由 `PlatformPort.selectFile`（`foundation` 域）提供，本域只做 `StructuredView` 顶栏本地打开接线。
-- **定位层只做「路径 → 原文区间」单向映射**：不做行 → 节点反向索引（原文反选）、不做 UI 高亮 / 双栏同步滚动 / 过滤与切 tab 的位置保持，也不做 renderer Worker 后台化与 5 MB 大文件原文窗口化（均为后续子项）；不碰 CRLF/LF 与编码归一化、不处理 UTF-8 BOM。
+- **定位层只做「路径 → 原文区间」单向映射**：不做行 → 节点反向索引（原文反选）、不做 UI 高亮 / 双栏同步滚动 / 过滤与切 tab 的位置保持，也不做 5 MB 大文件原文窗口化（后续子项）；**renderer 后台对比（parse / diff / 定位脱离主线程、加载态、代次取代与取消语义）已移交 `structured-async-compare` 域**，本域只作为其复用的同步引擎 + 定位层；不碰 CRLF/LF 与编码归一化、不处理 UTF-8 BOM。
 - **不做 YAML 高级语义展开**（alias / merge key / 锚点解引用 / 多文档 / 重复键策略），不做 JSONPath 查询、schema 校验；定位层不手写 JSON / YAML 词法，一律复用 `jsonc-parser` / `yaml` 的 AST offset 与 `range`，避免与 `parseStructured` 出现两套接受口径。
 - **不做跨格式比对**：JSON 只对 JSON、YAML 只对 YAML；不做 JSON ↔ YAML 转换后对比。
 - **不做数组智能对齐**：数组按索引比对，不做 LCS / 按元素内容重新对齐数组项。

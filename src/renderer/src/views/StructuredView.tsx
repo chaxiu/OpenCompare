@@ -1,13 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
-import { STRUCTURED_STATUSES, diffStructured, filterStructuredChanges } from '@core/structured/diff'
-import type {
-  StructuredChange,
-  StructuredDiffResult,
-  StructuredFilter,
-  StructuredStatus
-} from '@core/structured/diff'
+import { isOperationCancelled } from '@core/io'
+import { STRUCTURED_STATUSES, filterStructuredChanges } from '@core/structured/diff'
+import type { StructuredChange, StructuredFilter, StructuredStatus } from '@core/structured/diff'
 import type { StructuredFormat } from '@core/structured/parse'
 import type { DiffStatus, StructuredSceneFixture } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
@@ -23,6 +19,9 @@ import { StateView } from '@renderer/components/StateView'
 import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
+import { createStructuredCompareClient } from '@renderer/structured/compareClient'
+import type { StructuredCompareClient } from '@renderer/structured/compareClient'
+import type { StructuredCompareOutcome } from '@renderer/structured/compareJob'
 import { classifyFile } from '@renderer/workbench/fileKinds'
 import { STRUCTURED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
@@ -147,9 +146,16 @@ function ChangeRow({ change }: { readonly change: StructuredChange }): JSX.Eleme
   )
 }
 
-interface ComparisonState {
-  readonly diff: StructuredDiffResult | null
+interface SettledComparison {
+  /** Inputs the result belongs to; a newer source / format renders as loading. */
+  readonly source: FilePair
+  readonly format: StructuredFormat
+  readonly outcome: StructuredCompareOutcome | null
   readonly error: string | null
+}
+
+function defaultCreateClient(): StructuredCompareClient {
+  return createStructuredCompareClient()
 }
 
 /**
@@ -165,7 +171,8 @@ export function StructuredView({
   format,
   platform,
   toolbarLeading,
-  onOpenSide
+  onOpenSide,
+  createClient
 }: {
   readonly fixture?: StructuredSceneFixture
   /** Drilldown back row handed down by the shell; first row of the level. */
@@ -176,6 +183,8 @@ export function StructuredView({
   readonly platform: PlatformPort
   /** Writes a newly opened file back to the session's own pair facts. */
   readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
+  /** Test seam: replaces the background comparison client for this view. */
+  readonly createClient?: () => StructuredCompareClient
 }): JSX.Element {
   const { t } = useI18n()
   const [selected, setSelected] = useState<StructuredFormat>('json')
@@ -184,29 +193,64 @@ export function StructuredView({
   // A locally opened pair overrides the sample / drilldown source until the
   // format switch (or a new session) resets it.
   const [opened, setOpened] = useState<{ pair: FilePair; format: StructuredFormat } | null>(null)
+  const [clientFactory] = useState(() => createClient ?? defaultCreateClient)
+  const clientRef = useRef<StructuredCompareClient | null>(null)
+  const [comparison, setComparison] = useState<SettledComparison | null>(null)
   const adhoc = pair !== undefined
   const effective: StructuredFormat = opened
     ? opened.format
     : adhoc
       ? (format ?? 'json')
       : selected
-  const source =
+  const source: FilePair | null =
     opened?.pair ??
     pair ??
     (fixture ? (effective === 'json' ? fixture.json : fixture.yaml) : null)
 
-  const comparison = useMemo<ComparisonState>(() => {
-    if (!source) return { diff: null, error: null }
-    try {
-      return { diff: diffStructured(source.left.text, source.right.text, effective), error: null }
-    } catch (cause) {
-      return { diff: null, error: cause instanceof Error ? cause.message : String(cause) }
+  // The comparison client lives as long as the view; unmounting (tab close or
+  // session switch) terminates an in-flight background job.
+  useEffect(
+    () => () => {
+      clientRef.current?.dispose()
+      clientRef.current = null
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!source) return
+    const client = clientRef.current ?? (clientRef.current = clientFactory())
+    let active = true
+    void client
+      .compare({ leftText: source.left.text, rightText: source.right.text, format: effective })
+      .then((outcome) => {
+        if (active) setComparison({ source, format: effective, outcome, error: null })
+      })
+      .catch((cause: unknown) => {
+        // A superseded request is expected; it must never paint an error state.
+        if (!active || isOperationCancelled(cause)) return
+        setComparison({
+          source,
+          format: effective,
+          outcome: null,
+          error: cause instanceof Error ? cause.message : String(cause)
+        })
+      })
+    return () => {
+      active = false
     }
-  }, [source, effective])
+  }, [clientFactory, effective, source])
+
+  const settled =
+    comparison !== null && comparison.source === source && comparison.format === effective
+      ? comparison
+      : null
+  const loading = source !== null && settled === null
 
   const visible = useMemo(
-    () => (comparison.diff ? filterStructuredChanges(comparison.diff.entries, filter) : []),
-    [comparison, filter]
+    () =>
+      settled?.outcome ? filterStructuredChanges(settled.outcome.diff.entries, filter) : [],
+    [settled, filter]
   )
 
   /** Opens a local JSON / YAML file on one side and re-runs the comparison. */
@@ -324,11 +368,11 @@ export function StructuredView({
         data-shell-level="panels"
         className={cx('flex min-h-0 min-w-0 flex-1 flex-col', levelBandClasses('panels'))}
       >
-      {comparison.diff ? (
+      {settled?.outcome ? (
         <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-md border border-line-subtle bg-surface-sunken px-2 py-1">
-          <StatusCounts counts={comparison.diff.counts} />
+          <StatusCounts counts={settled.outcome.diff.counts} />
           <span className="ml-auto text-2xs text-content-muted">
-            {t('files.structured.nodeCount', { count: comparison.diff.entries.length })}
+            {t('files.structured.nodeCount', { count: settled.outcome.diff.entries.length })}
           </span>
         </div>
       ) : null}
@@ -339,21 +383,29 @@ export function StructuredView({
             key="changes"
             title={t('files.structured.changes')}
             subtitle={
-              comparison.error
-                ? t('files.structured.parseFailed')
-                : t('files.structured.showing', {
-                    visible: visible.length,
-                    total: comparison.diff?.entries.length ?? 0
-                  })
+              loading
+                ? undefined
+                : settled?.error
+                  ? t('files.structured.parseFailed')
+                  : t('files.structured.showing', {
+                      visible: visible.length,
+                      total: settled?.outcome?.diff.entries.length ?? 0
+                    })
             }
           >
-            {comparison.error ? (
+            {loading ? (
+              <div className="flex h-full min-h-0 flex-col">
+                <p role="status" className="p-3 text-2xs text-content-muted">
+                  {t('files.structured.comparing')}
+                </p>
+              </div>
+            ) : settled?.error ? (
               <div className="flex h-full min-h-0 flex-col">
                 <StateView
                   tone="danger"
                   icon={<Icon name={UI_ICON_ACTIONS.warning} size={20} />}
                   title={t('files.structured.errorTitle')}
-                  description={comparison.error}
+                  description={settled.error}
                   hint={t('files.structured.errorHint')}
                 />
               </div>
