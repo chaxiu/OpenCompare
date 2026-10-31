@@ -16,6 +16,7 @@
   9. 2026-11-01 可执行判定必须 UI 与门禁同源（「机制全绿 ≠ 用户拿得到」的第二次复现：`alignSymbolicLinkTimes` 逻辑正确但入口可执行判定内联，导致仅链接 mtime 不同时 Apply 禁用、待对齐链接不可见；结论与断言位置见该节）
   10. 2026-11-01 目录同步的类型保真缺口：known issue 不是验收豁免（`writeItem` 一律 `readFileBytes` + `writeFileBytes`，源侧独有 symlink 落盘后退化为普通文件且内容校验仍判一致；结论「known issue 不得用于掩盖打穿验收条款的类型保真缺口」与断言位置见该节）
 - **README 的 known issue 段不再承载「形态保真」类缺陷**：`README.md` / `README.zh-CN.md` 的 Known issues / 已知问题段只保留既有 `None known right now.` / `当前没有已知未修复问题。` 原句，其后以「设计口径，不是缺陷」/「Design postures, not defects」列出两条口径（Incremental 不列删除项、外部改动需重扫），**不得**再登记「源侧独有 symlink 按普通文件同步」这类类型保真缺口；该段落的门面结构与 `release-packaging.test.ts` 断言归 `release` 域，本域只约束「不要用 known issue 掩盖打穿验收的缺口」这条写作纪律。
+- **两条同步口径的双落点分工（2026-11-01）**：目录同步的两条设计口径（增量只新增与覆盖、不删除；应用外改动在下次对比时读取、无后台文件监听）现在**同时**出现在两版 README 的**两处**，且这是刻意分工、不是重复冗余——`## Features` / `## 核心能力` 首条以**能力陈述**（用户能做什么）在同一行内表达，`## Known issues` / `## 已知问题` 段以「设计口径，不是缺陷」/「Design postures, not defects」继续保留两条**边界陈述**（为什么看起来像缺失）。两处必须**语义同源**（同一条引擎事实：镜像模式才有 delete 组且默认不勾、对比按需触发），任一侧改口径都要同批改另一侧；`## Quickstart` / `## 快速上手` **不重复**这两条（能力陈述已在 Features 完整表达，Quickstart 只写操作四步）。能力区扩写的**行内**纪律：追加在既有 bullet **同一行**句尾，不新增 bullet、不拆行（5 条 `- ` 计数与 `release-packaging.test.ts` 直接相关，细节归 `domains/release`）。
 - **`AGENTS.md` 硬约束的增补纪律**：`docs/lessons.md` 新增一条**可复用工程约束**（而非一次性事故）时，`AGENTS.md`「硬约束」小节可增补**恰好一行**概括该约束并指向 `docs/lessons.md` 对应节；只追加、不重排、不改既有行、不新增小节。2026-11-01 对应第 9 节的一行为「可执行 / 可达性判定（按钮 `disabled`、门禁断言）必须共用同一纯函数（如 `canApplySyncPreview`），禁止 UI 与门禁各留一份内联判定；只测内层函数不算覆盖（见 `docs/lessons.md` §9）」。
 - **写作口径**：只搬结论与证据指针，不重写判定；数字、阈值、commit / run 标识、`blocked` / `pass` 定性逐字对齐来源；不新增未实测数字；每条带「来源 + 证据指针」，证据路径按仓库既有写法（相对产品仓根）原样给出、不改写或缩写。
 - **历史不改写**：当时 `blocked` 的记录保持 `blocked`，不得按后来的复验结论重述；同一事实在两处出现时数字与判定必须一致，发现两种取数时如实并列（如 `9,674` 与 `9,682` 同源两取数）而不择一覆盖。
@@ -41,6 +42,8 @@
 - **ac-evidence-paths-intact**：文中出现的证据路径（`projects/ops_df43e423451170fd/.munk/runs/...`、`docs/perf/*`、`docs/release-evidence/*`、`docs/release-notes/*`、`src/main/release-packaging.test.ts`、`scripts/release-metadata.mjs`）原样保留、未被改写或缩写，逐个可在仓内或产品目录定位。
 - **ac-no-number-drift**：同一事实在两处出现时数字与判定一致；阈值、口径句、blocked / pass 定性不得被改写或按新结论重述（历史 blocked 记录保持 blocked）。
 - **ac-readme-links**：两版 README 的 docs 索引节各出现一个指向 `docs/lessons.md` 的 markdown 链接（英文版链接文字为纯拉丁字符）；英文版除语言切换行外仍无汉字；README 仍无 `MiB` / `GiB` 与既有禁入数字；H2 仍是那 9 节、顺序不变；英文正文词数仍 ≤ 700。
+- **ac-readme-features-postures-placement**：两版 README 的能力区首条与已知问题段**并列携带**同一组同步口径且语义同源——英文 `## Features` 首条含 `never deletes` / `unchecked by default` / `no background file watcher`，`## Known issues` 段仍含 `Incremental sync never lists deletions` 与 `not picked up automatically; rescan`；中文 `## 核心能力` 首条含「不删除」/「默认不勾选」/「没有后台文件监听」，`## 已知问题` 段仍含「Incremental 模式不列出删除项」与「不会自动出现，需要重新扫描」。两版 `## Quickstart` / `## 快速上手` 段落与改动前逐字节相同（零 diff，不重复这两条）。两处措辞指向同一引擎事实，不得出现「增量会删除」「镜像默认删除」「有后台监听」这类反向表述。
+- **ac-readme-postures-untouched-sections**：本轮只在能力区首条**行内**追加，`## Known issues` / `## 已知问题` 段与 `## Quickstart` / `## 快速上手` 段相对改动前逐字节相同（`git diff` 在这些段落零 hunk）；`None known right now.` / `当前没有已知未修复问题。` 原句与「设计口径，不是缺陷」两条 bullet 原样保留。
 - **ac-gates-green**：默认 `.munk/code-gates.json` 全部 gate 绿（含 `pnpm test` 的 `release-packaging.test.ts` 双语镜像、九节标题、docs 索引导航、禁数字/禁汉字断言）。
 - **ac-diff-scope**：`git diff --name-status` 相对 main 只有三处：新增 `docs/lessons.md`、修改 `README.md`、修改 `README.zh-CN.md`；`src/`、`package.json`、`CHANGELOG.md`、`.github/workflows/release.yml`、`docs/release-notes/**`、`docs/release-evidence/**` 零 diff。
 - **ac-single-commit-clean**：单条 commit 经 delivery 合入 main；交付时工作区干净（`git status --porcelain` 为空）。
@@ -69,6 +72,13 @@
 - 域 fold 由 Delivery 承担：本域记录现行文档归属与写作口径，历史域记录（`release` / `perf-memory` / `compare-request` 各自的 AC 原文与当时证据）按当初事实保留，不改写。
 
 ## 最近交付证明
+
+- WI：`wi_intake_5bf454ae71a62cd8`（交叉引用：目录同步两条设计口径写进两版 README 的 Features / 核心能力首条；口径的引擎语义归 `domains/directory`，能力区 5 条 / 9 节 / 词数等门面结构归 `domains/release`，本域只承接「口径落在哪一节、两处如何分工」；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_5bf454ae71a62cd8/code-gates/attempts/001`；`pnpm test` 96 files / 1431 passed + 1 skipped（1432）、`pnpm test:sync-real` 32 tests / 2.51s）。
+- 改动面：`README.md` **+1 / −1**（`## Features` 首条 `- **Directory comparison and sync**` 同一行句尾追加三句：`never deletes` / `unchecked by default` / `no background file watcher`）、`README.zh-CN.md` **+1 / −1**（`## 核心能力` 首条逐句镜像）；`## Quickstart` / `## 快速上手`、`## Known issues` / `## 已知问题` 两段逐字节零 diff；两版第 5 行、H2 集合、`src/**`、`package.json`、`CHANGELOG.md`、`docs/**` 零 diff。
+- 验收落点：`ac-readme-features-postures-placement` / `ac-readme-postures-untouched-sections` 满足。
+- 注：① 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例；逐条 AC 落档在 `domains/directory/qa/readme-sync-postures.md`。② **本轮确立的双落点口径**：上一轮（`wi_intake_b95f668b89a1770d`）把两条口径放进 Known issues 作为「设计口径，不是缺陷」，本轮把它们**前移一份**到 Features 作为正向能力陈述——两处并存是最终形态，后来者不要以「去重」为由删掉 Known issues 那两条（它承担的是「这不是 bug」的解释职责，Features 承担的是「能做什么」）。③ 反面教训：口径写进 Features 时**不能**改写成「增量同步会删除多余文件」这类更强承诺——`ac-sync-mirror-delete` 的事实是 delete 组只在镜像模式出现且默认不勾，口径句与引擎事实一旦分叉，README 就从门面变成缺陷来源。
 
 - WI：`wi_intake_b95f668b89a1770d`（交叉引用：`docs/lessons.md` 新增第 10 节「目录同步的类型保真缺口：known issue 不是验收豁免」；主体修复与 AC 归 `domains/directory`，本域只承接教训归属与写作口径；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-11-01

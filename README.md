@@ -22,7 +22,7 @@ Every published version is listed on the [Releases page](https://github.com/chax
 
 ## Features
 
-- **Directory comparison and sync**: compare two nested trees, classify every node as same / added / removed / modified, and preview incremental or mirror sync before writing.
+- **Directory comparison and sync**: compare two nested trees, classify every node as same / added / removed / modified, and preview incremental or mirror sync before writing. Incremental sync only adds and overwrites, never deletes; mirror sync also lists target-only items as pending deletions, which stay unchecked by default and run only when you check them. Changes made outside the app are read on the next comparison, with no background file watcher.
 - **Code diff and 3-way merge**: line and intra-line highlighting, synchronized scrolling, per-hunk overwrite, and diff3 conflict blocks resolved one block at a time.
 - **CSV key alignment**: align CSV / TSV rows by a chosen key column, tolerate shuffled rows and shifted columns, and filter rows by state.
 - **JSON / YAML semantic comparison**: compare parsed documents by JSON Pointer path, ignoring key order, comments and indentation.
