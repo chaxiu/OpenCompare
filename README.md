@@ -65,6 +65,11 @@ src/shared/     cross-process types, PlatformPort contract and built-in samples
 
 None known right now. Report anything reproducible on the [issue tracker](https://github.com/chaxiu/OpenCompare/issues).
 
+Design postures, not defects:
+
+- Incremental sync never lists deletions; switch to Mirror to remove target-only items.
+- Changes made outside the app are not picked up automatically; rescan the pair to see them.
+
 ## Evidence and docs
 
 [Release process](docs/release-process.md) · [release signing credentials](docs/release-signing.md) · [symlink policy](docs/symlink-no-follow.md) · [large-directory memory](docs/perf/large-directory-memory.md).

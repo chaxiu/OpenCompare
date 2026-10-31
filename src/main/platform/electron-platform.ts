@@ -17,6 +17,7 @@ import {
   rm,
   rmdir,
   stat,
+  symlink,
   utimes,
   writeFile
 } from 'node:fs/promises'
@@ -514,6 +515,27 @@ function linkSeconds(modifiedMs: number): number {
   return Math.floor(modifiedMs) / 1000 + 1e-6
 }
 
+/** A link's own target string, verbatim; a dangling link still answers. */
+async function readLocalSymbolicLink(path: string): Promise<string> {
+  try {
+    return await readlink(path)
+  } catch (error) {
+    throw readableFailure('文件', error, path)
+  }
+}
+
+/**
+ * Creates the link itself. Nothing is read or written through it, so a relative,
+ * dangling or directory target is stored exactly as given.
+ */
+async function createLocalSymbolicLink(target: string, path: string): Promise<void> {
+  try {
+    await symlink(target, path)
+  } catch (error) {
+    throw readableWriteFailure(error, path)
+  }
+}
+
 /** The minimal read-stream surface the digest owns and can destroy. */
 export interface DigestReadStream extends AsyncIterable<Buffer> {
   destroy(error?: Error): void
@@ -873,6 +895,14 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
         throw readableWriteFailure(error, target)
       }
     }
+  )
+  ipcMain.handle(PLATFORM_CHANNELS.readSymbolicLink, (_event, path: unknown) =>
+    readLocalSymbolicLink(assertPath(path))
+  )
+  ipcMain.handle(
+    PLATFORM_CHANNELS.createSymbolicLink,
+    (_event, target: unknown, path: unknown) =>
+      createLocalSymbolicLink(assertPath(target), assertWritable(assertPath(path)))
   )
   ipcMain.handle(
     PLATFORM_CHANNELS.writeTextFile,

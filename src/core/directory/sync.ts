@@ -33,6 +33,12 @@ export interface SyncPlanItem {
    * size/mtime fast path does not re-flag a freshly synced file as modified.
    */
   readonly modifiedMs: number
+  /**
+   * Literal `readlink` string of a source-side symbolic link. `undefined` means
+   * an ordinary file; a link item is created as a link and its target body is
+   * never read.
+   */
+  readonly linkTarget?: string
 }
 
 export interface SyncPlanGroup {
@@ -110,6 +116,9 @@ export function buildSyncPlan(
     const sourceSize = (leftToRight ? file.leftSize : file.rightSize) ?? 0
     const targetSize = (leftToRight ? file.rightSize : file.leftSize) ?? 0
     const sourceModifiedMs = (leftToRight ? file.leftModifiedMs : file.rightModifiedMs) ?? 0
+    // A source-side link enters the plan as a link: the literal target string
+    // travels with the item so the write path never has to read its body.
+    const sourceLinkTarget = leftToRight ? file.leftLinkTarget : file.rightLinkTarget
 
     if (sourcePath !== undefined && targetPath === undefined) {
       copy.push({
@@ -117,7 +126,8 @@ export function buildSyncPlan(
         sourcePath,
         targetPath: joinRelativePath(target, file.relativePath),
         size: sourceSize,
-        modifiedMs: sourceModifiedMs
+        modifiedMs: sourceModifiedMs,
+        linkTarget: sourceLinkTarget
       })
       continue
     }
@@ -129,7 +139,8 @@ export function buildSyncPlan(
           sourcePath,
           targetPath: joinRelativePath(target, file.relativePath),
           size: sourceSize,
-          modifiedMs: sourceModifiedMs
+          modifiedMs: sourceModifiedMs,
+          linkTarget: sourceLinkTarget
         })
       }
       continue
@@ -172,6 +183,18 @@ export function buildSyncPlan(
 export interface SyncIo {
   readonly readFileBytes: (path: string) => Promise<Uint8Array>
   readonly writeFileBytes: (path: string, content: Uint8Array, modifiedMs?: number) => Promise<void>
+  /**
+   * `readlink` level: the link's own literal target string, never the body it
+   * points at. A dangling link still answers.
+   */
+  readonly readSymbolicLink: (path: string) => Promise<string>
+  /**
+   * `symlink` level: creates the link itself, storing `target` verbatim. The
+   * target is never resolved, read or materialised.
+   */
+  readonly createSymbolicLink: (target: string, path: string) => Promise<void>
+  /** `lutimes` level: sets the link's own mtime, never its target's. */
+  readonly setSymbolicLinkModifiedMs: (path: string, modifiedMs: number) => Promise<void>
   readonly ensureDirectory: (path: string) => Promise<void>
   readonly deleteFile: (path: string) => Promise<void>
   /** Removes one **empty** directory; rollback only deletes directories it created. */
@@ -207,6 +230,14 @@ export interface SyncWrittenTarget {
   readonly relativePath: string
   readonly sourcePath: string
   readonly targetPath: string
+  /**
+   * Literal link target when this item materialised a symbolic link, so the
+   * post-write check can verify a link by form (`lstat` + `readlink`) instead of
+   * hashing a body the link may not even have. `undefined` for a regular file.
+   */
+  readonly linkTarget?: string
+  /** Source mtime this item copied onto the target (link mtime included). */
+  readonly modifiedMs: number
 }
 
 export interface SyncExecution {
@@ -467,23 +498,75 @@ async function preflight(
 }
 
 interface FileBackup {
+  readonly kind: 'file'
   /** Raw bytes, so a binary target is restored byte for byte. */
   readonly content: Uint8Array
   readonly modifiedMs: number
 }
 
-/** Bytes + mtime of a target file the run is about to overwrite or delete. */
+interface LinkBackup {
+  readonly kind: 'link'
+  /** Literal link target, so a rollback rebuilds the link and not its target. */
+  readonly linkTarget: string
+  /** The link's own mtime (`lstat`), restored with `lutimes` level semantics. */
+  readonly modifiedMs: number
+}
+
+/** What the target held before this run touched it; links keep their form. */
+type TargetBackup = FileBackup | LinkBackup
+
+/**
+ * Form-aware backup of the target entry a write / delete is about to touch.
+ * A symbolic link is backed up as a link (target string + own mtime) and is
+ * **never** read through, so neither a rollback nor a delete degrades it into an
+ * ordinary file or mutates the body it points at. A missing entry is `null`.
+ */
 async function backupTarget(
   state: SyncTargetState,
   targetPath: string
-): Promise<FileBackup | null> {
+): Promise<TargetBackup | null> {
   const entry = await entryAt(state, targetPath)
   if (entry === undefined) return null
   if (entry.isDirectory) {
     throw new SyncTargetError(targetPath, 'EISDIR', SYSTEM_CODE_GLOSS.EISDIR)
   }
+  if (entry.isSymbolicLink === true) {
+    const linkTarget =
+      entry.linkTarget ?? (await targetCall(targetPath, () => state.io.readSymbolicLink(targetPath)))
+    return { kind: 'link', linkTarget, modifiedMs: entry.modifiedMs }
+  }
   const content = await targetCall(targetPath, () => state.io.readFileBytes(targetPath))
-  return { content, modifiedMs: entry.modifiedMs }
+  return { kind: 'file', content, modifiedMs: entry.modifiedMs }
+}
+
+/**
+ * Restores one entry to the form it had before the run: a link is rebuilt as a
+ * link with its own mtime, a file gets its bytes back, and an `absent` backup
+ * removes whatever this run created.
+ */
+async function restoreTarget(
+  state: SyncTargetState,
+  targetPath: string,
+  backup: TargetBackup | null
+): Promise<void> {
+  if (backup === null) {
+    await state.io.deleteFile(targetPath)
+    return
+  }
+  if (backup.kind === 'file') {
+    await state.io.writeFileBytes(targetPath, backup.content, backup.modifiedMs)
+    return
+  }
+  // Remove whatever the failed step left at the path, then rebuild the link
+  // itself and align its own mtime — never the file it points at.
+  await state.io.deleteFile(targetPath).catch(() => undefined)
+  await state.io.createSymbolicLink(backup.linkTarget, targetPath)
+  await state.io.setSymbolicLinkModifiedMs(targetPath, backup.modifiedMs)
+}
+
+/** Removes the target entry itself (a link is unlinked, never written through). */
+async function removeTargetEntry(state: SyncTargetState, targetPath: string): Promise<void> {
+  await targetCall(targetPath, () => state.io.deleteFile(targetPath))
 }
 
 /**
@@ -521,16 +604,33 @@ async function writeItem(
   await ensureDirectoryTracked(state, parentPath(item.targetPath), undo)
   const backup = await backupTarget(state, item.targetPath)
   checkCancelled(signal)
+
+  if (item.linkTarget !== undefined) {
+    const linkTarget = item.linkTarget
+    // A link item carries the literal target string: its body is never read, so
+    // a relative / dangling / directory target lands exactly as the source has it.
+    // The restore is registered **before** the target is touched (the link can
+    // exist and still reject on the mtime alignment).
+    undo.push(() => restoreTarget(state, item.targetPath, backup))
+    if (backup !== null) await removeTargetEntry(state, item.targetPath)
+    await targetCall(item.targetPath, () =>
+      state.io.createSymbolicLink(linkTarget, item.targetPath)
+    )
+    await targetCall(item.targetPath, () =>
+      state.io.setSymbolicLinkModifiedMs(item.targetPath, item.modifiedMs)
+    )
+    return
+  }
+
   const content = await targetCall(sourcePath, () => state.io.readFileBytes(sourcePath))
   checkCancelled(signal)
   // The restore is registered **before** the target is touched: the write can
   // land and still reject (the rename succeeded, the mtime backfill failed), and
   // that run must roll the previous bytes and mtime back like any other failure.
-  undo.push(
-    backup === null
-      ? () => state.io.deleteFile(item.targetPath)
-      : () => state.io.writeFileBytes(item.targetPath, backup.content, backup.modifiedMs)
-  )
+  undo.push(() => restoreTarget(state, item.targetPath, backup))
+  // A target that is a link is unlinked first: an ordinary file must replace the
+  // link itself, never land inside the file the old link pointed at.
+  if (backup?.kind === 'link') await removeTargetEntry(state, item.targetPath)
   await targetCall(item.targetPath, () =>
     state.io.writeFileBytes(item.targetPath, content, item.modifiedMs)
   )
@@ -601,11 +701,10 @@ export async function executeSyncPlan(
       const backup = await backupTarget(state, item.targetPath)
       if (backup === null) continue
       // Registered before the delete for the same reason as a write: a delete
-      // that landed and then rejected still has to be undone.
-      undo.push(() =>
-        state.io.writeFileBytes(item.targetPath, backup.content, backup.modifiedMs)
-      )
-      await targetCall(item.targetPath, () => state.io.deleteFile(item.targetPath))
+      // that landed and then rejected still has to be undone. A link backup
+      // rebuilds the link itself; its target file / directory is never touched.
+      undo.push(() => restoreTarget(state, item.targetPath, backup))
+      await removeTargetEntry(state, item.targetPath)
       affected.push(item.targetPath)
       deletedPaths.push(item.targetPath)
       deleted += 1
@@ -623,7 +722,9 @@ function writtenTarget(item: SyncPlanItem): SyncWrittenTarget {
   return {
     relativePath: item.relativePath,
     sourcePath: item.sourcePath ?? '',
-    targetPath: item.targetPath
+    targetPath: item.targetPath,
+    linkTarget: item.linkTarget,
+    modifiedMs: item.modifiedMs
   }
 }
 
@@ -635,7 +736,14 @@ function writtenTarget(item: SyncPlanItem): SyncWrittenTarget {
 export async function copyScannedTree(
   tree: ScannedTree,
   targetRoot: string,
-  io: Pick<SyncIo, 'readFileBytes' | 'writeFileBytes' | 'ensureDirectory'>
+  io: Pick<
+    SyncIo,
+    | 'readFileBytes'
+    | 'writeFileBytes'
+    | 'ensureDirectory'
+    | 'createSymbolicLink'
+    | 'setSymbolicLinkModifiedMs'
+  >
 ): Promise<number> {
   const files = [...tree.index.entries()]
     .filter(([, node]) => node.kind === 'file')
@@ -645,6 +753,13 @@ export async function copyScannedTree(
     const target = joinRelativePath(targetRoot, relativePath)
     const parent = parentPath(target)
     if (parent !== '') await io.ensureDirectory(parent)
+    if (file.linkTarget !== undefined) {
+      // Materialise the link itself through the same create-link seam as a sync
+      // write, so a link never degrades into a copy of the body it points at.
+      await io.createSymbolicLink(file.linkTarget, target)
+      await io.setSymbolicLinkModifiedMs(target, file.modifiedMs)
+      continue
+    }
     // Raw bytes end to end: a binary sample is materialised unchanged.
     const content = await io.readFileBytes(file.path)
     await io.writeFileBytes(target, content, file.modifiedMs)

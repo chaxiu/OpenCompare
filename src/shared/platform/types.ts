@@ -204,6 +204,18 @@ export interface PlatformPort {
    */
   setSymbolicLinkModifiedMs(path: string, modifiedMs: number): Promise<void>
   /**
+   * Reads a symbolic link's own target string **without following it**
+   * (`readlink`-level). A dangling link still answers; a non-link or missing
+   * path rejects.
+   */
+  readSymbolicLink(path: string): Promise<string>
+  /**
+   * Creates a symbolic link at `path` pointing at `target`, storing the string
+   * **verbatim**: a relative, dangling or directory target is never resolved,
+   * read or materialised.
+   */
+  createSymbolicLink(target: string, path: string): Promise<void>
+  /**
    * Digests each file's **raw bytes** with SHA-256, in input order. Nothing is
    * decoded as text, so binary content (including invalid UTF-8) is compared
    * byte for byte. A file that cannot be read only marks that item failed; the

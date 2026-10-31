@@ -190,3 +190,10 @@ v0.2.6 实测：
 - 根因：`alignSymbolicLinkTimes`（`src/renderer/src/workbench/directoryOps.ts`）逻辑本身正确，但对话框用内联 `executableCount === 0` 判禁用、用 `plan.totalCount === 0` 判空态，把「仅链接 lstat mtime 不同」整体判成无事可做；既有 `sync-real-gate` 用例只调 `applySyncPreview`，绕过了 UI 的可执行判定，所以一直是绿的。
 - 结论：可执行 / 可达性判定必须抽成纯函数（本项 `canApplySyncPreview`），UI 的 `disabled` 与门禁断言**共用同一实现**；只测被调用的内层函数不算覆盖。同类「机制全绿 ≠ 用户拿得到」本轮次已第二次出现（2026-10-22 同类结论）。
 - 断言位置：`src/sync-real-gate.test.ts`（`real-disk sync symlink metadata` 三条用例，断言消息以 `symlink metadata:` 开头）、`src/renderer/src/views/directorySyncDialog.test.tsx`（Apply `disabled` / 空态文案 / 待对齐计数与摘要同源）。
+
+## 10. 2026-11-01 目录同步的类型保真缺口：known issue 不是验收豁免
+
+- 事实（P1⑤ 结案驳回）：`writeItem` 对计划项一律 `readFileBytes(source)` + `writeFileBytes(target)`，`readFileBytes` 跟随链接，源侧独有 symlink 落盘后退化为「内容是链接指向目标字节」的普通文件；`buildSyncPlan` 把它当普通 copy，落盘后按内容 hash 校验仍判一致，类型保真缺口被静默掩盖。同源风险还包括目标侧既有链接被写穿、镜像删除按内容备份/删除误删链接指向文件、以及悬空链接读不到内容而失败。
+- 结论：known issue 不得用于掩盖打穿验收条款的类型保真缺口：链接/二进制/权限等形态保真必须由真实落盘端到端断言钉住，且校验不得用内容 hash 代替形态
+- 落盘口径：计划项携带 `linkTarget`（源侧 `readlink` 字面串）分派写路径，建链/替换/删除一律先 unlink 链接本身、再 `symlink` + `lutimes` 级对齐；回滚按原形态恢复（链接重建链接 + 自身 mtime）。
+- 断言位置：`src/sync-real-gate.test.ts`（`real-disk sync symlink fidelity` 用例组，断言消息以 `symlink fidelity:` 开头），覆盖 A/B/C 与验收 1)~5)，并全部通过 `previewSync` → `canApplySyncPreview` → `applySyncPreview` 的 UI 同源路径。

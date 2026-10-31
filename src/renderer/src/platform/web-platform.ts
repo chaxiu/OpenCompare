@@ -321,6 +321,14 @@ export function createWebPlatformPort(): PlatformPort {
     // The memory file system has no symbolic links, so there is never a link
     // mtime to align; the seam keeps the very same signature and semantics.
     setSymbolicLinkModifiedMs: async () => undefined,
+    // No link capability in the memory runtime: the seam keeps the same
+    // signature and refuses instead of faking a link that would then be listed.
+    readSymbolicLink: async (path) => {
+      throw new Error(`Web 运行时没有符号链接：${path}`)
+    },
+    createSymbolicLink: async () => {
+      throw new Error('Web 运行时暂不支持创建符号链接')
+    },
     // Same raw-byte SHA-256 as the main process (`node:crypto`), computed with
     // the pure JS core so the web runtime stays free of Node and WebCrypto.
     digestFiles: async (paths, options) => {
