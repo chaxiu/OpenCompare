@@ -30,6 +30,7 @@ UI 对标参照审计域：把「对标商业产品时我们保留什么、合�
 - **ac-gates-green**：默认 `.munk/code-gates.json` 九门（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate）全绿；不新增测试文件、不新增门禁。
 - **ac-verification-reproducible**：交付说明给出每条可 grep / `wc` 校验项的实际命令与实测结果（三表计数、18 条 id 集合差集为空、链接 host 清单、图片计数 0、`AGENTS.md` 行数），逐条可原样复跑。
 - **ac-single-commit-clean**：单条 commit 经 delivery 合入 main；交付时 `git status --porcelain` 为空。
+- **ac-table1-app-row-global-actions**：表① `app` 行的「该层控件在我们词汇下承担的动作」列不含「视图切换」（顶栏 scene 分段控件已退场，场景切换归 `sessions` 行的会话 tab），以「品牌与全局动作」起首；表①仍恰 6 行、行序严格等于 `SHELL_LEVEL_ORDER`，三表之外的行数约束不变。
 
 ## 非目标
 
@@ -52,6 +53,12 @@ UI 对标参照审计域：把「对标商业产品时我们保留什么、合�
 - 后续 UI 批次引用本域时按「判定列」执行：`降级到菜单` 的入口不得再占工具条主位，`明确不做` 的条目不得在后续批次悄悄补上而不改本域判定；改判必须同批改本域并写明推翻理由。
 
 ## 最近交付证明
+
+- WI：`wi_ws_e93fdbef0443dbcf`（交叉引用：scene 由打开对象决定，移除顶栏 scene 分段控件；`kind: feature`）
+- 日期：2026-10-31
+- 结果：`code_gates` passed（10 门，attempt 001，`.munk/runs/run_ws_1283bf9218f9c721/code-gates/attempts/001`）。AC 定义与实现归 `domains/workbench`（`qa/scene-auto-routing.md`），本域只同步审计文档口径。
+- 覆盖摘要：`docs/ui-phase1-reference-audit.md` 表① `app` 行由「品牌与视图切换、新建对比、打开文件 / 文件夹、设置；…」改为「品牌与全局动作、新建对比、打开文件 / 文件夹、设置；…」，其余 5 行、表② 18 条入口、表③ 三类判定与来源链接零改动（`git diff` 该文件 1 行）。场景切换按审计的层归属落在 `sessions` 行（会话 tab），与本域 `ac-table1-app-row-global-actions` 一致。
+- 注：① **审计表以 `domains/workbench` 的 `SHELL_ENTRIES` / `SHELL_ENTRY_IDS` 为唯一事实源**——本轮只删的是 `app` 行里的一个动作描述（`view-switch` 是 `APP_ROW.controls` 而非 `SHELL_ENTRIES` 的一员），入口清单仍 18 条，所以表② 不需要动；若后续把「场景切换」做成入口，才需在表② 增行并改判定。② 表① 的 `app` 行不再承担任何「切换」语义，后续再加顶栏切换类控件（如 tab 组、下拉）都会与本域判定冲突，须先改本域判定。
 
 - WI：`wi_ws_0b248d40545e9eb4`（UI 第一期对标参照审计 · 只读三表 + 仓根 `AGENTS.md` 补一行 `docs/lessons.md` 入口；纯文档，`src/**` 零 diff）
 - 日期：2026-10-30

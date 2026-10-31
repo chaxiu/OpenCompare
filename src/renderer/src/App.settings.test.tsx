@@ -264,14 +264,13 @@ describe('language switch', () => {
 
     fireEvent.click(languageOptions(settingsDialog('en'), 'en')[1])
 
-    // Same render batch: header, views, tabs, status bar and the panel are Chinese.
-    const switcher = screen.getByRole('tablist', { name: '视图切换' })
-    expect(
-      within(switcher)
-        .getAllByRole('tab')
-        .map((tab) => tab.textContent)
-    ).toEqual(['目录对比', '代码 Diff & 3-Way', 'CSV 主键对比', 'JSON / YAML'])
+    // Same render batch: header, tabs, status bar and the panel are Chinese.
+    // The scene switcher no longer exists, so its old label order is gone too.
+    expect(screen.queryByRole('tablist', { name: '视图切换' })).toBeNull()
     expect(screen.getByRole('tablist', { name: '会话' })).toBeDefined()
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+    ).toHaveLength(4)
     expect(screen.getByRole('contentinfo').textContent).toContain('会话')
     expect(settingsDialog('zh')).toBeDefined()
     expect(languageOptions(settingsDialog('zh'), 'zh').map((tab) => tab.textContent)).toEqual([
@@ -287,7 +286,7 @@ describe('language switch', () => {
     expect(readUserSettings.mock.calls.length).toBe(readsAtStartup)
 
     fireEvent.click(languageOptions(settingsDialog('zh'), 'zh')[0])
-    expect(screen.getByRole('tablist', { name: 'Switch view' })).toBeDefined()
+    expect(screen.queryByRole('tablist', { name: 'Switch view' })).toBeNull()
     expect(screen.getByRole('tablist', { name: 'Sessions' })).toBeDefined()
     expect(screen.getByRole('contentinfo').textContent).toContain('Session')
     expect(settingsDialog('en')).toBeDefined()

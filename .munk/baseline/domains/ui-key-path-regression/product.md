@@ -30,7 +30,7 @@ UI 第一期关键路径回归断言收口域：在最终 UI 树（main tip `c09
 - **ac-coverage-map**：交付说明给出「八类关键路径 → 测试文件 › 用例名」清单，清单中每条用例在最终树中真实存在且通过；八类各至少一条；缺口已补；无同一行为重复堆叠（同一契约只保留一条断言）。
 - **ac-sync-small-path**：新增一条断言——`CodeView` 渲染 <1,000 行的 pair 时，设置左 pane `scrollTop = N × 20` 并触发 `scroll` 后右 pane `scrollTop` 精确等于该值；反向同样成立；且两个 pane 的 `data-diff-content-height` 均不存在（走整表渲染，不是窗口化）；两 pane 渲染行数相等。
 - **ac-350k-contract-intact**：既有 350k 用例保持原契约不变——渲染行数落在「视口行数 ~ 视口行数 + 2×overscan」上下界内、内容总高 `7000000px`（350,000 × 20）、两栏内容总高相等；本项新增 0 条同类断言。
-- **ac-three-tier-intact**：既有三档断言仍绿且未被放宽——1024 / 1440 / 1920 每档 app head 与各视图工具栏预算不超过该档宽度、每条 toolbar 行只有一行（无换行）、20 条入口在三档各渲染且仅渲染一次（隐藏只允许丢标签文案，不允许丢入口）。
+- **ac-three-tier-intact**：既有三档断言仍绿且未被放宽——1024 / 1440 / 1920 每档 app head 与各视图工具栏预算不超过该档宽度、每条 toolbar 行只有一行（无换行）、18 条入口在三档各渲染且仅渲染一次（隐藏只允许丢标签文案，不允许丢入口）。
 - **ac-real-fixture-key-path**：第 4 条「下钻返回」用例仍在 `createRealDirectoryFixture` 的真实磁盘临时目录上执行（`beforeAll` 里 `expect(comparison.counts).toEqual(REAL_FIXTURE_COUNTS)` 保留），并断言 filter / 折叠 / 选中行 / 双栏滚动四项在重挂载后与返回前一致；不得退化成只依赖内置样本的比较结果。
 - **ac-no-long-gate**：`.munk/code-gates.json` 与 `vitest.config.mts` 零 diff；无新增 perf / evidence 配置与跑批脚本；`pnpm test` 用例集耗时没有量级增长（新增用例基于 ≤1,500 行内存 pair，不引入大磁盘 fixture）。
 - **ac-scope-guard**：`git diff` 中生产代码（`src/core/**`、`src/renderer/src/**`、`src/main/**`、`src/preload/**`、`src/shared/**` 的非 `*.test.*` 文件）为空；若确有真回归，只允许改动交付说明点名的文件，且必须附「修复前该断言失败、修复后通过」的证据，改动不得触及 diff / merge / csv / structured 算法、目录行模型、`DiffPane` 窗口化公式、ruler 计算与壳层布局表。

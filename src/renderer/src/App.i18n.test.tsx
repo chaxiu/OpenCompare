@@ -222,16 +222,14 @@ describe('start-up language', () => {
 describe('English shell copy', () => {
   beforeEach(() => setRecord('en'))
 
-  it('localizes the toolbar, view switcher and empty state', async () => {
+  it('localizes the toolbar and empty state without a view switcher', async () => {
     render(<App />)
     await screen.findByRole('heading', { name: EMPTY_EN })
 
     expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
-    const switcher = screen.getByRole('tablist', { name: 'Switch view' })
-    expect(within(switcher).getByRole('tab', { name: 'Directory' })).toBeDefined()
-    expect(within(switcher).getByRole('tab', { name: 'Code diff & 3-way' })).toBeDefined()
-    expect(within(switcher).getByRole('tab', { name: 'CSV key comparison' })).toBeDefined()
-    expect(within(switcher).getByRole('tab', { name: 'JSON / YAML' })).toBeDefined()
+    // The scene switcher is gone; English exposes no such tablist either.
+    expect(screen.queryByRole('tablist', { name: 'Switch view' })).toBeNull()
+    expect(screen.queryByRole('tablist')).toBeNull()
 
     expect(screen.getAllByRole('button', { name: 'New comparison' }).length).toBe(2)
     expect(screen.getAllByRole('button', { name: 'Open file' }).length).toBe(1)

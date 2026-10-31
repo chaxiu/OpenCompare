@@ -1,17 +1,22 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { PlatformPort } from '@shared/platform/types'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import { createComparisonCache } from '@core/directory/compare'
 import { setLivenessEnabled, livenessCounts } from '@shared/perf/liveness'
 import {
   attachDirectoryComparison,
+  createDirectorySession,
   createDrilldownSession,
   createFilePairSession,
   directoryComparisonKey,
   directoryViewKey,
+  FilePairError,
+  openFilePairSession,
   releaseDirectoryComparison,
   replaceFilePairSide,
   resolveDirectoryReturn
 } from './directoryCompare'
+import { classifyFile } from './fileKinds'
 import type { DrilldownTarget } from './fileKinds'
 import type { WorkbenchSession } from './session'
 import { describeSession } from './sessionDisplay'
@@ -49,6 +54,107 @@ describe('createDrilldownSession', () => {
     expect(second.id).toContain('src/core/engine.ts')
     expect(first.parentDirectoryId).toBe('directory:a ↔ b')
     expect(second.parentDirectoryId).toBe('directory:c ↔ d')
+  })
+
+  it('takes its scene from the target family and its id from the parent scope', () => {
+    const parent = 'directory:a ↔ b'
+    const target: DrilldownTarget = { kind: 'csv', label: 'csv', delimiter: ',' }
+    const child = createDrilldownSession(parent, fileNode('data/report.csv'), target, 'id\n1', 'id\n2')
+
+    expect(child.scene).toBe('csv')
+    expect(child.parentDirectoryId).toBe(parent)
+    expect(child.id).toBe(`file:${parent}::data/report.csv`)
+  })
+})
+
+describe('scene comes from the opened object', () => {
+  it('maps every supported extension family through classifyFile', () => {
+    expect(classifyFile('engine.ts')).toEqual({ kind: 'code', label: 'code' })
+    expect(classifyFile('orders.csv')).toEqual({ kind: 'csv', label: 'csv', delimiter: ',' })
+    expect(classifyFile('orders.tsv')).toEqual({ kind: 'csv', label: 'tsv', delimiter: '\t' })
+    expect(classifyFile('config.json')).toEqual({
+      kind: 'structured',
+      label: 'json',
+      format: 'json'
+    })
+    expect(classifyFile('config.yaml')).toEqual({
+      kind: 'structured',
+      label: 'yaml',
+      format: 'yaml'
+    })
+    expect(classifyFile('archive.bin')).toBeNull()
+  })
+
+  it('keeps a real directory pair on the directory scene', () => {
+    const session = createDirectorySession(comparisonOf('/left', '/right'), {
+      left: { kind: 'directory', path: '/left' },
+      right: { kind: 'directory', path: '/right' }
+    })
+    expect(session.scene).toBe('directory')
+    expect(session.title).toBe('left ↔ right')
+    expect(session.subtitle).toBe('/left ↔ /right')
+  })
+})
+
+/** Minimal read-only PlatformPort; only `readTextFile` is ever used here. */
+function stubPlatform(files: Readonly<Record<string, string>>): PlatformPort {
+  return {
+    readTextFile: async (path: string) => files[path] ?? ''
+  } as unknown as PlatformPort
+}
+
+describe('openFilePairSession', () => {
+  it('opens a code pair as the code scene', async () => {
+    const session = await openFilePairSession(
+      stubPlatform({ '/a/engine.ts': 'a\nb\n', '/b/engine.ts': 'a\nc\n' }),
+      '/a/engine.ts',
+      '/b/engine.ts'
+    )
+    expect(session.scene).toBe('code')
+    expect(session.adhoc?.scene).toBe('code')
+    expect(session.title).toBe('engine.ts')
+  })
+
+  it('opens a csv pair with both parsed tables', async () => {
+    const session = await openFilePairSession(
+      stubPlatform({
+        '/a/orders.csv': 'id,name\n1,left\n',
+        '/b/orders.csv': 'id,name\n1,right\n'
+      }),
+      '/a/orders.csv',
+      '/b/orders.csv'
+    )
+    expect(session.scene).toBe('csv')
+    expect(session.adhoc?.tables?.left.header).toEqual(['id', 'name'])
+    expect(session.adhoc?.tables?.left.rows).toHaveLength(1)
+    expect(session.adhoc?.tables?.right.rows).toHaveLength(1)
+  })
+
+  it('opens a json pair as the structured scene with the json format', async () => {
+    const session = await openFilePairSession(
+      stubPlatform({ '/a/x.json': '{"a":1}\n', '/b/x.json': '{"a":2}\n' }),
+      '/a/x.json',
+      '/b/x.json'
+    )
+    expect(session.scene).toBe('structured')
+    expect(session.adhoc?.scene).toBe('structured')
+    expect(session.adhoc?.format).toBe('json')
+  })
+
+  it('rejects a mixed family and an unsupported type without reading either side', async () => {
+    const readTextFile = vi.fn(async () => '')
+    const platform = { readTextFile } as unknown as PlatformPort
+
+    const mixed = openFilePairSession(platform, '/a/x.json', '/b/x.yaml')
+    await expect(mixed).rejects.toBeInstanceOf(FilePairError)
+    await expect(mixed).rejects.toMatchObject({ code: 'mixed-family' })
+
+    const unsupported = openFilePairSession(platform, '/a/x.bin', '/b/x.bin')
+    await expect(unsupported).rejects.toBeInstanceOf(FilePairError)
+    await expect(unsupported).rejects.toMatchObject({ code: 'unsupported-type' })
+
+    // A rejected pair never reaches the platform and never builds a session.
+    expect(readTextFile).not.toHaveBeenCalled()
   })
 })
 

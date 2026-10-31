@@ -135,6 +135,20 @@ describe('dictionary key sets', () => {
       expect(Object.keys(enSurface).sort(), surface).toEqual(Object.keys(zhSurface).sort())
     }
   })
+
+  it('drops the view switcher label but keeps the four scene labels', () => {
+    expect(zhValues['shell.viewSwitcher.label']).toBeUndefined()
+    expect(enValues['shell.viewSwitcher.label']).toBeUndefined()
+    for (const key of [
+      'shell.view.directory',
+      'shell.view.code',
+      'shell.view.csv',
+      'shell.view.structured'
+    ] as const) {
+      expect(zhValues[key]).toBeTruthy()
+      expect(enValues[key]).toBeTruthy()
+    }
+  })
 })
 
 describe('dictionary values', () => {

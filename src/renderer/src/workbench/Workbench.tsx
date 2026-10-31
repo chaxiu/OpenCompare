@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, JSX } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
+import type { IconName } from '@renderer/assets/icons'
 import { CODE_SCENE, CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { SampleComposition, SceneId } from '@shared/fixtures'
 import type { CompareRequest, CompareRequestPayload } from '@shared/compareRequest'
@@ -17,7 +18,6 @@ import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
-import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
 import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
@@ -198,32 +198,13 @@ function noticeText(notice: Notice, t: Translate): string {
   return t(notice.key, resolved)
 }
 
-const VIEW_OPTIONS: readonly {
-  value: SceneId
-  labelKey: MessageKey
-  icon: JSX.Element
-}[] = [
-  {
-    value: 'directory',
-    labelKey: 'shell.view.directory',
-    icon: <Icon name={UI_ICON_ACTIONS.viewDirectory} />
-  },
-  {
-    value: 'code',
-    labelKey: 'shell.view.code',
-    icon: <Icon name={UI_ICON_ACTIONS.viewCode} />
-  },
-  {
-    value: 'csv',
-    labelKey: 'shell.view.csv',
-    icon: <Icon name={UI_ICON_ACTIONS.viewCsv} />
-  },
-  {
-    value: 'structured',
-    labelKey: 'shell.view.structured',
-    icon: <Icon name={UI_ICON_ACTIONS.viewStructured} />
-  }
-]
+/** The type badge every session tab shows: the scene it was opened as. */
+const SCENE_ICONS: Readonly<Record<SceneId, IconName>> = {
+  directory: UI_ICON_ACTIONS.viewDirectory,
+  code: UI_ICON_ACTIONS.viewCode,
+  csv: UI_ICON_ACTIONS.viewCsv,
+  structured: UI_ICON_ACTIONS.viewStructured
+}
 
 /** Drops one session's shell cache entry without mutating the record. */
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -665,11 +646,6 @@ export function Workbench({
   function loadSampleFailure(): void {
     setSettingsOpen(false)
     void load({ simulateFailure: true })
-  }
-
-  function selectScene(scene: SceneId): void {
-    const target = sessions.find((session) => session.scene === scene)
-    if (target) selectSession(target.id)
   }
 
   /** Upserts a session, preserving the tab order it already had. */
@@ -1418,17 +1394,6 @@ export function Workbench({
           <h1 className="text-sm font-semibold tracking-tight">OpenCompare</h1>
         </div>
 
-        <SegmentedControl
-          label={t('shell.viewSwitcher.label')}
-          options={VIEW_OPTIONS.map((option) => ({
-            ...option,
-            label: t(option.labelKey),
-            disabled: sessions.length === 0
-          }))}
-          value={active?.scene ?? 'directory'}
-          onChange={selectScene}
-        />
-
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {/* The manual entry is permanent: with or without sessions on screen. */}
           <ToolbarButton
@@ -1498,7 +1463,7 @@ export function Workbench({
                   id: session.id,
                   title: renderSessionText(display.title, t),
                   subtitle: renderSessionText(display.subtitle, t),
-                  icon: VIEW_OPTIONS.find((option) => option.value === session.scene)?.icon,
+                  icon: <Icon name={SCENE_ICONS[session.scene]} />,
                   dirty: session.dirty ?? false
                 }
               })}
