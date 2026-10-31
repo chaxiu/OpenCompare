@@ -9,10 +9,10 @@ import { cx } from './utils'
 export const DIFF_ROW_HEIGHT = 20
 
 /** Extra rows above and below the viewport so fast scrolling never shows gaps. */
-const ROW_OVERSCAN = 10
+export const ROW_OVERSCAN = 10
 
 /** Up to this many rows a pane keeps every row in the DOM, as it always has. */
-const WINDOW_THRESHOLD = 1_000
+export const WINDOW_THRESHOLD = 1_000
 
 const GUTTER_CLASS =
   'tabular sticky left-0 z-10 w-11 shrink-0 border-r border-line-subtle pr-2 text-right text-2xs leading-5 select-none'
