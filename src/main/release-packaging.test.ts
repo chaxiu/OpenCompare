@@ -61,8 +61,9 @@ const pendingWord = ['待', '发布'].join('')
 // explicitly and asserted against the README status line, not against the
 // converged version in package.json. Once a release lands, one wrap-up commit
 // updates both README line 5 and this constant together.
-// v0.2.14 shipped, so the newest published anchor now equals the converged
-// tag; the v0.2.12 anchor stays pinned in `publishedTags` as history.
+// v0.2.15 converged above it, so the newest published anchor stays v0.2.14 and
+// must remain strictly earlier than the converged tag; the v0.2.12 anchor stays
+// pinned in `publishedTags` as history.
 const latestPublishedTag = 'v0.2.14'
 // The previous public release. Pinned on its own so flipping the newest anchor
 // never retargets the history assertions below.
@@ -946,16 +947,23 @@ describe('release version gate', () => {
     for (const line of [readmeStatusLine(readmeEn), readmeStatusLine(readmeZh)]) {
       expect(line).toContain(latestPublishedTag)
     }
-    // v0.2.14 shipped: the newest published anchor equals the converged tag,
-    // and the previously published v0.2.12 anchor still precedes it.
+    // v0.2.15 converged above the published anchor: v0.2.14 is strictly
+    // earlier than the converged tag, and the v0.2.12 anchor still precedes it.
     expect(publishedTags).toContain(latestPublishedTag)
     // The folded version was never tagged, so it must never join the shipped list.
     expect(publishedTags).not.toContain(foldedTag)
-    expect(latestPublishedTag).toBe(currentTag)
+    expect(latestPublishedTag).toBe('v0.2.14')
+    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
     expect(isTagBefore('v0.2.12', latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, currentTag)).toBe(true)
-    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
+    // The published notes belong to the shipped anchor, not to the convergence.
+    expect(relative(repoRoot, lastReleasedNotesPath)).toBe(
+      `docs/release-notes/${latestPublishedTag}.md`
+    )
+    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
+    expect(existsSync(lastReleasedNotesPath)).toBe(true)
+    expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
     expect(releaseProcessDoc).toContain(`default: '${currentTag}'`)
   })
@@ -1534,9 +1542,9 @@ describe('release notes changelog', () => {
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    // v0.2.14 shipped: the newest published entry is the current entry, and
-    // the v0.2.12 entry stays pinned directly below it as history.
-    expect(latestPublished).toBe(current)
+    // v0.2.15 converged above the published entry: the v0.2.14 entry sits
+    // strictly below the converged entry, and v0.2.12 stays pinned below it.
+    expect(latestPublished).toBeGreaterThan(current)
     expect(changelog.indexOf('## v0.2.12')).toBeGreaterThan(latestPublished)
     expect(shippedV0211).toBeGreaterThan(latestPublished)
     expect(shippedV029).toBeGreaterThan(shippedV0211)
@@ -1681,12 +1689,13 @@ describe('release notes changelog', () => {
         expect(paragraph).not.toContain('本版新增')
       }
     }
-    // The convergence entry neither carries the caps nor claims them as new.
-    const currentEntry = changelog.slice(
-      changelog.indexOf(`## ${currentTag}`),
+    // The published v0.2.14 entry neither carries the caps nor claims them as
+    // new; its notes are anchored at the same shipped version.
+    const publishedEntry = changelog.slice(
+      changelog.indexOf(`## ${latestPublishedTag}`),
       changelog.indexOf('## v0.2.12')
     )
-    for (const doc of [currentEntry, releaseNotes]) {
+    for (const doc of [publishedEntry, lastReleasedNotes]) {
       expect(doc).not.toContain('200,000')
       expect(doc).not.toContain('10 MB')
       expect(doc).not.toContain('本版新增')
@@ -1762,32 +1771,32 @@ describe('release notes changelog', () => {
 
   it('drops the never-published entry and adds no fake version heading', () => {
     expect(changelog).not.toMatch(new RegExp(`^## ${ghostTag}`, 'm'))
-    const start = changelog.indexOf(`## ${currentTag}`)
+    const start = changelog.indexOf(`## ${latestPublishedTag}`)
     const end = changelog.indexOf('## v0.2.12')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const headings = [...changelog.slice(start, end).matchAll(/^## (.+)$/gm)].map(
       (match) => match[1]
     )
-    // The converged entry alone; no ghost version in between.
-    expect(headings).toEqual([currentTag])
+    // The shipped entry alone; no ghost version in between.
+    expect(headings).toEqual([latestPublishedTag])
   })
 
-  it('ships the converged notes and changelog entry without unmeasured figures', () => {
-    const start = changelog.indexOf(`## ${currentTag}`)
+  it('ships the v0.2.14 notes and changelog entry without unmeasured figures', () => {
+    const start = changelog.indexOf(`## ${latestPublishedTag}`)
     const end = changelog.indexOf('## v0.2.12')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
-    const currentEntry = changelog.slice(start, end)
-    expect(firstHeading(releaseNotes)).toContain(currentTag)
+    const publishedEntry = changelog.slice(start, end)
+    expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     // The Chinese CHANGELOG entry and the English notes share the upgrade
     // section under their own language rather than one shared literal.
-    expect(currentEntry).toContain('### 升级方式')
-    expect(releaseNotes).toContain('Upgrade')
-    expect(currentEntry).toContain('共同祖先')
-    expect(releaseNotes).toContain('ancestor')
-    for (const doc of [releaseNotes, currentEntry]) {
-      // The structured-semantics facts shipped on main; the converged copy
+    expect(publishedEntry).toContain('### 升级方式')
+    expect(lastReleasedNotes).toContain('Upgrade')
+    expect(publishedEntry).toContain('共同祖先')
+    expect(lastReleasedNotes).toContain('ancestor')
+    for (const doc of [lastReleasedNotes, publishedEntry]) {
+      // The structured-semantics facts shipped on main; the shipped copy
       // states them without claiming a release, a fix pass or a measured run.
       for (const phrase of ['P1', 'opacity-60', 'structured', 'semantic', '9→10']) {
         expect(doc).toContain(phrase)
@@ -1798,7 +1807,7 @@ describe('release notes changelog', () => {
       expect(doc).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
       expect(doc).not.toMatch(/[0-9a-f]{40,64}/)
       // No unmeasured memory, size or first-open figure may leak into a
-      // convergence note.
+      // shipped note.
       expect(doc.match(/\d+(?:[.,]\d+)?\s*(?:GiB|MiB|GB|MB)/g) ?? []).toEqual([])
     }
   })
@@ -1855,9 +1864,9 @@ describe('release notes changelog', () => {
       }
     }
     expect(changelog).toMatch(/tag 之后的修复由 v0\.2\.0 承接/)
-    // The v0.1.2 drift record pins its own successor as history, so it must
-    // not follow the moving newest-published anchor.
-    expect(signingDoc).toContain('tag 之后的修复由 v0.2.12 承接')
+    // The v0.1.2 drift record names the converged tag as its successor, so it
+    // must follow the convergence rather than the published anchor.
+    expect(signingDoc).toContain('tag 之后的修复由 v0.2.15 承接')
   })
 
   it('ships the current release notes as paste-ready source text', () => {
@@ -1897,14 +1906,99 @@ describe('release notes changelog', () => {
     }
   })
 
+  it('pins the converged version on the changelog top and the dispatch default', () => {
+    // The convergence entry is the first heading and the shipped entry sits
+    // directly below it; no ghost entry may slip in between.
+    const headings = [...changelog.matchAll(/^## (.+)$/gm)].map((match) => match[1])
+    expect(headings.slice(0, 2)).toEqual([currentTag, latestPublishedTag])
+    expect(currentTag).toBe('v0.2.15')
+    expect(changelog).not.toMatch(new RegExp(`^## ${foldedTag}`, 'm'))
+    // Both notes files are the converged pair, and the README status line still
+    // anchors the published tag instead of the convergence.
+    expect(existsSync(releaseNotesPath)).toBe(true)
+    expect(firstHeading(releaseNotes)).toContain('v0.2.15')
+    expect(existsSync(bilingualNotesPath)).toBe(true)
+    expect(firstHeading(bilingualNotes)).toContain('v0.2.15')
+    for (const status of [readmeStatusLine(readmeEn), readmeStatusLine(readmeZh)]) {
+      expect(status).toContain(latestPublishedTag)
+      expect(status).not.toContain(currentTag)
+    }
+    // The workflow_dispatch defaults follow package.json, i.e. the convergence.
+    expect(releaseWorkflow).toContain("default: 'v0.2.15'")
+    expect(releaseProcessDoc).toContain("default: 'v0.2.15'")
+  })
+
+  it('covers the three user-visible v0.2.15 sync changes across the entry and both notes', () => {
+    const start = changelog.indexOf(`## ${currentTag}`)
+    const end = changelog.indexOf(`## ${latestPublishedTag}`)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const entry = changelog.slice(start, end)
+    // Link fidelity, the preview summary following the checked deletions and
+    // the three README postures, each with a checkable behavior description.
+    const zhPhrases = [
+      '源侧独有',
+      '仍是链接',
+      '相对路径',
+      '悬空链接',
+      '指向目录的链接',
+      '不写穿',
+      '只删链接本身',
+      '按链接对齐',
+      '可执行数',
+      '不可用',
+      '已选',
+      '磁盘实际一致',
+      '增量同步只做新增与覆盖、不删除',
+      '默认不勾选',
+      '没有后台文件监听'
+    ]
+    const enPhrases = [
+      'stay links',
+      'stored verbatim',
+      'relative path',
+      'dangling link',
+      'points at a directory',
+      'only that entry is replaced',
+      'deletes the link itself',
+      'link-time alignment',
+      'executable count is 0',
+      'Apply is disabled',
+      'checked count',
+      'matches what actually left the disk',
+      'only adds and overwrites, never deletes',
+      'unchecked by default',
+      'no background file watcher'
+    ]
+    for (const phrase of zhPhrases) {
+      expect(entry).toContain(phrase)
+      expect(bilingualNotes).toContain(phrase)
+    }
+    for (const phrase of enPhrases) {
+      expect(releaseNotes).toContain(phrase)
+    }
+    for (const doc of [entry, releaseNotes, bilingualNotes]) {
+      for (const banned of ['200,000', '10 MB', '本版新增', '已发布', '已修复', '预计通过', '应该通过']) {
+        expect(doc).not.toContain(banned)
+      }
+      expect(doc).not.toContain('**Full Changelog**')
+      expect(doc).not.toContain('releases/tag/')
+      expect(doc).not.toMatch(/[0-9a-f]{40,64}/)
+    }
+  })
+
   it('anchors the newest published release notes at the shipped tag', () => {
-    // v0.2.14 shipped: the newest published notes are the current notes, and
-    // the v0.2.12 record stays pinned as history.
+    // v0.2.15 converged above the shipped anchor: the newest published notes
+    // stay at v0.2.14 and the v0.2.12 record stays pinned as history.
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
+    expect(relative(repoRoot, lastReleasedNotesPath)).toBe(
+      `docs/release-notes/${latestPublishedTag}.md`
+    )
+    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
+    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
     expect(isTagBefore('v0.2.12', latestPublishedTag)).toBe(true)
   })
 
