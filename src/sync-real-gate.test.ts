@@ -45,7 +45,12 @@ import { isOperationCancelled } from '@core/io'
 import { en } from '@renderer/i18n/messages'
 import { digestFilesForComparison } from '@renderer/platform'
 import { syncPreviewGuidance } from '@renderer/views/directoryCopy'
-import { applySyncPreview, canApplySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
+import {
+  applySyncPreview,
+  canApplySyncPreview,
+  previewSync,
+  syncPreviewAction
+} from '@renderer/workbench/directoryOps'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DigestFilesResult,
@@ -507,6 +512,15 @@ describe('real-disk mirror sync gate', () => {
       expect(result.copied).toBe(preview.plan.copy.count)
       expect(result.updated).toBe(preview.plan.update.count)
       expect(result.deleted).toBe(checked.length)
+
+      // The completion notice reports exactly what the preview promised: the
+      // same action object the dialog renders, item by item.
+      const action = syncPreviewAction(preview, checked)
+      expect(action.executable, 'sync summary: select-all preview is executable').toBe(true)
+      expect(
+        [result.copied, result.updated, result.deleted, result.alignedLinks],
+        'sync summary: completion counts match the preview action'
+      ).toEqual([action.copy, action.update, action.delete, action.align])
 
       // Every source file now exists at the same relative path with the same
       // UTF-8 body and a millisecond-equal mtime on the target.
@@ -1395,6 +1409,134 @@ describe('real-disk sync completion consistency', () => {
       expect(await platform.exists(diskPath(right, 'stale.txt'))).toBe(true)
       // The remaining difference is only the unchecked deletion, not a failure.
       expect(result.comparison.counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
+    },
+    60_000
+  )
+
+  it(
+    'keeps the checked delete count, the applied result and the disk in one state',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await writeStamped(join(right, 'stale-a.txt'), 'stale a\n', BINARY_STAMP)
+      await writeStamped(join(right, 'stale-b.txt'), 'stale b\n', BINARY_STAMP)
+
+      const comparison = await comparePair(left, right)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      expect(preview.plan.copy.count, 'sync summary: no copy').toBe(0)
+      expect(preview.plan.update.count, 'sync summary: no update').toBe(0)
+      expect(preview.plan.delete.count, 'sync summary: two mirror deletions').toBe(2)
+      const [first, second] = preview.plan.delete.items
+        .map((item) => item.relativePath)
+        .sort()
+      const diskBefore = await listRelativeFiles(right)
+
+      // 1) Default unchecked: nothing is claimed executable and nothing leaves disk.
+      const unchecked = syncPreviewAction(preview)
+      expect(unchecked.delete, 'sync summary: default delete count').toBe(0)
+      expect(unchecked.planned, 'sync summary: default planned items').toBe(2)
+      expect(unchecked.executable, 'sync summary: default is not executable').toBe(false)
+      expect(unchecked.guidance, 'sync summary: default guidance').toBe('noExecutable')
+      expect(
+        canApplySyncPreview(preview),
+        'sync summary: canApply mirrors the unchecked action'
+      ).toBe(unchecked.executable)
+      const uncheckedRun = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(uncheckedRun.deleted, 'sync summary: unchecked run deletes nothing').toBe(0)
+      expect(await listRelativeFiles(right), 'sync summary: disk after unchecked run').toEqual(
+        diskBefore
+      )
+
+      // 2) One checked: the action count, the applied result and the entries that
+      //    left the disk are the same number.
+      const oneChecked = syncPreviewAction(preview, [first])
+      expect(oneChecked.delete, 'sync summary: one checked delete count').toBe(1)
+      expect(oneChecked.executable, 'sync summary: one checked delete is executable').toBe(true)
+      expect(oneChecked.guidance, 'sync summary: one checked delete points at changes').toBe(
+        'changes'
+      )
+      expect(
+        canApplySyncPreview(preview, [first]),
+        'sync summary: canApply mirrors the checked action'
+      ).toBe(true)
+      const checkedRun = await applySyncPreview(platform, preview, createComparisonCache(), [first])
+      expect(checkedRun.deleted, 'sync summary: checked delete result').toBe(oneChecked.delete)
+      expect(checkedRun.copied, 'sync summary: checked run copy count').toBe(oneChecked.copy)
+      expect(checkedRun.updated, 'sync summary: checked run update count').toBe(oneChecked.update)
+      expect(checkedRun.alignedLinks, 'sync summary: checked run align count').toBe(
+        oneChecked.align
+      )
+      expect(
+        await platform.exists(diskPath(right, first)),
+        'sync summary: checked delete left the disk'
+      ).toBe(false)
+      expect(
+        await platform.exists(diskPath(right, second)),
+        'sync summary: unchecked delete stayed'
+      ).toBe(true)
+      expect(await listRelativeFiles(right), 'sync summary: disk after checked run').toEqual(
+        diskBefore.filter((relativePath) => relativePath !== first)
+      )
+
+      // 3) Cleared again on the refreshed preview: the count falls back to 0 and a
+      //    run removes nothing — the real-disk "check then uncheck" path.
+      const refreshed = await previewSync(
+        platform,
+        checkedRun.comparison,
+        'left-to-right',
+        'mirror',
+        2
+      )
+      expect(
+        refreshed.plan.delete.items.map((item) => item.relativePath),
+        'sync summary: only one deletion left'
+      ).toEqual([second])
+      expect(
+        syncPreviewAction(refreshed, [second]).delete,
+        'sync summary: checked deletion before clearing'
+      ).toBe(1)
+      const cleared = syncPreviewAction(refreshed, [])
+      expect(cleared.delete, 'sync summary: cleared delete count').toBe(0)
+      expect(cleared.executable, 'sync summary: cleared is not executable').toBe(false)
+      expect(
+        canApplySyncPreview(refreshed, []),
+        'sync summary: canApply mirrors the cleared action'
+      ).toBe(false)
+      const clearedRun = await applySyncPreview(platform, refreshed, createComparisonCache(), [])
+      expect(clearedRun.deleted, 'sync summary: cleared run deletes nothing').toBe(0)
+      expect(
+        await platform.exists(diskPath(right, second)),
+        'sync summary: cleared delete stayed'
+      ).toBe(true)
+
+      // 4) Applied for real: result and disk agree, and the next preview has
+      //    nothing left to execute, so no stale summary can survive the run.
+      const applied = syncPreviewAction(refreshed, [second])
+      expect(applied.delete, 'sync summary: applied delete count').toBe(1)
+      const appliedRun = await applySyncPreview(platform, refreshed, createComparisonCache(), [
+        second
+      ])
+      expect(appliedRun.deleted, 'sync summary: applied delete result').toBe(applied.delete)
+      expect(
+        await platform.exists(diskPath(right, second)),
+        'sync summary: applied delete left the disk'
+      ).toBe(false)
+      expect(await listRelativeFiles(right), 'sync summary: disk after applied run').toEqual([
+        'shared.txt'
+      ])
+
+      const next = await previewSync(platform, appliedRun.comparison, 'left-to-right', 'mirror', 3)
+      const empty = syncPreviewAction(next)
+      expect(empty.delete, 'sync summary: next preview has no deletion').toBe(0)
+      expect(empty.planned, 'sync summary: next preview plans nothing').toBe(0)
+      expect(empty.executable, 'sync summary: next preview is not executable').toBe(false)
+      expect(empty.guidance, 'sync summary: next preview is empty').toBe('empty')
+      expect(syncPreviewGuidance(next), 'sync summary: guidance seam agrees').toBe('empty')
     },
     60_000
   )

@@ -1,8 +1,8 @@
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import type { MessageKey } from '@renderer/i18n/messages'
-import { canApplySyncPreview } from '@renderer/workbench/directoryOps'
-import type { SyncPreview } from '@renderer/workbench/directoryOps'
+import { syncPreviewAction } from '@renderer/workbench/directoryOps'
+import type { SyncPreview, SyncPreviewGuidance } from '@renderer/workbench/directoryOps'
 
 /** Dictionary keys of the five status filters, resolved at render time. */
 export const FILTER_LABEL_KEYS: Record<DirectoryFilter, MessageKey> = {
@@ -37,9 +37,6 @@ export function countKey(one: MessageKey, other: MessageKey, count: number): Mes
 export function syncPreviewGuidance(
   preview: SyncPreview,
   deletePaths: readonly string[] = []
-): 'changes' | 'empty' | 'noExecutable' {
-  if (!canApplySyncPreview(preview, deletePaths)) {
-    return preview.plan.totalCount + preview.linkAlignments.length > 0 ? 'noExecutable' : 'empty'
-  }
-  return 'changes'
+): SyncPreviewGuidance {
+  return syncPreviewAction(preview, deletePaths).guidance
 }
