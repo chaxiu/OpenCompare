@@ -5,8 +5,8 @@ covers: ac-sample-directory
 
 ## 最近执行
 
-- 入口变更（wi_ws_8959816f18ce7acf，2026-10-31）：目录工具栏「加载样本目录」按钮与顶栏 Load Sample Fixtures 已随「去 demo」项删除，本用例的等价路径改为 设置 → 示例与调试 → 目录入口（`load({ scene: 'directory' })`，语义与产出不变）；下方为入口变更前的实测记录，其余期望仍有效。
 - workItemId: wi_ws_83482f5aa362fd2e
 - at: 2026-10-18
 - status: pass
 - note: 在真实 web 交互会话 isess_471ed727efaa（surface=http://127.0.0.1:5199/，本 worktree 新构建）实测：点顶栏 Load Sample Fixtures 即出现就绪目录对比会话 session-directory（左 baseline/源目录、右 candidate/目标目录），左右双栏树、徽章、统计均有值；再点「加载样本目录」结果一致，可重复。无白屏/渲染报错。
+- 入口变更（wi_ws_8959816f18ce7acf，2026-10-31）：目录工具栏「加载样本目录」按钮与顶栏 Load Sample Fixtures 已随「去 demo」项删除，本用例的等价路径改为 设置 → 示例与调试 → 目录入口（`load({ scene: 'directory' })`，语义与产出不变）；上方为入口变更前的实测记录，其余期望仍有效。

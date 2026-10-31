@@ -5,8 +5,8 @@ covers: ac-remote-sample-four-statuses
 
 ## 最近执行
 
-- 入口变更（wi_ws_8959816f18ce7acf，2026-10-31）：顶栏 Load Sample Fixtures 与目录工具栏「演示：远端快照」按钮已随「去 demo」项删除，本用例入口改为 设置 → 示例与调试 → 远端快照（同一 `runSidesCompare(remoteSnapshotSides())` 路径，产出会话不变）；下方为入口变更前的实测记录，右栏快照标识 / 四态断言仍有效。
 - workItemId: wi_ws_1c48f73551810bc2
 - at: 2026-10-18
 - status: pass
 - note: web 实测：Load Sample Fixtures → 远端快照样本。右栏 Panel 标题 remote-prod / 副标题 /snapshots/right/remote-prod / meta「快照」；图例「6 相同 3 新增 4 删除 5 修改」四项均>0；左栏仍 baseline /samples/directory/baseline meta「源目录」。
+- 入口变更（wi_ws_8959816f18ce7acf，2026-10-31）：顶栏 Load Sample Fixtures 与目录工具栏「演示：远端快照」按钮已随「去 demo」项删除，本用例入口改为 设置 → 示例与调试 → 远端快照（同一 `runSidesCompare(remoteSnapshotSides())` 路径，产出会话不变）；上方为入口变更前的实测记录，右栏快照标识 / 四态断言仍有效。
