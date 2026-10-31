@@ -205,13 +205,11 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
             pickerAvailable={false}
             busy={false}
             onPick={ignoreSide}
-            onLoadSample={ignorePath}
             onOpenFile={ignorePath}
             leftIsSnapshot={sides.left.kind === 'snapshot'}
             rightIsSnapshot={sides.right.kind === 'snapshot'}
             onExportSnapshot={ignoreSide}
             onImportSnapshot={ignoreImport}
-            onLoadRemoteSnapshotSample={ignorePath}
             hideLocalPaths
             onHideLocalPathsChange={ignorePath}
             onExportReport={ignorePath}

@@ -11,7 +11,7 @@ covers: ac-pure-module-pure, ac-clip-tail-shape, ac-clip-budget-bound, ac-clip-k
 | --- | --- | --- | --- | --- | --- |
 | tab-select | sessions | tabs | label | label | label |
 
-其余 19 条入口（`open-file` / `open-folder` / `new-compare` / `samples` / `samples-menu` / `settings` / `filter` / `sync` / `template` / `snapshot-import` / `snapshot-export` / `report-export` / `drilldown-back` / `prev-diff` / `next-diff` / `override` / `save` / `merge-accept` / `export`）的 level / slot / 三档呈现模式本轮均未变，逐条对照见 `qa/shell-levels-and-width-tiers.md` 的表。核对方法：`SHELL_ENTRIES` 与 `SHELL_ENTRY_IDS` 集合相等断言 + `shellLayout.dom.test.tsx` 的 `data-shell-entry` 计数，本轮这两个文件零 diff。
+其余 19 条入口（`open-file` / `open-folder` / `new-compare` / `samples` / `samples-menu` / `settings`  ← 其中 `samples` / `samples-menu` 已于 `wi_ws_8959816f18ce7acf`（2026-10-31）随示例入口迁入设置删除，现为 18 条 / `filter` / `sync` / `template` / `snapshot-import` / `snapshot-export` / `report-export` / `drilldown-back` / `prev-diff` / `next-diff` / `override` / `save` / `merge-accept` / `export`）的 level / slot / 三档呈现模式本轮均未变，逐条对照见 `qa/shell-levels-and-width-tiers.md` 的表。核对方法：`SHELL_ENTRIES` 与 `SHELL_ENTRY_IDS` 集合相等断言 + `shellLayout.dom.test.tsx` 的 `data-shell-entry` 计数，本轮这两个文件零 diff。
 
 ## 未改范围（核对清单）
 

@@ -288,12 +288,10 @@ function queuePendingReport(): void {
 
 /** Toolbar actions gated by the directory comparison's own busy flag. */
 const DIRECTORY_BUSY_KEYS = [
-  'directory.toolbar.loadSample',
   'directory.toolbar.previewSync',
   'directory.toolbar.template',
   'directory.toolbar.exportLeft',
-  'directory.toolbar.importLeft',
-  'directory.toolbar.demoRemote'
+  'directory.toolbar.importLeft'
 ] as const
 
 function expectDirectoryBusyButtonsEnabled(): void {

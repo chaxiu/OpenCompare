@@ -50,18 +50,16 @@ afterEach(cleanup)
 
 const HAN = /\p{Script=Han}/u
 
-/** The eleven toolbar buttons and the dictionary key of each English title. */
+/** The nine real toolbar buttons and the dictionary key of each English title. */
 const EN_TOOLBAR = [
   ['Choose left folder', 'directory.toolbar.pickLeftTitle'],
   ['Choose right folder', 'directory.toolbar.pickRightTitle'],
-  ['Load demo folder', 'directory.toolbar.loadSampleTitle'],
   ['Preview & sync', 'directory.toolbar.previewSyncTitle'],
   ['Place from template', 'directory.toolbar.templateTitle'],
   ['Export left snapshot', 'directory.toolbar.exportLeftTitle'],
   ['Import left snapshot', 'directory.toolbar.importLeftTitle'],
   ['Export right snapshot', 'directory.toolbar.exportRightTitle'],
   ['Import right snapshot', 'directory.toolbar.importRightTitle'],
-  ['Demo: remote snapshot', 'directory.toolbar.demoRemoteTitle'],
   ['Export HTML report', 'directory.report.toolbar.exportTitle']
 ] as const
 
@@ -314,13 +312,11 @@ function ViewHarness({
       pickerAvailable={pickerAvailable}
       busy={false}
       onPick={() => undefined}
-      onLoadSample={() => undefined}
       onOpenFile={() => undefined}
       leftIsSnapshot={leftIsSnapshot}
       rightIsSnapshot={rightIsSnapshot}
       onExportSnapshot={() => undefined}
       onImportSnapshot={() => undefined}
-      onLoadRemoteSnapshotSample={() => undefined}
       hideLocalPaths={hideLocalPaths}
       onHideLocalPathsChange={() => undefined}
       onExportReport={() => undefined}
@@ -389,7 +385,7 @@ describe('DirectoryView bilingual copy', () => {
     expect(labels).toEqual(DIRECTORY_FILTERS.map((filter) => zh[FILTER_LABEL_KEYS[filter]]))
   })
 
-  it('localizes all eleven toolbar buttons and their titles', () => {
+  it('localizes all nine real toolbar buttons and their titles', () => {
     renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'en')
     for (const [label, key] of EN_TOOLBAR) {
       expect(button(label).getAttribute('title')).toBe(en[key])
@@ -397,14 +393,12 @@ describe('DirectoryView bilingual copy', () => {
 
     for (const [key, text] of [
       ['directory.toolbar.pickLeft', '选择左目录'],
-      ['directory.toolbar.loadSample', '加载演示目录'],
       ['directory.toolbar.previewSync', '预览并同步'],
       ['directory.toolbar.template', '模板归位'],
       ['directory.toolbar.exportLeft', '导出左侧快照'],
       ['directory.toolbar.importLeft', '导入左侧快照'],
       ['directory.toolbar.exportRight', '导出右侧快照'],
       ['directory.toolbar.importRight', '导入右侧快照'],
-      ['directory.toolbar.demoRemote', '演示：远端快照'],
       ['directory.report.toolbar.export', '导出 HTML 报告'],
       ['directory.report.toolbar.hideLocalPaths', '隐藏本机路径']
     ] as const) {
@@ -453,6 +447,9 @@ describe('DirectoryView bilingual copy', () => {
       'en'
     )
     expect(screen.getByText(en['directory.picker.unavailable'])).toBeDefined()
+    // The copy can no longer point at the removed demo toolbar button.
+    expect(en['directory.picker.unavailable']).not.toContain('Load demo folder')
+    expect(en['directory.picker.unavailable']).toContain('Settings → Samples & debugging')
     expect(button('Choose left folder').getAttribute('title')).toBeNull()
     expect(button('Choose right folder').getAttribute('title')).toBeNull()
     cleanup()
@@ -462,6 +459,8 @@ describe('DirectoryView bilingual copy', () => {
       'zh'
     )
     expect(screen.getByText(zh['directory.picker.unavailable'])).toBeDefined()
+    expect(zh['directory.picker.unavailable']).not.toContain('加载演示目录')
+    expect(zh['directory.picker.unavailable']).toContain('设置 → 示例与调试')
     expect(button(zh['directory.toolbar.pickLeft']).getAttribute('title')).toBeNull()
     expect(button(zh['directory.toolbar.pickRight']).getAttribute('title')).toBeNull()
   })

@@ -35,8 +35,6 @@ const ACCEPTANCE_ENTRIES = [
   'open-file',
   'open-folder',
   'new-compare',
-  'samples',
-  'samples-menu',
   'settings',
   'filter',
   'sync',
@@ -162,9 +160,9 @@ describe('shell level table', () => {
 })
 
 describe('shell entry manifest', () => {
-  it('declares exactly the twenty accepted entries', () => {
+  it('declares exactly the eighteen accepted entries', () => {
     expect([...SHELL_ENTRY_IDS].sort()).toEqual([...ACCEPTANCE_ENTRIES].sort())
-    expect(SHELL_ENTRY_IDS.length).toBe(20)
+    expect(SHELL_ENTRY_IDS.length).toBe(18)
   })
 
   it('places every entry on a known level and slot', () => {
@@ -194,14 +192,7 @@ describe('shell entry manifest', () => {
     // Copy is only ever dropped for these entries, and only at these tiers;
     // everything else keeps its copy so no entry can silently disappear.
     const alwaysIcon = ['settings', 'prev-diff', 'next-diff']
-    const compactIcon = [
-      'new-compare',
-      'open-file',
-      'open-folder',
-      'samples',
-      'samples-menu',
-      'drilldown-back'
-    ]
+    const compactIcon = ['new-compare', 'open-file', 'open-folder', 'drilldown-back']
     for (const tier of TIERS) {
       for (const id of SHELL_ENTRY_IDS) {
         const collapsed =

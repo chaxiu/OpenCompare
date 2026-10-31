@@ -71,6 +71,21 @@ function openSettings(language: 'zh' | 'en'): HTMLElement {
   return settingsDialog(language)
 }
 
+/** Starts all four built-in scenes through the settings sample entries. */
+async function loadDemoSamples(language: 'zh' | 'en'): Promise<void> {
+  const panelTitle = language === 'zh' ? '设置' : 'Settings'
+  for (const id of ['directory', 'code', 'csv', 'structured']) {
+    const panel = openSettings(language)
+    const entry = panel.querySelector(`[data-sample-entry="${id}"]`)
+    if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+    fireEvent.click(entry)
+    expect(screen.queryByRole('dialog', { name: panelTitle })).toBeNull()
+  }
+  await screen.findByRole('tablist', { name: language === 'zh' ? '会话' : 'Sessions' }, {
+    timeout: 4000
+  })
+}
+
 function languageOptions(panel: HTMLElement, language: 'zh' | 'en'): HTMLElement[] {
   const group = within(panel).getByRole('tablist', {
     name: language === 'zh' ? '语言' : 'Language'
@@ -103,8 +118,7 @@ describe('settings entry', () => {
 
   it('stays reachable with sessions open', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    await loadDemoSamples('en')
 
     const entry = screen.getByRole('button', { name: 'Open settings' })
     expect((entry as HTMLButtonElement).disabled).toBe(false)
@@ -165,6 +179,68 @@ describe('settings language options', () => {
   })
 })
 
+describe('settings sample section', () => {
+  it('lists exactly the five scenes and keeps the failure entry out by default', () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
+
+    const panel = openSettings('en')
+    const entries = Array.from(panel.querySelectorAll('[data-sample-entry]'))
+    expect(entries.map((entry) => entry.getAttribute('data-sample-entry')).sort()).toEqual([
+      'code',
+      'csv',
+      'directory',
+      'remote-snapshot',
+      'structured'
+    ])
+    expect(panel.querySelectorAll('[data-sample-failure]').length).toBe(0)
+  })
+
+  it('starts and activates the matching session from every entry', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
+
+    const cases = [
+      ['directory', /baseline ↔ candidate/],
+      ['code', /Code diff & 3-way merge/],
+      ['csv', /CSV key comparison/],
+      ['structured', /JSON \/ YAML semantic comparison/],
+      ['remote-snapshot', /baseline ↔ remote-prod/]
+    ] as const
+
+    for (const [id, name] of cases) {
+      const panel = openSettings('en')
+      const entry = panel.querySelector(`[data-sample-entry="${id}"]`)
+      if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+      fireEvent.click(entry)
+
+      // The panel closes before the session starts, so the progress and the
+      // session itself are never covered by the modal.
+      expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+      const tab = await screen.findByRole('tab', { name }, { timeout: 4000 })
+      await waitFor(() => expect(tab.getAttribute('aria-selected')).toBe('true'))
+    }
+  }, 20000)
+
+  it('renders the failure entry only under the debug switch, outside the five', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} showDebugSamples />, 'en')
+
+    const panel = openSettings('en')
+    expect(panel.querySelectorAll('[data-sample-entry]').length).toBe(5)
+    const failure = panel.querySelector('[data-sample-failure]')
+    if (!(failure instanceof HTMLElement)) throw new Error('missing debugging sample entry')
+    fireEvent.click(failure)
+
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    expect(
+      await screen.findByRole(
+        'heading',
+        { name: 'Could not read the sample library' },
+        { timeout: 4000 }
+      )
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
+  })
+})
+
 describe('language switch', () => {
   it('switches every shell surface in the same click, before the write settles', async () => {
     const readUserSettings = vi.fn(
@@ -183,14 +259,12 @@ describe('language switch', () => {
     await screen.findByRole('heading', { name: EMPTY_EN })
     const readsAtStartup = readUserSettings.mock.calls.length
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    await loadDemoSamples('en')
     openSettings('en')
 
     fireEvent.click(languageOptions(settingsDialog('en'), 'en')[1])
 
     // Same render batch: header, views, tabs, status bar and the panel are Chinese.
-    expect(screen.getByText('对比与三向合并工作台')).toBeDefined()
     const switcher = screen.getByRole('tablist', { name: '视图切换' })
     expect(
       within(switcher)
@@ -213,7 +287,6 @@ describe('language switch', () => {
     expect(readUserSettings.mock.calls.length).toBe(readsAtStartup)
 
     fireEvent.click(languageOptions(settingsDialog('zh'), 'zh')[0])
-    expect(screen.getByText('Comparison and three-way merge workbench')).toBeDefined()
     expect(screen.getByRole('tablist', { name: 'Switch view' })).toBeDefined()
     expect(screen.getByRole('tablist', { name: 'Sessions' })).toBeDefined()
     expect(screen.getByRole('contentinfo').textContent).toContain('Session')
@@ -272,8 +345,7 @@ describe('language switch', () => {
       }
     }
     renderWithI18n(<Workbench platform={port} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    await loadDemoSamples('en')
     const tabsBefore = within(screen.getByRole('tablist', { name: 'Sessions' })).getAllByRole('tab')
     const activeBefore = tabsBefore.findIndex(
       (tab) => tab.getAttribute('aria-selected') === 'true'

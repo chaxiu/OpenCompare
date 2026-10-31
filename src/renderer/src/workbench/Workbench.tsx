@@ -16,8 +16,6 @@ import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
-import { DropdownMenu } from '@renderer/components/DropdownMenu'
-import type { DropdownItem } from '@renderer/components/DropdownMenu'
 import { Icon } from '@renderer/components/Icon'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SessionTabs } from '@renderer/components/SessionTabs'
@@ -227,59 +225,6 @@ const VIEW_OPTIONS: readonly {
   }
 ]
 
-const MENU_SCENES: Record<string, SceneId> = {
-  'load-directory': 'directory',
-  'load-code': 'code',
-  'load-csv': 'csv',
-  'load-structured': 'structured'
-}
-
-/**
- * The auxiliary sample library, explicitly marked as a demo: the workbench's
- * primary entry is opening real files / folders or dropping real paths.
- */
-/** Smallest possible plural switch: one vs. everything else. */
-function countKey(one: MessageKey, other: MessageKey, count: number): MessageKey {
-  return count === 1 ? one : other
-}
-
-function sampleMenu(t: Translate): readonly DropdownItem[] {
-  return [
-    {
-      id: 'load-all',
-      label: t('shell.sampleMenu.all.label'),
-      description: t('shell.sampleMenu.all.description'),
-      icon: <Icon name={UI_ICON_ACTIONS.sample} />
-    },
-    {
-      id: 'load-directory',
-      label: t('shell.sampleMenu.directory.label'),
-      description: t('shell.sampleMenu.directory.description')
-    },
-    {
-      id: 'load-code',
-      label: t('shell.sampleMenu.code.label'),
-      description: t('shell.sampleMenu.code.description')
-    },
-    {
-      id: 'load-csv',
-      label: t('shell.sampleMenu.csv.label'),
-      description: t('shell.sampleMenu.csv.description')
-    },
-    {
-      id: 'load-structured',
-      label: t('shell.sampleMenu.structured.label'),
-      description: t('shell.sampleMenu.structured.description')
-    },
-    {
-      id: 'simulate-failure',
-      label: t('shell.sampleMenu.failure.label'),
-      description: t('shell.sampleMenu.failure.description'),
-      danger: true
-    }
-  ]
-}
-
 /** Drops one session's shell cache entry without mutating the record. */
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   if (!(key in record)) return record
@@ -291,6 +236,11 @@ function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T
 /** File handles of a drag, tolerating the synthetic transfer a test dispatches. */
 function droppedFiles(transfer: DataTransfer | null): readonly File[] {
   return transfer === null ? [] : Array.from(transfer.files)
+}
+
+/** Smallest possible plural switch: one vs. everything else. */
+function countKey(one: MessageKey, other: MessageKey, count: number): MessageKey {
+  return count === 1 ? one : other
 }
 
 function isFileDrag(transfer: DataTransfer | null): boolean {
@@ -352,7 +302,14 @@ function sampleErrorNotice(cause: unknown): Notice {
 }
 
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
-export function Workbench({ platform }: { readonly platform: PlatformPort }): JSX.Element {
+export function Workbench({
+  platform,
+  showDebugSamples = false
+}: {
+  readonly platform: PlatformPort
+  /** Debug switch of the settings sample section; production builds pass false. */
+  readonly showDebugSamples?: boolean
+}): JSX.Element {
   const { language, t } = useI18n()
   const tier = useWidthTier()
   /** Whether an entry shows its copy at this window width (never an entry drop). */
@@ -670,11 +627,13 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           ...loaded.filter((sample) => !current.some((s) => s.id === sample.id))
         ]
       })
-      setActiveId((current) =>
-        current !== null && sessions.some((session) => session.id === current)
+      setActiveId((current) => {
+        // A settings sample entry opens its own scene: that session must win.
+        if (options?.scene !== undefined) return loaded[0]?.id ?? current
+        return current !== null && sessions.some((session) => session.id === current)
           ? current
           : (loaded[0]?.id ?? null)
-      )
+      })
       setStatus('ready')
     } catch (cause) {
       if (sessions.length > 0) {
@@ -690,22 +649,27 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     }
   }
 
+  /** Settings sample entry: close the panel first, then start the scene. */
+  function loadSampleScene(scene: SceneId): void {
+    setSettingsOpen(false)
+    void load({ scene })
+  }
+
+  /** Settings sample entry: the built-in remote snapshot against the sample tree. */
+  function loadRemoteSnapshotSample(): void {
+    setSettingsOpen(false)
+    void runSidesCompare(remoteSnapshotSides())
+  }
+
+  /** Debug-only settings entry: the same loader with its scripted failure. */
+  function loadSampleFailure(): void {
+    setSettingsOpen(false)
+    void load({ simulateFailure: true })
+  }
+
   function selectScene(scene: SceneId): void {
     const target = sessions.find((session) => session.scene === scene)
     if (target) selectSession(target.id)
-  }
-
-  function handleMenuSelect(id: string): void {
-    if (id === 'simulate-failure') {
-      void load({ simulateFailure: true })
-      return
-    }
-    if (id === 'load-all') {
-      void load()
-      return
-    }
-    const scene = MENU_SCENES[id]
-    if (scene) void load({ scene })
   }
 
   /** Upserts a session, preserving the tab order it already had. */
@@ -1325,17 +1289,11 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
             pickerAvailable={platform.kind === 'electron'}
             busy={directoryBusy}
             onPick={(side) => void pickDirectory(side)}
-            onLoadSample={() =>
-              void runSidesCompare(
-                directorySides(DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right)
-              )
-            }
             onOpenFile={(node) => void openFile(node)}
             leftIsSnapshot={sessionSides.left.kind === 'snapshot'}
             rightIsSnapshot={sessionSides.right.kind === 'snapshot'}
             onExportSnapshot={(side) => void handleExportSnapshot(side)}
             onImportSnapshot={(side, file) => void handleImportSnapshot(side, file)}
-            onLoadRemoteSnapshotSample={() => void runSidesCompare(remoteSnapshotSides())}
             hideLocalPaths={hideLocalPaths}
             onHideLocalPathsChange={setHideLocalPaths}
             onExportReport={() => void handleExportReport()}
@@ -1457,10 +1415,7 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           <span className="flex size-6 items-center justify-center rounded-sm bg-accent-soft text-accent">
             <Icon name={UI_ICON_ACTIONS.brand} />
           </span>
-          <div className="leading-tight">
-            <h1 className="text-sm font-semibold tracking-tight">OpenCompare</h1>
-            <p className="text-2xs text-content-muted">{t('shell.header.brandSubtitle')}</p>
-          </div>
+          <h1 className="text-sm font-semibold tracking-tight">OpenCompare</h1>
         </div>
 
         <SegmentedControl
@@ -1515,27 +1470,6 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
               </ToolbarButton>
             </>
           )}
-          <ToolbarButton
-            size="sm"
-            data-shell-entry="samples"
-            aria-label={t('shell.toolbar.loadSamples')}
-            icon={<Icon name={SHELL_ENTRY_ICONS.samples} />}
-            onClick={() => void load()}
-            disabled={status === 'loading'}
-            title={t('shell.toolbar.loadSamplesTitle')}
-          >
-            {labelShown('samples') ? t('shell.toolbar.loadSamples') : null}
-          </ToolbarButton>
-          <DropdownMenu
-            size="sm"
-            entryId="samples-menu"
-            iconOnly={!labelShown('samples-menu')}
-            label={t('shell.toolbar.samples')}
-            menuLabel={t('shell.toolbar.samplesMenu')}
-            icon={<Icon name={SHELL_ENTRY_ICONS['samples-menu']} />}
-            items={sampleMenu(t)}
-            onSelect={handleMenuSelect}
-          />
           {/* Settings stays reachable in every workbench state, so the language
               can be switched during an empty screen or a running scan. */}
           <IconButton
@@ -1754,7 +1688,14 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
       ) : null}
 
       {settingsOpen ? (
-        <SettingsDialog platform={platform} onClose={() => setSettingsOpen(false)} />
+        <SettingsDialog
+          platform={platform}
+          onClose={() => setSettingsOpen(false)}
+          onLoadSample={loadSampleScene}
+          onLoadRemoteSnapshot={loadRemoteSnapshotSample}
+          onSimulateSampleFailure={loadSampleFailure}
+          showDebugSamples={showDebugSamples}
+        />
       ) : null}
 
       {closeTarget ? (

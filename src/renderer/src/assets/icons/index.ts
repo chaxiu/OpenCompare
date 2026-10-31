@@ -16,7 +16,6 @@ import folderOpen from './folder-open.svg?raw'
 import folderSearch from './folder-search.svg?raw'
 import folderTree from './folder-tree.svg?raw'
 import gitCompare from './git-compare.svg?raw'
-import layers from './layers.svg?raw'
 import listFilter from './list-filter.svg?raw'
 import loaderCircle from './loader-circle.svg?raw'
 import refreshCw from './refresh-cw.svg?raw'
@@ -24,7 +23,6 @@ import rotateCcw from './rotate-ccw.svg?raw'
 import save from './save.svg?raw'
 import settings from './settings.svg?raw'
 import shuffle from './shuffle.svg?raw'
-import sparkles from './sparkles.svg?raw'
 import squareSplitHorizontal from './square-split-horizontal.svg?raw'
 import table2 from './table-2.svg?raw'
 import triangleAlert from './triangle-alert.svg?raw'
@@ -86,7 +84,6 @@ export const ICON_PATHS = {
   'folder-search': geometry(folderSearch),
   'folder-tree': geometry(folderTree),
   'git-compare': geometry(gitCompare),
-  layers: geometry(layers),
   'list-filter': geometry(listFilter),
   'loader-circle': geometry(loaderCircle),
   'refresh-cw': geometry(refreshCw),
@@ -94,7 +91,6 @@ export const ICON_PATHS = {
   save: geometry(save),
   settings: geometry(settings),
   shuffle: geometry(shuffle),
-  sparkles: geometry(sparkles),
   'square-split-horizontal': geometry(squareSplitHorizontal),
   'table-2': geometry(table2),
   'triangle-alert': geometry(triangleAlert),
@@ -126,8 +122,6 @@ export const SHELL_ENTRY_ICONS = {
   'open-file': 'file-code-corner',
   'open-folder': 'folder-open',
   'new-compare': 'git-compare',
-  samples: 'sparkles',
-  'samples-menu': 'layers',
   settings: 'settings',
   filter: 'list-filter',
   sync: 'square-split-horizontal',
@@ -163,7 +157,6 @@ export const UI_ICON_ACTIONS = {
   changeArrow: 'arrow-right',
   refresh: 'refresh-cw',
   reset: 'rotate-ccw',
-  sample: 'sparkles',
   remoteSample: 'cloud',
   overwriteLeft: 'arrow-left',
   overwriteRight: 'arrow-right',

@@ -87,9 +87,40 @@ async function compareSampleDirectory(): Promise<ReturnType<typeof compareDirect
   )
 }
 
-/** The built-in library is an auxiliary, explicitly labelled demo entry. */
-function loadDemoSamples(): void {
-  fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+/** One settings sample entry, addressed by its stable marker. */
+function sampleEntry(id: string): HTMLElement {
+  const dialog = screen.getByRole('dialog', { name: '设置' })
+  const button = dialog.querySelector(`[data-sample-entry="${id}"]`)
+  if (!(button instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+  return button
+}
+
+/** Opens the settings sample section and starts one built-in scene. */
+function startSample(id: string): void {
+  fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
+  fireEvent.click(sampleEntry(id))
+}
+
+/** Starts all four built-in scenes through the settings sample entries. */
+async function loadDemoSamples(): Promise<void> {
+  for (const id of ['directory', 'code', 'csv', 'structured']) {
+    startSample(id)
+  }
+  const list = await screen.findByRole('tablist', { name: '会话' }, { timeout: 4000 })
+  for (const name of [/3-Way Merge/, /CSV 主键对比/, /JSON \/ YAML/, /baseline ↔ candidate/]) {
+    await within(list).findByRole('tab', { name }, { timeout: 4000 })
+  }
+  fireEvent.click(within(list).getByRole('tab', { name: /baseline ↔ candidate/ }))
+}
+
+/** Debug-only settings entry: the scripted sample read failure. */
+function startSampleFailure(): void {
+  fireEvent.click(screen.getByRole('button', { name: '打开设置' }))
+  const failure = screen
+    .getByRole('dialog', { name: '设置' })
+    .querySelector('[data-sample-failure]')
+  if (!(failure instanceof HTMLElement)) throw new Error('missing debugging sample entry')
+  fireEvent.click(failure)
 }
 
 interface PortScript {
@@ -134,20 +165,33 @@ describe('workbench shell', () => {
     await renderApp()
 
     expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
+    expect(screen.queryByText('对比与三向合并工作台')).toBeNull()
     expect(screen.getByText('web')).toBeDefined()
     expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
     expect(screen.getByRole('tablist', { name: '视图切换' })).toBeDefined()
     expect(screen.getByRole('button', { name: '打开文件' })).toBeDefined()
     expect(screen.getByRole('button', { name: '打开文件夹' })).toBeDefined()
+
+    // The top bar carries no demo entry, and the empty state keeps three real CTAs.
+    expect(document.querySelector('[data-shell-entry="samples"]')).toBeNull()
+    expect(document.querySelector('[data-shell-entry="samples-menu"]')).toBeNull()
+    expect(screen.queryByRole('button', { name: /加载演示样本|演示样本/ })).toBeNull()
+    expect(within(screen.getByRole('main')).getAllByRole('button')).toHaveLength(3)
+    // The hint points at the settings section instead of the old top bar.
+    expect(screen.getByText(/设置 → 示例与调试/)).toBeDefined()
+    expect(screen.getByText(/设置 → 示例与调试/).textContent).not.toContain('顶栏')
   })
 
   it('shows the loading state, then every sample session', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    const loading = loadDemoSamples()
     expect(screen.getByRole('heading', { name: '正在载入样本…' })).toBeDefined()
+    await loading
 
-    expect(await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByRole('tab', { name: /3-Way Merge/ })).toBeDefined()
+    expect(document.querySelector('[data-shell-entry="samples"]')).toBeNull()
+    expect(document.querySelector('[data-shell-entry="samples-menu"]')).toBeNull()
     expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
     expect(screen.getAllByRole('tab', { name: /CSV 主键对比/ }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('tab', { name: /JSON \/ YAML/ }).length).toBeGreaterThan(0)
@@ -156,7 +200,7 @@ describe('workbench shell', () => {
   it('switches the work area and the status bar with the active session', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     const codeTab = await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(codeTab)
@@ -170,8 +214,7 @@ describe('workbench shell', () => {
   it('shows the key-aligned CSV reconciliation with runtime counts', async () => {
     await renderApp()
 
-    fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV 主键对比/ }))
+    startSample('csv')
 
     const total = CSV_SCENE.composition.same + CSV_SCENE.composition.added +
       CSV_SCENE.composition.removed + CSV_SCENE.composition.modified
@@ -194,8 +237,7 @@ describe('workbench shell', () => {
   it('surfaces a readable, retryable error state', async () => {
     await renderApp()
 
-    fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /演示：样本读取失败/ }))
+    startSampleFailure()
 
     expect(
       await screen.findByRole('heading', { name: '样本库读取失败' }, { timeout: 4000 })
@@ -206,7 +248,7 @@ describe('workbench shell', () => {
   it('filters the directory comparison and drills a file into its file view', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     // Runtime comparison: the paired file shows up in both projected panes.
@@ -240,7 +282,7 @@ describe('workbench shell', () => {
   it('drills CSV and YAML files into their typed views', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
@@ -262,7 +304,7 @@ describe('workbench shell', () => {
   it('explains why a non-text file cannot be drilled into', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.doubleClick(screen.getAllByText('logo.png')[0])
@@ -276,23 +318,24 @@ describe('workbench shell', () => {
   it('degrades the native directory picker on the web runtime', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     const leftPicker = screen.getByRole('button', { name: '选择左目录' }) as HTMLButtonElement
     const rightPicker = screen.getByRole('button', { name: '选择右目录' }) as HTMLButtonElement
-    const samplePicker = screen.getByRole('button', { name: '加载演示目录' }) as HTMLButtonElement
 
     expect(leftPicker.disabled).toBe(true)
     expect(rightPicker.disabled).toBe(true)
-    expect(samplePicker.disabled).toBe(false)
+    // The demo shortcuts are gone from the workflow toolbar.
+    expect(screen.queryByRole('button', { name: '加载演示目录' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '演示：远端快照' })).toBeNull()
     expect(screen.getByText(/Web 预览模式没有原生目录选择/)).toBeDefined()
   })
 
   it('previews a sync dry-run with byte totals and cancels without writing', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('tab', { name: '镜像' }))
@@ -313,7 +356,7 @@ describe('workbench shell', () => {
   it('applies the confirmed sync and refreshes the comparison tree', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     const tabCount = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
@@ -344,7 +387,7 @@ describe('workbench shell', () => {
   it('previews the template placement and extracts it into a writable root', async () => {
     await renderApp()
 
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
@@ -1008,7 +1051,7 @@ const REVERSED_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.right} ↔ ${D
 describe('directory drilldown roundtrip', () => {
   async function loadDirectorySamples(): Promise<void> {
     await renderApp()
-    loadDemoSamples()
+    await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
   }
 
@@ -1315,36 +1358,39 @@ describe('session tabs lifecycle', () => {
   })
 
   it('merges samples into open sessions instead of replacing them', async () => {
-    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    render(
+      <Workbench
+        platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })}
+        showDebugSamples
+      />
+    )
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
     await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
 
-    loadDemoSamples()
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    await loadDemoSamples()
 
     const tabs = within(sessionTabs()).getAllByRole('tab')
-    // The real session stays first, and the active one is not switched away.
+    // The real session keeps its place and the sample scenes are merged in, not
+    // swapped for the open work.
     expect(tabs[0].textContent).toContain('engine.ts')
-    expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)
+    // The four sample scenes are added next to the open real-file session.
+    expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(5)
     expect(tabs.filter((item) => item.textContent?.includes('baseline ↔ candidate'))).toHaveLength(1)
 
     // Loading the same library again upserts by id: no duplicate sample tabs.
-    loadDemoSamples()
-    await screen.findByRole('heading', { name: '正在载入样本…' })
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '正在载入样本…' })).toBeNull())
+    await loadDemoSamples()
     expect(
       within(sessionTabs())
         .getAllByRole('tab')
         .filter((item) => item.textContent?.includes('baseline ↔ candidate'))
     ).toHaveLength(1)
+    expect(within(sessionTabs()).getAllByRole('tab')[0].textContent).toContain('engine.ts')
 
     // A failed auxiliary load keeps the sessions on screen and reports it.
-    fireEvent.click(screen.getByRole('button', { name: '演示样本' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /演示：样本读取失败/ }))
+    startSampleFailure()
 
     const alert = await screen.findByRole('alert', {}, { timeout: 4000 })
     expect(alert.textContent).toContain('无法读取内置样本库')
-    expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)
     expect(within(sessionTabs()).getAllByRole('tab').length).toBeGreaterThan(1)
   })
 
@@ -2418,9 +2464,7 @@ describe('directory progress and cancel UI', () => {
     }
 
     render(<Workbench platform={port} />)
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
-    fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+    await loadDemoSamples()
 
     const tabsBefore = within(screen.getByRole('tablist', { name: '会话' }))
       .getAllByRole('tab')
@@ -2504,9 +2548,7 @@ describe('directory progress and cancel UI', () => {
     }
 
     render(<Workbench platform={port} />)
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
-    fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+    await loadDemoSamples()
 
     const tabsBefore = within(screen.getByRole('tablist', { name: '会话' }))
       .getAllByRole('tab')
@@ -2570,9 +2612,7 @@ describe('directory progress and cancel UI', () => {
     expect(progressBar()).toBeNull()
 
     // Load the demo directory, then run sync / template flows.
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
-    fireEvent.click(screen.getByRole('tab', { name: /baseline ↔ candidate/ }))
+    await loadDemoSamples()
     await waitFor(() => expect(screen.getByRole('button', { name: '预览并同步' })).toBeDefined())
     expect(progressBar()).toBeNull()
 

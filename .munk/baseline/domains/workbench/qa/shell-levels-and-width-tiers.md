@@ -7,6 +7,8 @@ covers: ac-level-order, ac-level-metrics-single-source, ac-no-wrap, ac-fit-1024,
 
 ## 入口 → 位置（level + slot + 三档呈现模式）
 
+> 下表是 **20 条入口时期**的记录（WI `wi_ws_cfd7df4f1ef376ca`）。`samples` / `samples-menu` 已在 `wi_ws_8959816f18ce7acf`（2026-10-31，示例入口迁入设置）删除，当前 18 条入口的现行表见 `qa/topbar-workflow-empty-state-de-demo.md`；其余 18 条的 level / slot / 三档呈现模式不变。
+
 | 入口 id | level | slot | compact (1024) | regular (1440) | wide (1920) |
 | --- | --- | --- | --- | --- | --- |
 | open-file | app | global-actions | icon-only | label | label |

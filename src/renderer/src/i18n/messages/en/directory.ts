@@ -17,8 +17,6 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.toolbar.pickLeftTitle': 'Choose a real local folder as the left (source) folder',
   'directory.toolbar.pickRight': 'Choose right folder',
   'directory.toolbar.pickRightTitle': 'Choose a real local folder as the right (target) folder',
-  'directory.toolbar.loadSample': 'Load demo folder',
-  'directory.toolbar.loadSampleTitle': 'Demo only: load the built-in sample folder as both sides',
   'directory.toolbar.previewSync': 'Preview & sync',
   'directory.toolbar.previewSyncTitle':
     'Build the change list, show a dry-run preview, and write only after you confirm',
@@ -35,13 +33,10 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
     'Scan the right folder into a snapshot and export it as <name>.ocsnap.json through the system save dialog (a mounted snapshot is re-exported as is)',
   'directory.toolbar.importRight': 'Import right snapshot',
   'directory.toolbar.importRightTitle': 'Choose an .ocsnap.json and mount it on the right side',
-  'directory.toolbar.demoRemote': 'Demo: remote snapshot',
-  'directory.toolbar.demoRemoteTitle':
-    'Demo only: built-in local sample folder (left) vs built-in remote snapshot remote-prod (right)',
   'directory.snapshot.pickLeftFile': 'Choose left snapshot file',
   'directory.snapshot.pickRightFile': 'Choose right snapshot file',
   'directory.picker.unavailable':
-    'The web preview has no native folder picker; use "Load demo folder" to explore a directory comparison. The desktop app (pnpm dev) can pick local folders directly.',
+    'The web preview has no native folder picker; open a built-in sample folder from Settings → Samples & debugging. The desktop app (pnpm dev) can pick local folders directly.',
   'directory.panel.source': 'Source folder',
   'directory.panel.target': 'Target folder',
   'directory.panel.snapshot': 'Snapshot',

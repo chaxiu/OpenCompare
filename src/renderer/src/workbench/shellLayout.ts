@@ -165,8 +165,6 @@ export type ShellEntryId =
   | 'open-file'
   | 'open-folder'
   | 'new-compare'
-  | 'samples'
-  | 'samples-menu'
   | 'settings'
   | 'filter'
   | 'sync'
@@ -229,22 +227,6 @@ export const SHELL_ENTRIES: Record<ShellEntryId, ShellEntryPlacement> = {
     slot: 'global-actions',
     labelKey: 'shell.toolbar.newCompare',
     labelKeys: ['shell.toolbar.newCompare'],
-    presentation: COMPACT_ICONS,
-    width: { label: 96, 'icon-only': 26 }
-  },
-  samples: {
-    level: 'app',
-    slot: 'global-actions',
-    labelKey: 'shell.toolbar.loadSamples',
-    labelKeys: ['shell.toolbar.loadSamples'],
-    presentation: COMPACT_ICONS,
-    width: { label: 108, 'icon-only': 26 }
-  },
-  'samples-menu': {
-    level: 'app',
-    slot: 'global-actions',
-    labelKey: 'shell.toolbar.samples',
-    labelKeys: ['shell.toolbar.samples'],
     presentation: COMPACT_ICONS,
     width: { label: 96, 'icon-only': 26 }
   },
@@ -384,7 +366,7 @@ export function entryPresentation(entry: ShellEntryId, tier: WidthTier): EntryPr
 export type ToolbarView = 'directory' | 'code-diff' | 'code-merge' | 'csv' | 'structured'
 
 /**
- * A control that is not one of the 20 entries (counters, legends, pickers…),
+ * A control that is not one of the 18 entries (counters, legends, pickers…),
  * kept in the table so the row budget covers the whole row.
  */
 export interface ToolbarControlSpec {
@@ -432,7 +414,7 @@ const APP_ROW: ToolbarRowSpec = {
   id: 'app-actions',
   level: 'app',
   views: ['directory'],
-  entries: ['new-compare', 'open-file', 'open-folder', 'samples', 'samples-menu', 'settings'],
+  entries: ['new-compare', 'open-file', 'open-folder', 'settings'],
   controls: [control('brand', 130), control('view-switch', 444)],
   extra: 56
 }
@@ -448,7 +430,6 @@ export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
       control('legend', 240),
       control('pick-left', 80),
       control('pick-right', 80),
-      control('load-sample', 80),
       control('busy', 16)
     ],
     extra: 48
@@ -466,11 +447,7 @@ export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
     level: 'view-toolbar',
     views: ['directory'],
     entries: ['snapshot-export', 'snapshot-import', 'report-export'],
-    controls: [
-      control('remote-demo', 84),
-      control('hide-local-paths', 112),
-      control('report-progress', 120)
-    ],
+    controls: [control('hide-local-paths', 112), control('report-progress', 120)],
     extra: 64
   },
   {
