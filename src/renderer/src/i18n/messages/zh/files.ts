@@ -90,6 +90,7 @@ export const files = {
   'files.structured.changes': '节点路径变更',
   'files.structured.parseFailed': '解析失败',
   'files.structured.showing': '显示 {visible} / {total}',
+  'files.structured.comparing': '对比中',
   'files.structured.emptyFiltered': '当前过滤条件下没有节点。切回「全部」可查看完整变更列表。',
   'files.structured.errorTitle': '结构化解析失败',
   'files.structured.errorHint': '仅本会话受影响：可修正输入后重新下钻，或切换到其他会话。',

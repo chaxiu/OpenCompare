@@ -94,6 +94,7 @@ export const files: Record<keyof typeof zhFiles, string> = {
   'files.structured.changes': 'Node path changes',
   'files.structured.parseFailed': 'Parse failed',
   'files.structured.showing': 'Showing {visible} / {total}',
+  'files.structured.comparing': 'Comparing',
   'files.structured.emptyFiltered':
     'No nodes under the current filter. Switch back to All to see the full change list.',
   'files.structured.errorTitle': 'Structured parsing failed',

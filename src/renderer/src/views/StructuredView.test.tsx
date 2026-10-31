@@ -43,10 +43,10 @@ function countsGroup(): HTMLElement {
 }
 
 describe('built-in structured scene', () => {
-  it('lists path-level changes with old and new values', () => {
+  it('lists path-level changes with old and new values', async () => {
     render(<StructuredView fixture={STRUCTURED_SCENE} platform={platform} />)
 
-    expect(screen.getByText('/service/features/limits/maxBytes')).toBeDefined()
+    expect(await screen.findByText('/service/features/limits/maxBytes')).toBeDefined()
     // the type change is labelled separately from a plain edit, with both values
     const row = screen.getByText('/service/version').parentElement as HTMLElement
     expect(within(row).getByText('类型变更')).toBeDefined()
@@ -55,9 +55,10 @@ describe('built-in structured scene', () => {
     expect(within(countsGroup()).getByText('类型变更')).toBeDefined()
   })
 
-  it('reports runtime counts that survive filtering', () => {
+  it('reports runtime counts that survive filtering', async () => {
     render(<StructuredView fixture={STRUCTURED_SCENE} platform={platform} />)
 
+    await screen.findByText('/service/features/limits/maxBytes')
     const counts = within(countsGroup())
     expect(counts.getByText(String(jsonCounts.typeChanged))).toBeDefined()
     expect(counts.getByText(String(jsonCounts.added))).toBeDefined()
@@ -69,9 +70,10 @@ describe('built-in structured scene', () => {
     expect(within(countsGroup()).getByText(String(jsonCounts.added))).toBeDefined()
   })
 
-  it('restores the full list when the filter goes back to 全部', () => {
+  it('restores the full list when the filter goes back to 全部', async () => {
     render(<StructuredView fixture={STRUCTURED_SCENE} platform={platform} />)
 
+    await screen.findByText('/service/features/limits/maxBytes')
     fireEvent.click(screen.getByRole('tab', { name: '新增' }))
     expect(screen.queryByText('/telemetry/enabled')).toBeNull()
     expect(screen.getByText('/service/features/limits/maxBytes')).toBeDefined()
@@ -81,13 +83,13 @@ describe('built-in structured scene', () => {
     expect(screen.getByText('/service/features/limits/maxBytes')).toBeDefined()
   })
 
-  it('switches between the JSON and YAML sample pairs', () => {
+  it('switches between the JSON and YAML sample pairs', async () => {
     render(<StructuredView fixture={STRUCTURED_SCENE} platform={platform} />)
 
-    expect(screen.getByText('/service/features/limits/maxBytes')).toBeDefined()
+    await screen.findByText('/service/features/limits/maxBytes')
 
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
-    expect(screen.getByText('/service/health')).toBeDefined()
+    expect(await screen.findByText('/service/health')).toBeDefined()
     expect(screen.queryByText('/service/features/limits/maxBytes')).toBeNull()
     expect(screen.getByText('/samples/structured/deploy.left.yaml')).toBeDefined()
   })
@@ -110,7 +112,7 @@ describe('drilldown pair', () => {
     }
   }
 
-  it('renders the fixed format without a format switch', () => {
+  it('renders the fixed format without a format switch', async () => {
     render(<StructuredView pair={pair} format="yaml" platform={platform} />)
 
     expect(screen.getByText(/本地文件 · YAML 原文/)).toBeDefined()
@@ -118,13 +120,13 @@ describe('drilldown pair', () => {
     expect(screen.getByRole('tablist', { name: '状态过滤' })).toBeDefined()
 
     // shuffled keys are ignored: only the real edits show up
-    expect(screen.getByText('/profile')).toBeDefined()
+    expect(await screen.findByText('/profile')).toBeDefined()
     expect(screen.getByText('/service/replicas')).toBeDefined()
     expect(screen.getByText('/service/health')).toBeDefined()
     expect(screen.queryByText('/service/name')).toBeNull()
   })
 
-  it('shows a readable error state for an unparseable side', () => {
+  it('shows a readable error state for an unparseable side', async () => {
     render(
       <StructuredView
         pair={{ left: { path: 'broken.json', text: '{"a": 1' }, right: { path: 'right.json', text: '{}' } }}
@@ -133,7 +135,9 @@ describe('drilldown pair', () => {
       />
     )
 
-    expect(screen.getByRole('heading', { name: '结构化解析失败' })).toBeDefined()
+    expect(
+      await screen.findByRole('heading', { name: '结构化解析失败' })
+    ).toBeDefined()
     expect(screen.getByText(/left side: JSON parse error/)).toBeDefined()
     // the raw text and the other session tabs stay usable
     expect(screen.getByText('broken.json')).toBeDefined()
@@ -150,7 +154,7 @@ describe('local file entry points', () => {
 
     await waitFor(() => expect(screen.getByText('/memory/config.right.json')).toBeDefined())
     // The opened body is the right side now: nothing else survives from the sample.
-    expect(screen.getByText('/service/version')).toBeDefined()
+    expect(await screen.findByText('/service/version')).toBeDefined()
     expect(screen.queryByText('/telemetry/enabled')).toBeNull()
     expect(await screen.findByText(/已打开 \/memory\/config\.right\.json/)).toBeDefined()
   })
@@ -188,12 +192,13 @@ function diffPair(): { left: { path: string; text: string }; right: { path: stri
 }
 
 describe('English copy', () => {
-  it('renders the format switch, filters, counts and panel copy in English', () => {
+  it('renders the format switch, filters, counts and panel copy in English', async () => {
     const { container } = renderWithI18n(
       <StructuredView fixture={STRUCTURED_SCENE} platform={platform} />,
       'en'
     )
 
+    expect(await screen.findByText('/service/features/limits/maxBytes')).toBeDefined()
     expect(screen.getByRole('tablist', { name: 'Structured format' })).toBeDefined()
     expect(screen.getByRole('tablist', { name: 'Status filter' })).toBeDefined()
     for (const name of ['All', 'Added', 'Removed', 'Modified', 'Type changed', 'Same']) {
@@ -210,11 +215,12 @@ describe('English copy', () => {
     expect(container.textContent).not.toMatch(/\p{Script=Han}/u)
   })
 
-  it('describes a YAML drilldown and localizes its picker title', () => {
+  it('describes a YAML drilldown and localizes its picker title', async () => {
     const selectFile = vi.fn(async () => null)
     const port: PlatformPort = { ...platform, selectFile }
     renderWithI18n(<StructuredView pair={diffPair()} format="yaml" platform={port} />, 'en')
 
+    expect(await screen.findByText('/profile')).toBeDefined()
     expect(screen.getByText('Local file · YAML source · semantic comparison')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open left file' }))
@@ -223,9 +229,10 @@ describe('English copy', () => {
     )
   })
 
-  it('keeps the Chinese wording for counts, panel titles and sources', () => {
+  it('keeps the Chinese wording for counts, panel titles and sources', async () => {
     render(<StructuredView fixture={STRUCTURED_SCENE} platform={platform} />)
 
+    expect(await screen.findByText('/service/features/limits/maxBytes')).toBeDefined()
     expect(
       screen.getByText(`共 ${jsonEntries} 个节点 · 计数为运行时对比结果`)
     ).toBeDefined()
@@ -241,10 +248,12 @@ describe('parse errors and empty states', () => {
     right: { path: 'right.json', text: '{}' }
   }
 
-  it('localizes the error frame but keeps the raw core message', () => {
+  it('localizes the error frame but keeps the raw core message', async () => {
     renderWithI18n(<StructuredView pair={broken} format="json" platform={platform} />, 'en')
 
-    expect(screen.getByRole('heading', { name: 'Structured parsing failed' })).toBeDefined()
+    expect(
+      await screen.findByRole('heading', { name: 'Structured parsing failed' })
+    ).toBeDefined()
     expect(screen.getByText('Parse failed')).toBeDefined()
     expect(screen.getByText(/left side: JSON parse error/)).toBeDefined()
     expect(
@@ -252,7 +261,7 @@ describe('parse errors and empty states', () => {
     ).toBeDefined()
   })
 
-  it('localizes the no-data and filtered empty states', () => {
+  it('localizes the no-data and filtered empty states', async () => {
     const empty = renderWithI18n(<StructuredView platform={platform} />, 'en')
     expect(screen.getByRole('heading', { name: 'No structured data to compare' })).toBeDefined()
     expect(empty.container.textContent).not.toMatch(/\p{Script=Han}/u)
@@ -271,7 +280,7 @@ describe('parse errors and empty states', () => {
       'en'
     )
     fireEvent.click(screen.getByRole('tab', { name: 'Type changed' }))
-    expect(screen.getByText(/No nodes under the current filter/)).toBeDefined()
+    expect(await screen.findByText(/No nodes under the current filter/)).toBeDefined()
     expect(screen.getByText(/Switch back to All/)).toBeDefined()
 
     cleanup()
@@ -283,13 +292,13 @@ describe('parse errors and empty states', () => {
       />
     )
     fireEvent.click(screen.getByRole('tab', { name: '类型变更' }))
-    const zhEmpty = screen.getByText(/当前过滤条件下没有节点/)
+    const zhEmpty = await screen.findByText(/当前过滤条件下没有节点/)
     expect(zhEmpty.textContent).toContain('全部')
   })
 })
 
 describe('language switch keeps structured state', () => {
-  it('keeps the YAML format, type-change filter and counts', () => {
+  it('keeps the YAML format, type-change filter and counts', async () => {
     render(
       <I18nProvider initialLanguage="zh">
         <StructuredView fixture={STRUCTURED_SCENE} platform={platform} />
@@ -300,6 +309,7 @@ describe('language switch keeps structured state', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
     fireEvent.click(screen.getByRole('tab', { name: '类型变更' }))
 
+    await screen.findByText(/^显示 /)
     const countsBefore = countsGroup().textContent ?? ''
     const showingBefore = screen.getByText(/^显示 /).textContent ?? ''
 
