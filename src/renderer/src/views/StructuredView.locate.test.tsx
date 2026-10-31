@@ -149,23 +149,63 @@ describe('change row → original panes', () => {
     expect(changeRow('/a/c').getAttribute('aria-selected')).toBe('false')
   })
 
-  it('marks the missing side with the fallback ancestor line and no highlight', async () => {
+  it('marks the missing side with the fallback ancestor line and a weakened highlight', async () => {
     await renderPairReady()
     selectChange('/a/c')
 
     // The right side owns /a/c: exact lines 4–6 are marked as added.
     const rightMarked = Array.from(
       pane('right').querySelectorAll<HTMLElement>('[data-highlight-status="added"]')
-    ).map((row) => row.dataset.sourceLine)
-    expect(rightMarked).toEqual(['4', '5', '6'])
+    )
+    expect(rightMarked.map((row) => row.dataset.sourceLine)).toEqual(['4', '5', '6'])
     expect(pane('right').scrollTop).toBeCloseTo((4 - 1) * SOURCE_ROW_HEIGHT, 0)
+    // Exact hits keep the four-state hook only, never the fallback one.
+    expect(pane('right').querySelectorAll('[data-highlight-tone]')).toHaveLength(0)
 
     // The left side falls back to /a (lines 2–4): no row pretends to exist.
     expect(pane('left').scrollTop).toBeCloseTo((2 - 1) * SOURCE_ROW_HEIGHT, 0)
     expect(pane('left').querySelectorAll('[data-highlight-status]')).toHaveLength(0)
+    const ancestorRows = Array.from(
+      pane('left').querySelectorAll<HTMLElement>('[data-highlight-tone="ancestor"]')
+    )
+    expect(ancestorRows.map((row) => row.dataset.sourceLine)).toEqual(['2', '3', '4'])
+    for (const row of ancestorRows) {
+      const tones = row.className.split(/\s+/).filter((token) => token.startsWith('bg-diff-'))
+      expect(tones).toEqual(['bg-diff-added-soft'])
+      // Same soft token as the exact row, dimmed: visibly weaker.
+      expect(row.className).not.toBe(rightMarked[0].className)
+    }
     expect(pane('left').querySelector('[data-missing-marker="left"]')).toBeNull()
     const marker = document.querySelector<HTMLElement>('[data-missing-marker="left"]')
     expect(marker?.textContent).toBe('此侧不存在')
+  })
+
+  it('leaves the offset and paints nothing when the missing side has no ancestor', async () => {
+    render(
+      <StructuredView
+        pair={{
+          left: { path: 'comment.left.yaml', text: '# only a comment\n' },
+          right: { path: 'comment.right.yaml', text: 'a:\n  b: 1\n' }
+        }}
+        format="yaml"
+        platform={platform}
+      />
+    )
+    await screen.findByText('/')
+
+    scrollPane('left', 3 * SOURCE_ROW_HEIGHT)
+    expect(pane('left').scrollTop).toBeCloseTo(3 * SOURCE_ROW_HEIGHT, 0)
+
+    selectChange('')
+
+    // The comments-only side has no ancestor at all: it neither jumps nor paints.
+    expect(pane('left').scrollTop).toBeCloseTo(3 * SOURCE_ROW_HEIGHT, 0)
+    expect(pane('left').querySelectorAll('[data-highlight-tone]')).toHaveLength(0)
+    expect(pane('left').querySelectorAll('[data-highlight-status]')).toHaveLength(0)
+    // The copy stays, and the owning side still resolves its exact range.
+    expect(document.querySelector('[data-missing-marker="left"]')?.textContent).toBe('此侧不存在')
+    expect(pane('right').querySelectorAll('[data-highlight-tone]')).toHaveLength(0)
+    expect(pane('right').querySelectorAll('[data-highlight-status]')).not.toHaveLength(0)
   })
 
   it('selects the added change again when the missing-side marker is clicked', async () => {

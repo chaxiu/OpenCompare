@@ -11,3 +11,4 @@ covers: ac-reverse-deepest, ac-reverse-exact-only, ac-row-click-jump, ac-highlig
 - at: 2026-10-31
 - status: pass
 - note: `needSelfTest=false`，以 code_gates（10 gates 矩阵，attempt 001）为交付门槛：install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate / structured-semantics 全绿；`pnpm test` 89 files、1331 passed + 1 skipped（30.47s），`StructuredView.scale.test.tsx` 的 ≥5 MB 单例实测 1141 ms（后台对比另测 922 ms）。反选纯函数 `findChangeAtLine` 6 例全绿；`StructuredView.locate.test.tsx` 覆盖跳转 / Enter+Space / 缺失侧与标记回选 / 原文反选与祖先回退不反选 / 四态高亮 token / 比例同步与无回环 / 跳转无回显 / 键盘滚动 / 过滤保位 / 换源重置 / 窗口化两条 / 缺失侧中英文；`structuredSessionState.dom.test.tsx` 覆盖切 tab 恢复且不串味。本 WI change pack 仅含 `prd.md`（无 `tests/cases/**`），本文件为按 20 条 AC 落档的执行记录；未提供 `tech.md` / `ux/**`，tech/ux 手合跳过。
+- superseded: 「缺失侧无任何高亮元素」的旧口径已由 `wi_ws_78cbf66a9a187ec9` 升级为「祖先弱化高亮（`data-highlight-tone="ancestor"`）+ 文案并存」；当前契约以 `structured-locate-sync-ancestor-fallback.md` 与 product.md 为准，本文件仅作上一轮执行快照。

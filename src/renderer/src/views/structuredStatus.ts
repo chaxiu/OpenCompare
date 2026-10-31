@@ -53,6 +53,17 @@ export const HIGHLIGHT_CLASSES: Record<HighlightStatus, string> = {
   conflict: 'bg-diff-conflict-soft'
 }
 
+/**
+ * A fallback ancestor reuses the exact status token, dimmed: same hue, weaker
+ * weight, so it never reads as "this node exists here".
+ */
+export const ANCESTOR_CLASSES: Record<HighlightStatus, string> = {
+  added: `${HIGHLIGHT_CLASSES.added} opacity-60`,
+  removed: `${HIGHLIGHT_CLASSES.removed} opacity-60`,
+  modified: `${HIGHLIGHT_CLASSES.modified} opacity-60`,
+  conflict: `${HIGHLIGHT_CLASSES.conflict} opacity-60`
+}
+
 export const VALUE_CLASSES: Record<StructuredStatus, string> = {
   added: 'text-diff-added',
   removed: 'text-diff-removed',

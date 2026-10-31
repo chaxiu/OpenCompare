@@ -26,6 +26,12 @@ export interface SourceRange {
   readonly endColumn: number
   readonly path: string // actually matched path; equals the request when exact
   readonly exact: boolean // false = node absent on this side, fell back to an ancestor
+  /**
+   * False when no source span matched at all (the side has no document root),
+   * so every coordinate is the placeholder 1:1. Optional for backward
+   * compatibility: a range built before this field existed reads as `true`.
+   */
+  readonly hasSpan?: boolean
 }
 
 export interface StructuredLocator {
@@ -95,7 +101,8 @@ function toSourceRange(
     endLine: end.line,
     endColumn: end.column,
     path,
-    exact
+    exact,
+    hasSpan: span !== null
   }
 }
 

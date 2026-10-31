@@ -6,6 +6,7 @@ import { STRUCTURED_STATUSES, filterStructuredChanges } from '@core/structured/d
 import type { StructuredChange, StructuredFilter } from '@core/structured/diff'
 import { findChangeAtLine } from '@core/structured/locateLine'
 import type { StructuredSide } from '@core/structured/locateLine'
+import { classifySourceRange } from '@core/structured/locateFallback'
 import type { StructuredFormat } from '@core/structured/parse'
 import type { StructuredSceneFixture } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
@@ -102,9 +103,11 @@ function defaultCreateClient(): StructuredCompareClient {
  * fixed format without the format switch; both sources share one engine.
  *
  * Navigation is bidirectional: a change row locates its JSON Pointer on both
- * originals, a source line selects the deepest exact change covering it, and
- * the two panes scroll together by relative position. Filter, selection and
- * scroll offsets are controlled by the shell so a tab switch restores them.
+ * originals (the side that lacks the node falls back to its deepest existing
+ * ancestor and marks it weakly), a source line selects the deepest exact change
+ * covering it, and the two panes scroll together by relative position. Filter,
+ * selection and scroll offsets are controlled by the shell so a tab switch
+ * restores them.
  */
 export function StructuredView({
   fixture,
@@ -271,13 +274,16 @@ export function StructuredView({
     return entries.find((entry) => entry.path === activeSelectedPath) ?? null
   }, [entries, activeSelectedPath])
 
-  /** Writes each side's own target offset; never a ratio copy of the other. */
+  /**
+   * Writes each side's own target offset; never a ratio copy of the other. A
+   * side with no ancestor at all keeps the offset it already had.
+   */
   const jumpTo = useCallback(
     (change: StructuredChange) => {
       const range = ranges?.[change.path]
       for (const side of ['left', 'right'] as const) {
         const target = range?.[side]
-        if (!target) continue
+        if (!target || classifySourceRange(target) === 'none') continue
         const element = side === 'left' ? leftRef.current : rightRef.current
         if (!element) continue
         const max = Math.max(0, element.scrollHeight - element.clientHeight)
@@ -405,18 +411,31 @@ export function StructuredView({
     [entries, ranges, selectPath]
   )
 
+  /**
+   * Exact hits paint their own span; a node this side lacks paints the deepest
+   * existing ancestor weakly so a fallback never reads as an exact hit. A side
+   * with nothing to mark (no document root) highlights nothing.
+   */
   const highlightFor = (side: StructuredSide): StructuredHighlight | null => {
     if (!selectedChange || !ranges) return null
     const range = ranges[selectedChange.path]?.[side]
     const status = HIGHLIGHT_STATUSES[selectedChange.status]
-    if (!range || !range.exact || status === null) return null
-    return { status, startLine: range.startLine, endLine: range.endLine }
+    if (!range || status === null) return null
+    const kind = classifySourceRange(range)
+    if (kind === 'none') return null
+    return {
+      status,
+      tone: kind === 'exact' ? 'exact' : 'ancestor',
+      startLine: range.startLine,
+      endLine: range.endLine
+    }
   }
 
+  /** Whether this side lacks the node; the copy never depends on the highlight. */
   const missingOn = (side: StructuredSide): boolean => {
     if (!selectedChange || !ranges) return false
     const range = ranges[selectedChange.path]?.[side]
-    return range !== undefined && !range.exact
+    return range !== undefined && classifySourceRange(range) !== 'exact'
   }
 
   /** Opens a local JSON / YAML file on one side and re-runs the comparison. */
