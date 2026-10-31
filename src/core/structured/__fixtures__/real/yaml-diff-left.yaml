@@ -1,0 +1,21 @@
+# yaml-diff-left.yaml — real differences mixed with cosmetic noise
+"deploy":
+  "retries": 5
+  "legacyTimeout": 30
+  "enabled": true
+
+  "extras":
+    "canary": "off"
+"cluster":
+  "regions":
+    "primary":
+      "zones":
+        "a":
+          "nodes":
+            - "labels":
+                "role": "ingress"
+                "tier": "front"
+            - "labels":
+                "role": "worker"
+                "tier": "back"
+  "name": "eu-central"
