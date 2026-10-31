@@ -16,6 +16,7 @@ export const PLATFORM_CHANNELS = {
   writeTextFile: 'platform:write-text-file',
   exists: 'platform:exists',
   statPath: 'platform:stat-path',
+  checkWritable: 'platform:check-writable',
   ensureDirectory: 'platform:ensure-directory',
   deleteFile: 'platform:delete-file',
   removeDirectory: 'platform:remove-directory',

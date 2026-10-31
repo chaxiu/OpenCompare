@@ -15,6 +15,7 @@ import {
   executeSyncPlan,
   invalidateComparisonCache,
   joinRelativePath,
+  SyncRefreshError,
   SyncTargetError
 } from '@core/directory/sync'
 import type { SyncDirection, SyncMode, SyncPlan } from '@core/directory/sync'
@@ -46,7 +47,8 @@ function syncIo(platform: PlatformPort) {
     deleteFile: (path: string) => platform.deleteFile(path),
     removeDirectory: (path: string) => platform.removeDirectory(path),
     statPath: (path: string) => platform.statPath(path),
-    listDirectory: (path: string) => platform.listDirectory(path)
+    listDirectory: (path: string) => platform.listDirectory(path),
+    checkWritable: (path: string) => platform.checkWritable(path)
   }
 }
 
@@ -54,12 +56,19 @@ function syncIo(platform: PlatformPort) {
 const IPC_FAILURE_PREFIX = /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/
 
 /**
- * Keeps a localized sync failure and a cancellation exactly as they are, and
- * strips the `Error invoking remote method …` wrapper from anything else so the
- * workbench never shows the IPC plumbing instead of the reason.
+ * Keeps a localized sync failure, a "writes landed, refresh failed" error and a
+ * cancellation exactly as they are, and strips the `Error invoking remote method
+ * …` wrapper from anything else so the workbench never shows the IPC plumbing
+ * instead of the reason.
  */
 function readableSyncFailure(cause: unknown): unknown {
-  if (cause instanceof SyncTargetError || isOperationCancelled(cause)) return cause
+  if (
+    cause instanceof SyncTargetError ||
+    cause instanceof SyncRefreshError ||
+    isOperationCancelled(cause)
+  ) {
+    return cause
+  }
   if (!(cause instanceof Error)) return cause
   const stripped = cause.message.replace(IPC_FAILURE_PREFIX, '')
   return stripped === cause.message ? cause : new Error(stripped)
@@ -194,7 +203,9 @@ export interface SyncApplyOptions {
  *
  * A failure or cancellation rolls the target back inside `executeSyncPlan` and
  * rejects: no new `DirectoryComparison` is produced, so the caller keeps its
- * current session and the same preview stays retryable.
+ * current session and the same preview stays retryable. A refresh that fails
+ * *after* the writes landed rejects with {@link SyncRefreshError} instead — the
+ * disk already holds the result, so that preview must not be applied again.
  */
 export async function applySyncPreview(
   platform: PlatformPort,
@@ -239,8 +250,23 @@ export async function applySyncPreview(
   const leftRoot = leftToRight ? preview.sourceRoot : plan.targetRoot
   const rightRoot = leftToRight ? plan.targetRoot : preview.sourceRoot
 
+  let comparison: DirectoryComparison
+  try {
+    comparison = await compareRoots(platform, leftRoot, rightRoot, cache)
+  } catch (cause) {
+    // The writes are on disk, so rolling back would be the wrong answer. Report
+    // the completed write and the failed re-read as one readable failure.
+    const reason =
+      cause instanceof Error ? cause.message.replace(IPC_FAILURE_PREFIX, '') : String(cause)
+    throw new SyncRefreshError(reason, {
+      copied: execution.copied,
+      updated: execution.updated,
+      deleted: execution.deleted
+    })
+  }
+
   return {
-    comparison: await compareRoots(platform, leftRoot, rightRoot, cache),
+    comparison,
     copied: execution.copied,
     updated: execution.updated,
     deleted: execution.deleted

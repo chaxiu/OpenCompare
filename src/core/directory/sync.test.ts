@@ -8,7 +8,6 @@ import {
   copyScannedTree,
   executeSyncPlan,
   invalidateComparisonCache,
-  SYNC_WRITE_PROBE_PREFIX,
   SyncTargetError
 } from './sync'
 
@@ -125,7 +124,8 @@ function createWritableFs(initial: FakeTree): WritableFs {
         if (node === null) return 'missing'
         return isFile(node) ? 'file' : 'directory'
       },
-      listDirectory: listEntries
+      listDirectory: listEntries,
+      checkWritable: async () => undefined
     }
   }
 }
@@ -148,11 +148,6 @@ async function compareTrees(fs: WritableFs, cache = createComparisonCache()) {
     comparison: await compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache),
     cache
   }
-}
-
-/** Planned deletes only: the writability probe is written and removed each run. */
-function itemDeletes(deletes: readonly string[]): string[] {
-  return deletes.filter((path) => !path.includes(SYNC_WRITE_PROBE_PREFIX))
 }
 
 function mutable(tree: FakeFile | FakeTree): Record<string, FakeFile | FakeTree> {
@@ -275,7 +270,7 @@ describe('sync execution', () => {
 
     const execution = await executeSyncPlan(plan, fs.io, { deletePaths: ['drop-me.txt'] })
     expect(execution.deleted).toBe(1)
-    expect(itemDeletes(fs.deletes)).toEqual(['/right/drop-me.txt'])
+    expect(fs.deletes).toEqual(['/right/drop-me.txt'])
     expect(fs.snapshot().right).toHaveProperty('keep-me.txt')
   })
 
@@ -291,7 +286,7 @@ describe('sync execution', () => {
 
       const execution = await executeSyncPlan(plan, fs.io, options)
       expect(execution.deleted).toBe(0)
-      expect(itemDeletes(fs.deletes)).toEqual([])
+      expect(fs.deletes).toEqual([])
       expect(fs.snapshot().right).toHaveProperty('drop-me.txt')
       expect(fs.snapshot().right).toHaveProperty('keep-me.txt')
     }
@@ -356,20 +351,28 @@ describe('sync failure safety', () => {
     expect(message).toContain('/right/added.txt')
     expect(message).toMatch(/EISDIR/)
     expect(message).not.toContain('Error invoking remote method')
+    // The refusal happens in the preflight: no planned write or delete ran and
+    // no probe file was created in the target tree.
+    expect(fs.writes).toEqual([])
+    expect(fs.deletes).toEqual([])
     expect(fs.snapshot().right).toEqual(before)
   })
 
   it('refuses an unwritable target root before touching any planned item', async () => {
     const { fs, plan } = await safetyPlan()
     const before = structuredClone(fs.snapshot().right)
+    // The writability seam itself refuses, exactly like `access(root, W_OK)` on a
+    // read-only target: no write channel is ever asked to create a probe file.
     const denied: SyncIo = {
       ...fs.io,
-      writeTextFile: async () => {
+      checkWritable: async () => {
         throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
       }
     }
 
-    const error = await executeSyncPlan(plan, denied).then(
+    const error = await executeSyncPlan(plan, denied, {
+      deletePaths: ['stale-a.txt', 'stale-b.txt']
+    }).then(
       () => undefined,
       (reason: unknown) => reason
     )
@@ -379,7 +382,75 @@ describe('sync failure safety', () => {
     expect((error as Error).message).toContain('/right')
     expect((error as Error).message).toMatch(/EACCES/)
     expect(fs.writes).toEqual([])
+    expect(fs.deletes).toEqual([])
     expect(fs.snapshot().right).toEqual(before)
+  })
+
+  it('registers the restore before an overwrite so a post-write failure still rolls back', async () => {
+    const { fs, plan } = await safetyPlan()
+    const before = structuredClone(fs.snapshot().right)
+    let landed = false
+    // The atomic write landed (rename done) and the mtime backfill then failed.
+    const failing: SyncIo = {
+      ...fs.io,
+      writeTextFile: async (path, content, modifiedMs) => {
+        await fs.io.writeTextFile(path, content, modifiedMs)
+        if (!landed && path.endsWith('update.txt')) {
+          landed = true
+          throw Object.assign(new Error('utimes failed'), { code: 'EACCES' })
+        }
+      }
+    }
+
+    const error = await executeSyncPlan(plan, failing).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(landed).toBe(true)
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
+    expect((error as Error).message).toContain('/right/update.txt')
+    // The undo was registered before the write, so the landed overwrite is undone.
+    expect(fs.snapshot().right).toEqual(before)
+    expect(mutable(fs.snapshot().right)['update.txt']).toMatchObject({
+      text: 'old',
+      modifiedMs: 400
+    })
+  })
+
+  it('registers the restore before a delete so a post-delete failure still restores it', async () => {
+    const { fs, plan } = await safetyPlan()
+    const before = structuredClone(fs.snapshot().right)
+    let landed = false
+    // The unlink landed and the call still rejected.
+    const failing: SyncIo = {
+      ...fs.io,
+      deleteFile: async (path) => {
+        await fs.io.deleteFile(path)
+        if (!landed && path.endsWith('stale-a.txt')) {
+          landed = true
+          throw Object.assign(new Error('unlink failed after removal'), { code: 'EACCES' })
+        }
+      }
+    }
+
+    const error = await executeSyncPlan(plan, failing, {
+      deletePaths: ['stale-a.txt']
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(landed).toBe(true)
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
+    expect((error as Error).message).toContain('/right/stale-a.txt')
+    expect(fs.snapshot().right).toEqual(before)
+    expect(mutable(fs.snapshot().right)['stale-a.txt']).toMatchObject({
+      text: 'a',
+      modifiedMs: 500
+    })
   })
 
   it('rolls a mid-plan failure back to the exact previous bytes and mtimes', async () => {

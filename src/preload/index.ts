@@ -45,6 +45,8 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.statPath, path) as Promise<
       'file' | 'directory' | 'missing'
     >,
+  checkWritable: (path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.checkWritable, path) as Promise<void>,
   ensureDirectory: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,

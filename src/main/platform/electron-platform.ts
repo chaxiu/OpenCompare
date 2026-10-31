@@ -19,7 +19,7 @@ import {
   utimes,
   writeFile
 } from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
+import { createReadStream, constants } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
@@ -852,6 +852,16 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   ipcMain.handle(PLATFORM_CHANNELS.statPath, (_event, path: unknown) =>
     statPath(assertPath(path))
   )
+  ipcMain.handle(PLATFORM_CHANNELS.checkWritable, async (_event, path: unknown) => {
+    const target = assertWritable(assertPath(path))
+    try {
+      // `access(…, W_OK)` only asks the OS; it never creates or truncates a file,
+      // so a refused sync preflight leaves the target tree exactly as it was.
+      await access(target, constants.W_OK)
+    } catch (error) {
+      throw readableFileFailure('写入', error, target)
+    }
+  })
   ipcMain.handle(PLATFORM_CHANNELS.ensureDirectory, async (_event, path: unknown) => {
     const target = assertPath(path)
     if (isSamplePath(target)) return

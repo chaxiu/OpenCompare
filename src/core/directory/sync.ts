@@ -175,6 +175,12 @@ export interface SyncIo {
   readonly statPath: (path: string) => Promise<PathProbeKind>
   /** One directory's entries; carries each entry's `isDirectory` / `modifiedMs`. */
   readonly listDirectory: (path: string) => Promise<readonly DirectoryEntry[]>
+  /**
+   * Non-writing writability probe of one existing path. Rejects with the OS
+   * refusal (`EACCES`, `EROFS`, …) instead of creating a probe file, so the
+   * preflight never leaves anything behind in the target tree.
+   */
+  readonly checkWritable: (path: string) => Promise<void>
 }
 
 export interface SyncExecutionOptions {
@@ -198,9 +204,6 @@ export interface SyncExecution {
   /** Absolute target paths that changed, so caches can drop them. */
   readonly affected: readonly string[]
 }
-
-/** Temporary probe file a preflight writes and removes to test writability. */
-export const SYNC_WRITE_PROBE_PREFIX = '.opencompare-sync-probe-'
 
 /** Chinese gloss of the OS codes a sync write path can surface. */
 const SYSTEM_CODE_GLOSS: Readonly<Record<string, string>> = {
@@ -230,6 +233,32 @@ export class SyncTargetError extends Error {
     this.name = 'SyncTargetError'
     this.path = path
     this.code = code
+  }
+}
+
+/**
+ * The plan's writes all landed, but re-reading the tree afterwards failed.
+ * Deliberately **not** a {@link SyncTargetError}: nothing was rolled back, so the
+ * caller must keep the written disk state, close the already-applied preview and
+ * tell the user the write completed and only the refresh failed.
+ */
+export class SyncRefreshError extends Error {
+  readonly copied: number
+  readonly updated: number
+  readonly deleted: number
+  /** Readable reason of the failed re-read, any IPC wrapper already stripped. */
+  readonly reason: string
+
+  constructor(reason: string, counts: { copied: number; updated: number; deleted: number }) {
+    super(
+      `同步写入已完成（新增拷贝 ${counts.copied} · 覆盖 ${counts.updated} · 删除 ${counts.deleted}），` +
+        `但刷新对比失败：${reason}。目标侧已是写入后的状态，请重新预览获取最新对比。`
+    )
+    this.name = 'SyncRefreshError'
+    this.copied = counts.copied
+    this.updated = counts.updated
+    this.deleted = counts.deleted
+    this.reason = reason
   }
 }
 
@@ -327,30 +356,21 @@ async function assertDirectoryChain(state: SyncTargetState, directory: string): 
 }
 
 /**
- * Writes and removes a probe file in the target root, so a read-only target is
- * refused before any planned item is touched. The probe never survives.
+ * Refuses a read-only target root through the non-writing writability probe, so
+ * the check itself creates no file in the user's tree.
  */
-async function probeWritableTarget(state: SyncTargetState): Promise<void> {
-  const probe = joinRelativePath(
-    state.targetRoot,
-    `${SYNC_WRITE_PROBE_PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  )
+async function assertWritableTarget(state: SyncTargetState): Promise<void> {
   try {
-    await state.io.writeTextFile(probe, '')
+    await state.io.checkWritable(state.targetRoot)
   } catch (error) {
     throw syncFailure(state.targetRoot, error, '无法写入目标目录')
-  }
-  try {
-    await state.io.deleteFile(probe)
-  } catch (error) {
-    throw syncFailure(probe, error, '无法清理临时探测文件')
   }
 }
 
 /**
  * Refuses the whole run before the first planned write when the target root is
- * not writable or a planned position is occupied by a directory. Only reads (and
- * the removed probe) happen here, so a refused run leaves the target untouched.
+ * not writable or a planned position is occupied by a directory. Only reads
+ * happen here, so a refused run leaves the target untouched.
  */
 async function preflight(
   plan: SyncPlan,
@@ -364,6 +384,8 @@ async function preflight(
   if (rootShape === 'missing') {
     throw new SyncTargetError(plan.targetRoot, 'ENOENT', SYSTEM_CODE_GLOSS.ENOENT)
   }
+
+  await assertWritableTarget(state)
 
   const writes = [...plan.copy.items, ...plan.update.items]
   const deletes = plan.delete.items.filter((item) => selected.has(item.relativePath))
@@ -381,8 +403,6 @@ async function preflight(
       throw new SyncTargetError(item.targetPath, 'EISDIR', SYSTEM_CODE_GLOSS.EISDIR)
     }
   }
-
-  await probeWritableTarget(state)
 }
 
 interface FileBackup {
@@ -441,13 +461,16 @@ async function writeItem(
   checkCancelled(signal)
   const content = await targetCall(sourcePath, () => state.io.readTextFile(sourcePath))
   checkCancelled(signal)
-  await targetCall(item.targetPath, () =>
-    state.io.writeTextFile(item.targetPath, content, item.modifiedMs)
-  )
+  // The restore is registered **before** the target is touched: the write can
+  // land and still reject (the rename succeeded, the mtime backfill failed), and
+  // that run must roll the previous bytes and mtime back like any other failure.
   undo.push(
     backup === null
       ? () => state.io.deleteFile(item.targetPath)
       : () => state.io.writeTextFile(item.targetPath, backup.content, backup.modifiedMs)
+  )
+  await targetCall(item.targetPath, () =>
+    state.io.writeTextFile(item.targetPath, content, item.modifiedMs)
   )
 }
 
@@ -511,10 +534,12 @@ export async function executeSyncPlan(
       checkCancelled(options.signal)
       const backup = await backupTarget(state, item.targetPath)
       if (backup === null) continue
-      await targetCall(item.targetPath, () => state.io.deleteFile(item.targetPath))
+      // Registered before the delete for the same reason as a write: a delete
+      // that landed and then rejected still has to be undone.
       undo.push(() =>
         state.io.writeTextFile(item.targetPath, backup.content, backup.modifiedMs)
       )
+      await targetCall(item.targetPath, () => state.io.deleteFile(item.targetPath))
       affected.push(item.targetPath)
       deleted += 1
     }
