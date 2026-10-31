@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -27,6 +28,9 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as 
   author?: { name?: string; email?: string }
   license?: string
   homepage?: string
+  scripts?: Record<string, string>
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
 }
 
 // The release documents and workflow defaults are asserted against the version
@@ -127,7 +131,7 @@ const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8
     notarize?: boolean
     target?: string[]
   }
-  win?: { icon?: string; target?: string[] }
+  win?: { icon?: string; artifactName?: string; target?: string[] }
   nsis?: { artifactName?: string }
   linux?: {
     icon?: string
@@ -3679,7 +3683,7 @@ describe('packaged artifact names and update metadata', () => {
   it('requires the versioned artifact of every platform', () => {
     expect(step).toContain('case "${{ matrix.target }}" in')
     expect(step).toContain('mac) required_exts=(dmg zip)')
-    expect(step).toContain('win) required_exts=(exe)')
+    expect(step).toContain('win) required_exts=(exe zip)')
     expect(step).toContain('linux) required_exts=(AppImage deb)')
   })
 
@@ -3699,6 +3703,327 @@ describe('packaged artifact names and update metadata', () => {
     expect(step).toContain('files[].path')
     expect(step).toContain('path ${metadata.path}')
     expect(step).toContain('update metadata does not match tag')
+  })
+})
+
+describe('Windows portable zip release surface', () => {
+  const versionStep = packageStep('Assert packaged version matches the tag')
+  const winRequiredExtsScript = (versionStep?.run ?? '').replaceAll('${{ matrix.target }}', 'win')
+  const feedStep = packageStep('Assert the Windows update feed points at the NSIS installer')
+  const feedScript = feedStep?.run ?? ''
+  const assetsStep = releaseStepBody('Assert the public release has every platform asset')
+  const assetsGateScript =
+    finalizeStep('Assert the public release has every platform asset')?.run ?? ''
+
+  const setupAsset = `OpenCompare-Setup-${currentVersion}.exe`
+  const portableAsset = `OpenCompare-${currentVersion}-win-x64.zip`
+
+  const winLatestYml = (zipEntry: boolean): string =>
+    [
+      `version: ${currentVersion}`,
+      'files:',
+      `  - url: ${setupAsset}`,
+      '    sha512: fixture',
+      '    size: 1',
+      ...(zipEntry ? [`  - url: ${portableAsset}`, '    sha512: fixture', '    size: 1'] : []),
+      `path: ${setupAsset}`,
+      'sha512: fixture'
+    ].join('\n')
+
+  // Tempdir fixtures are the only place this suite writes Windows artifacts.
+  const runPackagingScript = (
+    script: string,
+    options: { artifacts?: string[]; latestYml?: string } = {}
+  ): { status: number; output: string } => {
+    const { artifacts = [], latestYml } = options
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-win-packaging-'))
+    try {
+      // Each step runs after `pnpm install`, so `node -e` resolves the
+      // repository's yaml package; the fixture reuses it instead of a copy.
+      symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'), 'dir')
+      const releaseDir = join(dir, 'release')
+      mkdirSync(releaseDir, { recursive: true })
+      if (latestYml !== undefined) writeFileSync(join(releaseDir, 'latest.yml'), latestYml)
+      for (const artifact of artifacts) writeFileSync(join(releaseDir, artifact), 'fixture')
+      const scriptPath = join(dir, 'step.sh')
+      writeFileSync(scriptPath, script)
+      const result = spawnSync('bash', [scriptPath], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: { ...process.env, RELEASE_TAG: currentTag }
+      })
+      return {
+        status: result.status ?? -1,
+        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('builds both the NSIS installer and the portable zip for Windows', () => {
+    const targets = builder.win?.target ?? []
+    expect(targets).toContain('nsis')
+    expect(targets).toContain('zip')
+    // No third Windows target: the release matrix promises exactly these two.
+    expect([...targets].sort()).toEqual(['nsis', 'zip'])
+  })
+
+  it('derives both Windows artifact names from the version with no spaces', () => {
+    const setupName = builder.nsis?.artifactName ?? ''
+    const winName = builder.win?.artifactName ?? ''
+    // The installer keeps its own template, so latest.yml's files[].url shape
+    // does not move; the win-level template covers the zip only.
+    expect(setupName).toBe('${productName}-Setup-${version}.${ext}')
+    expect(winName).toBe('${productName}-${version}-win-${arch}.${ext}')
+    for (const pattern of [setupName, winName]) {
+      expect(pattern).toContain('${version}')
+      expect(pattern).not.toContain(' ')
+    }
+    const productName = builder.productName ?? ''
+    expect(productName).toBe('OpenCompare')
+    const render = (pattern: string, ext: string): string =>
+      pattern
+        .replace('${productName}', productName)
+        .replace('${version}', currentVersion)
+        .replace('${arch}', 'x64')
+        .replace('${ext}', ext)
+    expect(render(setupName, 'exe')).toBe(`OpenCompare-Setup-${currentVersion}.exe`)
+    expect(render(winName, 'zip')).toBe(`OpenCompare-${currentVersion}-win-x64.zip`)
+    expect(render(winName, 'zip')).not.toMatch(/\s/)
+  })
+
+  it('produces the portable zip from the built-in target with no extra script', () => {
+    // electron-builder's own `zip` target unpacks to a runnable directory, so the
+    // build step, the upload glob and package.json need no zip-specific branch.
+    const build = packageStep('Build installers')?.run ?? ''
+    expect(build).toContain('electron-builder --${{ matrix.target }} --publish never')
+    expect(build).not.toMatch(/\bzip\b/)
+    for (const [name, command] of Object.entries(pkg.scripts ?? {})) {
+      expect(name.toLowerCase()).not.toContain('zip')
+      expect(command).not.toContain('zip ')
+    }
+    for (const dependency of ['archiver', 'adm-zip', 'jszip', 'yazl']) {
+      expect(pkg.dependencies?.[dependency]).toBeUndefined()
+      expect(pkg.devDependencies?.[dependency]).toBeUndefined()
+    }
+    const upload = releaseStepBody("Upload installers to the tag's release")
+    expect(upload).toContain('release/*.zip')
+    expect(upload).toContain('release/*.exe')
+  })
+
+  it('requires both Windows extensions in the packaging job', () => {
+    expect(builder.win?.target).toContain('zip')
+    expect(winRequiredExtsScript).toContain('win) required_exts=(exe zip)')
+    // The versioned-name loop covers both extensions, so neither can ship stale.
+    expect(winRequiredExtsScript).toContain('for ext in "${required_exts[@]}"')
+    expect(winRequiredExtsScript).toContain('does not match tag')
+  })
+
+  it('passes when the installer and the portable zip both carry the tag version', () => {
+    const { status, output } = runPackagingScript(winRequiredExtsScript, {
+      artifacts: [setupAsset, portableAsset],
+      latestYml: winLatestYml(false)
+    })
+    expect(output).toContain(`release/latest.yml version=${currentVersion}`)
+    expect(status).toBe(0)
+  })
+
+  it('fails closed when the NSIS installer is missing', () => {
+    const { status, output } = runPackagingScript(winRequiredExtsScript, {
+      artifacts: [portableAsset],
+      latestYml: winLatestYml(false)
+    })
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::No .exe artifact found')
+  })
+
+  it('fails closed when the portable zip is missing', () => {
+    const { status, output } = runPackagingScript(winRequiredExtsScript, {
+      artifacts: [setupAsset],
+      latestYml: winLatestYml(false)
+    })
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::No .zip artifact found')
+  })
+
+  it('keeps the Windows update feed on the NSIS installer as its own gate', () => {
+    expect(feedStep).toBeDefined()
+    expect(feedStep?.if).toBe("matrix.target == 'win'")
+    expect(feedScript).toContain('release/latest*.yml')
+    expect(feedScript).toContain('files[].url')
+    expect(feedScript).toContain('endsWith(".zip")')
+    expect(feedScript).toContain('exit 1')
+    // Read-only: it never writes the feed or the release.
+    expect(feedScript).not.toMatch(/gh release (upload|edit|create|delete)/)
+    // It sits between the version/url checks and the upload, and the existing
+    // latest*.yml version + files[].url gates stay in place next to it.
+    const versionIndex = releaseWorkflow.indexOf('name: Assert packaged version matches the tag')
+    const feedIndex = releaseWorkflow.indexOf(
+      'name: Assert the Windows update feed points at the NSIS installer'
+    )
+    const uploadIndex = releaseWorkflow.indexOf("name: Upload installers to the tag's release")
+    expect(feedIndex).toBeGreaterThan(versionIndex)
+    expect(uploadIndex).toBeGreaterThan(feedIndex)
+    expect(winRequiredExtsScript).toContain('String(metadata.version) !== tag')
+    expect(winRequiredExtsScript).toContain('files[].url ${url} does not match tag')
+  })
+
+  it('passes a latest.yml that only lists the installer', () => {
+    const { status, output } = runPackagingScript(feedScript, {
+      latestYml: winLatestYml(false)
+    })
+    expect(output).toContain('files[] carries no zip entry')
+    expect(status).toBe(0)
+  })
+
+  it('fails closed when latest.yml lists the portable zip', () => {
+    const { status, output } = runPackagingScript(feedScript, {
+      latestYml: winLatestYml(true)
+    })
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::')
+    expect(output).toContain('must use the NSIS installer')
+    expect(output).toContain('refusing a Windows update feed')
+  })
+
+  it('verifies both Windows assets by their exact published names', () => {
+    expect(assetsStep).toContain('has_exact_asset')
+    expect(assetsStep).toContain(
+      `for asset in "OpenCompare-Setup-\${tag}.exe" "OpenCompare-\${tag}-win-x64.zip"; do`
+    )
+    expect(assetsStep).toContain('if [ "${name}" = "${wanted}" ]; then return 0; fi')
+    expect(assetsStep).toContain('is missing the Windows asset ${asset}')
+    // The exact matcher is used, never the suffix matcher the macOS zip satisfies.
+    expect(assetsStep).toContain('! has_exact_asset "${asset}"')
+  })
+
+  // `gh` is a local stub echoing a fixture release, so the gate runs for real
+  // against exact asset-name sets without any network access.
+  const runAssetGate = (assets: string[]): { status: number; output: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-win-assets-'))
+    try {
+      const fakeGh = join(dir, 'gh')
+      writeFileSync(
+        fakeGh,
+        [
+          '#!/usr/bin/env bash',
+          'if [[ "$*" == *"/assets"* ]]; then',
+          '  printf \'%s\\n\' "${FAKE_ASSETS}"',
+          'else',
+          '  printf \'[{"id":123,"tag_name":"%s"}]\\n\' "${RELEASE_TAG}"',
+          'fi',
+          ''
+        ].join('\n'),
+        { mode: 0o755 }
+      )
+      const scriptPath = join(dir, 'assets-gate.sh')
+      writeFileSync(scriptPath, assetsGateScript)
+      const result = spawnSync('bash', [scriptPath], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH ?? ''}`,
+          RELEASE_TAG: currentTag,
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare',
+          FAKE_ASSETS: JSON.stringify(assets.map((name) => ({ name })))
+        }
+      })
+      return {
+        status: result.status ?? -1,
+        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  const publishedWindowsAssets = (omit?: 'exe' | 'zip'): string[] =>
+    [
+      `OpenCompare-${currentVersion}.dmg`,
+      `OpenCompare-${currentVersion}-mac.zip`,
+      setupAsset,
+      portableAsset,
+      `OpenCompare-${currentVersion}.AppImage`,
+      `opencompare_${currentVersion}_amd64.deb`,
+      'latest-mac.yml',
+      'latest.yml',
+      'latest-linux.yml'
+    ].filter((name) => {
+      if (omit === 'exe') return name !== setupAsset
+      if (omit === 'zip') return name !== portableAsset
+      return true
+    })
+
+  it('passes when both Windows assets are published under their exact names', () => {
+    const { status, output } = runAssetGate(publishedWindowsAssets())
+    expect(status).toBe(0)
+    expect(output).not.toContain('is missing the Windows asset')
+  })
+
+  it('is not satisfied by the macOS zip when the Windows zip is missing', () => {
+    const { status, output } = runAssetGate(publishedWindowsAssets('zip'))
+    expect(status).not.toBe(0)
+    expect(output).toContain(`is missing the Windows asset ${portableAsset}`)
+  })
+
+  it('fails closed when the Windows installer is missing', () => {
+    const { status, output } = runAssetGate(publishedWindowsAssets('exe'))
+    expect(status).not.toBe(0)
+    expect(output).toContain(`is missing the Windows asset ${setupAsset}`)
+  })
+
+  it('keeps every pre-existing release gate', () => {
+    for (const name of [
+      'Assert the published release body is bilingual',
+      'Verify the tag has exactly one public release',
+      'Assert the public release has every platform asset',
+      'Assert latest*.yml urls match the release assets',
+      'Assert the tag is the latest published release'
+    ]) {
+      expect(finalizeStep(name)).toBeDefined()
+    }
+    expect(assetsStep).toContain('latest-mac.yml latest.yml latest-linux.yml')
+    const uniqueStep = finalizeStep('Verify the tag has exactly one public release')?.run ?? ''
+    expect(uniqueStep).toContain('select(.draft)')
+    expect(uniqueStep).toContain('select(.prerelease)')
+  })
+
+  it('announces the portable zip in both language notes', () => {
+    const noteSection = (notes: string, heading: string): string => {
+      const start = notes.indexOf(`### ${heading}`)
+      expect(start).toBeGreaterThan(-1)
+      const end = notes.indexOf('\n## ', start)
+      expect(end).toBeGreaterThan(start)
+      return notes.slice(start, end)
+    }
+    const enSection = noteSection(releaseNotes, 'Windows portable download')
+    const zhSection = noteSection(bilingualNotes, 'Windows 免安装包')
+    expect(enSection).toContain(
+      'Windows ships both the NSIS installer and a portable `.zip` (extract and run, no installation step).'
+    )
+    expect(zhSection).toContain(
+      'Windows 同时提供 NSIS 安装包与免安装 `.zip`（解压即用，无安装步骤）。'
+    )
+    expect(enSection).toContain(
+      'Auto-update keeps resolving to the NSIS installer, so the portable zip is a download only.'
+    )
+    expect(zhSection).toContain('自动更新仍指向 NSIS 安装包，免安装 zip 只作为下载。')
+    // Sentence-for-sentence parity: two sentences on each side, same order.
+    const body = (section: string): string => section.replace(/^###[^\n]*\n/, '').trim()
+    const sentences = (text: string, separator: RegExp): string[] =>
+      text.split(separator).map((part) => part.trim()).filter(Boolean)
+    expect(sentences(body(enSection), /(?<=\.)\s+/)).toHaveLength(2)
+    expect(sentences(body(zhSection), /(?<=。)/)).toHaveLength(2)
+  })
+
+  it('reframes the Windows assets in the release process doc', () => {
+    expect(releaseProcessDoc).toContain(
+      '- **Windows**：NSIS `.exe` 安装包 + 免安装 `.zip`（解压即用，无安装步骤）'
+    )
+    // The old "installer only" wording may not survive anywhere in the doc.
+    expect(releaseProcessDoc).not.toContain('Windows**：NSIS `.exe` 安装包。')
   })
 })
 
