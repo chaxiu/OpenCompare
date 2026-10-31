@@ -79,6 +79,8 @@
 
 ## 最近交付证明
 
+- 交叉引用（非本域 AC）：`wi_ws_7efd09ed8abe2eda`（2026-10-31）只改 `platform:write-text-file` handler 的 mtime 回填方式——由 `new Date(modifiedMs)` + `utimes(Date)` 改为数值秒 `Math.floor(ms) / 1000 + 1e-6`，让源 `stat().mtimeMs` 的亚毫秒部分不再把回写时间压到整毫秒以下。**通道名、请求/响应形状、`PlatformPort.writeTextFile(path, content, modifiedMs?)` 签名与 Web 实现均未变**，不新增 IPC channel；真实磁盘同步的 AC 与门禁归 `domains/directory`（`ac-mtime-preserved-fast-path-same` / `sync-real-gate`）。
+
 - WI：`wi_ws_5d6ca74561fcb9ea`（保存落盘原子化与成功/取消/不可写三路径，`kind: fix`）
 - 日期：2026-10-27
 - 结果：code_gates passed（9 条门禁 attempt 001 全绿：install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate；`pnpm test` 62 个文件 965 passed / 1 skipped）；本轮 `needSelfTest=false`，UI 自测与原生保存面板人工验收跳过。

@@ -727,8 +727,9 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect(screen.getByText('1 item · 100 B')).toBeDefined()
     expect(screen.getByText('2 items · 2.0 KiB')).toBeDefined()
     expect(screen.getByText('0 items · 0 B')).toBeDefined()
+    expect(screen.getByText('This run: 1 copy · 2 overwrite · 0 delete')).toBeDefined()
     expect(button('Cancel')).toBeDefined()
-    expect(button('Apply changes')).toBeDefined()
+    expect((button('Apply changes') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('keeps the zh title, groups, totals and actions unchanged', () => {
@@ -829,7 +830,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect((button(zh['directory.sync.apply']) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('localizes the mirror delete checkbox, cancels once and confirms checked paths', () => {
+  it('starts mirror deletions unchecked, requires a selection and confirms only checked paths', () => {
     const onCancel = vi.fn()
     const onConfirm = vi.fn()
     const preview = makeSyncPreview({
@@ -846,10 +847,28 @@ describe('DirectorySyncDialog bilingual copy', () => {
       'en'
     )
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Delete drop.txt' }))
+    const keep = checkbox('Delete keep.txt') as HTMLInputElement
+    const drop = checkbox('Delete drop.txt') as HTMLInputElement
+    expect(keep.checked).toBe(false)
+    expect(drop.checked).toBe(false)
+    // Only unselected deletions: nothing is executable, and the reason is shown.
+    expect((button('Apply changes') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/Delete items are unchecked by default/)).toBeDefined()
+
+    fireEvent.click(button('Select all'))
+    expect(keep.checked).toBe(true)
+    expect(drop.checked).toBe(true)
+    fireEvent.click(button('Clear'))
+    expect(keep.checked).toBe(false)
+    expect(drop.checked).toBe(false)
+
+    // A single explicit selection is the only deletion that can be confirmed.
+    fireEvent.click(drop)
+    expect(screen.getByText('This run: 0 copy · 0 overwrite · 1 delete')).toBeDefined()
+    expect((button('Apply changes') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(button('Apply changes'))
     expect(onConfirm).toHaveBeenCalledTimes(1)
-    expect(onConfirm).toHaveBeenCalledWith(['keep.txt'])
+    expect(onConfirm).toHaveBeenCalledWith(['drop.txt'])
 
     fireEvent.click(button('Cancel'))
     expect(onCancel).toHaveBeenCalledTimes(1)
@@ -865,10 +884,14 @@ describe('DirectorySyncDialog bilingual copy', () => {
       'zh'
     )
     expect(
-      screen.getByRole('checkbox', {
-        name: zh['directory.sync.deleteItem'].replace('{path}', 'keep.txt')
-      })
-    ).toBeDefined()
+      (
+        checkbox(
+          zh['directory.sync.deleteItem'].replace('{path}', 'keep.txt')
+        ) as HTMLInputElement
+      ).checked
+    ).toBe(false)
+    expect(button(zh['directory.sync.selectAll'])).toBeDefined()
+    expect((button(zh['directory.sync.apply']) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('shows the busy labels and keeps the whole en dialog Han free', () => {

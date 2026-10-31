@@ -254,6 +254,24 @@ describe('sync execution', () => {
     expect(fs.deletes).toEqual(['/right/drop-me.txt'])
     expect(fs.snapshot().right).toHaveProperty('keep-me.txt')
   })
+
+  it('deletes nothing when no delete path is selected or the option is omitted', async () => {
+    for (const options of [{}, { deletePaths: [] as string[] }]) {
+      const fs = createWritableFs({
+        left: { 'keep.txt': { text: 'keep' } },
+        right: { 'drop-me.txt': { text: 'drop' }, 'keep-me.txt': { text: 'stay' } }
+      })
+      const { comparison } = await compareTrees(fs)
+      const plan = buildSyncPlan(comparison, 'left-to-right', 'mirror')
+      expect(plan.delete.items).toHaveLength(2)
+
+      const execution = await executeSyncPlan(plan, fs.io, options)
+      expect(execution.deleted).toBe(0)
+      expect(fs.deletes).toEqual([])
+      expect(fs.snapshot().right).toHaveProperty('drop-me.txt')
+      expect(fs.snapshot().right).toHaveProperty('keep-me.txt')
+    }
+  })
 })
 
 describe('tree materialisation', () => {

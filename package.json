@@ -35,7 +35,8 @@
     "screenshots": "electron-vite build && node scripts/capture-readme-screenshots.mjs",
     "test:cancel": "vitest run src/cancel-gate.test.ts",
     "test:memory": "vitest run src/memory-gate.test.ts",
-    "test:structured": "vitest run src/structured-semantics-gate.test.ts"
+    "test:structured": "vitest run src/structured-semantics-gate.test.ts",
+    "test:sync-real": "vitest run src/sync-real-gate.test.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.21",

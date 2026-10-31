@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { JSX } from 'react'
+import type { JSX, ReactNode } from 'react'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { SyncPlanGroup } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
@@ -13,11 +13,13 @@ import { SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS, countKey } from './directoryCopy'
 function GroupHeader({
   title,
   tone,
-  group
+  group,
+  actions
 }: {
   readonly title: string
   readonly tone: string
   readonly group: SyncPlanGroup
+  readonly actions?: ReactNode
 }): JSX.Element {
   const { t } = useI18n()
   return (
@@ -29,6 +31,7 @@ function GroupHeader({
           size: formatBytes(group.bytes)
         })}
       </span>
+      {actions ? <div className="ml-auto flex items-center gap-1">{actions}</div> : null}
     </div>
   )
 }
@@ -69,7 +72,7 @@ export interface DirectorySyncDialogProps {
 /**
  * Dry-run preview of one sync direction: what will be copied, overwritten and
  * (in mirror mode) deleted, with byte totals. Cancel writes nothing; mirror
- * deletions can be individually unchecked.
+ * deletions start unchecked and are opt-in, one by one or all at once.
  */
 export function DirectorySyncDialog({
   preview,
@@ -79,15 +82,18 @@ export function DirectorySyncDialog({
 }: DirectorySyncDialogProps): JSX.Element {
   const { t } = useI18n()
   const { plan, materializeTarget } = preview
-  const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 
   const deletePaths = useMemo(
-    () => plan.delete.items.filter((item) => !excluded.has(item.relativePath)).map((item) => item.relativePath),
-    [plan, excluded]
+    () =>
+      plan.delete.items
+        .filter((item) => selected.has(item.relativePath))
+        .map((item) => item.relativePath),
+    [plan, selected]
   )
 
   function toggle(relativePath: string): void {
-    setExcluded((current) => {
+    setSelected((current) => {
       const next = new Set(current)
       if (next.has(relativePath)) next.delete(relativePath)
       else next.add(relativePath)
@@ -96,6 +102,9 @@ export function DirectorySyncDialog({
   }
 
   const empty = plan.totalCount === 0
+  const executableCount = plan.copy.count + plan.update.count + deletePaths.length
+  const blockedByDeletes =
+    !empty && executableCount === 0 && plan.mode === 'mirror' && plan.delete.count > 0
 
   return (
     <Dialog
@@ -123,7 +132,7 @@ export function DirectorySyncDialog({
           <ToolbarButton
             variant="primary"
             onClick={() => onConfirm(deletePaths)}
-            disabled={busy || empty}
+            disabled={busy || executableCount === 0}
           >
             {busy ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
             {busy ? t('directory.sync.syncing') : t('directory.sync.apply')}
@@ -185,6 +194,28 @@ export function DirectorySyncDialog({
                 title={t('directory.sync.group.delete')}
                 tone="text-diff-removed"
                 group={plan.delete}
+                actions={
+                  plan.delete.items.length > 0 ? (
+                    <>
+                      <ToolbarButton
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => setSelected(new Set(plan.delete.items.map((item) => item.relativePath)))}
+                      >
+                        {t('directory.sync.selectAll')}
+                      </ToolbarButton>
+                      <ToolbarButton
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy || deletePaths.length === 0}
+                        onClick={() => setSelected(new Set())}
+                      >
+                        {t('directory.sync.clearSelection')}
+                      </ToolbarButton>
+                    </>
+                  ) : undefined
+                }
               />
               {plan.delete.items.length > 0 ? (
                 <ul className="mt-1 rounded-sm border border-line-subtle">
@@ -195,8 +226,9 @@ export function DirectorySyncDialog({
                     >
                       <input
                         type="checkbox"
-                        checked={!excluded.has(item.relativePath)}
+                        checked={selected.has(item.relativePath)}
                         onChange={() => toggle(item.relativePath)}
+                        disabled={busy}
                         aria-label={t('directory.sync.deleteItem', {
                           path: item.relativePath
                         })}
@@ -216,6 +248,19 @@ export function DirectorySyncDialog({
               )}
             </section>
           ) : null}
+
+          <div className="flex flex-col gap-1 border-t border-line-subtle pt-2">
+            <p className="text-2xs text-content-secondary" aria-live="polite">
+              {t('directory.sync.summary', {
+                copy: plan.copy.count,
+                update: plan.update.count,
+                delete: deletePaths.length
+              })}
+            </p>
+            {blockedByDeletes ? (
+              <p className="text-2xs text-danger">{t('directory.sync.noExecutable')}</p>
+            ) : null}
+          </div>
         </div>
       )}
     </Dialog>

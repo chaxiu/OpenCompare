@@ -814,8 +814,12 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
       const target = assertWritable(assertPath(path))
       await writeFile(target, typeof content === 'string' ? content : String(content), 'utf8')
       if (typeof modifiedMs === 'number' && Number.isFinite(modifiedMs)) {
-        const stamp = new Date(modifiedMs)
-        await utimes(target, stamp, stamp)
+        // Preserve the source mtime at whole-millisecond precision. `new Date(ms)`
+        // plus the platform's seconds conversion can land just below the integer
+        // millisecond (e.g. …348.999), which would re-flag a synced file as
+        // modified; numeric seconds with a sub-microsecond lift stay on the ms.
+        const seconds = Math.floor(modifiedMs) / 1000 + 1e-6
+        await utimes(target, seconds, seconds)
       }
     }
   )
