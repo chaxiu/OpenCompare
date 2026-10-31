@@ -1,0 +1,17 @@
+// json-noise-left.json — real disk snapshot, cosmetic noise only
+{
+	"service": {
+		"name": "opencompare", // inline comment
+		"replicas": 3,
+
+		"tiers": {
+			"web": { "cpu": "500m", "memory": "1Gi" },
+		},
+		"sinks": ["stdout", "file",],
+	},
+	"pipeline": {
+		"stages": ["build", "test", "package"],
+		// trailing comma on the last member below
+		"enabled": true,
+	},
+}

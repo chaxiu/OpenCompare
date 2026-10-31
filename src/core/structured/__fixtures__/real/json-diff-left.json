@@ -1,0 +1,28 @@
+// json-diff-left.json — real differences mixed with cosmetic noise
+{
+	"service": {
+		"name": "opencompare",
+		"quota": 12,
+		"removedFlag": "legacy",
+		"tiers": {
+			"web": { "replicas": 3, "cpu": "500m" },
+			"worker": { "cpu": "250m", "replicas": 2 },
+		},
+	},
+	"pipeline": {
+		"stage": {
+			"build": {
+				"matrix": {
+					"targets": {
+						"linux": {
+							"runners": {
+								"labels": ["self-hosted", "linux-x64"],
+								"caches": { "enabled": true },
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+}

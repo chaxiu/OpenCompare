@@ -1,0 +1,14 @@
+{
+  "pipeline": {
+    "enabled": true,
+    "stages": ["build", "test", "package"]
+  },
+  "service": {
+    "sinks": ["stdout", "file"],
+    "tiers": {
+      "web": { "memory": "1Gi", "cpu": "500m" }
+    },
+    "replicas": 3,
+    "name": "opencompare"
+  }
+}

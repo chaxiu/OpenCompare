@@ -31,7 +31,8 @@ const EXPECTED_GATES = [
   { id: 'test', command: 'pnpm test' },
   { id: 'test-compare-request', command: 'pnpm test src/shared/compareRequest.test.ts' },
   { id: 'cancel-gate', command: 'pnpm test:cancel' },
-  { id: 'memory-gate', command: 'pnpm test:memory' }
+  { id: 'memory-gate', command: 'pnpm test:memory' },
+  { id: 'structured-semantics', command: 'pnpm test:structured' }
 ] as const
 
 const SINGLE_ARGV_FORBIDDEN = ['&&', '||', '|', ';'] as const
@@ -49,16 +50,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly nine pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly ten pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(9)
+    expect(defaultManifest.gates).toHaveLength(10)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the nine commands verbatim with cwd "."', () => {
+  it('keeps the ten commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )

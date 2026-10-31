@@ -15,6 +15,7 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 - **两类数据源同一套引擎**：内置样本场景 `STRUCTURED_SCENE`（json/yaml 两对，可切换格式）与目录树双击下钻传入的 ad-hoc `pair`（含 `format`，格式固定、不显示格式切换控件）。
 - **解析错误态**：非法 JSON / YAML 给出可读错误提示（`StateView` 危险态），不崩溃、不白屏，左右原文与其余会话仍可用。
 - **本地结构化文件入口（`StructuredView` 顶栏）**：经 `PlatformPort.selectFile` 分别打开左 / 右本地 `.json` / `.yaml` 文件，按扩展名判定格式并重算语义差异；打开非 JSON/YAML 或解析失败时展示可读错误态而非崩溃。
+- **真实文件语义门（`src/structured-semantics-gate.test.ts` + `src/core/structured/__fixtures__/real/`）**：放在 `src/` 根、与 `src/cancel-gate.test.ts` / `src/memory-gate.test.ts` 同级同范式的**只读真实磁盘文件**门，钉死三件事——键序无关、格式无关、真实差异不漏。**恰好 3 个 `it`**，一例一主题；对比输入一律经 `node:fs` 的 `readFileSync` 从 `__fixtures__/real/` 读入（`import.meta` 相对解析，不用 `process.cwd()` 拼路径），不得内联 JSON/YAML 字符串、不得 import `@shared/fixtures`、不得 `vi.mock`。fixtures 为 8 个提交入库的静态文件：`json-noise-left/right.json`、`yaml-noise-left/right.yaml`（两侧语义相同，只在对象键序、缩进、注释、尾逗号、空行、引号风格上有差；左边带噪音、右边干净）、`json-diff-left/right.json`、`yaml-diff-left/right.yaml`（各至少一条 added / removed / modified / typeChanged，且至少一条路径 ≥8 层嵌套；未变更部分照样带键序与格式噪音）。期望差异表在测试文件内以常量声明、排序后比较。配套：`package.json` 新增单 argv 脚本 `"test:structured": "vitest run src/structured-semantics-gate.test.ts"`；`.munk/code-gates.json` 的 `gates` 末尾追加第 10 项 `structured-semantics`（`cwd: "."`、`command: "pnpm test:structured"`）；`src/munk-gates.test.ts` 期望矩阵 9 → 10，前 9 条 `{id, command}` 逐字逐序保留。
 
 ## 验收
 
@@ -45,6 +46,15 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 - **ac-real-fixtures**：`src/core/structured/__fixtures__/locate/` 下 4 个真实文件（JSON 左/右、YAML 左/右，含注释 / 缩进 / 引号噪音、≥8 层嵌套、单侧新增与单侧删除）经 `node:fs` 读入后，定位结果的原文切片与期望值逐字相等，行号与文件真实行号一致。
 - **ac-locate-idempotent**：同一 locator 交替调用多个 path 各 100 次，每次返回深相等结果，互不影响。
 - **ac-existing-diff-intact**：`src/core/structured/diff.ts`、`parse.ts`、`diff.test.ts` 零改动，`pnpm test` 全绿，`pnpm typecheck`、`pnpm lint` 通过。
+- **ac-gate-manifest**：`.munk/code-gates.json` 的 `gates` 中存在且仅存在一条 `id === 'structured-semantics'`，其 `cwd === '.'`、`command === 'pnpm test:structured'`，命令串不含 `&&`、`||`、`|`、`;`。
+- **ac-structured-script**：`package.json` 的 `scripts['test:structured'] === 'vitest run src/structured-semantics-gate.test.ts'`，且该文件在磁盘上存在。
+- **ac-gate-under-pnpm-test**：执行 `pnpm test` 时该门文件被实际收集并执行（`vitest run` 的 include `src/**/*.test.ts` 覆盖它），`pnpm test` 与 `pnpm test:structured` 两条命令均退出码 0。
+- **ac-gate-pin-preserved**：`src/munk-gates.test.ts` 的期望矩阵长度断言为 10，前 9 条 `{id, command}` 与改动前逐字、逐序相同（`install/lint/typecheck/build/build-web/test/test-compare-request/cancel-gate/memory-gate`），第 10 条为 `structured-semantics` → `pnpm test:structured`。
+- **ac-gate-three-cases-only**：`src/structured-semantics-gate.test.ts` 内 `it(` 出现次数恰为 3；每个 `it` 体的对比输入都来自 `src/core/structured/__fixtures__/real/` 下的 `readFileSync`，文件源码中不出现 `import ... from '@shared/fixtures'`。
+- **ac-key-order-ignored**：对 `json-noise-*` 与 `yaml-noise-*` 两对真实文件分别 `diffStructured(left, right, format)`：`counts.added === counts.removed === counts.modified === counts.typeChanged === 0`，`entries.length > 0`，且 `entries.every(e => e.status === 'same')`；同时断言两侧原文的对象键出现顺序确实不同（对同两个键名取 `indexOf` 比较先后，左右相反），证明该例不是空转。
+- **ac-format-noise-ignored**：`json-noise-left.json` 原文确实含 `//` 注释行与尾逗号、且与右侧缩进不同；`yaml-noise-left.yaml` 原文确实含 `#` 注释行与空行、且键带引号；对应右侧不含注释；在此前提下上述两对 diff 仍为零差异计数（同 ac-key-order-ignored 的计数口径）。
+- **ac-real-diff-not-missed**：对 `json-diff-*` 与 `yaml-diff-*` 两对真实文件，`diffStructured(...).entries` 中所有 `status !== 'same'` 的 `{path, status}` 集合与测试内声明的期望表**逐条相等**（不多不少）；期望表至少含 `added`、`removed`、`modified`、`typeChanged` 各 1 条，且至少一条路径为 ≥8 段 JSON Pointer；`changed.size > 0`（引擎若整对判 same 会直接红）。
+- **ac-existing-tests-intact**：`src/core/structured/diff.test.ts` 与 `src/core/structured/locate.test.ts` 文件未被删除、未被改写，`it(` 数量分别不少于 16 与 32，且 `pnpm test` 全绿。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 六条门禁全绿。
 
 ## 非目标
@@ -72,9 +82,9 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 
 ## 最近交付证明
 
-- WI：`wi_ws_925dd85679f21b43`（JSON/YAML 路径定位核心，`key: structured-locate-core`，work-set `ws_cf3b932ce0e1ecd7` P1④）
+- WI：`wi_ws_ffe5e8010c083c42`（真实文件语义门，`key: structured-real-file-semantics-gate`）
 - 日期：2026-10-31
-- 结果：code_gates passed（9 gates，attempt 001，`needSelfTest: false`）。
-- 覆盖摘要：新增纯函数模块 `src/core/structured/locate.ts`（`createStructuredLocator` / `locateStructuredPath` → `SourceRange`），把 `diffStructured` 的 JSON Pointer 映射为某一侧原文 1-based 行/列区间：JSON 走 `jsonc-parser` `parseTree` 的 `offset`+`length`、YAML 走 `parseDocument` 节点 `range`，与 `parseStructured` 同参数、不可解析时抛同一个 `StructuredParseError`；段反转义在 `locate.ts` 内按 `~1`→`/`、`~0`→`~` 顺序完成，数组段严格匹配 `^(0|[1-9][0-9]*)$`，容器区间覆盖开/闭括号或块映射/序列全量，根指针与 `''` 剔除前导注释/尾随空白；该侧缺节点逐段下钻最深祖先（`exact:false`），全无则回退根（`path:''`）；行起始 offset 缓存一次、后续 locate 按段下钻，同一 locator 多次调用结果恒定。真实样本 `__fixtures__/locate/`（`json-left/right`、`yaml-left/right`，含注释/缩进/引号噪音、≥8 层嵌套、单侧新增与删除）经 `node:fs` 读取校验切片逐字相等与行号一致。`diff.ts` / `parse.ts` / `diff.test.ts` 零改动；`pnpm test` 81 files / 1277 tests passed（含 `locate.test.ts` 32 例），`typecheck` / `lint` / `build` / `build-web` / memory / cancel gate 全绿。
-- 注：本 WI change pack 仅含 `prd.md`（无 `tests/cases/**`），故本轮无 QA 用例文件可 copy；验收口径已按 `prd.md` 的 16 条 AC **定义**整段折入上方「验收」。亦未提供 `tech.md` / `ux/**`，tech/ux 折叠跳过（沿用既有 tech overview 与 design 基线）。
-- 注：本域为纯 core 层增量，UI 侧（差异行点选跳转高亮、原文反选、双栏同步滚动、过滤/切 tab 位置保持、5 MB 后台化）仍为后续子项，未在本轮落地。
+- 结果：code_gates passed（10 gates 矩阵，`needSelfTest: false`；本项把默认矩阵从 9 扩到 10，末尾追加 `structured-semantics`）。
+- 覆盖摘要：新增 `src/structured-semantics-gate.test.ts`（`src/` 根，与 `cancel-gate` / `memory-gate` 同范式，**恰好 3 个 `it`**：键序无关 / 格式噪音无关 / 真实差异不漏），全部输入经 `node:fs` `readFileSync` + `fileURLToPath(new URL('./core/structured/__fixtures__/real/', import.meta.url))` 读取，无内联对比字符串、无 `@shared/fixtures`、无 mock；新增 `src/core/structured/__fixtures__/real/` 8 个静态文件（`json-noise-left/right.json`、`yaml-noise-left/right.yaml`、`json-diff-left/right.json`、`yaml-diff-left/right.yaml`）：noise 对语义相同、左侧带 `//` 注释 + 尾逗号 + tab 缩进 / `#` 注释 + 空行 + 引号键，右侧干净且两键出现顺序左右相反；diff 对各含 added / removed / modified / typeChanged，JSON 深层路径 `/pipeline/stage/build/matrix/targets/linux/runners/labels/0`、YAML 深层路径 `/cluster/regions/primary/zones/a/nodes/0/labels/role` 均 ≥8 段，未变更部分照样带噪音。`package.json` 追加 `test:structured` 单 argv 脚本；`.munk/code-gates.json` 末尾追加第 10 项 `structured-semantics`（`cwd: "."`、`command: "pnpm test:structured"`）；`src/munk-gates.test.ts` 期望矩阵 9 → 10、长度断言 9 → 10，前 9 条 `{id, command}` 逐字逐序未动。`src/core/structured/` 源码（`diff.ts` / `parse.ts` / `locate.ts`）与 `diff.test.ts` / `locate.test.ts` 零字节改动。
+- 注：本 WI change pack 仅含 `prd.md`（无 `tests/cases/**`），故无 change-pack 用例可 copy；验收口径已按 `prd.md` 的 10 条 AC **定义**折入上方「验收」，执行记录落档 `qa/real-file-semantics-gate.md`。亦未提供 `tech.md` / `ux/**`，tech/ux 手合跳过（`.munk/baseline/tech/overview.md` 的门禁清单一节由 Delivery 同步为 10 项口径，属门禁形状变更的事实同步）。
+- 后续注意：① 本门**只**读 `__fixtures__/real/`，不复用 `__fixtures__/locate/` 或 `@shared/fixtures`；往门里加第 4 个 `it` 会直接违反 `ac-gate-three-cases-only`。② 期望差异表是排序后逐条相等，改 fixtures 必须同改常量表，否则红在「不多不少」而不是「漏检」。③ CRLF/LF、BOM、编码归一、YAML 多文档 / 重复键 / merge key、`.json5` 等解析边界仍挂账，本门不受理。

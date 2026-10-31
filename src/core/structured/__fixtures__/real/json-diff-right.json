@@ -1,0 +1,27 @@
+{
+  "pipeline": {
+    "stage": {
+      "build": {
+        "matrix": {
+          "targets": {
+            "linux": {
+              "runners": {
+                "caches": { "enabled": true },
+                "labels": ["self-hosted-large", "linux-x64"]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "service": {
+    "tiers": {
+      "worker": { "replicas": 2, "cpu": "250m" },
+      "web": { "cpu": "500m", "replicas": "3" }
+    },
+    "quota": 14,
+    "name": "opencompare",
+    "addedFlag": { "owner": "platform" }
+  }
+}
