@@ -46,6 +46,11 @@
       "id": "memory-gate",
       "cwd": ".",
       "command": "pnpm test:memory"
+    },
+    {
+      "id": "structured-semantics",
+      "cwd": ".",
+      "command": "pnpm test:structured"
     }
   ]
 }

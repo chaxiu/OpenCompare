@@ -1,0 +1,19 @@
+cluster:
+  name: eu-central
+  regions:
+    primary:
+      zones:
+        a:
+          nodes:
+            - labels:
+                tier: front
+                role: edge
+            - labels:
+                role: worker
+                tier: back
+deploy:
+  extras:
+    canary: "off"
+    telemetry: true
+  enabled: "true"
+  retries: 8

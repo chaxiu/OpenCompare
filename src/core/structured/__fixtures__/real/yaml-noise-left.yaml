@@ -1,0 +1,19 @@
+# yaml-noise-left.yaml — real disk snapshot, cosmetic noise only
+"service":
+  "name": "opencompare"
+  "replicas": 3
+
+  "tiers":
+    "web":
+      "cpu": "500m"
+      "memory": "1Gi"
+  "sinks":
+    - stdout
+    - file
+
+"pipeline":
+  "stages":
+    - build
+    - test
+    - package
+  "enabled": true
