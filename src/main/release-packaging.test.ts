@@ -61,9 +61,9 @@ const pendingWord = ['待', '发布'].join('')
 // explicitly and asserted against the README status line, not against the
 // converged version in package.json. Once a release lands, one wrap-up commit
 // updates both README line 5 and this constant together.
-// This tree is a v0.2.14 pre-release wrap-up: the newest published anchor
-// stays at v0.2.12 while package.json has already converged on v0.2.14.
-const latestPublishedTag = 'v0.2.12'
+// v0.2.14 shipped, so the newest published anchor now equals the converged
+// tag; the v0.2.12 anchor stays pinned in `publishedTags` as history.
+const latestPublishedTag = 'v0.2.14'
 // The previous public release. Pinned on its own so flipping the newest anchor
 // never retargets the history assertions below.
 const previousPublishedTag = 'v0.2.8'
@@ -80,6 +80,7 @@ const publishedTags = [
   'v0.2.8',
   'v0.2.9',
   'v0.2.11',
+  'v0.2.12',
   latestPublishedTag
 ]
 const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
@@ -945,16 +946,16 @@ describe('release version gate', () => {
     for (const line of [readmeStatusLine(readmeEn), readmeStatusLine(readmeZh)]) {
       expect(line).toContain(latestPublishedTag)
     }
-    // This tree is a v0.2.14 pre-release wrap-up: the newest published anchor
-    // still points at v0.2.12 and precedes the converged tag.
+    // v0.2.14 shipped: the newest published anchor equals the converged tag,
+    // and the previously published v0.2.12 anchor still precedes it.
     expect(publishedTags).toContain(latestPublishedTag)
     // The folded version was never tagged, so it must never join the shipped list.
     expect(publishedTags).not.toContain(foldedTag)
-    expect(latestPublishedTag).not.toBe(currentTag)
-    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
+    expect(latestPublishedTag).toBe(currentTag)
+    expect(isTagBefore('v0.2.12', latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, latestPublishedTag)).toBe(true)
     expect(isTagBefore(previousPublishedTag, currentTag)).toBe(true)
-    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
+    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
     expect(releaseWorkflow).toContain(`default: '${currentTag}'`)
     expect(releaseProcessDoc).toContain(`default: '${currentTag}'`)
   })
@@ -1533,10 +1534,10 @@ describe('release notes changelog', () => {
     const superseded = changelog.indexOf('## v0.2.0')
     const previous = changelog.indexOf('## v0.1.2')
     expect(current).toBeGreaterThan(-1)
-    // This tree is a v0.2.14 pre-release wrap-up: the converged entry sits above
-    // the newest published entry, which stays at v0.2.12.
-    expect(latestPublished).toBeGreaterThan(current)
-    expect(changelog.indexOf('## v0.2.12')).toBe(changelog.indexOf(`## ${latestPublishedTag}`))
+    // v0.2.14 shipped: the newest published entry is the current entry, and
+    // the v0.2.12 entry stays pinned directly below it as history.
+    expect(latestPublished).toBe(current)
+    expect(changelog.indexOf('## v0.2.12')).toBeGreaterThan(latestPublished)
     expect(shippedV0211).toBeGreaterThan(latestPublished)
     expect(shippedV029).toBeGreaterThan(shippedV0211)
     // The v0.2.8 entry sits below v0.2.9 and above v0.2.7.
@@ -1854,7 +1855,9 @@ describe('release notes changelog', () => {
       }
     }
     expect(changelog).toMatch(/tag 之后的修复由 v0\.2\.0 承接/)
-    expect(signingDoc).toContain(`tag 之后的修复由 ${latestPublishedTag} 承接`)
+    // The v0.1.2 drift record pins its own successor as history, so it must
+    // not follow the moving newest-published anchor.
+    expect(signingDoc).toContain('tag 之后的修复由 v0.2.12 承接')
   })
 
   it('ships the current release notes as paste-ready source text', () => {
@@ -1895,14 +1898,14 @@ describe('release notes changelog', () => {
   })
 
   it('anchors the newest published release notes at the shipped tag', () => {
-    // This tree is a v0.2.14 pre-release wrap-up: the shipped notes stay at
-    // v0.2.12 while the converged notes already point at v0.2.14.
+    // v0.2.14 shipped: the newest published notes are the current notes, and
+    // the v0.2.12 record stays pinned as history.
     expect(existsSync(lastReleasedNotesPath)).toBe(true)
     expect(firstHeading(lastReleasedNotes)).toContain(latestPublishedTag)
     expect(existsSync(releaseNotesPath)).toBe(true)
     expect(firstHeading(releaseNotes)).toContain(currentTag)
-    expect(lastReleasedNotesPath).not.toBe(releaseNotesPath)
-    expect(isTagBefore(latestPublishedTag, currentTag)).toBe(true)
+    expect(lastReleasedNotesPath).toBe(releaseNotesPath)
+    expect(isTagBefore('v0.2.12', latestPublishedTag)).toBe(true)
   })
 
   it('covers the still-public v0.2.2 release notes', () => {
