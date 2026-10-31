@@ -910,6 +910,34 @@
 - **ac-delivery-clean**：交付时 `git status --porcelain` 为空，改动已提交并经 delivery 合入 main；未打 tag、未 push tag、未发版、未 dispatch 任何 release workflow。
 - **非目标（本项）**：不重做工具栏横向滚动兜底，不改 `DirectoryView.tsx` / `main.css` / `shellLayout*` 或任何渲染层代码；不改 `docs/release-notes/**`（含 `v0.2.12.md`）、两版 README、`release.yml`、`docs/release-evidence/**`、`docs/release-signing.md`、`docs/assets/*.png`、`docs/screenshots.md`；不新增 / 删除 / 重排任何历史 CHANGELOG 条目，不改 `## v0.2.12` 既有 5 条「改进」文案与「文档」「升级方式」小节；不写 `tech.md`、不新建 WorkSet、不扩范围到算法 / 扫描 / 快照 / 主题 token / `SHELL_LEVELS` / `minWidth`；不打 tag / 不 push tag / 不发版 / 不 dispatch release workflow、不跑浏览器 / 真机 / 截图。
 
+### v0.2.13 版本单点 + 双语发布说明 + 锚点对齐（发布前态，单提交）
+
+> **姿态**：`latestPublishedTag` 保持 `'v0.2.12'`，`currentTag` 前移到 `v0.2.13`——版本门回到「latest 落后 current」（`not.toBe` + `isTagBefore === true`），与上一轮 v0.2.12 收尾轮的 `latest === current` 正好相反。发布说明正文只写已合入事实：P1④ 语义定位收尾（缺失侧落到最近祖先并 `opacity-60` 弱化、精确行不回退）与结构化语义门默认矩阵 9→10。
+
+- **ac-version-single-source**：`package.json#version === "0.2.13"`，且该文件 diff 只有 version 一行。
+- **ac-changelog-new-segment-first**：`CHANGELOG.md` 中最先出现的 `## v*` 标题是 `## v0.2.13`，其后紧邻的下一个版本标题是 `## v0.2.12`，两者之间不插入其它版本标题或空段。
+- **ac-changelog-history-untouched**：`## v0.2.12` 及以下全部历史条目零 diff（git diff 在该区段只有新增行、无删除/改写行）。
+- **ac-changelog-upgrade-heading**：`## v0.2.13` 段内含「升级方式」标题。
+- **ac-changelog-banned-tokens**：`## v0.2.13` 段不含 `200,000`、`10 MB`、`本版新增`、`待验证`、`预计通过`、`应该通过`、`TODO|TBD|FIXME`、40–64 位十六进制串，以及任何 `\d+(\.\d+)?\s*(GiB|MiB|GB|MB)` 尺寸/内存数字。
+- **ac-notes-bilingual-pair**：`docs/release-notes/v0.2.13.md` 与 `docs/release-notes/v0.2.13.zh-CN.md` 均存在且非空，各自首个 H1 含 `v0.2.13`；两版顶部各有一条指向对方的互链，且互链路径与对方文件名一致。
+- **ac-notes-section-order**：英文版按 `What changed` → `Not in this release` → `Risk and verification scope` → `Upgrade` 顺序出现；中文版按 `本次变化` → `不做的事` → `风险与验证规模` → `升级方式` 顺序出现；四节标题在每个文件内各出现一次。
+- **ac-notes-facts-only**：两版正文均含 P1 语义定位事实（最近祖先 / `opacity-60` / 精确行不回退）与结构化语义门事实（默认门数 9→10，`structured` 或 `semantic` 表述），且不含「已发布」「已修复」「已通过 L1」、`**Full Changelog**` 行，也不含 `releases/tag/` 链接。
+- **ac-readme-line5-frozen**：`README.md` 与 `README.zh-CN.md` 的 diff 为空；第 5 行仍为 `v0.2.12`，两版都未新增版本表（仍无 `| Version |` / `| 版本 |`）。
+- **ac-signing-posture-v0213**：`docs/release-signing.md` 含 `正式版发布姿态（v0.2.13）`，第五节补发用法默认 tag 为 `v0.2.13`，末尾收敛句指向 `v0.2.13` 且明确写出「最新公开 Release 仍为 v0.2.12」。
+- **ac-signing-published-facts-frozen**：`docs/release-signing.md` 第 5 行 `当前状态：v0.2.12 已发布` 与 `docs/release-notes/v0.2.12.md`、`docs/release-evidence/v0.2.12.md` 引用逐字未变；不含 `待发布`。
+- **ac-release-yml-default-only**：`release.yml` 的 `workflow_dispatch.inputs.tag.default` 解析结果为 `v0.2.13`，该文件 diff 仅此一行。
+- **ac-release-process-default**：`docs/release-process.md` 含 `default: 'v0.2.13'`，且第 8 行以外无其它改动。
+- **ac-test-dispatch-defaults**：`src/main/release-packaging.test.ts` 对 `releaseWorkflow` 与 `releaseProcessDoc` 的 dispatch 默认值断言与 `currentTag`（= `v0.2.13`）同源并全绿。
+- **ac-test-prelaunch-state**：测试断言 `latestPublishedTag`（保持 `v0.2.12`）早于 `currentTag`，且 `lastReleasedNotesPath !== releaseNotesPath`；`publishedTags` 列表内容不变。
+- **ac-test-anchor-moves-only**：测试文件无删除的 `describe` / `it`、无 `skip` / `todo` 化、无把断言放宽为 `not.toContain`、无白名单扩容、无断言目标文件改写；改动前基线 `grep -c '  it('` = 202、`grep -c 'expect('` = 863，改动后两者计数均不低于基线。
+- **ac-test-changelog-slice-boundaries**：以 `## v0.2.12` 作为当前段结束边界，当前段内版本标题集合恰为 `[v0.2.13]`，且顺序断言中 `## v0.2.12` 位于 `## v0.2.13` 与 `## v0.2.11` 之间。
+- **ac-test-content-tokens**：CHANGELOG 当前段内容断言使用 `v0.2.13` 事实 token（`P1`、`opacity-60`、`structured`/`semantic`、门数 9→10 表达）且逐条保留；「升级方式」类中英共享断言拆成中文 CHANGELOG 段断言 `升级方式` + 英文 notes 断言 `Upgrade` 两条等价断言。
+- **ac-evidence-frozen**：`docs/release-evidence/**` 与 `docs/release-notes/v0.2.12.md` 及更早历史 notes 零 diff；`docs/release-evidence/v0.2.13.md` 不存在。
+- **ac-no-product-code**：`src/renderer/**`、`src/core/**`、`src/main/**`（`release-packaging.test.ts` 除外）零 diff；`src/preload/**`、`src/shared/**` 零 diff。
+- **ac-gates-10-green**：按 `.munk/code-gates.json` 顺序执行全部 10 门（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate / structured-semantics）全部通过。
+- **ac-worktree-clean**：隔离 worktree 内 `git status --porcelain` 为空。
+- **ac-delivery-report**：交付说明逐条列出改动文件清单、每处测试锚点改动理由、`it(`/`expect(` 改动前后计数、`git diff --stat`。
+
 ## 非目标
 
 - 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
@@ -1089,9 +1117,18 @@
 - **非目标**：不改 `docs/release-evidence/**` 与 `docs/release-notes/**`（前序 WI 已交付，本项只读）；不改 `package.json#version`、`CHANGELOG.md` 历史条目、`.github/workflows/release.yml`、发布说明正文；不动 tag / Release / 资产，不 push、不发版、不重新打包或公证；不改产品行为与 UI、`docs/perf/**`、`docs/release-process.md`；不重构测试、不新增发布规则、不为 v0.2.10 新增 notes 或 evidence；不放宽或删除任何既有断言换绿灯。
 - **实现约束**：基线是 `refs/heads/main`（tip `c9dbaba`）的干净工作树，测试文件行号以本树实际内容为准；`latestPublishedTag` 前移只动常量、注释与「收敛态 / 收尾态」相关断言，历史锚（`historicalNotesV0xx`、`historicalEvidenceV026/V027`、`previousPublishedTag = 'v0.2.8'`、`previousPublishedEvidencePath`）保持原状——**`previousPublishedTag` 不得跟着前移**（前移会打断 v0.2.8 证据 describe / caps / README 负向链接断言）；`v0.2.11` 证据文件已在本树存在，签名文档不得再写「尚未归档 / 不在仓库内」，`v0.2.10` 不得新增证据或 notes；改完跑 `.munk/code-gates.json` 九门，`test` 门须真实执行不接受跳过；依赖安装用仓库既定 `pnpm`。
 
+- **v0.2.13 收敛的改动面与「反向翻面」纪律（本项）**：允许改的路径恰为七项——`package.json`（仅 `version`）、`CHANGELOG.md`（顶部新增 `## v0.2.13`，历史逐字不动）、`docs/release-notes/v0.2.13.md` + `docs/release-notes/v0.2.13.zh-CN.md`（同提交新增，英文为默认正文）、`docs/release-process.md`（`default:` 一行）、`docs/release-signing.md`（姿态标题 / 第五节补发默认 tag 与收敛句 / 末尾承接段）、`.github/workflows/release.yml`（仅 `workflow_dispatch.inputs.tag.default` 一行）、`src/main/release-packaging.test.ts`（锚点反向翻面 + 切片终点重锚）；`.munk/changes/**` 与 `.munk/baseline/**` 除外。**反向翻面是硬要求**：上一轮 v0.2.12 收尾轮把断言翻成 `toBe(currentTag)` / `isTagBefore === false` / `lastReleasedNotesPath === releaseNotesPath`，本轮必须整组翻回 `not.toBe(currentTag)` / `isTagBefore === true` / `not.toBe(releaseNotesPath)`，并把三处 `changelog.slice(...)` 的结束端点从派生锚改为显式 `## v0.2.12`——**`latest === current` 那一套终点写法在 `latest` 落后时会切出空串假绿**，这是本项最容易写坏的地方；`latestPublishedTag` 保持 `'v0.2.12'`、`previousPublishedTag` 保持 `'v0.2.8'`、`publishedTags` 一个不动。**签名文档分工**：姿态标题与补发默认 tag 跟 `currentTag`（v0.2.13），`当前状态：v0.2.12 已发布`、`docs/release-notes/v0.2.12.md`、`docs/release-evidence/v0.2.12.md` 钉 `latestPublishedTag`，末尾收敛句必须写明「最新公开 Release 仍为 v0.2.12」。**双语 notes 纪律（本版起的新约定）**：英文正文 + `zh-CN` 同提交副本，两版顶部各一条指向对方的互链（`./v0.2.13.md` / `./v0.2.13.zh-CN.md`），四节标题各自齐全且各出现一次，事实只写已合入的 P1④ 祖先回退 + 结构化语义门 9→10，不写「已发布 / 已修复 / 已通过 L1」，不写 `**Full Changelog**` 与 `releases/tag/` 链接。**冻结项**：两版 README 第 5 行仍 `v0.2.12`、`docs/release-evidence/**` 与 `docs/release-notes/v0.2.12.md` 及更早历史 notes 零 diff、不新建 `docs/release-evidence/v0.2.13.md`、`src/` 除 `release-packaging.test.ts` 外零 diff。**门禁口径**：`.munk/code-gates.json` 现为 **10 门**（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate / structured-semantics），交付证据按 10 门记，不沿用旧的 9 门口径。
+
 ## 最近交付证明
 
-- WI：`wi_ws_cc072345813e636b`（v0.2.12 版本锚点收尾：两版 README 第 5 行 `v0.2.11` → `v0.2.12`、`release-packaging.test.ts` 锚点前移到 `latestPublishedTag = 'v0.2.12'` 并把收敛态断言整体翻面（`latest === current`）、三处 `slice` 终点由派生锚改显式 `## v0.2.11`、`docs/release-signing.md` 版本指向同步且 v0.2.11 降为历史条目指向已归档证据；`deliveryIntent: local merge`，`needSelfTest=false`）
+- WI：`wi_ws_01759cc51f642bad`（v0.2.13 版本单点 + 双语发布说明 + 锚点对齐：`package.json#version` 0.2.12 → 0.2.13；`CHANGELOG.md` 顶部新增 `## v0.2.13`（改进 / 不做的事 / 升级方式，历史逐字不动）；新增 `docs/release-notes/v0.2.13.md` 与 `v0.2.13.zh-CN.md` 双语互链对，正文只写 P1④ 祖先回退 + `opacity-60` 弱化 + 精确行不回退与结构化语义门 9→10；`release.yml` dispatch 默认 tag 与 `docs/release-process.md` 摘录同步 `v0.2.13`；`docs/release-signing.md` 姿态标题 / 第五节补发默认 tag / 末尾收敛句指向 `v0.2.13`，而 `当前状态：v0.2.12 已发布` 与两份 v0.2.12 引用逐字冻结；`release-packaging.test.ts` 锚点整组反向翻面（`not.toBe(currentTag)` / `isTagBefore === true` / `not.toBe(releaseNotesPath)`）并把三处 `slice` 结束端点改成显式 `## v0.2.12`，新增 bilingual notes 对用例；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-10-31
+- 结果：`code_gates` passed（**10 gates**，attempt 001 全 exit 0，`.munk/runs/run_ws_5b055e3cfc11b92a/code-gates/attempts/001`）；`pnpm test` 91 files / 1347 passed + 1 skipped（1348），29.49s。UI 自测跳过。
+- 改动面：6 个已跟踪文件 `+91 / −30`（`package.json` 1/1、`CHANGELOG.md` 18/0、`docs/release-process.md` 1/1、`docs/release-signing.md` 3/3、`.github/workflows/release.yml` 1/1、`src/main/release-packaging.test.ts` 67/24），外加两份新增 notes（各 30 行）。零 diff：两版 README、`docs/release-evidence/**`、`docs/release-notes/v0.2.12.md` 及更早历史 notes、`src/renderer/**`、`src/core/**`、`src/preload/**`、`src/shared/**` 与 `src/main/**` 除该测试文件外全部。
+- 验收落点：prd 的 23 条 AC 全条落档为 `qa/v0213-version-convergence-bilingual-notes.md`。要点：`version` 单点 0.2.13；CHANGELOG 前两个 `## v*` 标题为 v0.2.13 → v0.2.12、v0.2.13 段含 `### 升级方式` 且禁用 token / 单位数字 / 长 hex 全 0 命中；双语 notes 互链与四节顺序各恰一次、两版零 `已发布` / `已修复` / `已通过 L1` / `**Full Changelog**` / `releases/tag/`；签名文档四项正向 + `发布冻结` / `待发布` 零命中；`it(` 202 → **203**、`expect(` 863 → **876**（只增不减）；`docs/release-evidence/v0.2.13.md` 不存在。
+- 注：① 本 WI change pack **只有 `prd.md`**（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；QA 档案由 Delivery 按 prd AC 逐条落档。② **上一轮注⑤的预告在本轮兑现**：v0.2.12 收尾轮是 `latest === current`，本轮必须把整套断言**反向**翻回「latest 落后 current」并把 `slice` 终点改显式 `## v0.2.12`——只翻锚点、不删断言（`it(` 202→203 是新增双语用例，`expect(` 863→876 是新增断言与等价拆分）。③ **门禁口径已变成 10 门**（新增 `structured-semantics`），旧的「9 门」记录只作历史；后续交付证据一律按 10 门写。④ **双语 notes 是本版起的新约定**：英文默认正文 + `zh-CN` 同提交副本，由 `ships the bilingual notes pair with mutual links and mirrored sections` 用例守住；后续只写单语会直接红。⑤ v0.2.13 尚未打 tag：两版 README 第 5 行与 `latestPublishedTag` 仍钉 `v0.2.12`，发版后的收尾（README 第 5 行前移 + `latestPublishedTag` → `v0.2.13` + 归档 `docs/release-evidence/v0.2.13.md`）仍是独立动作。
+
+- 历史（上一轮）：`wi_ws_cc072345813e636b`（v0.2.12 版本锚点收尾：两版 README 第 5 行 `v0.2.11` → `v0.2.12`、`release-packaging.test.ts` 锚点前移到 `latestPublishedTag = 'v0.2.12'` 并把收敛态断言整体翻面（`latest === current`）、三处 `slice` 终点由派生锚改显式 `## v0.2.11`、`docs/release-signing.md` 版本指向同步且 v0.2.11 降为历史条目指向已归档证据；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-10-31
 - 结果：`code_gates` passed（9 gates，attempt 001 全 exit 0，`.munk/runs/run_ws_b909b721c6501ba6/code-gates/attempts/001`）；`pnpm test` 80 files / 1248 passed + 1 skipped（1249），30.51s。UI 自测跳过。
 - 改动面：4 个已跟踪文件 `+40 / −34`（`README.md` 1/1、`README.zh-CN.md` 1/1、`docs/release-signing.md` 8/7、`src/main/release-packaging.test.ts` 30/25）；`package.json`、`CHANGELOG.md`、`.github/workflows/release.yml`、`docs/release-notes/**`、`docs/release-evidence/**`、`docs/release-process.md`、其余 `src/**` 零 diff。
