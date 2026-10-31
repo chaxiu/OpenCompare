@@ -61,7 +61,7 @@ function LocalizedWorkbench({ platform }: { readonly platform: PlatformPort }): 
   return (
     <I18nProvider initialLanguage={preferences.language}>
       <ThemeProvider initialTheme={preferences.theme}>
-        <Workbench platform={platform} />
+        <Workbench platform={platform} showDebugSamples={import.meta.env.DEV} />
       </ThemeProvider>
     </I18nProvider>
   )

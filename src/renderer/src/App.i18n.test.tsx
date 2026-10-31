@@ -58,6 +58,32 @@ function withLocale(locale: string): PlatformPort {
   return { ...createWebPlatformPort(), systemLocale: async () => locale }
 }
 
+/** Opens the settings sample section in either language. */
+function startSample(id: string): void {
+  fireEvent.click(screen.getByRole('button', { name: /^(Open settings|打开设置)$/ }))
+  const panel = screen.getByRole('dialog', { name: /^(Settings|设置)$/ })
+  const entry = panel.querySelector(`[data-sample-entry="${id}"]`)
+  if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+  fireEvent.click(entry)
+}
+
+/** Opens the settings debugging entry; only rendered under the debug switch. */
+function startSampleFailure(): void {
+  fireEvent.click(screen.getByRole('button', { name: /^(Open settings|打开设置)$/ }))
+  const panel = screen.getByRole('dialog', { name: /^(Settings|设置)$/ })
+  const failure = panel.querySelector('[data-sample-failure]')
+  if (!(failure instanceof HTMLElement)) throw new Error('missing debugging sample entry')
+  fireEvent.click(failure)
+}
+
+/** Starts the four built-in scenes and lands on the directory session. */
+async function loadDemoSamples(): Promise<void> {
+  for (const id of ['directory', 'code', 'csv', 'structured']) startSample(id)
+  const list = await screen.findByRole('tablist', { name: /^(Sessions|会话)$/ }, { timeout: 4000 })
+  await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(4), { timeout: 4000 })
+  fireEvent.click(within(list).getByRole('tab', { name: /baseline ↔ candidate/ }))
+}
+
 function dropPaths(element: HTMLElement, paths: readonly string[]): void {
   const files = paths.map((path) => new File([''], path.slice(path.lastIndexOf('/') + 1)))
   fireEvent.drop(element, { dataTransfer: { files, types: ['Files'] } })
@@ -102,7 +128,7 @@ describe('start-up language', () => {
     expect(await screen.findByRole('heading', { name: EMPTY_EN })).toBeDefined()
     expect(screen.queryByRole('heading', { name: EMPTY_ZH })).toBeNull()
     expect(screen.getAllByRole('button', { name: 'New comparison' }).length).toBeGreaterThan(0)
-    expect(screen.getByText('Comparison and three-way merge workbench')).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
   })
 
   it('marks the default English first screen as en on <html>', async () => {
@@ -200,7 +226,7 @@ describe('English shell copy', () => {
     render(<App />)
     await screen.findByRole('heading', { name: EMPTY_EN })
 
-    expect(screen.getByText('Comparison and three-way merge workbench')).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
     const switcher = screen.getByRole('tablist', { name: 'Switch view' })
     expect(within(switcher).getByRole('tab', { name: 'Directory' })).toBeDefined()
     expect(within(switcher).getByRole('tab', { name: 'Code diff & 3-way' })).toBeDefined()
@@ -210,8 +236,8 @@ describe('English shell copy', () => {
     expect(screen.getAllByRole('button', { name: 'New comparison' }).length).toBe(2)
     expect(screen.getAllByRole('button', { name: 'Open file' }).length).toBe(1)
     expect(screen.getAllByRole('button', { name: 'Open folder' }).length).toBe(1)
-    expect(screen.getByRole('button', { name: 'Load demo samples' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Demo samples' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Load demo samples' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Demo samples' })).toBeNull()
 
     const toolbarNew = screen.getAllByRole('button', { name: 'New comparison' })[0]
     expect(toolbarNew.getAttribute('title')).toContain('Enter or paste two real paths')
@@ -233,9 +259,8 @@ describe('English shell copy', () => {
   })
 
   it('localizes the sample library failure without leaking Chinese detail', async () => {
-    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Demo samples' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Demo: sample read failure/ }))
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} showDebugSamples />, 'en')
+    startSampleFailure()
 
     expect(
       await screen.findByRole(
@@ -253,16 +278,21 @@ describe('English shell copy', () => {
 
   it('renders sample sessions from dictionary keys instead of fixture Chinese', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    const tablist = await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    await loadDemoSamples()
+    const tablist = screen.getByRole('tablist', { name: 'Sessions' })
 
     const tabs = within(tablist)
       .getAllByRole('tab')
       .map((tab) => tab.getAttribute('aria-label') ?? '')
-    expect(tabs[0]).toContain('baseline ↔ candidate')
-    expect(tabs[1]).toContain('Code diff & 3-way merge')
-    expect(tabs[2]).toContain('CSV key comparison')
-    expect(tabs[3]).toContain('JSON / YAML semantic comparison')
+    expect(tabs).toHaveLength(4)
+    for (const copy of [
+      'baseline ↔ candidate',
+      'Code diff & 3-way merge',
+      'CSV key comparison',
+      'JSON / YAML semantic comparison'
+    ]) {
+      expect(tabs.some((label) => label.includes(copy)), copy).toBe(true)
+    }
     expect(tablist.textContent ?? '').not.toMatch(/\p{Script=Han}/u)
   })
 
@@ -313,12 +343,8 @@ describe('English shell copy', () => {
 
   it('overrides the code conflict stat by stable key, not by label text', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    const codeTab = await screen.findByRole(
-      'tab',
-      { name: /Code diff & 3-way merge/ },
-      { timeout: 4000 }
-    )
+    await loadDemoSamples()
+    const codeTab = screen.getByRole('tab', { name: /Code diff & 3-way merge/ })
     fireEvent.click(codeTab)
 
     expect(screen.getByRole('contentinfo').textContent).toMatch(/Conflict blocks\s*3/)
@@ -539,8 +565,7 @@ describe('English directory progress and notices', () => {
       }
     }
     renderWithI18n(<Workbench platform={snapshotPort} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    await screen.findByRole('tab', { name: /Code diff & 3-way merge/ }, { timeout: 4000 })
+    await loadDemoSamples()
     fireEvent.click(screen.getByRole('button', { name: 'Export left snapshot' }))
     expect((await screen.findByRole('alert')).textContent).toBe(
       'Exported to /memory/baseline.ocsnap.json (15 files).'
@@ -658,8 +683,7 @@ describe('English new-comparison dialog', () => {
 describe('English drilldown navigation', () => {
   it('localizes the source line and both return results', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    await screen.findByRole('tab', { name: /Code diff & 3-way merge/ }, { timeout: 4000 })
+    await loadDemoSamples()
 
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
     expect(
@@ -728,8 +752,7 @@ describe('pickers and no extra work', () => {
     expect(fileTitles[0]?.title).toBe('Choose the left file')
     expect(fileTitles[1]?.title).toBe('Choose the right file')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    await screen.findByRole('tab', { name: /Code diff & 3-way merge/ }, { timeout: 4000 })
+    await loadDemoSamples()
     fireEvent.click(screen.getByRole('button', { name: 'Export left snapshot' }))
     await waitFor(() => expect(saveTitles).toHaveLength(1))
     expect(saveTitles[0]).toBe('Export directory snapshot')
@@ -749,8 +772,7 @@ describe('pickers and no extra work', () => {
     }
     renderWithI18n(<Workbench platform={port} />, 'zh')
 
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    await screen.findByRole('tab', { name: /代码 Diff & 3-Way Merge/ }, { timeout: 4000 })
+    await loadDemoSamples()
     fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
     await waitFor(() => expect(saveFilters).toHaveLength(1))
     expect(saveFilters[0]).toEqual([
@@ -761,8 +783,8 @@ describe('pickers and no extra work', () => {
   it('renders the same sessions with the same platform calls in both languages', async () => {
     const first = countingPort()
     renderWithI18n(<Workbench platform={first.port} />, 'zh')
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    const zhTabs = await screen.findByRole('tablist', { name: '会话' }, { timeout: 4000 })
+    await loadDemoSamples()
+    const zhTabs = screen.getByRole('tablist', { name: '会话' })
     const zhOrder = within(zhTabs).getAllByRole('tab').map((tab) => tab.textContent ?? '')
     const zhActive = within(zhTabs)
       .getAllByRole('tab')
@@ -772,8 +794,8 @@ describe('pickers and no extra work', () => {
     cleanup()
     const second = countingPort()
     renderWithI18n(<Workbench platform={second.port} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    const enTabs = await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    await loadDemoSamples()
+    const enTabs = screen.getByRole('tablist', { name: 'Sessions' })
     const enOrder = within(enTabs).getAllByRole('tab').map((tab) => tab.textContent ?? '')
     const enActive = within(enTabs)
       .getAllByRole('tab')
@@ -782,11 +804,14 @@ describe('pickers and no extra work', () => {
 
     const activeId = `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
     expect(enOrder).toHaveLength(zhOrder.length)
-    expect(enActive).toBe(zhActive)
+    expect(within(zhTabs).getAllByRole('tab')[zhActive].textContent).toContain(
+      'baseline ↔ candidate'
+    )
+    expect(within(enTabs).getAllByRole('tab')[enActive].textContent).toContain(
+      'baseline ↔ candidate'
+    )
     expect(zhStatus).toContain(activeId)
     expect(enStatus).toContain(activeId)
-    expect(zhOrder[0]).toContain('baseline ↔ candidate')
-    expect(enOrder[0]).toContain('baseline ↔ candidate')
     expect(second.counts).toEqual(first.counts)
   })
 })
@@ -807,8 +832,8 @@ describe('English smoke', () => {
     )
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
-    const tablist = await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
+    await loadDemoSamples()
+    const tablist = screen.getByRole('tablist', { name: 'Sessions' })
     expect(tablist.textContent ?? '').not.toMatch(/\p{Script=Han}/u)
     expect(screen.getByRole('contentinfo').textContent ?? '').not.toMatch(/\p{Script=Han}/u)
   })

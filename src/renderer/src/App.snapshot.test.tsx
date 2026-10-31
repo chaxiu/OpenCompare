@@ -63,13 +63,21 @@ afterEach(() => {
   revokeObjectURL.mockClear()
 })
 
-/** Loads the sample library and waits for the directory session to be ready. */
+/** Opens one settings sample entry in the language the renderer is using. */
+function startSample(id: string): void {
+  fireEvent.click(screen.getByRole('button', { name: /^(Open settings|打开设置)$/ }))
+  const panel = screen.getByRole('dialog', { name: /^(Settings|设置)$/ })
+  const entry = panel.querySelector(`[data-sample-entry="${id}"]`)
+  if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+  fireEvent.click(entry)
+}
+
+/** Opens the built-in directory scene and waits for its session. */
 async function loadWorkbench(): Promise<void> {
   render(<App />)
-  fireEvent.click(
-    await screen.findByRole('button', { name: '加载演示样本' })
-  )
-  await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+  await screen.findByRole('button', { name: /^(Open settings|打开设置)$/ })
+  startSample('directory')
+  await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
 }
 
 function selectedFileInto(label: string, file: File): void {
@@ -80,7 +88,7 @@ describe('snapshot workbench integration', () => {
   it('loads the remote snapshot sample with a snapshot-labelled right pane and four statuses', async () => {
     await loadWorkbench()
 
-    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
+    startSample('remote-snapshot')
 
     expect(await screen.findByText('/snapshots/right/remote-prod')).toBeDefined()
     expect(screen.getAllByText('remote-prod').length).toBeGreaterThan(0)
@@ -103,7 +111,7 @@ describe('snapshot workbench integration', () => {
 
   it('filters a snapshot comparison by status', async () => {
     await loadWorkbench()
-    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
+    startSample('remote-snapshot')
     await screen.findByText('/snapshots/right/remote-prod')
 
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
@@ -124,7 +132,7 @@ describe('snapshot workbench integration', () => {
 
   it('drills snapshot files into code, CSV and structured views pointing at the mount', async () => {
     await loadWorkbench()
-    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
+    startSample('remote-snapshot')
     await screen.findByText('/snapshots/right/remote-prod')
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
 
@@ -177,8 +185,8 @@ describe('snapshot workbench integration', () => {
     }
 
     render(<Workbench platform={port} />)
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    startSample('directory')
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
 
@@ -201,8 +209,8 @@ describe('snapshot workbench integration', () => {
     const port: PlatformPort = { ...base, saveFile: async () => null }
 
     render(<Workbench platform={port} />)
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    startSample('directory')
+    await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
     const before = screen.getByRole('contentinfo').textContent
 
     fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
@@ -234,7 +242,7 @@ describe('snapshot workbench integration', () => {
 
   it('rejects a non-snapshot file and keeps the current comparison', async () => {
     await loadWorkbench()
-    fireEvent.click(screen.getByRole('button', { name: '演示：远端快照' }))
+    startSample('remote-snapshot')
     await screen.findByText('/snapshots/right/remote-prod')
     const before = screen.getByRole('contentinfo').textContent ?? ''
 
@@ -278,7 +286,7 @@ describe('snapshot workbench integration', () => {
 describe('snapshot failure copy', () => {
   it('renders every known import failure in English', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
+    startSample('directory')
     await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
 
     const hash = 'a'.repeat(64)
@@ -334,7 +342,7 @@ describe('snapshot failure copy', () => {
     }
 
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
-    fireEvent.click(screen.getByRole('button', { name: 'Load demo samples' }))
+    startSample('directory')
     await screen.findByRole('tablist', { name: 'Sessions' }, { timeout: 4000 })
     selectedFileInto(
       'Choose right snapshot file',
@@ -352,7 +360,7 @@ describe('snapshot failure copy', () => {
 
   it('re-translates an on-screen import failure when the language switches', async () => {
     renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'zh')
-    fireEvent.click(screen.getByRole('button', { name: '加载演示样本' }))
+    startSample('directory')
     await screen.findByRole('tablist', { name: '会话' }, { timeout: 4000 })
 
     selectedFileInto('选择左侧快照文件', new File(['{"a":1}'], 'broken.json'))

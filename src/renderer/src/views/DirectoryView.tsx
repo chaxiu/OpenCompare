@@ -50,14 +50,12 @@ export interface DirectoryViewProps {
   readonly pickerAvailable: boolean
   readonly busy: boolean
   readonly onPick: (side: 'left' | 'right') => void
-  readonly onLoadSample: () => void
   readonly onOpenFile: (node: DirectoryDiffNode) => void
   /** True when that side is a mounted snapshot rather than a real directory. */
   readonly leftIsSnapshot: boolean
   readonly rightIsSnapshot: boolean
   readonly onExportSnapshot: (side: SidePosition) => void
   readonly onImportSnapshot: (side: SidePosition, file: File) => void
-  readonly onLoadRemoteSnapshotSample: () => void
   /** Privacy switch of the HTML report; the shell owns it, so it survives remounts. */
   readonly hideLocalPaths: boolean
   readonly onHideLocalPathsChange: (hideLocalPaths: boolean) => void
@@ -99,13 +97,11 @@ export function DirectoryView({
   pickerAvailable,
   busy,
   onPick,
-  onLoadSample,
   onOpenFile,
   leftIsSnapshot,
   rightIsSnapshot,
   onExportSnapshot,
   onImportSnapshot,
-  onLoadRemoteSnapshotSample,
   hideLocalPaths,
   onHideLocalPathsChange,
   onExportReport,
@@ -223,15 +219,6 @@ export function DirectoryView({
             >
               {t('directory.toolbar.pickRight')}
             </ToolbarButton>
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={SHELL_ENTRY_ICONS.samples} />}
-              onClick={onLoadSample}
-              disabled={busy}
-              title={t('directory.toolbar.loadSampleTitle')}
-            >
-              {t('directory.toolbar.loadSample')}
-            </ToolbarButton>
             {busy ? (
               <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin text-content-muted" />
             ) : null}
@@ -324,15 +311,6 @@ export function DirectoryView({
               {t('directory.toolbar.importRight')}
             </ToolbarButton>
           </span>
-          <ToolbarButton
-            size="sm"
-            icon={<Icon name={UI_ICON_ACTIONS.remoteSample} />}
-            onClick={onLoadRemoteSnapshotSample}
-            disabled={busy}
-            title={t('directory.toolbar.demoRemoteTitle')}
-          >
-            {t('directory.toolbar.demoRemote')}
-          </ToolbarButton>
           <ToolbarButton
             size="sm"
             data-shell-entry="report-export"

@@ -15,8 +15,6 @@ export const directory = {
   'directory.toolbar.pickLeftTitle': '选择真实本地目录作为左（源）目录',
   'directory.toolbar.pickRight': '选择右目录',
   'directory.toolbar.pickRightTitle': '选择真实本地目录作为右（目标）目录',
-  'directory.toolbar.loadSample': '加载演示目录',
-  'directory.toolbar.loadSampleTitle': '演示用途：把内置样本目录加载为左右两侧',
   'directory.toolbar.previewSync': '预览并同步',
   'directory.toolbar.previewSyncTitle': '生成变更清单后弹出 Dry-run 预览，确认才写入',
   'directory.toolbar.template': '模板归位',
@@ -32,13 +30,10 @@ export const directory = {
     '把右侧目录扫描为快照并经系统保存对话框导出为 <name>.ocsnap.json（已挂载快照则原样重导出）',
   'directory.toolbar.importRight': '导入右侧快照',
   'directory.toolbar.importRightTitle': '选择一个 .ocsnap.json 并挂载到右栏',
-  'directory.toolbar.demoRemote': '演示：远端快照',
-  'directory.toolbar.demoRemoteTitle':
-    '演示用途：内置本地样本目录（左）vs 内置远端快照 remote-prod（右）',
   'directory.snapshot.pickLeftFile': '选择左侧快照文件',
   'directory.snapshot.pickRightFile': '选择右侧快照文件',
   'directory.picker.unavailable':
-    'Web 预览模式没有原生目录选择，可用「加载演示目录」查看目录对比；桌面端（pnpm dev）可直接选择本地目录。',
+    'Web 预览模式没有原生目录选择，可在「设置 → 示例与调试」中打开内置示例目录；桌面端（pnpm dev）可直接选择本地目录。',
   'directory.panel.source': '源目录',
   'directory.panel.target': '目标目录',
   'directory.panel.snapshot': '快照',

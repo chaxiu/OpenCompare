@@ -210,13 +210,11 @@ function Harness({
       pickerAvailable={false}
       busy={busy}
       onPick={() => {}}
-      onLoadSample={() => {}}
       onOpenFile={() => {}}
       leftIsSnapshot={false}
       rightIsSnapshot={false}
       onExportSnapshot={() => {}}
       onImportSnapshot={() => {}}
-      onLoadRemoteSnapshotSample={() => {}}
       hideLocalPaths={hideLocalPaths}
       onHideLocalPathsChange={changeHideLocalPaths}
       onExportReport={onExportReport ?? (() => {})}
@@ -780,12 +778,10 @@ describe('DirectoryView report toolbar', () => {
     )
 
     for (const key of [
-      'directory.toolbar.loadSample',
       'directory.toolbar.previewSync',
       'directory.toolbar.template',
       'directory.toolbar.exportLeft',
-      'directory.toolbar.importLeft',
-      'directory.toolbar.demoRemote'
+      'directory.toolbar.importLeft'
     ] as const) {
       expect((screen.getByRole('button', { name: zh[key] }) as HTMLButtonElement).disabled, key).toBe(
         false
@@ -795,5 +791,29 @@ describe('DirectoryView report toolbar', () => {
     expect(screen.getByRole('checkbox', {
       name: zh['directory.report.toolbar.hideLocalPaths']
     }).hasAttribute('disabled')).toBe(false)
+  })
+})
+
+describe('DirectoryView workflow toolbar', () => {
+  it('keeps the real entries and drops both demo shortcuts', () => {
+    const { container } = render(
+      <Harness comparison={syntheticComparison(12)} initial={INITIAL_STATE} />
+    )
+
+    expect(screen.queryByRole('button', { name: '加载演示目录' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '演示：远端快照' })).toBeNull()
+
+    for (const entry of [
+      'filter',
+      'sync',
+      'template',
+      'snapshot-import',
+      'snapshot-export',
+      'report-export'
+    ]) {
+      expect(container.querySelectorAll(`[data-shell-entry="${entry}"]`).length, entry).toBe(1)
+    }
+    const toolbar = container.querySelector('[data-shell-level="view-toolbar"]')
+    expect(toolbar?.children.length).toBe(3)
   })
 })

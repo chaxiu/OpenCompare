@@ -1,10 +1,11 @@
 covers: ac-sample-directory
 标题: 一键把内置样本目录加载为左右两侧并完成对比，dev 与 dev:web 均可复现
-步骤: 在 `pnpm dev:web` 与 `pnpm dev` 两种模式下分别打开工作台 → 点击目录视图「加载样本目录」（或顶栏 Load Sample Fixtures）→ 观察目录对比会话的双栏树与统计
+步骤: 在 `pnpm dev:web` 与 `pnpm dev` 两种模式下分别打开工作台 → 点顶栏齿轮「设置」→「示例与调试」→ 点 `[data-sample-entry="directory"]` → 观察目录对比会话的双栏树与统计（原「加载样本目录」按钮与顶栏 Load Sample Fixtures 已删除）
 期望: 无需任何外部文件，经 `PlatformPort` 读取内置样本目录并完成左右两侧递归扫描与对比；随即出现就绪的目录对比会话（左右双栏树、徽章、统计均有值），两个运行模式表现一致、可重复
 
 ## 最近执行
 
+- 入口变更（wi_ws_8959816f18ce7acf，2026-10-31）：目录工具栏「加载样本目录」按钮与顶栏 Load Sample Fixtures 已随「去 demo」项删除，本用例的等价路径改为 设置 → 示例与调试 → 目录入口（`load({ scene: 'directory' })`，语义与产出不变）；下方为入口变更前的实测记录，其余期望仍有效。
 - workItemId: wi_ws_83482f5aa362fd2e
 - at: 2026-10-18
 - status: pass

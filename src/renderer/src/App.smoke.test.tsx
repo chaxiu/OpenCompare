@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { PlatformPort } from '@shared/platform/types'
 import { App } from './App'
@@ -94,6 +94,27 @@ function selectView(copy: Record<MessageKey, string>, key: MessageKey): void {
   fireEvent.click(within(viewSwitcher(copy)).getByRole('tab', { name: copy[key] }))
 }
 
+/** Starts the four built-in scenes through the settings sample entries. */
+async function loadDemoSamples(copy: Record<MessageKey, string>): Promise<void> {
+  for (const id of ['directory', 'code', 'csv', 'structured']) {
+    fireEvent.click(screen.getByRole('button', { name: copy['shell.settings.open'] }))
+    const dialog = screen.getByRole('dialog', { name: copy['settings.title'] })
+    const entry = dialog.querySelector(`[data-sample-entry="${id}"]`)
+    if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+    fireEvent.click(entry)
+  }
+  const list = await screen.findByRole('tablist', { name: copy['common.sessions'] }, {
+    timeout: 4000
+  })
+  // Each scene loads through its own settings pick, so wait until all four have
+  // landed before the walk switches views (a slow runner otherwise races the
+  // structured session and finds no format switcher).
+  await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(4), {
+    timeout: 4000
+  })
+  selectView(copy, 'shell.view.directory')
+}
+
 /**
  * One bilingual run over the six close-out surfaces. The caller decides how the
  * start-up language is derived, so the same walk proves the default English
@@ -108,7 +129,7 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
 
   // 1. First screen.
   const main = screen.getByRole('main')
-  expect(screen.getByText(copy['shell.header.brandSubtitle'])).toBeDefined()
+  expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
   expect(screen.getByText(copy['shell.empty.description'])).toBeDefined()
   expect(screen.getAllByRole('button', { name: copy['shell.toolbar.newCompare'] }).length).toBe(2)
   expect(screen.getByRole('button', { name: copy['shell.toolbar.openFile'] })).toBeDefined()
@@ -133,9 +154,7 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
   fireEvent.click(within(dialog).getByRole('button', { name: copy['common.cancel'] }))
 
   // 3. Directory filters, five levels and the group name.
-  fireEvent.click(screen.getByRole('button', { name: copy['shell.toolbar.loadSamples'] }))
-  await screen.findByRole('tablist', { name: copy['common.sessions'] }, { timeout: 4000 })
-  selectView(copy, 'shell.view.directory')
+  await loadDemoSamples(copy)
   const filterGroup = screen.getByRole('tablist', { name: copy['directory.filter.group'] })
   for (const key of DIRECTORY_FILTER_KEYS) {
     expect(within(filterGroup).getByRole('tab', { name: copy[key] })).toBeDefined()

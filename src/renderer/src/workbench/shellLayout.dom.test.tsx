@@ -105,10 +105,23 @@ function isRendered(element: Element): boolean {
   return element.closest('.hidden') === null
 }
 
-/** Loads the built-in sample library and waits for the ready shell. */
+/** Opens one settings sample entry by its stable marker. */
+function startSample(id: string): void {
+  fireEvent.click(screen.getByRole('button', { name: zh('shell.settings.open') }))
+  const panel = screen.getByRole('dialog', { name: zh('settings.title') })
+  const entry = panel.querySelector(`[data-sample-entry="${id}"]`)
+  if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
+  fireEvent.click(entry)
+}
+
+/** Starts the built-in scenes through the settings and waits for the ready shell. */
 async function loadSamples(): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: zh('shell.toolbar.loadSamples') }))
-  await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+  for (const id of ['directory', 'code', 'csv', 'structured']) startSample(id)
+  const list = await screen.findByRole('tablist', { name: zh('common.sessions') }, {
+    timeout: 4000
+  })
+  await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(4), { timeout: 4000 })
+  fireEvent.click(within(list).getByRole('tab', { name: /baseline ↔ candidate/ }))
 }
 
 /** Switches the visible session through the tabs the shell renders. */
@@ -147,12 +160,18 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
   })
 
   it('shows the event band only between the session head and the view toolbar', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = render(
+      <Workbench platform={createWebPlatformPort()} showDebugSamples />
+    )
     await loadSamples()
     expect(container.querySelector('[data-shell-level="events"]')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: zh('shell.toolbar.samples') }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /样本读取失败/ }))
+    fireEvent.click(screen.getByRole('button', { name: zh('shell.settings.open') }))
+    const failure = screen
+      .getByRole('dialog', { name: zh('settings.title') })
+      .querySelector('[data-sample-failure]')
+    if (!(failure instanceof HTMLElement)) throw new Error('missing debugging sample entry')
+    fireEvent.click(failure)
     await screen.findByRole('alert')
 
     expect(renderedLevels(container)).toEqual([
@@ -277,11 +296,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     const firstRowText = rows[0].textContent ?? ''
     expect(firstRowText).toContain(zh('common.diff.same'))
     expect(firstRowText).toContain(zh('common.diff.added'))
-    for (const key of [
-      'directory.toolbar.pickLeft',
-      'directory.toolbar.pickRight',
-      'directory.toolbar.loadSample'
-    ] as const) {
+    for (const key of ['directory.toolbar.pickLeft', 'directory.toolbar.pickRight'] as const) {
       const buttons = screen.getAllByRole('button', { name: zh(key) })
       expect(buttons.length).toBe(1)
       expect(isRendered(buttons[0])).toBe(true)
@@ -437,7 +452,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
 })
 
 describe('workbench shell entry manifest', () => {
-  it('covers all twenty entries across the ready views, none of them twice', async () => {
+  it('covers all eighteen entries across the ready views, none of them twice', async () => {
     setWindowWidth(TIER_WIDTHS.compact)
     const { container } = render(<Workbench platform={createWebPlatformPort()} />)
     await loadSamples()
@@ -471,6 +486,9 @@ describe('workbench shell entry manifest', () => {
     collect()
 
     expect([...seen].sort()).toEqual([...SHELL_ENTRY_IDS].sort())
+    expect(seen.size).toBe(18)
+    expect(renderedEntries(container)).not.toContain('samples')
+    expect(renderedEntries(container)).not.toContain('samples-menu')
   })
 })
 
