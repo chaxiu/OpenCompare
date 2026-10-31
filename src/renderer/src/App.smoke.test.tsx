@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { PlatformPort } from '@shared/platform/types'
 import { App } from './App'
@@ -103,7 +103,15 @@ async function loadDemoSamples(copy: Record<MessageKey, string>): Promise<void> 
     if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
     fireEvent.click(entry)
   }
-  await screen.findByRole('tablist', { name: copy['common.sessions'] }, { timeout: 4000 })
+  const list = await screen.findByRole('tablist', { name: copy['common.sessions'] }, {
+    timeout: 4000
+  })
+  // Each scene loads through its own settings pick, so wait until all four have
+  // landed before the walk switches views (a slow runner otherwise races the
+  // structured session and finds no format switcher).
+  await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(4), {
+    timeout: 4000
+  })
   selectView(copy, 'shell.view.directory')
 }
 
