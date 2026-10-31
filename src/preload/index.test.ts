@@ -56,6 +56,7 @@ describe('preload bridge', () => {
         'statPath',
         'ensureDirectory',
         'deleteFile',
+        'removeDirectory',
         'temporaryDirectory',
         'realpath',
         'readUserSettings',

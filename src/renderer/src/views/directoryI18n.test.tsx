@@ -325,6 +325,7 @@ function ViewHarness({
       syncPreview={null}
       templatePreview={null}
       onCancelSync={() => undefined}
+      onAbortSync={() => {}}
       onConfirmSync={() => undefined}
       onCancelTemplate={() => undefined}
       onConfirmTemplate={() => undefined}
@@ -708,6 +709,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={preview}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'en'
@@ -744,6 +746,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={preview}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'zh'
@@ -775,6 +778,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={preview}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'en'
@@ -792,6 +796,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={mirror}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'zh'
@@ -805,6 +810,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={makeSyncPreview()}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'en'
@@ -822,6 +828,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={makeSyncPreview()}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'zh'
@@ -842,6 +849,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={preview}
         busy={false}
         onCancel={onCancel}
+        onAbort={() => undefined}
         onConfirm={onConfirm}
       />,
       'en'
@@ -879,6 +887,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
         preview={preview}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'zh'
@@ -894,12 +903,13 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect((button(zh['directory.sync.apply']) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('shows the busy labels and keeps the whole en dialog Han free', () => {
+  it('shows the busy labels, keeps cancel usable mid-run and stays Han free', () => {
     const { container } = renderWithI18n(
       <DirectorySyncDialog
         preview={makeSyncPreview()}
         busy={false}
         onCancel={() => undefined}
+        onAbort={() => undefined}
         onConfirm={() => undefined}
       />,
       'en'
@@ -907,6 +917,8 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect(container.textContent ?? '').not.toMatch(HAN)
     cleanup()
 
+    const onCancel = vi.fn()
+    const onAbort = vi.fn()
     renderWithI18n(
       <DirectorySyncDialog
         preview={makeSyncPreview({
@@ -915,12 +927,20 @@ describe('DirectorySyncDialog bilingual copy', () => {
           delete: [syncItem('drop.txt', 20)]
         })}
         busy
-        onCancel={() => undefined}
+        onCancel={onCancel}
+        onAbort={onAbort}
         onConfirm={() => undefined}
       />,
       'en'
     )
+    // Apply is locked while the run is in flight, but the same cancel action
+    // stays usable and stops the run (it aborts; it never just closes).
     expect((button('Syncing…') as HTMLButtonElement).disabled).toBe(true)
+    const cancel = button('Cancel') as HTMLButtonElement
+    expect(cancel.disabled).toBe(false)
+    fireEvent.click(cancel)
+    expect(onAbort).toHaveBeenCalledTimes(1)
+    expect(onCancel).not.toHaveBeenCalled()
   })
 })
 

@@ -153,6 +153,7 @@ function viewProps(session: WorkbenchSession) {
     syncPreview: null,
     templatePreview: null,
     onCancelSync: noop,
+    onAbortSync: noop,
     onConfirmSync: noop,
     onCancelTemplate: noop,
     onConfirmTemplate: noop

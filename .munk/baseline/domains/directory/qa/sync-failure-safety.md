@@ -1,0 +1,11 @@
+covers: ac-preflight-unwritable-target, ac-preflight-occupied-target, ac-atomic-write-no-partial, ac-rollback-on-failure, ac-cancel-mid-plan, ac-cancel-signal-observable, ac-unchecked-untouched, ac-readable-error-with-code, ac-session-state-preserved, ac-gate-registered, ac-gate-runtime-budget
+标题: 真实目录同步在目标只读 / 位置被占 / 中途失败或取消时预检拒绝、逆序回滚，目标逐项回到执行前且会话保持可重试
+步骤: 用 `mkdtemp` 建左 / 右真实临时目录（含 added / deep / modified / stale / same，单例 ≤ 200 文件）→ `compareDirectories` + `buildSyncPlan` 生成镜像计划 → ① 执行前 `chmod 0555` 目标根后 `executeSyncPlan`（非 root；root 身份仅跳过该条）→ ② 计划生成后把某待 copy 目标路径 `mkdir` 成同名目录后执行 → ③ 注入 `deleteFile` 抛 `EBUSY`（在第 2 个删除项）后经 `applySyncPreview` 执行 → ④ 注入 `writeTextFile` 在第 1 个写入后 `controller.abort()`，带 `signal` 执行 → ⑤ 零勾选删除下注入 `EACCES` 让前若干 copy 成功后失败 → ⑥ 对 ③ / ④ 前后做 `stat` + 内容 + `mtimeMs` 全量快照对比，并立即用同一 preview 重试 / 重新 `buildSyncPlan`
+期望: ① 预检直接拒绝（`SyncTargetError`，码属 `EACCES` / `EPERM` / `EROFS`），目标侧相对路径集合、字节内容与 `mtimeMs` 与执行前逐项全等，无 `*.tmp` 或本次新建条目；② 以 `EISDIR` 拒绝，同名目录仍在且为空、无部分写入；③ 执行 reject（`EBUSY`），已覆盖文件内容与 mtime 复原、已删除文件重现、本次新建文件与多层目录全部消失，同一 preview 重试后 `copied` / `updated` / `deleted` 与计划一致；④ 以 `OperationCancelledError`（`name` / `code === 'ECANCELED'`、消息含「已取消」、不含系统码）结束，目标逐项回到执行前，随后冷 `buildSyncPlan` 的 copy / update / delete 与该时刻真实磁盘一致；⑤ 失败后未勾选的两个删除项仍在磁盘上且内容不变；所有失败消息为中文句子、含目标路径与系统码、不含 `Error invoking remote method`；`applySyncPreview` 失败 / 取消后不返回 `DirectoryComparison`（调用方会话 id、树、四态计数不变），预览可重试；断言全部落在 `sync-real-gate`（`pnpm test:sync-real`）内，未新增 `code-gates.json` 矩阵项，真实落盘用例组保持秒级。
+
+## 最近执行
+
+- workItemId: wi_ws_08b7067f448f263b
+- at: 2026-10-31
+- status: pass
+- note: `needSelfTest=false`（本项不做实机 GUI 验收），证据取自 code_gates 全量 + 真实磁盘门禁：`src/sync-real-gate.test.ts` 的 `real-disk sync failure safety` 5 条真实用例（`chmod 0555` 只读根、同名目录占位 `EISDIR`、`deleteFile` 抛 `EBUSY` 逆序回滚 + 同一 preview 重试全量成功、中途 `abort()` 回滚 + 冷 Dry-run 与真实磁盘一致、零勾选删除失败后原样留存）与 `src/core/directory/sync.test.ts` 的 `sync failure safety` 5 条注入式用例。code_gates 11 门 attempt 001 全绿（`.munk/runs/run_ws_f06a7d04d430ead2/code-gates/attempts/001`），`sync-real-gate` 沿用既有矩阵项、未新增门下项。UI 侧 `directoryI18n.test.tsx` 断言忙碌态「取消」按钮可用（改调 `onAbort`），渲染层状态保持由 `Workbench.handleConfirmSync` 的 catch / finally 分支与 `applySyncPreview` 不返回新 comparison 保证。

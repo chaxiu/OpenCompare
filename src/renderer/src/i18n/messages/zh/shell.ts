@@ -45,6 +45,7 @@ export const shell = {
   'shell.notice.snapshotMounted': '已挂载快照 {name} 到{side}栏。',
   'shell.notice.syncComplete':
     '同步完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}。',
+  'shell.notice.syncCancelled': '同步已取消：目标侧已回滚到执行前状态，可再次预览或重试。',
   'shell.notice.templateComplete':
     '模板归位完成：写入 {extracted} 个文件；复核已写入槽位 已匹配 {matched} · 缺失 {missing} · 冲突 {conflicts}。',
   'shell.side.left': '左',

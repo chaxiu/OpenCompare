@@ -226,6 +226,7 @@ function Harness({
       syncPreview={null}
       templatePreview={null}
       onCancelSync={() => {}}
+      onAbortSync={() => {}}
       onConfirmSync={() => {}}
       onCancelTemplate={() => {}}
       onConfirmTemplate={() => {}}

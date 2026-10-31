@@ -72,6 +72,8 @@ export interface DirectoryViewProps {
   readonly syncPreview: SyncPreview | null
   readonly templatePreview: TemplatePreview | null
   readonly onCancelSync: () => void
+  /** Stops the running sync; stays usable while `busy` (unlike `onCancelSync`). */
+  readonly onAbortSync: () => void
   readonly onConfirmSync: (deletePaths: readonly string[]) => void
   readonly onCancelTemplate: () => void
   readonly onConfirmTemplate: () => void
@@ -113,6 +115,7 @@ export function DirectoryView({
   syncPreview,
   templatePreview,
   onCancelSync,
+  onAbortSync,
   onConfirmSync,
   onCancelTemplate,
   onConfirmTemplate
@@ -462,6 +465,7 @@ export function DirectoryView({
           preview={syncPreview}
           busy={busy}
           onCancel={onCancelSync}
+          onAbort={onAbortSync}
           onConfirm={onConfirmSync}
         />
       ) : null}

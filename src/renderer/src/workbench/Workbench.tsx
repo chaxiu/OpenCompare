@@ -333,6 +333,8 @@ export function Workbench({
   const activeDirectoryOperation = useRef<ActiveDirectoryOperation | null>(null)
   /** The running report export; the ref also guards against double starts. */
   const reportExportController = useRef<AbortController | null>(null)
+  /** Cancels the running sync; the dialog's cancel action aborts it mid-plan. */
+  const syncAbortController = useRef<AbortController | null>(null)
   /** Latest launch-request handler; the subscription itself is installed once. */
   const launchRequest = useRef<(payload: CompareRequestPayload) => void>(() => undefined)
 
@@ -1115,16 +1117,23 @@ export function Workbench({
     }
   }
 
-  /** Applies the confirmed plan, then refreshes the comparison tree. */
+  /**
+   * Applies the confirmed plan, then refreshes the comparison tree. A failure or
+   * cancellation rolls the target back and keeps the preview open for a retry.
+   */
   async function handleConfirmSync(deletePaths: readonly string[]): Promise<void> {
     const preview = syncPreview
     const target = active
     if (!preview || !target) return
 
+    const controller = new AbortController()
+    syncAbortController.current = controller
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      const result = await applySyncPreview(platform, preview, cache.current, deletePaths)
+      const result = await applySyncPreview(platform, preview, cache.current, deletePaths, {
+        signal: controller.signal
+      })
       const { leftRoot, rightRoot } = result.comparison
       replaceSession(
         target.id,
@@ -1140,11 +1149,24 @@ export function Workbench({
       )
       setNoticeTone('info')
     } catch (cause) {
-      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
-      setNoticeTone('danger')
+      // The preview stays open either way: the target was rolled back, so the
+      // same plan can be retried or re-previewed against the real disk.
+      if (isOperationCancelled(cause)) {
+        setNotice(copyNotice('shell.notice.syncCancelled'))
+        setNoticeTone('info')
+      } else {
+        setNotice(detailNotice(errorText(cause)))
+        setNoticeTone('danger')
+      }
     } finally {
+      syncAbortController.current = null
       setDirectoryBusy(false)
     }
+  }
+
+  /** Stops the running sync before it reaches the next write. */
+  function cancelSync(): void {
+    syncAbortController.current?.abort()
   }
 
   /** Matches the shuffled incoming tree against the left (template) tree. */
@@ -1281,6 +1303,7 @@ export function Workbench({
             syncPreview={syncPreview}
             templatePreview={templatePreview}
             onCancelSync={() => setSyncPreview(null)}
+            onAbortSync={cancelSync}
             onConfirmSync={(deletePaths) => void handleConfirmSync(deletePaths)}
             onCancelTemplate={() => setTemplatePreview(null)}
             onConfirmTemplate={() => void handleConfirmTemplate()}

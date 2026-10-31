@@ -66,18 +66,22 @@ export interface DirectorySyncDialogProps {
   readonly preview: SyncPreview
   readonly busy: boolean
   readonly onCancel: () => void
+  /** Stops the running sync; the footer cancel action calls this while busy. */
+  readonly onAbort: () => void
   readonly onConfirm: (deletePaths: readonly string[]) => void
 }
 
 /**
  * Dry-run preview of one sync direction: what will be copied, overwritten and
  * (in mirror mode) deleted, with byte totals. Cancel writes nothing; mirror
- * deletions start unchecked and are opt-in, one by one or all at once.
+ * deletions start unchecked and are opt-in, one by one or all at once. While a
+ * run is in flight the same action stops it, which rolls the target back.
  */
 export function DirectorySyncDialog({
   preview,
   busy,
   onCancel,
+  onAbort,
   onConfirm
 }: DirectorySyncDialogProps): JSX.Element {
   const { t } = useI18n()
@@ -126,7 +130,7 @@ export function DirectorySyncDialog({
       onClose={busy ? () => undefined : onCancel}
       footer={
         <>
-          <ToolbarButton variant="ghost" onClick={onCancel} disabled={busy}>
+          <ToolbarButton variant="ghost" onClick={busy ? onAbort : onCancel}>
             {t('common.cancel')}
           </ToolbarButton>
           <ToolbarButton

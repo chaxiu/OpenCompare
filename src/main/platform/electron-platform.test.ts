@@ -23,7 +23,7 @@ import {
 } from '@core/directory/compare'
 import type { ListDirectory } from '@core/directory/compare'
 import { sha256Bytes, sha256Hex } from '@core/directory/hash'
-import { buildSyncPlan } from '@core/directory/sync'
+import { buildSyncPlan, SyncTargetError } from '@core/directory/sync'
 import { DIRECTORY_SCENE, DIRECTORY_SAMPLE_PATHS, SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
@@ -116,6 +116,7 @@ const platform: PlatformPort = {
   statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
   ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
+  removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
   temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
   realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
   readUserSettings: () =>
@@ -220,6 +221,117 @@ describe('electron real-directory sync', () => {
 
     const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
     expect(second.totalCount).toBe(0)
+  })
+
+  it(
+    'cleans up the materialised sandbox when a read-only-sample run fails',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      await mkdir(left, { recursive: true })
+      await writeFile(join(left, '左 仅此.txt'), 'left only body', 'utf8')
+
+      const comparison = await compareDirectories(
+        left,
+        DIRECTORY_SAMPLE_PATHS.right,
+        (path) => platform.listDirectory(path),
+        (path) => platform.readTextFile(path),
+        createComparisonCache()
+      )
+      const preview = await previewSync(
+        platform,
+        comparison,
+        'left-to-right',
+        'mirror',
+        2_000_000_000_000 + Date.now()
+      )
+      // The sample mount is read-only, so writes go to a fresh materialised root.
+      expect(preview.materializeTarget).toBe(true)
+      expect(await platform.statPath(preview.plan.targetRoot)).toBe('missing')
+
+      const failing: PlatformPort = {
+        ...platform,
+        writeTextFile: async (path, content, modifiedMs) => {
+          if (path.endsWith('左 仅此.txt')) {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+          }
+          return platform.writeTextFile(path, content, modifiedMs)
+        }
+      }
+
+      const error = await applySyncPreview(failing, preview, createComparisonCache(), []).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EACCES')
+      // The sandbox the materialisation created (files, both directory levels and
+      // the root) is removed again, so nothing half-copied survives.
+      expect(await platform.statPath(preview.plan.targetRoot)).toBe('missing')
+    },
+    60_000
+  )
+})
+
+describe('sync write and directory channels', () => {
+  async function entriesOf(directory: string): Promise<string[]> {
+    return (await readdir(directory)).sort()
+  }
+
+  it('writes the sync channel atomically and leaves no temporary file', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'note.txt')
+    await writeFile(target, 'old body', 'utf8')
+
+    await platform.writeTextFile(target, 'new body', 1_600_000_000_000)
+
+    expect(await readFile(target, 'utf8')).toBe('new body')
+    expect(Math.floor((await stat(target)).mtimeMs)).toBe(1_600_000_000_000)
+    expect((await entriesOf(root)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('rejects an occupied target with a readable reason and no residue', async () => {
+    const root = await scratchRoot()
+    const target = join(root, 'occupied')
+    await mkdir(target, { recursive: true })
+    await writeFile(join(target, 'keep.txt'), 'original', 'utf8')
+
+    const error = await platform.writeTextFile(target, 'new body').then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toMatch(/[\u4e00-\u9fff]/)
+    expect(message).toContain(target)
+    expect(message).toMatch(/EISDIR|ENOTEMPTY|EEXIST|EPERM|EACCES/)
+    expect(message).not.toContain('.tmp')
+    expect(await entriesOf(target)).toEqual(['keep.txt'])
+    expect(await readFile(join(target, 'keep.txt'), 'utf8')).toBe('original')
+    expect((await entriesOf(root)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('removes one empty directory and rejects a non-empty one readably', async () => {
+    const root = await scratchRoot()
+    const empty = join(root, 'empty')
+    await mkdir(empty, { recursive: true })
+    await platform.removeDirectory(empty)
+    expect(await platform.statPath(empty)).toBe('missing')
+
+    const full = join(root, 'full')
+    await mkdir(full, { recursive: true })
+    await writeFile(join(full, 'keep.txt'), 'x', 'utf8')
+    const error = await platform.removeDirectory(full).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toMatch(/[\u4e00-\u9fff]/)
+    expect((error as Error).message).toContain(full)
+    expect(await entriesOf(full)).toEqual(['keep.txt'])
   })
 })
 

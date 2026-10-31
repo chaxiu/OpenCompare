@@ -13,9 +13,12 @@ import {
   buildSyncPlan,
   copyScannedTree,
   executeSyncPlan,
-  invalidateComparisonCache
+  invalidateComparisonCache,
+  joinRelativePath,
+  SyncTargetError
 } from '@core/directory/sync'
 import type { SyncDirection, SyncMode, SyncPlan } from '@core/directory/sync'
+import { isOperationCancelled } from '@core/io'
 import { extractTemplateMatches, matchTemplate, matchTemplateSlots } from '@core/directory/template'
 import type { TemplateMatchResult } from '@core/directory/template'
 import { digestFilesForComparison } from '../platform'
@@ -40,7 +43,68 @@ function syncIo(platform: PlatformPort) {
     writeTextFile: (path: string, content: string, modifiedMs?: number) =>
       platform.writeTextFile(path, content, modifiedMs),
     ensureDirectory: (path: string) => platform.ensureDirectory(path),
-    deleteFile: (path: string) => platform.deleteFile(path)
+    deleteFile: (path: string) => platform.deleteFile(path),
+    removeDirectory: (path: string) => platform.removeDirectory(path),
+    statPath: (path: string) => platform.statPath(path),
+    listDirectory: (path: string) => platform.listDirectory(path)
+  }
+}
+
+/** Electron wraps a handler rejection; the user only ever sees the reason. */
+const IPC_FAILURE_PREFIX = /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/
+
+/**
+ * Keeps a localized sync failure and a cancellation exactly as they are, and
+ * strips the `Error invoking remote method …` wrapper from anything else so the
+ * workbench never shows the IPC plumbing instead of the reason.
+ */
+function readableSyncFailure(cause: unknown): unknown {
+  if (cause instanceof SyncTargetError || isOperationCancelled(cause)) return cause
+  if (!(cause instanceof Error)) return cause
+  const stripped = cause.message.replace(IPC_FAILURE_PREFIX, '')
+  return stripped === cause.message ? cause : new Error(stripped)
+}
+
+/**
+ * Removes the sandbox tree a materialised target copy built. Only a root this
+ * run created is removed; an existing sandbox is left alone (its bytes are not
+ * ours to delete). Best effort: cleanup must never mask the original failure.
+ */
+async function discardSandbox(
+  platform: PlatformPort,
+  root: string,
+  tree: ScannedTree,
+  createdRoot: boolean
+): Promise<void> {
+  const relativePaths = [...tree.index.entries()]
+    .filter(([, node]) => node.kind === 'file')
+    .map(([relativePath]) => relativePath)
+  for (const relativePath of relativePaths) {
+    await platform.deleteFile(joinRelativePath(root, relativePath)).catch(() => undefined)
+  }
+  const directories = new Set<string>()
+  for (const relativePath of relativePaths) {
+    let parent = relativePath.includes('/')
+      ? relativePath.slice(0, relativePath.lastIndexOf('/'))
+      : ''
+    while (parent !== '') {
+      directories.add(parent)
+      parent = parent.includes('/') ? parent.slice(0, parent.lastIndexOf('/')) : ''
+    }
+  }
+  const deepestFirst = [...directories].sort(
+    (left, right) =>
+      right.split('/').length - left.split('/').length || right.localeCompare(left)
+  )
+  for (const relativePath of deepestFirst) {
+    await platform.removeDirectory(joinRelativePath(root, relativePath)).catch(() => undefined)
+  }
+  if (createdRoot) {
+    await platform.removeDirectory(root).catch(() => undefined)
+    // The materialisation root's own parent (`<temp>/workbench`) is ours too when
+    // it was empty; a non-empty one (another session) rejects harmlessly.
+    const parent = root.slice(0, Math.max(root.lastIndexOf('/'), root.lastIndexOf('\\')))
+    if (parent !== '') await platform.removeDirectory(parent).catch(() => undefined)
   }
 }
 
@@ -118,28 +182,57 @@ export interface SyncApplyResult {
   readonly deleted: number
 }
 
+/** Optional cancellation seam of one sync confirmation. */
+export interface SyncApplyOptions {
+  /** Cancels between single writes; a cancelled run rolls back and rejects. */
+  readonly signal?: AbortSignal
+}
+
 /**
  * Applies a previewed plan and re-runs the comparison so the tree, badges and
  * status bar reflect the new state. Mirror deletions can be narrowed per item.
+ *
+ * A failure or cancellation rolls the target back inside `executeSyncPlan` and
+ * rejects: no new `DirectoryComparison` is produced, so the caller keeps its
+ * current session and the same preview stays retryable.
  */
 export async function applySyncPreview(
   platform: PlatformPort,
   preview: SyncPreview,
   cache: ComparisonCache,
-  deletePaths: readonly string[]
+  deletePaths: readonly string[],
+  options: SyncApplyOptions = {}
 ): Promise<SyncApplyResult> {
   const { plan } = preview
+  const io = syncIo(platform)
+  let materialized: ScannedTree | null = null
+  let createdSandboxRoot = false
 
   if (preview.materializeTarget) {
-    const original = await scan(platform, preview.originalTargetRoot)
-    await copyScannedTree(original, plan.targetRoot, syncIo(platform))
+    materialized = await scan(platform, preview.originalTargetRoot)
+    createdSandboxRoot = (await platform.statPath(plan.targetRoot)) === 'missing'
+    try {
+      await copyScannedTree(materialized, plan.targetRoot, io)
+    } catch (cause) {
+      await discardSandbox(platform, plan.targetRoot, materialized, createdSandboxRoot)
+      throw readableSyncFailure(cause)
+    }
   }
 
-  const execution = await executeSyncPlan(plan, syncIo(platform), {
-    // Mirror deletions are opt-in: an incremental plan has none, and a mirror
-    // plan only removes the paths the user explicitly checked.
-    deletePaths: plan.mode === 'mirror' ? deletePaths : []
-  })
+  let execution
+  try {
+    execution = await executeSyncPlan(plan, io, {
+      // Mirror deletions are opt-in: an incremental plan has none, and a mirror
+      // plan only removes the paths the user explicitly checked.
+      deletePaths: plan.mode === 'mirror' ? deletePaths : [],
+      signal: options.signal
+    })
+  } catch (cause) {
+    if (materialized !== null) {
+      await discardSandbox(platform, plan.targetRoot, materialized, createdSandboxRoot)
+    }
+    throw readableSyncFailure(cause)
+  }
   invalidateComparisonCache(cache, execution.affected)
 
   const leftToRight = plan.direction === 'left-to-right'
