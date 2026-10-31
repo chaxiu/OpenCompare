@@ -6,11 +6,11 @@
  * `same` / `added` (right only) / `removed` (left only) / `modified`.
  *
  * The fast path never reads file bodies: a size mismatch is immediately
- * `modified`, an mtime mismatch is immediately `modified`, and only pairs whose
- * size *and* mtime agree fall through to a SHA-256 content confirmation (which
- * is what catches "same size, different content"). Hashes are cached per
- * `(path, size, modifiedMs)`, so re-comparing an unchanged tree neither reads
- * bodies nor recomputes digests.
+ * `modified`, an mtime mismatch (at millisecond granularity) is immediately
+ * `modified`, and only pairs whose size *and* mtime agree fall through to a
+ * SHA-256 content confirmation (which is what catches "same size, different
+ * content"). Hashes are cached per `(path, size, modifiedMs)`, so re-comparing
+ * an unchanged tree neither reads bodies nor recomputes digests.
  */
 import type { DiffStatus } from '@shared/fixtures'
 import type {
@@ -780,9 +780,22 @@ function directoryStatus(counts: Readonly<Record<FileDiffStatus, number>>): File
   return 'removed'
 }
 
+/**
+ * Millisecond-normalised mtime equality for the size + mtime fast path.
+ *
+ * Real file systems report sub-millisecond mtimes (`…301.4927`), while a
+ * preserved write lands on whole milliseconds. Comparing the raw floats would
+ * flag every freshly synced file as `modified`; the comparison therefore
+ * normalises only this fast-path test to milliseconds. Content confirmation
+ * still decides same vs modified afterwards.
+ */
+function sameModifiedMillisecond(leftMs: number, rightMs: number): boolean {
+  return Math.floor(leftMs) === Math.floor(rightMs)
+}
+
 /** True when size and mtime are both equal, i.e. only content can tell them apart. */
 function needsContent(left: ScannedNode, right: ScannedNode): boolean {
-  return left.size === right.size && left.modifiedMs === right.modifiedMs
+  return left.size === right.size && sameModifiedMillisecond(left.modifiedMs, right.modifiedMs)
 }
 
 function needsHash(node: ScannedNode, cache: ComparisonCache): boolean {
@@ -852,7 +865,7 @@ function classifyPair(left: ScannedNode, right: ScannedNode, context: CompareCon
     return 'modified'
   }
   if (left.size !== right.size) return 'modified'
-  if (left.modifiedMs !== right.modifiedMs) return 'modified'
+  if (!sameModifiedMillisecond(left.modifiedMs, right.modifiedMs)) return 'modified'
   return hashFile(left, context) === hashFile(right, context) ? 'same' : 'modified'
 }
 

@@ -69,6 +69,11 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.sync.syncing': 'Syncing…',
   'directory.sync.apply': 'Apply changes',
   'directory.sync.deleteItem': 'Delete {path}',
+  'directory.sync.selectAll': 'Select all',
+  'directory.sync.clearSelection': 'Clear',
+  'directory.sync.summary': 'This run: {copy} copy · {update} overwrite · {delete} delete',
+  'directory.sync.noExecutable':
+    'Delete items are unchecked by default. Select at least one delete item, or have files to copy or overwrite, to run.',
   'directory.template.title': 'Template placement preview',
   'directory.template.label.template': 'Template A: ',
   'directory.template.label.incoming': 'Scattered tree B: ',

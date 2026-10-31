@@ -14,9 +14,11 @@
 - **往返目录状态保持（按目录会话归口）**：过滤档位、目录树折叠/展开集合、左右面板滚动位置、树行选中项由工作台壳层按目录会话 id 保存并受控回填，不依赖组件挂载生命周期；目录视图因下钻卸载重建后，上述状态原样恢复，且不同目录会话之间互不串味。状态仅保持于当前运行期内存，不跨重启/跨窗口持久化。
 - **目录树行选中态**：行单击即单选选中（左右栏同一相对路径行同步高亮），选中样式引用 `--color-accent-soft` 语义 token；点展开/折叠按钮不改变选中。
 - **来源不可用兜底**：来源目录会话已不可用（被关闭或被替换）时，返回优先落到仍可用的其他目录会话并给出明确状态栏提示；无任何目录会话可返回时停留文件视图并提示，不崩溃、不死路。
-- **同步计划生成器（`src/core/directory/`，纯函数）**：基于现有 `DirectoryComparison` 输出某方向（**左→右 / 右→左**）的变更清单：`copy`（源侧有、目标侧不存在的新增拷贝）、`update`（两侧都存在且 `modified` 的覆盖修改）、`delete`（仅**镜像模式**下，目标侧独有的文件；默认勾选、可逐项取消）。`same` 文件不进清单。每项带相对路径、源/目标绝对路径与字节数；计划带 `count`/`bytes` 分组汇总与 `totalCount`/`totalBytes`。
-- **执行器**：按计划经 `PlatformPort` 写入目标侧，自动创建缺失的中间目录；镜像模式按传入的 `deletePaths` 只删除选中项；写入后使受影响路径的比对缓存失效；同一方向重复执行后计划为空（幂等）。
-- **Dry-run 预览确认弹窗**：执行前弹出弹窗，分组列出待新增拷贝、待覆盖修改（镜像模式另列待删除项），显示字节汇总与目标根路径；**取消不写任何文件**；确认后才执行；执行完成后自动重跑 `compareDirectories`，目录树、徽章与状态栏统计随之刷新。
+- **同步计划生成器（`src/core/directory/`，纯函数）**：基于现有 `DirectoryComparison` 输出某方向（**左→右 / 右→左**）的变更清单：`copy`（源侧有、目标侧不存在的新增拷贝）、`update`（两侧都存在且 `modified` 的覆盖修改）、`delete`（仅**镜像模式**下，目标侧独有的文件；**默认不勾选**、可逐项或组级全选）。`same` 文件不进清单。每项带相对路径、源/目标绝对路径与字节数；计划带 `count`/`bytes` 分组汇总与 `totalCount`/`totalBytes`。
+- **执行器**：按计划经 `PlatformPort` 写入目标侧，自动创建缺失的中间目录；镜像模式**只删除显式勾选并传入的 `deletePaths`**——缺省或空集一律零删除（安全默认，调用方漏传勾选集不可能清空目标侧）；写入后使受影响路径的比对缓存失效；同一方向重复执行（含勾选的镜像删除）后计划为空（幂等）。
+- **Dry-run 预览确认弹窗**：执行前弹出弹窗，copy / update / delete 三组常驻（空组显示「无」），每组带条目与「N 个 · X 字节」，外加合计与目标根路径；底部「本次将执行」汇总新增 / 覆盖 / 已勾选删除的条目数，与实际传给执行器的勾选集合同源；**没有任何可执行项时（含「只有未勾选的删除项」）确认按钮禁用并给出可见原因**，忙碌态禁用并显示进行中文案；**取消不写任何文件**；确认后才执行；执行完成后自动重跑 `compareDirectories`，目录树、徽章与状态栏统计随之刷新，返回的新 `DirectoryComparison` 直接替换当前会话（计数、四态与跳过数全部来自这一次比较，不另算一套）。
+- **真实磁盘写盘与 mtime 毫秒归一**：确认后经既有 `PlatformPort` → Electron 主进程 IPC 写入真实磁盘，保留相对路径与 ≥4 层嵌套，中文与空格路径不被转义或改名，目标文件 UTF-8 内容与源逐字节一致；写入回填源 mtime 时按**整毫秒**落盘，而「size + mtime」快路径的 mtime 比较也只比 `Math.floor(ms)`——两侧亚毫秒写入精度差不再把刚同步的文件误判 `modified`；内容不同仍必须由 SHA-256 确认，不得靠抹平 mtime 伪造 `same`。
+- **真实磁盘规模集成门禁（`sync-real-gate`）**：新增 `src/sync-real-gate.test.ts`，只用 `mkdtemp` 真实临时目录 + 真实主进程 IPC handler（沿用 electron mock + handler map 模式），两侧各 ≥1,000 文件、≥4 层嵌套、四态齐备、路径含中文与空格，覆盖双向镜像、删除默认不勾 / 显式全选、mtime 与二次幂等；登记为 `.munk/code-gates.json` 末尾第 11 项（`pnpm test:sync-real`，单 argv），不用 `/samples`、内存 VFS、`.ocsnap` 或 mock 文件系统顶替。
 - **模板归位匹配器（`src/core/directory/`，纯函数）**：以模板树 A（当前目录会话左/源侧，或用户选定目录）的**相对路径槽位**为骨架，用「**文件名 + SHA-256 内容哈希**」从层级被打乱的树 B（内置 `/samples/directory/incoming` 或用户选定目录）中匹配文件，产出 `matched`（A 槽位 ← B 文件，文件名一致且内容哈希一致）、`missing`（A 槽位在 B 中无同名候选）、`conflict`（同名候选内容不同 `content-mismatch`，或同名候选多于一个 `ambiguous`）、以及 B 中未被消费的 `unused` 文件。匹配经哈希索引 + 文件名索引完成，线性复杂度，不做两两内容比对。
 - **模板预览与提取归位**：视图展示归位映射预览（已匹配相对路径映射、缺失槽位、冲突项、B 未使用文件；确认前不写任何文件）；确认后按模板 A 的相对路径结构写出所有 `matched` 文件（自动创建缺失父目录）到目标根，完成后用同一匹配器复核归位结果。
 - **批量取数与有界遍历（`src/core/directory/compare.ts`）**：`scanDirectory` 从「逐层串行、一个目录一次 `list`」改为**队列 + 批量取数 + 有界并发**——按层收集待列目录，一次 `listDirectories` 往返携带多个目录（默认批大小 `DEFAULT_DIRECTORY_BATCH_SIZE = 8`，队列不足时按 `ceil(待列数 / 并发)` 收缩但不少于 2），由 `mapWithLimit` 限制在飞批量调用（默认 `DEFAULT_TRAVERSAL_CONCURRENCY = 16`，可经 `ScanDirectoryOptions.concurrency` 覆盖）。批量/并发只改「怎么取数」：树结构、按名称 `localeCompare` 排序、`index` 相对路径键、四态配对、`skipped` 计数口径与不可列子树容错与串行基线逐项一致；批量槽位缺失或槽位顺序与请求不符即整次 reject，绝不返回部分 `ScannedTree`。既有 `scanDirectory(rootPath, list)` 调用形态保留，缺批量能力时由 `perDirectoryBatches` 适配为批形态。
@@ -56,9 +58,19 @@
 - **ac-sync-plan-same-modified**：两侧相同的文件不进清单；`modified` 进 `update`；源侧独有的文件在目标侧进 `copy`（vitest 覆盖四类状态）。
 - **ac-sync-dryrun-dialog**：目录视图可发起左→右 / 右→左同步并弹出 Dry-run 预览弹窗，分组展示待新增拷贝 / 待覆盖修改（镜像模式含待删除）与字节汇总；取消后目标侧无任何写入。
 - **ac-sync-apply-refresh**：确认后经 `PlatformPort` 实际写入（缺失父目录自动创建），完成后自动重跑对比并刷新目录树与统计；再执行同一方向时计划为空（幂等）。
-- **ac-sync-mirror-delete**：镜像模式可把目标侧独有文件列为待删除项并可逐项取消；未勾选项不被删除。
+- **ac-sync-mirror-delete**：镜像模式把目标侧独有文件列为待删除项，**初始全部未勾选**；提供组级「全选 / 清空」与逐项复选框；确认执行只删勾选项，未勾选的目标侧文件仍在磁盘上。（口径在 2026-10-31 由 `wi_ws_7efd09ed8abe2eda` 由「默认勾选」反转为「默认不勾」，`qa/sync-mirror-delete.md` 已按新合同改写；旧「默认勾选」断言只允许改成断言默认不勾。）
 - **ac-sync-electron-local**：Electron（`pnpm dev`）下对两个真实本地目录完成 dry-run → 确认 → 磁盘写入 → 重新对比闭环。
 - **ac-sync-web-sample**：Web（`pnpm dev:web`）下用内置样本目录 / 内存可写区完成同一闭环；内置样本库保持只读、可重复一键加载（写操作不污染 `/samples`）。
+- **ac-plan-three-groups-exact**：真实临时目录对上，左→右与右→左两个方向的 Dry-run 计划只产出 copy / update / delete 三类条目；每组 `count` 等于条目数、`bytes` 等于该组条目 `size` 之和，且与磁盘上实际待新增 / 待覆盖 / 待删除的文件逐条对应；`same` 文件不出现在任何一组（`same` 数量 = 两侧内容与 mtime 均一致的文件数）。
+- **ac-delete-default-unchecked**：镜像 Dry-run 的删除组初始复选框全部未选中；不勾选任何删除项即确认 → `executeSyncPlan` 的 `deleted === 0`，目标侧文件列表与执行前逐项一致；未传 `deletePaths` 直接调用 `executeSyncPlan` 时同样零删除。
+- **ac-delete-selected-only**：勾选（逐项或组级全选）后确认，只有被勾选的删除项从磁盘消失，未勾选的目标侧独有文件仍在磁盘上；`deleted` 计数等于勾选数，返回的 `affected` 覆盖被删路径。
+- **ac-real-apply-content-structure**：确认执行后真实落盘：每个 copy / update 项的目标文件内容与源文件 UTF-8 内容完全一致，目标侧相对路径与源侧逐条相同，≥4 层嵌套原样保留，含中文与空格的路径（如 `资料 夹/第一层 子目录/第二层/deep 文件.txt`）在磁盘上可被同一相对路径找到。
+- **ac-mtime-preserved-fast-path-same**：同步完成后每个被写入目标文件的 `mtimeMs` 与源文件按毫秒归一相等（允许平台写入精度归一到毫秒），对同步后的磁盘重新对比时这些文件判为 `same`、`modified` 集合不含它们。
+- **ac-refresh-single-source**：`applySyncPreview` 返回的 `DirectoryComparison` 的 `counts` 与 `skipped` / `leftSkipped` / `rightSkipped` 与对同一磁盘状态独立重新 `compareDirectories` 的结果完全相等，且 `copied` / `updated` / `deleted` 与计划中的勾选集合一致。
+- **ac-idempotent-second-dry-run**：镜像模式删除项显式全选并执行完成后，立即对同一方向重新 Dry-run：`copy.count = 0`、`update.count = 0`、`delete.count = 0`、`totalCount = 0`、`totalBytes = 0`；不因 mtime 精度、路径分隔符或中文 / 空格路径出现幽灵条目。
+- **ac-dialog-executable-summary**：预览弹窗底部「本次将执行」条目数与实际调用 `onConfirm` 的勾选集合一致；只有未勾选删除项时「确认执行」不可点击并显示原因；勾选任一删除项或存在 copy / update 项时可点击；忙碌态下确认按钮禁用并显示进行中文案。
+- **ac-scale-real-disk-fixture**：集成测试只使用 `mkdtemp` 真实磁盘临时目录，两侧各 ≥1,000 个文件、至少 4 层嵌套、四态齐备、路径含中文与空格；不使用 `/samples` 内置样本、内存 VFS 或 `.ocsnap` 快照顶替，不 mock 文件系统。
+- **ac-gate-registered**：上述断言以独立 gate `sync-real-gate` 登记在 `.munk/code-gates.json` 末尾（`command` 为单 argv `pnpm test:sync-real`、`cwd: "."`，可单独执行通过）；`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 与既有目录、渲染层套件零回归，既有「删除默认勾选」断言必须改写为断言默认不勾，不得删除或弱化。
 - **ac-template-match**：匹配器以文件名 + SHA-256 内容哈希把散乱树 B 的文件映射到模板 A 的相对路径槽位，正确产出 已匹配 / 缺失 / 冲突（同名不同内容或同名多候选），并列出 B 未使用文件（vitest 可单测）。
 - **ac-template-sample**：对模板 A（`/samples/directory/baseline`）与散乱树 B（`/samples/directory/incoming`）匹配，能把被打乱层级的多层文件归位到模板路径（如 `misc/deep/deeper/strings.ts` → `src/core/utils/strings.ts`、`misc/ui/SplitPane.tsx` → `src/ui/workbench/SplitPane.tsx`），缺失槽位正确报缺失。
 - **ac-template-preview**：视图展示归位映射预览（已匹配相对路径、缺失、冲突、B 未使用），确认前不写任何文件。
@@ -116,6 +128,8 @@
 
 - **不做文件级差异算法本体**：行级 / 行内字符级 inline diff、3-way merge 冲突求解与点选合并、CSV 主键列对齐、JSON/YAML 语义归一化 diff 一律不在本域。下钻只把内容带进对应视图并只读呈现，视图增强留给对应子项。
 - **不做双向 / 三向同步**：同步为单向（左→右 / 右→左）按方向覆盖，不做双向 / 三向同步、不做内容级合并冲突策略（3-way 归代码域）。
+- **不做同步失败安全能力（本阶段）**：不做执行中取消（`AbortSignal`）、失败回滚 / 备份、目标只读或条目被占用预检、写盘原子性改造、IPC 失败可读中文文案统一——本阶段只在**成功路径**上保证真实落盘与幂等。
+- **不清理镜像删除产生的空目录**：`buildSyncPlan` 只列文件项，三类清单为空不依赖目录级清理，不改目录级四态口径。
 - **不做二进制 / 非 UTF-8 字节级拷贝**：平台读写通道为文本；不做权限 / 属主 / 模式位 / ACL / 符号链接复制；不做回收站、版本保留、保留策略等高级镜像选项。
 - **不做持续 / 定时自动同步与 watcher**：不对文件系统做监听、不做增量重扫调度；同步为按需触发（用户点「预览并同步」）。
 - **不做模板归位的模糊 / 相似度匹配**：仅精确文件名 + SHA-256 内容哈希；不做重命名识别与内容 diff 匹配，改名文件按「缺失 + B 未使用」处理。
@@ -138,6 +152,8 @@
 - **SHA-256 必须用可在 Node、浏览器与 Electron renderer 三端运行的实现**：renderer 侧不得引入 `node:*`，不依赖难以单测的异步 Web Crypto；核心比对保持同步纯函数。
 - 目录扫描 / 读取走 `PlatformPort.selectDirectory` / `listDirectory` / `readTextFile`；写入走 `writeTextFile` / `ensureDirectory`（镜像删除经 `delete-file`）。
 - **写入后必须使受影响路径的比对缓存失效**（清 `ComparisonCache.hashes` 对应条目），并让 Web 虚拟文件系统的写入更新其 size / mtime 元数据；否则「size 与 mtime 相同即判相同」的短路会让刷新读到旧结论（Web 侧 `modifiedMs` 恒为 0，尤其危险）。
+- **mtime 归一只允许发生在「size + mtime 快路径」的比较上**，粒度为毫秒（`Math.floor(ms)`）：Electron `write-text-file` 回填 `modifiedMs` 时用数值秒 + 亚微秒抬升（`Math.floor(ms) / 1000 + 1e-6`）避免落在整毫秒以下，核心侧 `needsContent` / `classifyPair` 的 mtime 等值判断同步按毫秒归一；内容不同仍必须由 SHA-256 确认 `modified`，禁止用 mtime 抹平伪造 `same`。
+- **删除语义单一实现**：继续用 `buildSyncPlan` / `executeSyncPlan`，`deletePaths` 缺省 = 零删除的合同在 `sync.test.ts` 内直接断言；`directoryOps.applySyncPreview` 的非镜像分支传 `[]` 而非 `undefined`，任何调用点都不得因漏传参数删目标文件。预览弹窗新增文案（「全选」「清空」「本次将执行」「无执行项原因」）必须 zh / en 成对并通过 `messages.test` 的英文零汉字规则，样式只用既有 token / `ToolbarButton`。
 - 目标 / 源若落在只读的 `/samples` 挂载上，先物化到可写区再执行（Web → `/memory/**`；Electron → 临时目录），保证样本库只读且可重复加载。
 - 差异语义复用现有 `DiffStatus`（`same`/`added`/`removed`/`modified`）与 `DiffBadge` / `diffSemantics`，不新造状态枚举；Dry-run 弹窗与模板预览用现有基础组件组合（`Panel` / `Button` / `SegmentedControl` / `DropdownMenu` / `TreeView` / `DiffBadge`），需要弹层语义时用 `role="dialog"` + 焦点管理；不新造第四套视图或重型组件库。
 - 匹配与计划生成必须避免 O(n²) 内容比对：哈希 / 文件名建索引后再匹配。
@@ -162,6 +178,13 @@
 - **摘要分块大小单一来源导出**（`compare.ts` 的 `DEFAULT_DIGEST_BATCH_SIZE`），可在测试经 `digestBatchSize` 覆盖；每结算一块才写该块成功项的 `cache.hashes`，取消时不写未结算块。核心不感知 `operationId`，只透传 `signal`。
 
 ## 最近交付证明
+
+- WI：`wi_ws_7efd09ed8abe2eda`（真实外部目录双向镜像同步闭环：删除安全默认反转 + mtime 毫秒归一 + 真实磁盘规模门禁，`kind: feature`）
+- 日期：2026-10-31
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_ad95f49955770496/code-gates/attempts/001/manifest.json`；新增 `sync-real-gate` 在矩阵内且单跑通过；`needSelfTest=false`，不做实机 GUI 验收）。
+- 覆盖摘要：① **删除语义反转**——`executeSyncPlan` 的 `deletePaths` 由「缺省 = 全删」改为 `new Set(options.deletePaths ?? [])`（缺省 / 空集零删除），`DirectorySyncDialog` 的 `excluded` 集合改为 `selected` 集合并初始为空，逐项复选框默认未勾，新增组级「全选 / 清空」与底部「本次将执行：新增 X · 覆盖 Y · 删除 Z」；确认按钮由 `empty` 改为 `executableCount === 0` 禁用，`blockedByDeletes`（只有未勾选删除项）渲染可见原因，忙碌态复选框 / 组级按钮一并禁用。`directoryOps.applySyncPreview` 非镜像分支改传 `[]`。② **mtime 幽灵差异消除**——主进程 `write-text-file` 回填 mtime 由 `new Date(modifiedMs) + utimes(Date)` 改为数值秒 `Math.floor(ms) / 1000 + 1e-6`；`compare.ts` 新增 `sameModifiedMillisecond`（`Math.floor(ms)` 相等）供 `needsContent` 与 `classifyPair` 使用，内容确认仍由 SHA-256 决定 `same` / `modified`。③ **真实磁盘规模门禁**——新增 `src/sync-real-gate.test.ts`（`mkdtemp` + 真实 IPC handler，两侧各 1,000 文件、6 层嵌套、四态齐备、`资料 夹/第一层 子目录/…/第五层` 中文空格路径）：双向 copy/update/delete 逐条与磁盘对应、`same` 不进组、空 / 缺省 `deletePaths` 零删除、显式勾选只删该项、apply 后内容与 mtime（毫秒）一致、返回比较与独立重比相等、二次 Dry-run 全 0；`package.json` 加单 argv `test:sync-real`，`.munk/code-gates.json` 末尾追加第 11 项 `sync-real-gate`（门禁矩阵形状见 `domains/quality-gates`）。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech/ux 手合；本域 `qa/sync-mirror-delete.md` 的期望已按新合同（默认不勾）改写并记录本轮真实磁盘门禁证据，其余 `sync-*` 用例定义未受影响。预览弹窗新增四条词条（`directory.sync.selectAll` / `clearSelection` / `summary` / `noExecutable`）的 zh / en 口径同步在 `domains/i18n`。
+- 后续注意：① **「默认勾选删除」是本域最容易被旧记忆带偏的一条合同**——任何新增同步入口或测试都要按「缺省零删除」写，别再用 `deletePaths === undefined → 全删」的旧注释 / 旧断言；② mtime 归一**只允许在快路径比较上**，把它扩散到缓存键或写盘时间戳会让 `same` 判定失去内容校验；③ 本阶段成功路径之外仍无取消 / 回滚 / 预检，真实目录大规模镜像中途失败会留下部分写入，后续失败安全项要按此前提设计。
 
 - 交叉引用（非本域 AC）：`wi_ws_b32f99362fb6b51b`（2026-10-30，`kind: fix`）只改 `DirectoryView.tsx` 的三条 `view-toolbar` **行容器** class（追加 `min-w-0 overflow-x-auto scrollbar-none`）以修窄档横向溢出；目录树 / 行模型 / 过滤 / 折叠 / 选中 / 下钻 / 同步 / 模板语义零改动，AC 定义与门禁记录归 `domains/workbench`「视图工具区窄档横向滚动兜底」小节。
 

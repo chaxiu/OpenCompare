@@ -51,6 +51,11 @@
       "id": "structured-semantics",
       "cwd": ".",
       "command": "pnpm test:structured"
+    },
+    {
+      "id": "sync-real-gate",
+      "cwd": ".",
+      "command": "pnpm test:sync-real"
     }
   ]
 }

@@ -65,6 +65,11 @@ export const directory = {
   'directory.sync.syncing': '正在同步…',
   'directory.sync.apply': '确认执行',
   'directory.sync.deleteItem': '删除 {path}',
+  'directory.sync.selectAll': '全选',
+  'directory.sync.clearSelection': '清空',
+  'directory.sync.summary': '本次将执行：新增 {copy} · 覆盖 {update} · 删除 {delete}',
+  'directory.sync.noExecutable':
+    '待删除项默认不勾选；勾选至少一项删除，或存在新增/覆盖项后才能执行。',
   'directory.template.title': '模板归位映射预览',
   'directory.template.label.template': '模板 A：',
   'directory.template.label.incoming': '散乱树 B：',

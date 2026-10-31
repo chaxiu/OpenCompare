@@ -136,7 +136,9 @@ export async function applySyncPreview(
   }
 
   const execution = await executeSyncPlan(plan, syncIo(platform), {
-    deletePaths: plan.mode === 'mirror' ? deletePaths : undefined
+    // Mirror deletions are opt-in: an incremental plan has none, and a mirror
+    // plan only removes the paths the user explicitly checked.
+    deletePaths: plan.mode === 'mirror' ? deletePaths : []
   })
   invalidateComparisonCache(cache, execution.affected)
 

@@ -7,10 +7,11 @@
  *  - `update` — a file that exists on both sides and compares as `modified`,
  *  - `delete` — a target-only file, listed in *mirror* mode only.
  *
- * `same` files never enter the plan, so re-running the same direction after an
- * apply yields an empty plan (idempotent). Actual writes go through injected IO
- * callbacks, which the renderer binds to `PlatformPort`; the module itself stays
- * pure and Node-testable.
+ * `same` files never enter the plan, so re-running the same direction after
+ * applying the plan (including the mirror deletions the user checked) yields an
+ * empty plan (idempotent). Actual writes go through injected IO callbacks, which
+ * the renderer binds to `PlatformPort`; the module itself stays pure and
+ * Node-testable.
  */
 import type { ComparisonCache, DirectoryComparison, DirectoryDiffNode, ScannedTree } from './compare'
 
@@ -170,8 +171,9 @@ export interface SyncIo {
 
 export interface SyncExecutionOptions {
   /**
-   * Root-relative paths of mirror deletions the user kept checked. When
-   * omitted every planned deletion is applied.
+   * Root-relative paths of mirror deletions the user explicitly kept checked.
+   * Deletions are opt-in: when this is omitted (or empty) nothing is deleted,
+   * so a caller that forgets to pass the checked set can never wipe a target.
    */
   readonly deletePaths?: readonly string[]
 }
@@ -216,9 +218,10 @@ export async function executeSyncPlan(
     updated += 1
   }
 
-  const selected = options.deletePaths === undefined ? null : new Set(options.deletePaths)
+  // Deletions are explicit: an omitted `deletePaths` means "keep everything".
+  const selected = new Set(options.deletePaths ?? [])
   for (const item of plan.delete.items) {
-    if (selected !== null && !selected.has(item.relativePath)) continue
+    if (!selected.has(item.relativePath)) continue
     await io.deleteFile(item.targetPath)
     affected.push(item.targetPath)
     deleted += 1

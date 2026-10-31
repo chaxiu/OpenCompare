@@ -31,9 +31,9 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 
 ## 质量门禁
 
-默认矩阵 10 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
-`test-compare-request` / `cancel-gate` / `memory-gate` / `structured-semantics`（见
-`.munk/code-gates.json`），全部为纯单测或构建门禁；矩阵扩容只做末尾追加，前序条目逐字逐序不变
+默认矩阵 11 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
+`test-compare-request` / `cancel-gate` / `memory-gate` / `structured-semantics` / `sync-real-gate`（见
+`.munk/code-gates.json`），全部为纯单测或构建门禁（`sync-real-gate` 只写系统临时目录并自带清理）；矩阵扩容只做末尾追加，前序条目逐字逐序不变
 （`src/munk-gates.test.ts` 钉板同步长度断言）。重采样 `pnpm perf:gate` **不在默认矩阵**，只作为条件 profile 放在
 `.munk/code-gates.perf.json`（Host 不自动执行）：仅在 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染
 / 取消路径时调用，或作为里程碑 `x.y.0` 的独立验收任务跑一次；同一 commit 只采样一次，重跑须在

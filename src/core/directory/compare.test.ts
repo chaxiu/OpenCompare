@@ -398,6 +398,34 @@ describe('directory comparison engine', () => {
     expect(added?.leftPath).toBeUndefined()
   })
 
+  it('normalises the size/mtime fast path to whole milliseconds', async () => {
+    const fs = createTrees(
+      {
+        'same.txt': { text: 'aaa', modifiedMs: 1000.4927 },
+        'content.txt': { text: 'aaaa', modifiedMs: 2000.2 },
+        'stamp.txt': { text: 'bbb', modifiedMs: 3000.2 }
+      },
+      {
+        // A freshly synced target has the source mtime truncated to whole ms.
+        'same.txt': { text: 'aaa', modifiedMs: 1000 },
+        'content.txt': { text: 'bbbb', modifiedMs: 2000.9 },
+        // Different whole-millisecond stamps stay a fast-path difference.
+        'stamp.txt': { text: 'bbb', modifiedMs: 3001.2 }
+      }
+    )
+
+    const comparison = await compareDirectories(
+      '/left',
+      '/right',
+      fs.list,
+      fs.readTextFile,
+      createComparisonCache()
+    )
+
+    // Sub-millisecond drift is not a difference; different content still is.
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 0, modified: 2 })
+  })
+
   it('settles size/mtime mismatches without reading bodies and reuses the hash cache', async () => {
     const fs = createTrees(
       {

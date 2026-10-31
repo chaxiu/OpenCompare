@@ -4,25 +4,25 @@
 
 ## 范围
 
-- **默认矩阵收敛为 10 项（`.munk/code-gates.json`）**：`version: 1`，`gates` 恰为 10 项，id 顺序固定 `install, lint, typecheck, build, build-web, test, test-compare-request, cancel-gate, memory-gate, structured-semantics`；命令逐字为 `pnpm install` / `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm build:web` / `pnpm test` / `pnpm test src/shared/compareRequest.test.ts` / `pnpm test:cancel` / `pnpm test:memory` / `pnpm test:structured`，`cwd` 均为 `"."`。默认矩阵**不得**包含 `perf-gate`，也不得包含 `perf:dir`。`cancel-gate` / `memory-gate` / `structured-semantics` 三个较重的既有单测门禁留在默认矩阵内（它们不启动 Electron、不打包）。**扩容纪律**：往默认矩阵加项只能追加在末尾并同一次提交更新 `src/munk-gates.test.ts` 期望矩阵与长度断言，前序条目逐字逐序不得改动（2026-10-31 由 WI `wi_ws_ffe5e8010c083c42` 从 9 扩到 10，旧 AC id `ac-manifest-nine-gates` / `ac-manifest-commands-intact` 的 9 项口径由下方 `ac-manifest-ten-gates` / `ac-manifest-commands-intact-ten` 取代）。
+- **默认矩阵收敛为 11 项（`.munk/code-gates.json`）**：`version: 1`，`gates` 恰为 11 项，id 顺序固定 `install, lint, typecheck, build, build-web, test, test-compare-request, cancel-gate, memory-gate, structured-semantics, sync-real-gate`；命令逐字为 `pnpm install` / `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm build:web` / `pnpm test` / `pnpm test src/shared/compareRequest.test.ts` / `pnpm test:cancel` / `pnpm test:memory` / `pnpm test:structured` / `pnpm test:sync-real`，`cwd` 均为 `"."`。默认矩阵**不得**包含 `perf-gate`，也不得包含 `perf:dir`。`cancel-gate` / `memory-gate` / `structured-semantics` / `sync-real-gate` 四个较重的既有单测门禁留在默认矩阵内（它们不启动 Electron、不打包；`sync-real-gate` 只写临时目录并自带清理）。**扩容纪律**：往默认矩阵加项只能追加在末尾并同一次提交更新 `src/munk-gates.test.ts` 期望矩阵与长度断言，前序条目逐字逐序不得改动（2026-10-31 由 WI `wi_ws_ffe5e8010c083c42` 从 9 扩到 10，旧 AC id `ac-manifest-nine-gates` / `ac-manifest-commands-intact` 的 9 项口径由 `ac-manifest-ten-gates` / `ac-manifest-commands-intact-ten` 取代；同日由 WI `wi_ws_7efd09ed8abe2eda` 从 10 扩到 11，矩阵形状现行口径即本条与下方 `ac-manifest-eleven-gates` / `ac-manifest-commands-intact-eleven`，10 项口径记为历史）。
 - **条件采样 profile（`.munk/code-gates.perf.json`）**：`version: 1`，唯一 gate `perf-gate`（`cwd: "."`、`command: "pnpm perf:gate"` 逐字、单 argv 不含 `&&` / `||` / `|` / `;`，不含 `perf:dir`），`description` 为非空字符串，必须写明三件事：① 该 profile **不进默认 `code_gates`**、Host 不自动执行；② 触发条件——diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染 / 取消路径时调用，或作为里程碑 `x.y.0` 的独立验收任务一次性跑；③ 采样纪律——同一被测对象同一 commit 只采样一次，重跑须在 digest 写明上一轮作废原因与两轮差异。
-- **回归钉板单测（`src/munk-gates.test.ts`）**：纯静态读两个 manifest（`process.cwd()` 相对路径，`node:fs` + `JSON.parse`），不启动 Electron、不写临时目录、不依赖网络；靠既有 `vitest run` include `src/**/*.test.ts` 进入 `pnpm test`，不新增 npm script。断言默认矩阵恰 10 项且 id 顺序一致、10 条命令逐字不变且 `cwd === "."`、不含 `perf-gate` / `perf:dir`、`cancel-gate` / `memory-gate` / `structured-semantics` 仍在；断言 perf profile 存在、版本 1、唯一项字段逐字相等、单 argv 无 shell 连接符、`description` 含条件 profile 口径 / 六类触发路径 / `x.y.0` / 同 commit 只采一次与 digest 重跑说明。把 `perf-gate` 改回或追加到默认矩阵即红。
-- **文档口径同步**：`docs/perf/large-directory-memory.md` §2 不再声称「`.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`」，改为指向 `.munk/code-gates.perf.json` 条件 profile 并列出三条采样纪律；`.munk/baseline/tech/overview.md` 的「质量门禁」一节写为「默认 9 项 + 条件 profile」，不再声称默认矩阵含 `perf-gate`，同时把 perf 门禁段标题从「门禁」改为「条件门禁（不进默认矩阵）」。
+- **回归钉板单测（`src/munk-gates.test.ts`）**：纯静态读两个 manifest（`process.cwd()` 相对路径，`node:fs` + `JSON.parse`），不启动 Electron、不写临时目录、不依赖网络；靠既有 `vitest run` include `src/**/*.test.ts` 进入 `pnpm test`，不新增 npm script。断言默认矩阵恰 11 项且 id 顺序一致、11 条命令逐字不变且 `cwd === "."`、不含 `perf-gate` / `perf:dir`、`cancel-gate` / `memory-gate` / `structured-semantics` / `sync-real-gate` 仍在；断言 perf profile 存在、版本 1、唯一项字段逐字相等、单 argv 无 shell 连接符、`description` 含条件 profile 口径 / 六类触发路径 / `x.y.0` / 同 commit 只采一次与 digest 重跑说明。把 `perf-gate` 改回或追加到默认矩阵即红。
+- **文档口径同步**：`docs/perf/large-directory-memory.md` §2 不再声称「`.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`」，改为指向 `.munk/code-gates.perf.json` 条件 profile 并列出三条采样纪律；`.munk/baseline/tech/overview.md` 的「质量门禁」一节写为「默认 11 项 + 条件 profile」，不再声称默认矩阵含 `perf-gate`，同时把 perf 门禁段标题从「门禁」改为「条件门禁（不进默认矩阵）」。
 - **JSON 形态约束**：两个 manifest 均 2 空格缩进、无尾逗号、`version: 1`，命令一律单 argv 字符串。
 
 ## 验收
 
-- **ac-manifest-ten-gates**：`.munk/code-gates.json` 为 `version: 1`，`gates` 长度恰为 10，id 顺序为 `install, lint, typecheck, build, build-web, test, test-compare-request, cancel-gate, memory-gate, structured-semantics`；不含 `id: "perf-gate"`。
-- **ac-manifest-commands-intact-ten**：10 项 command 逐字不变（`pnpm install` / `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm build:web` / `pnpm test` / `pnpm test src/shared/compareRequest.test.ts` / `pnpm test:cancel` / `pnpm test:memory` / `pnpm test:structured`），`cwd` 均为 `"."`；前 9 项 id / 顺序 / 命令与扩容前逐字相同，第 10 项为末尾追加。
-- **ac-gate-append-only**：默认矩阵扩容只做加法——前 9 条 `{id, command}` 逐字逐序保留，新条目追加在末尾；`src/munk-gates.test.ts` 的期望矩阵长度断言与 `gates` 长度同步（当前 10），新条目命令为单 argv（不含 `&&` / `||` / `|` / `;`）且不引入 `perf-gate`。
+- **ac-manifest-eleven-gates**：`.munk/code-gates.json` 为 `version: 1`，`gates` 长度恰为 11，id 顺序为 `install, lint, typecheck, build, build-web, test, test-compare-request, cancel-gate, memory-gate, structured-semantics, sync-real-gate`；不含 `id: "perf-gate"`。（10 项口径的旧 id `ac-manifest-ten-gates` 由本条取代。）
+- **ac-manifest-commands-intact-eleven**：11 项 command 逐字不变（`pnpm install` / `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm build:web` / `pnpm test` / `pnpm test src/shared/compareRequest.test.ts` / `pnpm test:cancel` / `pnpm test:memory` / `pnpm test:structured` / `pnpm test:sync-real`），`cwd` 均为 `"."`；前 10 项 id / 顺序 / 命令与扩容前逐字相同，第 11 项为末尾追加。（旧 id `ac-manifest-commands-intact-ten` 由本条取代。）
+- **ac-gate-append-only**：默认矩阵扩容只做加法——前序 `{id, command}` 逐字逐序保留，新条目追加在末尾；`src/munk-gates.test.ts` 的期望矩阵长度断言与 `gates` 长度同步（当前 11），新条目命令为单 argv（不含 `&&` / `||` / `|` / `;`）且不引入 `perf-gate`。
 - **ac-perf-profile-file**：`.munk/code-gates.perf.json` 存在且可 `JSON.parse`，`version === 1`，`gates` 长度恰为 1，唯一项 `id === "perf-gate"`、`cwd === "."`、`command === "pnpm perf:gate"`（逐字相等）。
 - **ac-perf-profile-single-argv**：该命令不含 `&&`、`||`、`|`、`;`，且不等于/不包含 `perf:dir`。
 - **ac-perf-profile-description**：该文件 `description` 为非空字符串，同时包含条件 profile 口径（不进默认 `code_gates`）、触发条件（diff 触及扫描/哈希/缓存/IPC/树渲染/取消路径，或里程碑 x.y.0 独立验收一次）、以及「同一 commit 只采样一次 + 重跑须在 digest 写明作废原因与两轮差异」三条采样纪律的关键表述。
 - **ac-pin-test-green**：`src/munk-gates.test.ts` 存在并被默认 `pnpm test` 收录，`pnpm test` 全绿；把任一默认矩阵条目改回/追加 `perf-gate` 时该测试失败（红）。
-- **ac-default-gates-green**：默认矩阵 10 项（install / lint / typecheck / build / build:web / test / test-compare-request / cancel-gate / memory-gate / structured-semantics）在交付提交上全部 passed，`manifest.summary` 为「code_gates passed (10 gates)」且无 failedGateIds；该结论不替代条件 profile 的 `perf-gate`（后者按触发纪律单跑）。
-- **ac-unit-gates-kept**：默认矩阵中 `cancel-gate` 的 command 为 `pnpm test:cancel`、`memory-gate` 的 command 为 `pnpm test:memory`、`structured-semantics` 的 command 为 `pnpm test:structured`，三者均不被移出。
+- **ac-default-gates-green**：默认矩阵 11 项（install / lint / typecheck / build / build:web / test / test-compare-request / cancel-gate / memory-gate / structured-semantics / sync-real-gate）在交付提交上全部 passed，`manifest.summary` 为「code_gates passed (11 gates)」且无 failedGateIds；该结论不替代条件 profile 的 `perf-gate`（后者按触发纪律单跑）。
+- **ac-unit-gates-kept**：默认矩阵中 `cancel-gate` 的 command 为 `pnpm test:cancel`、`memory-gate` 的 command 为 `pnpm test:memory`、`structured-semantics` 的 command 为 `pnpm test:structured`、`sync-real-gate` 的 command 为 `pnpm test:sync-real`，四者均不被移出。
 - **ac-docs-perf-md**：`docs/perf/large-directory-memory.md` §2 不再出现「`.munk/code-gates.json` 的 `perf-gate` 一项就是 `pnpm perf:gate`」的默认矩阵口径，改为指向 `.munk/code-gates.perf.json` 的条件 profile，并写明三条采样纪律（条件触发 / 里程碑一次 / 同 commit 只采一次且重跑需在 digest 说明）。
-- **ac-docs-tech-overview**：`.munk/baseline/tech/overview.md` 门禁清单一节写为默认 9 项 + 条件 profile，且不再声称默认矩阵含 `perf-gate`。
+- **ac-docs-tech-overview**：`.munk/baseline/tech/overview.md` 门禁清单一节写为默认 11 项 + 条件 profile（10 项为历史口径，不得回写），且不再声称默认矩阵含 `perf-gate`。
 - **ac-diff-scope**：`git diff --name-only`（相对改动前 HEAD）仅含 `.munk/code-gates.json`、`.munk/code-gates.perf.json`、`src/munk-gates.test.ts`、`docs/perf/large-directory-memory.md`、`.munk/baseline/tech/overview.md`。
 - **ac-no-perf-run**：本项执行过程中未运行 `pnpm perf:gate` / `pnpm perf:dir` / `electron-vite build` / 打包，也无真机采样证据文件产出。
 
@@ -47,6 +47,13 @@
 - `.munk/baseline/**` 的 fold 由 Delivery 承担：本域只记录现行门禁口径与 AC 定义，历史域记录（`foundation` 的 `ac-gates`、`perf-memory` 的 `ac-gate-wired`）按当初事实保留，由本域声明取代关系。
 
 ## 最近交付证明
+
+- WI：`wi_ws_7efd09ed8abe2eda`（真实磁盘镜像同步门 → 默认矩阵 10 → 11，`key: sync-real-gate`）
+- 日期：2026-10-31
+- 结果：code_gates passed（11 gates 矩阵，attempt 001，`manifest.summary = "code_gates passed (11 gates)"`，`.munk/runs/run_ws_ad95f49955770496/code-gates/attempts/001`，`needSelfTest: false`）。**本域口径同步更新**：默认矩阵 10 → 11，末尾追加 `sync-real-gate`。
+- 覆盖摘要：① `.munk/code-gates.json` 的 `gates` 末尾追加 `{ "id": "sync-real-gate", "cwd": ".", "command": "pnpm test:sync-real" }`，前 10 项 id / 顺序 / 命令 / `cwd` 逐字未动，矩阵长度 10 → 11；② `package.json` 新增单 argv 脚本 `test:sync-real`（`vitest run src/sync-real-gate.test.ts`）；③ `src/munk-gates.test.ts` 期望矩阵追加第 11 条、长度断言 10 → 11，「keeps cancel-gate, memory-gate and the real-disk sync gate in the matrix」断言新门 command，原 10 条逐字逐序保留（`ac-gate-append-only`）；④ 新门测什么归 `domains/directory`（真实临时目录双向镜像 / 删除安全默认 / mtime 毫秒 / 幂等），本域只管**清单形状与触发纪律**。矩阵扩容后仍无 `perf-gate` / `perf:dir`，条件 profile `.munk/code-gates.perf.json` 零改动。
+- 注：本 WI change pack 仅含 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech/ux 手合；本域无新增 qa 折叠用例。`.munk/baseline/tech/overview.md` 质量门禁节的「默认矩阵 10 项」由 Delivery 同步为 11 项并补上新门条目（门禁形状变更的事实同步，非 tech.md 折叠）。
+- 后续注意（本轮新增）：① `sync-real-gate` 属于**写真实临时目录**的重门（两侧各 1,000 文件，单跑约 20–40 s），虽不启动 Electron 但已明显比 `cancel-gate` 重；默认矩阵目前仍可接受，若将来再加同类真实磁盘门，应优先评估并入现有门文件而不是继续加矩阵项，否则每个 WI 都要多付一次全量落盘。② 11 项是全项目现行口径，任何「10 gates」旧描述都已过时（历史交付证明按当初事实保留，不回写）。
 
 - WI：`wi_ws_ffe5e8010c083c42`（真实文件语义门 → 默认矩阵 9 → 10，`key: structured-real-file-semantics-gate`）
 - 日期：2026-10-31
