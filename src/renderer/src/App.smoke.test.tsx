@@ -86,12 +86,13 @@ function assertNoPlaceholder(element: HTMLElement): void {
   expect(text).not.toMatch(/未翻译|TODO|\{[a-zA-Z]+\}/)
 }
 
-function viewSwitcher(copy: Record<MessageKey, string>): HTMLElement {
-  return screen.getByRole('tablist', { name: copy['shell.viewSwitcher.label'] })
-}
-
-function selectView(copy: Record<MessageKey, string>, key: MessageKey): void {
-  fireEvent.click(within(viewSwitcher(copy)).getByRole('tab', { name: copy[key] }))
+/** The session tab of one scene, located by the type icon it shows. */
+function selectScene(icon: string): void {
+  const node = Array.from(document.querySelectorAll('[data-session-tab]')).find(
+    (tab) => tab.querySelector(`svg[data-icon="${icon}"]`) !== null
+  )
+  if (!(node instanceof HTMLElement)) throw new Error(`missing session tab for ${icon}`)
+  fireEvent.click(within(node).getByRole('tab'))
 }
 
 /** Starts the four built-in scenes through the settings sample entries. */
@@ -112,7 +113,7 @@ async function loadDemoSamples(copy: Record<MessageKey, string>): Promise<void> 
   await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(4), {
     timeout: 4000
   })
-  selectView(copy, 'shell.view.directory')
+  selectScene('folder-tree')
 }
 
 /**
@@ -163,7 +164,7 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
   if (language === 'en') assertNoHan(main)
 
   // 4. Code view.
-  selectView(copy, 'shell.view.code')
+  selectScene('file-code-corner')
   const codeModes = screen.getByRole('tablist', { name: copy['files.code.modeLabel'] })
   expect(within(codeModes).getByRole('tab', { name: copy['files.code.mode.diff'] })).toBeDefined()
   expect(within(codeModes).getByRole('tab', { name: copy['files.code.mode.merge'] })).toBeDefined()
@@ -173,7 +174,7 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
   if (language === 'en') assertNoHan(main)
 
   // 5. CSV view.
-  selectView(copy, 'shell.view.csv')
+  selectScene('table-2')
   expect(
     screen.getByRole('tablist', { name: copy['files.csv.filterLabel'] })
   ).toBeDefined()
@@ -182,7 +183,7 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
   if (language === 'en') assertNoHan(main)
 
   // 6. Structured view.
-  selectView(copy, 'shell.view.structured')
+  selectScene('braces')
   expect(
     screen.getByRole('tablist', { name: copy['files.structured.formatLabel'] })
   ).toBeDefined()

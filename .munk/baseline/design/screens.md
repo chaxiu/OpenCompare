@@ -4,7 +4,7 @@ Links to key screens (not full page copies).
 
 来源：WI `wi_ws_7d6e8664e391fe1f`（ui-baseline）。
 
-- 主屏：`src/renderer/src/workbench/Workbench.tsx` — 顶栏（品牌图标 + `OpenCompare` 标题、平台、视图切换、`new-compare` / `open-file` / `open-folder` / `settings` 四个常驻动作；**无样本入口、无品牌副标题**）、会话标签条、中央工作区、底部状态栏。示例入口收在设置 →「示例与调试」（`SettingsDialog.tsx`：5 个 `[data-sample-entry]` + 调试开关下的 `[data-sample-failure]`）。
+- 主屏：`src/renderer/src/workbench/Workbench.tsx` — 顶栏（品牌图标 + `OpenCompare` 标题、平台、`new-compare` / `open-file` / `open-folder` / `settings` 四个常驻动作；**无样本入口、无品牌副标题、无 scene 分段控件**，场景由打开对象决定、切换走会话标签条）、会话标签条（每个 tab 按 `session.scene` 显示类型图标）、中央工作区、底部状态栏。示例入口收在设置 →「示例与调试」（`SettingsDialog.tsx`：5 个 `[data-sample-entry]` + 调试开关下的 `[data-sample-failure]`）。
 - 加载编排：`src/renderer/src/workbench/loadSampleSessions.ts`（`LoadedSession`、CSV/TSV 解析、加载下限时长、错误分支）。
 - 场景视图 `src/renderer/src/views/`：`DirectoryView`（双栏树 + 可折叠散乱树 B）、`CodeView`（双栏 Diff ↔ 三栏 base·ours·theirs）、`CsvView`（左右原始表格，主键列着色）、`StructuredView`（JSON ↔ YAML 原文对）。
 - 内置样本：`src/shared/fixtures/`（`types.ts` / `scenes.ts` / `index.ts` / `fixtures.test.ts`），纯数据 + 纯函数，零 Electron / DOM；`SAMPLE_FIXTURE_FILES` 由 Web 内存 `PlatformPort`（`src/renderer/src/platform/web-platform.ts`）挂载到 `/samples`，与 Electron 走同一契约。

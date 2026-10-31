@@ -239,6 +239,20 @@ describe('toolbar width budgets', () => {
     }
   })
 
+  it('recomputes the app row after the scene switcher leaves the header', () => {
+    const appRow = TOOLBAR_ROWS.find((row) => row.id === 'app-actions')
+    expect(appRow?.controls.map((item) => item.id)).toEqual(['brand'])
+
+    // The 444px view-switch control is gone, so each tier needs exactly that
+    // much less than the 734 / 948 / 948 baseline it was measured at.
+    const baseline: Readonly<Record<WidthTier, number>> = { compact: 734, regular: 948, wide: 948 }
+    for (const tier of TIERS) {
+      const budget = measureToolbar(tier, 'app')
+      expect(budget.required).toBe(baseline[tier] - 444)
+      expect(budget.fits).toBe(true)
+    }
+  })
+
   it('fits every view toolbar at 1024 / 1440 / 1920', () => {
     for (const tier of TIERS) {
       for (const view of VIEWS) {

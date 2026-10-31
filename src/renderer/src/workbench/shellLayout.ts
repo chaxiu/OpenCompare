@@ -415,7 +415,7 @@ const APP_ROW: ToolbarRowSpec = {
   level: 'app',
   views: ['directory'],
   entries: ['new-compare', 'open-file', 'open-folder', 'settings'],
-  controls: [control('brand', 130), control('view-switch', 444)],
+  controls: [control('brand', 130)],
   extra: 56
 }
 

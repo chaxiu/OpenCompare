@@ -6,7 +6,6 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.settings.open': 'Open settings',
   'shell.notification.dismiss': 'Dismiss notification',
   'shell.loading.preparing': 'Preparing…',
-  'shell.viewSwitcher.label': 'Switch view',
   'shell.view.directory': 'Directory',
   'shell.view.code': 'Code diff & 3-way',
   'shell.view.csv': 'CSV key comparison',

@@ -7,7 +7,7 @@
 
 | 我们的层 | 对方对应层 | 该层控件在我们词汇下承担的动作 | 来源 |
 | --- | --- | --- | --- |
-| app | app | 品牌与视图切换、新建对比、打开文件 / 文件夹、设置；全局动作只在此行出现一次，对应对方的菜单栏加标准工具栏（示例入口已收进设置，不再占用顶栏） | https://www.scootersoftware.com/v5help/commandsbc.html |
+| app | app | 品牌与全局动作、新建对比、打开文件 / 文件夹、设置；全局动作只在此行出现一次，对应对方的菜单栏加标准工具栏（示例入口已收进设置，不再占用顶栏） | https://www.scootersoftware.com/v5help/commandsbc.html |
 | sessions | sessions | 会话切换、关闭与脏标记；只切换视图，不承担任何对比动作，对应对方的标签栏 | https://www.scootersoftware.com/v5help/optionstab.html |
 | events | status | 提示、扫描 / 校验进度与取消；只读播报，不承担常规动作，对应对方落在视图底部的提示条 | https://www.scootersoftware.com/v5help/sessiondirsyncotherfilters.html |
 | view-toolbar | view-toolbar | 过滤、同步 / 模板、快照与报告、差异导航、覆写 / 保存、合并接受 / 导出；全部是当前视图动作，随视图类型换行 | https://www.scootersoftware.com/v5help/optionscommand.html |

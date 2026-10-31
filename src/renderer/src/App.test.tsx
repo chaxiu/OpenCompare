@@ -67,6 +67,24 @@ async function renderApp(): Promise<void> {
   render(<App />)
   await screen.findByRole('heading', { name: EMPTY_TITLE })
 }
+
+/** The entries the app header renders, in DOM order. */
+function appHeaderEntries(): string[] {
+  const header = document.querySelector('[data-shell-level="app"]')
+  if (header === null) throw new Error('missing app header')
+  return Array.from(header.querySelectorAll('[data-shell-entry]')).map(
+    (element) => element.getAttribute('data-shell-entry') ?? ''
+  )
+}
+
+/** Number of ARIA tablists inside the app header. */
+function appHeaderTabLists(): number {
+  const header = document.querySelector('[data-shell-level="app"]')
+  if (header === null) throw new Error('missing app header')
+  return header.querySelectorAll('[role="tablist"]').length
+}
+
+
 const LEFT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.left}/src/core/engine.ts`
 const RIGHT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.right}/src/core/engine.ts`
 const LEFT_REPORT = `${DIRECTORY_SAMPLE_PATHS.left}/src/data/report.csv`
@@ -168,7 +186,11 @@ describe('workbench shell', () => {
     expect(screen.queryByText('对比与三向合并工作台')).toBeNull()
     expect(screen.getByText('web')).toBeDefined()
     expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
-    expect(screen.getByRole('tablist', { name: '视图切换' })).toBeDefined()
+    // Switching scenes is the session tabs' job now: the header has no tablist.
+    expect(screen.queryByRole('tablist', { name: '视图切换' })).toBeNull()
+    expect(screen.queryByRole('tablist', { name: 'Switch view' })).toBeNull()
+    expect(appHeaderEntries()).toEqual(['new-compare', 'settings'])
+    expect(appHeaderTabLists()).toBe(0)
     expect(screen.getByRole('button', { name: '打开文件' })).toBeDefined()
     expect(screen.getByRole('button', { name: '打开文件夹' })).toBeDefined()
 
@@ -195,6 +217,48 @@ describe('workbench shell', () => {
     expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
     expect(screen.getAllByRole('tab', { name: /CSV 主键对比/ }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('tab', { name: /JSON \/ YAML/ }).length).toBeGreaterThan(0)
+    // A ready shell keeps the same header actions and still has no view switcher.
+    expect(appHeaderEntries()).toEqual(['new-compare', 'open-file', 'open-folder', 'settings'])
+    expect(appHeaderTabLists()).toBe(0)
+  })
+
+  it('shows each session tab the type it was opened as and drives the view', async () => {
+    await renderApp()
+    await loadDemoSamples()
+
+    const tabs = screen.getByRole('tablist', { name: '会话' })
+    const iconOf = (id: string): string | null => {
+      const node = tabs.querySelector(`[data-session-tab="${id}"]`)
+      if (node === null) throw new Error(`missing session tab: ${id}`)
+      return node.querySelector('svg[data-icon]')?.getAttribute('data-icon') ?? null
+    }
+    // One type icon per scene, independent of which tab is active.
+    const expected: Readonly<Record<string, string>> = {
+      [SAMPLE_DIRECTORY_ID]: 'folder-tree',
+      'session-code': 'file-code-corner',
+      'session-csv': 'table-2',
+      'session-structured': 'braces'
+    }
+    for (const [id, icon] of Object.entries(expected)) expect(iconOf(id)).toBe(icon)
+    expect(new Set(Object.keys(expected).map(iconOf)).size).toBe(4)
+
+    // Clicking a session tab is the only way to switch scenes now.
+    const open = (id: string): void => {
+      const node = tabs.querySelector(`[data-session-tab="${id}"]`)
+      if (!(node instanceof HTMLElement)) throw new Error(`missing session tab: ${id}`)
+      fireEvent.click(within(node).getByRole('tab'))
+    }
+
+    open('session-code')
+    await screen.findByRole('tablist', { name: '代码视图' })
+    open('session-csv')
+    await screen.findByRole('tablist', { name: '状态过滤' })
+    open('session-structured')
+    await screen.findByRole('tablist', { name: '结构化格式' })
+    open(SAMPLE_DIRECTORY_ID)
+    await screen.findByRole('tablist', { name: '差异过滤' })
+    // The icons never follow the active state.
+    for (const [id, icon] of Object.entries(expected)) expect(iconOf(id)).toBe(icon)
   })
 
   it('switches the work area and the status bar with the active session', async () => {
@@ -2074,13 +2138,13 @@ describe('launch request injection', () => {
     return screen.getByRole('contentinfo').textContent ?? ''
   }
 
-  function activeScene(): string | null {
-    const views = screen.getByRole('tablist', { name: '视图切换' })
-    return (
-      within(views)
-        .getAllByRole('tab')
-        .find((tab) => tab.getAttribute('aria-selected') === 'true')?.textContent ?? null
-    )
+  function activeSceneIcon(): string | null {
+    const list = screen.queryByRole('tablist', { name: '会话' })
+    if (list === null) return null
+    const selected = within(list)
+      .getAllByRole('tab')
+      .find((tab) => tab.getAttribute('aria-selected') === 'true')
+    return selected?.querySelector('svg[data-icon]')?.getAttribute('data-icon') ?? null
   }
 
   it('opens a file session from an injected request without a picker', async () => {
@@ -2095,7 +2159,7 @@ describe('launch request injection', () => {
     act(() => port.emit({ ok: true, request: FILE_REQUEST }))
 
     await waitFor(() => expect(tabCount()).toBe(1))
-    expect(activeScene()).toBe('代码 Diff & 3-Way')
+    expect(activeSceneIcon()).toBe('file-code-corner')
     expect(activeSession()).toContain(`file:${LEFT} ↔ ${RIGHT}`)
     expect(selectFile).not.toHaveBeenCalled()
     expect(selectDirectory).not.toHaveBeenCalled()
@@ -2118,7 +2182,7 @@ describe('launch request injection', () => {
     )
 
     await waitFor(() => expect(tabCount()).toBe(1))
-    expect(activeScene()).toBe('目录对比')
+    expect(activeSceneIcon()).toBe('folder-tree')
     expect(activeSession()).toContain('directory:/memory/left-dir ↔ /memory/right-dir')
   })
 

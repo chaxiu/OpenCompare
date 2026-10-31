@@ -4,7 +4,6 @@ export const shell = {
   'shell.settings.open': '打开设置',
   'shell.notification.dismiss': '关闭通知',
   'shell.loading.preparing': '正在准备…',
-  'shell.viewSwitcher.label': '视图切换',
   'shell.view.directory': '目录对比',
   'shell.view.code': '代码 Diff & 3-Way',
   'shell.view.csv': 'CSV 主键对比',
