@@ -54,6 +54,7 @@ describe('preload bridge', () => {
         'writeTextFile',
         'exists',
         'statPath',
+        'checkWritable',
         'ensureDirectory',
         'deleteFile',
         'removeDirectory',

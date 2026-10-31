@@ -221,6 +221,13 @@ export interface PlatformPort {
    * other I/O failures reject instead of guessing.
    */
   statPath(path: string): Promise<PathProbeKind>
+  /**
+   * Reports whether `path` can be written to, **without touching it**. A
+   * read-only mount or a denied directory rejects with the OS refusal
+   * (`EACCES` / `EROFS` / …); nothing is created on disk, so a caller can refuse
+   * a write before its first byte and leave the tree untouched.
+   */
+  checkWritable(path: string): Promise<void>
   /** Creates `path` and any missing ancestors; a no-op when it already exists. */
   ensureDirectory(path: string): Promise<void>
   /** Removes one file. Directories and read-only mounts are rejected. */

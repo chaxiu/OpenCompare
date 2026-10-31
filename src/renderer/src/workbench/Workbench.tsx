@@ -13,6 +13,7 @@ import { directoryReportSource } from '@core/directory/report'
 import type { DirectoryReportProgress } from '@core/directory/report'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { StructuredFilter } from '@core/structured/diff'
+import { SyncRefreshError } from '@core/directory/sync'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
@@ -1119,7 +1120,9 @@ export function Workbench({
 
   /**
    * Applies the confirmed plan, then refreshes the comparison tree. A failure or
-   * cancellation rolls the target back and keeps the preview open for a retry.
+   * cancellation rolls the target back and keeps the preview open for a retry; a
+   * refresh failure after the writes landed says the write completed and closes
+   * the preview, which no longer describes a retryable plan.
    */
   async function handleConfirmSync(deletePaths: readonly string[]): Promise<void> {
     const preview = syncPreview
@@ -1149,11 +1152,25 @@ export function Workbench({
       )
       setNoticeTone('info')
     } catch (cause) {
-      // The preview stays open either way: the target was rolled back, so the
-      // same plan can be retried or re-previewed against the real disk.
+      // The preview stays open on a rolled-back run: the same plan can be retried
+      // or re-previewed against the real disk.
       if (isOperationCancelled(cause)) {
         setNotice(copyNotice('shell.notice.syncCancelled'))
         setNoticeTone('info')
+      } else if (cause instanceof SyncRefreshError) {
+        // The writes landed and only the re-read failed: close the preview so the
+        // already-applied plan can never be confirmed a second time, and keep the
+        // current session (it still describes the pre-write tree).
+        setSyncPreview(null)
+        setNotice(
+          copyNotice('shell.notice.syncRefreshFailed', {
+            copied: cause.copied,
+            updated: cause.updated,
+            deleted: cause.deleted,
+            reason: cause.reason
+          })
+        )
+        setNoticeTone('danger')
       } else {
         setNotice(detailNotice(errorText(cause)))
         setNoticeTone('danger')

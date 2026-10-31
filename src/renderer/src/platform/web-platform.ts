@@ -340,6 +340,14 @@ export function createWebPlatformPort(): PlatformPort {
       if (!node) return 'missing'
       return node.isDirectory ? 'directory' : 'file'
     },
+    // The memory tree has no permission bits; only the read-only sample mount can
+    // refuse, and nothing is created to answer the question.
+    checkWritable: async (path) => {
+      assertWritable(path)
+      if (!nodes.has(path)) {
+        throw new Error(`无法写入目标 ${path}：路径不存在或已被移动（ENOENT）。`)
+      }
+    },
     ensureDirectory: async (path) => {
       if (isSamplePath(path)) return
       ensureDirectoryNode(path)

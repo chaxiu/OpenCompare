@@ -27,7 +27,12 @@ import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { compareDirectories, createComparisonCache, scanDirectory } from '@core/directory/compare'
 import type { ComparisonCache, DirectoryComparison } from '@core/directory/compare'
-import { buildSyncPlan, executeSyncPlan, SyncTargetError } from '@core/directory/sync'
+import {
+  buildSyncPlan,
+  executeSyncPlan,
+  SyncRefreshError,
+  SyncTargetError
+} from '@core/directory/sync'
 import type { SyncDirection, SyncIo, SyncPlanGroup } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { digestFilesForComparison } from '@renderer/platform'
@@ -92,6 +97,7 @@ const platform: PlatformPort = {
     invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
   statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
+  checkWritable: (path) => invoke(PLATFORM_CHANNELS.checkWritable, path) as Promise<void>,
   ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
   removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
@@ -112,7 +118,26 @@ function syncIo(port: PlatformPort): SyncIo {
     deleteFile: (path) => port.deleteFile(path),
     removeDirectory: (path) => port.removeDirectory(path),
     statPath: (path) => port.statPath(path),
-    listDirectory: (path) => port.listDirectory(path)
+    listDirectory: (path) => port.listDirectory(path),
+    checkWritable: (path) => port.checkWritable(path)
+  }
+}
+
+/** Wraps a port so every real write is counted before it reaches the disk. */
+function recordWrites(port: PlatformPort): {
+  readonly port: PlatformPort
+  readonly writes: string[]
+} {
+  const writes: string[] = []
+  return {
+    writes,
+    port: {
+      ...port,
+      writeTextFile: (path, content, modifiedMs) => {
+        writes.push(path)
+        return port.writeTextFile(path, content, modifiedMs)
+      }
+    }
   }
 }
 
@@ -603,7 +628,13 @@ function expectSameSnapshot(before: DiskSnapshot, after: DiskSnapshot): void {
     expect(after.files.get(relativePath)?.content, relativePath).toBe(file.content)
     expect(after.files.get(relativePath)?.modifiedMs, relativePath).toBe(file.modifiedMs)
   }
-  expect([...after.files.keys()].filter((relativePath) => relativePath.endsWith('.tmp'))).toEqual([])
+  // No atomic-write temporary file and no writability probe may survive a run.
+  expect(
+    [...after.files.keys()].filter(
+      (relativePath) =>
+        relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-')
+    )
+  ).toEqual([])
 }
 
 const SAFETY_STAMP = 1_700_000_500_000
@@ -650,7 +681,7 @@ function isRootUser(): boolean {
 
 describe('real-disk sync failure safety', () => {
   it.skipIf(isRootUser())(
-    'refuses a read-only target before writing any planned item',
+    'refuses a read-only target without writing any planned item or probe file',
     async () => {
       // Permission bits are meaningless for root; only this case is skipped.
       const fixture = await buildSafetyFixture()
@@ -658,11 +689,12 @@ describe('real-disk sync failure safety', () => {
       const plan = buildSyncPlan(comparison, 'left-to-right', 'mirror')
       expect(plan.totalCount).toBe(6)
       const before = await snapshotTree(fixture.right)
+      const recorded = recordWrites(platform)
 
       let error: unknown
       try {
         await chmod(fixture.right, 0o555)
-        error = await executeSyncPlan(plan, syncIo(platform), {
+        error = await executeSyncPlan(plan, syncIo(recorded.port), {
           deletePaths: ['stale-a.txt', 'stale-b.txt']
         }).then(
           () => undefined,
@@ -680,8 +712,16 @@ describe('real-disk sync failure safety', () => {
       expect(message).toMatch(/EACCES|EPERM|EROFS/)
       expect(message).not.toContain('Error invoking remote method')
 
-      // Nothing was written, deleted or left behind: the target is identical.
+      // The preflight refuses through the non-writing probe: zero write calls,
+      // so no probe file and no planned item ever reached the disk.
+      expect(recorded.writes).toEqual([])
       expectSameSnapshot(before, await snapshotTree(fixture.right))
+      expect((await readdir(fixture.right)).sort()).toEqual([
+        'same.txt',
+        'stale-a.txt',
+        'stale-b.txt',
+        'update.txt'
+      ])
     },
     60_000
   )
@@ -699,8 +739,9 @@ describe('real-disk sync failure safety', () => {
       // at a path the plan still wants to copy a file to.
       await mkdir(copyItem.targetPath, { recursive: true })
       const before = await snapshotTree(fixture.right)
+      const recorded = recordWrites(platform)
 
-      const error = await executeSyncPlan(plan, syncIo(platform), {
+      const error = await executeSyncPlan(plan, syncIo(recorded.port), {
         deletePaths: ['stale-a.txt', 'stale-b.txt']
       }).then(
         () => undefined,
@@ -715,7 +756,9 @@ describe('real-disk sync failure safety', () => {
       expect(message).toContain('EISDIR')
       expect(message).not.toContain('Error invoking remote method')
 
-      // No earlier item landed, and the occupying directory is untouched.
+      // Refused in the preflight: no write ran and the occupying directory is
+      // untouched, so no earlier item landed and nothing was left behind.
+      expect(recorded.writes).toEqual([])
       expectSameSnapshot(before, await snapshotTree(fixture.right))
       expect((await stat(copyItem.targetPath)).isDirectory()).toBe(true)
       expect(await readdir(copyItem.targetPath)).toEqual([])
@@ -851,6 +894,141 @@ describe('real-disk sync failure safety', () => {
       expectSameSnapshot(before, await snapshotTree(fixture.right))
       expect(await platform.exists(diskPath(fixture.right, 'stale-a.txt'))).toBe(true)
       expect(await platform.exists(diskPath(fixture.right, 'stale-b.txt'))).toBe(true)
+    },
+    60_000
+  )
+
+  it(
+    'rolls a write that landed before it rejected back, for a copy and an update',
+    async () => {
+      const fixture = await buildSafetyFixture()
+      const cache = createComparisonCache()
+      const comparison = await comparePair(fixture.left, fixture.right, cache)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      const checked = preview.plan.delete.items.map((item) => item.relativePath)
+      const before = await snapshotTree(fixture.right)
+
+      /** Writes for real, then rejects exactly once on `relativePath`. */
+      function postWriteFailure(relativePath: string): {
+        readonly port: PlatformPort
+        readonly landed: () => boolean
+      } {
+        const targetPath = diskPath(fixture.right, relativePath)
+        let landed = false
+        return {
+          landed: () => landed,
+          port: {
+            ...platform,
+            writeTextFile: async (path, content, modifiedMs) => {
+              await platform.writeTextFile(path, content, modifiedMs)
+              if (!landed && path === targetPath) {
+                landed = true
+                throw Object.assign(new Error('rename landed, mtime backfill failed'), {
+                  code: 'EACCES'
+                })
+              }
+            }
+          }
+        }
+      }
+
+      for (const relativePath of ['added/one.txt', 'update.txt']) {
+        const failure = postWriteFailure(relativePath)
+        const error = await applySyncPreview(
+          failure.port,
+          preview,
+          cache,
+          checked
+        ).then(
+          () => undefined,
+          (reason: unknown) => reason
+        )
+
+        expect(failure.landed(), relativePath).toBe(true)
+        expect(error).toBeInstanceOf(SyncTargetError)
+        expect((error as SyncTargetError).code).toBe('EACCES')
+        const message = (error as Error).message
+        expect(message).toMatch(/[一-龥]/)
+        expect(message).toContain(diskPath(fixture.right, relativePath))
+        expect(message).toContain('EACCES')
+        expect(message).not.toContain('Error invoking remote method')
+
+        // Bytes, millisecond mtimes and directories are all exactly as before.
+        expectSameSnapshot(before, await snapshotTree(fixture.right))
+        // Everything this run created is gone again, multi-level directories too.
+        expect(await platform.exists(diskPath(fixture.right, 'added/one.txt'))).toBe(false)
+        expect(await platform.statPath(diskPath(fixture.right, 'added'))).toBe('missing')
+      }
+    },
+    60_000
+  )
+
+  it(
+    'reports a refresh failure after the writes landed as a readable completed-write error',
+    async () => {
+      const fixture = await buildSafetyFixture()
+      const cache = createComparisonCache()
+      const comparison = await comparePair(fixture.left, fixture.right, cache)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      const checked = preview.plan.delete.items.map((item) => item.relativePath)
+      let refreshing = false
+      const refreshFailure = (path: string): Error =>
+        new Error(
+          `Error invoking remote method 'platform:list-directory': Error: ` +
+            `无法读取目录 ${path}：没有访问权限（EACCES）。`
+        )
+
+      // The last planned operation is the last checked deletion: everything after
+      // it belongs to the refresh, which is where the injected read failure hits.
+      const failingRefresh: PlatformPort = {
+        ...platform,
+        deleteFile: async (path) => {
+          await platform.deleteFile(path)
+          if (path.endsWith('stale-b.txt')) refreshing = true
+        },
+        listDirectory: async (path) => {
+          if (refreshing) throw refreshFailure(path)
+          return platform.listDirectory(path)
+        },
+        listDirectories: async (paths, options) => {
+          if (refreshing) throw refreshFailure(paths[0] ?? '')
+          return platform.listDirectories(paths, options)
+        }
+      }
+
+      const error = await applySyncPreview(failingRefresh, preview, cache, checked).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(error).toBeInstanceOf(SyncRefreshError)
+      expect(error).not.toBeInstanceOf(SyncTargetError)
+      const refresh = error as SyncRefreshError
+      expect(refresh.copied).toBe(preview.plan.copy.count)
+      expect(refresh.updated).toBe(preview.plan.update.count)
+      expect(refresh.deleted).toBe(checked.length)
+
+      const message = refresh.message
+      expect(message).toMatch(/[一-龥]/)
+      expect(message).toContain('写入已完成')
+      expect(message).toContain(`新增拷贝 ${preview.plan.copy.count}`)
+      expect(message).toContain(`覆盖 ${preview.plan.update.count}`)
+      expect(message).toContain(`删除 ${checked.length}`)
+      expect(message).toContain('EACCES')
+      expect(message).not.toContain('Error invoking remote method')
+
+      // Nothing was rolled back: the target holds the fully applied plan.
+      const after = await snapshotTree(fixture.right)
+      expect(after.files.get('update.txt')?.content).toBe('new body!!\n')
+      expect(after.files.get('added/deep/three.txt')?.content).toBe('copy three\n')
+      expect(after.files.has('stale-a.txt')).toBe(false)
+      expect(after.files.has('stale-b.txt')).toBe(false)
+      expect(
+        [...after.files.keys()].filter(
+          (relativePath) =>
+            relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-')
+        )
+      ).toEqual([])
     },
     60_000
   )
