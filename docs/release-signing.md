@@ -2,7 +2,7 @@
 
 OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application 签名** 与 **Apple 公证（Notarization）**，否则 Gatekeeper 会拦截、无法作为合规正式版分发。相关配置已接线，但**凭据必须由人类录入**，AI 不获取、不录入、不在本地执行公证。缺凭据时 CI 显式失败（fail-closed），**绝不产出、上传或公开未签名裸包**。
 
-> **当前状态：v0.2.12 已发布。** 最新公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.12>，发布说明见 `docs/release-notes/v0.2.12.md`；发布证据见 `docs/release-evidence/v0.2.12.md`。v0.2.11 作为历史保留，其发布证据已归档到 `docs/release-evidence/v0.2.11.md`；v0.2.8 的发布证据作为历史保留在 `docs/release-evidence/v0.2.8.md`，v0.2.7 的发布证据作为历史保留在 `docs/release-evidence/v0.2.7.md`，v0.2.6 的发布证据同样作为历史保留在 `docs/release-evidence/v0.2.6.md`。公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
+> **当前状态：v0.2.14 已发布。** 最新公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.14>，发布说明见 `docs/release-notes/v0.2.14.md`；发布证据见 `docs/release-evidence/v0.2.14.md`。v0.2.11 作为历史保留，其发布证据已归档到 `docs/release-evidence/v0.2.11.md`；v0.2.8 的发布证据作为历史保留在 `docs/release-evidence/v0.2.8.md`，v0.2.7 的发布证据作为历史保留在 `docs/release-evidence/v0.2.7.md`，v0.2.6 的发布证据同样作为历史保留在 `docs/release-evidence/v0.2.6.md`。公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
 >
 > **凭据录入：** Developer ID 证书与 App Store Connect API Key 由人类按标准协助机制录入 **GitHub CI Secrets**（只进 Secrets，禁止写入仓库、构建脚本或日志）；6 项 Secret 齐备后推送 `v*` 标签即可由 CI 产出签名 + 公证的包。
 
@@ -44,7 +44,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 ## 三、正式版发布姿态（v0.2.14）
 
 - 发布已解冻：正式版经 **Developer ID 签名 + Apple 公证** 流程产出，由 `v*` tag 触发的 CI 发布为每个版本唯一的公开 Release（详见 `README.md` 的「发布流程」）。v0.2.0 从未公开发布，v0.2.1 以修正后的发布门测试首发，用户可见变化与 v0.2.0 相同。
-- v0.2.12 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.12>，发布说明见 `docs/release-notes/v0.2.12.md`，发布证据见 `docs/release-evidence/v0.2.12.md`（tag、公开 Release、Release CI run、11 件公开资产与 macOS 签名 / 公证结论）。macOS 公证由 CI 执行，实际结果以那次 CI 为准。
+- v0.2.14 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.14>，发布说明见 `docs/release-notes/v0.2.14.md`，发布证据见 `docs/release-evidence/v0.2.14.md`（tag、公开 Release、Release CI run、11 件公开资产与 macOS 签名 / 公证结论）。macOS 公证由 CI 执行，实际结果以那次 CI 为准。
 - v0.2.11 已发布（历史）：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.11>，发布说明见 `docs/release-notes/v0.2.11.md`，发布证据见 `docs/release-evidence/v0.2.11.md`（`status: partial`，发布期证据目录缺失的项在该文件内逐节标注）。macOS 公证由 CI 执行，实际结果以那次 CI 为准。
 - v0.2.9 已发布（历史）：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.9>，11 件资产；CI run `40603225496` 五 job（`Quality gates` / `Package win` / `Package linux` / `Package mac` / `Publish the GitHub Release`）全 success，发布证据见 `docs/release-evidence/v0.2.9.md`。macOS 公证由 CI 执行，实际结果以那次 CI 为准；公证 / Gatekeeper 原文与 L1 公开包复验等未归档项在证据文件第 5–7 节标为证据缺口。
 - v0.2.8 已发布（历史）：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.8>，11 件资产；CI run `40427569024` 五 job（`Quality gates` / `Package win` / `Package linux` / `Package mac` / `Publish the GitHub Release`）全 success，签名与公证的实测原文见 `docs/release-evidence/v0.2.8.md`。macOS 公证由 CI 执行，实际结果以那次 CI 为准；负载面按证据文件第 9 节判定口径，冷跑与取消均满足口径。
@@ -78,7 +78,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 
 **补发用法（不改 tag、不升版本）**：`v0.2.14` 的版本收敛已合入 `main`；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.14`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
 
-`v0.2.14` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main`，发布说明见 `docs/release-notes/v0.2.14.md`；最新公开 Release 仍为 v0.2.12，README 状态行与 `latestPublishedTag` 保持指向该版本。
+`v0.2.14` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main` 并随 tag 发布，发布说明见 `docs/release-notes/v0.2.14.md`，发布证据见 `docs/release-evidence/v0.2.14.md`；最新公开 Release 为 v0.2.14，README 状态行与 `latestPublishedTag` 已跟随翻到该版本。
 
 ## 六、打包后硬校验（CI，上传前）
 
