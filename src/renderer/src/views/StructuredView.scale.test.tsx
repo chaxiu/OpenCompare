@@ -3,9 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createStructuredLocator } from '@core/structured/locate'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
+import { createStructuredCompareClient } from '@renderer/structured/compareClient'
+import type { StructuredCompareClient } from '@renderer/structured/compareClient'
 import { StructuredView } from './StructuredView'
 
 const platform = createWebPlatformPort()
@@ -65,6 +67,28 @@ function sideText(side: 'left' | 'right'): string {
     ...(side === 'left' ? { onlyLeft: `left-${index}` } : { onlyRight: `right-${index}` })
   }))
   return JSON.stringify({ items }, null, 2)
+}
+
+/**
+ * Wraps the shipped client so the test can count `dispose` calls while the
+ * comparison itself still runs through the real fallback path.
+ */
+function trackRealClient(): {
+  readonly client: StructuredCompareClient
+  readonly dispose: ReturnType<typeof vi.fn>
+} {
+  const real = createStructuredCompareClient()
+  const dispose = vi.fn((): void => {
+    real.dispose()
+  })
+  return {
+    client: {
+      compare: (request) => real.compare(request),
+      cancel: () => real.cancel(),
+      dispose
+    },
+    dispose
+  }
 }
 
 describe('5 MB structured comparison', () => {
@@ -146,6 +170,126 @@ describe('5 MB structured comparison', () => {
       } finally {
         rmSync(directory, { recursive: true, force: true })
         process.off('unhandledRejection', onUnhandled)
+      }
+    },
+    60_000
+  )
+
+  it(
+    'disposes the real client exactly once after the 5 MB result lands',
+    async () => {
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason)
+      }
+      process.on('unhandledRejection', onUnhandled)
+      const reactErrors: unknown[][] = []
+      const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        reactErrors.push(args)
+      })
+
+      const directory = mkdtempSync(join(tmpdir(), 'opencompare-structured-dispose-'))
+      const leftPath = join(directory, 'dispose.left.json')
+      const rightPath = join(directory, 'dispose.right.json')
+      try {
+        writeFileSync(leftPath, sideText('left'))
+        writeFileSync(rightPath, sideText('right'))
+        const left = readFileSync(leftPath, 'utf8')
+        const right = readFileSync(rightPath, 'utf8')
+        expect(Buffer.byteLength(left)).toBeGreaterThanOrEqual(5 * 1024 * 1024)
+        expect(Buffer.byteLength(right)).toBeGreaterThanOrEqual(5 * 1024 * 1024)
+
+        const { client, dispose } = trackRealClient()
+        const { container, unmount } = render(
+          <StructuredView
+            pair={{
+              left: { path: leftPath, text: left },
+              right: { path: rightPath, text: right }
+            }}
+            format="json"
+            platform={platform}
+            createClient={() => client}
+          />
+        )
+
+        await waitFor(
+          () => {
+            const row = container.querySelector<HTMLElement>(
+              `[data-change-path="${KNOWN_PATH}"]`
+            )
+            if (!row) throw new Error('the known change row is not rendered yet')
+          },
+          { timeout: 30_000 }
+        )
+
+        unmount()
+        expect(dispose).toHaveBeenCalledTimes(1)
+
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        expect(dispose).toHaveBeenCalledTimes(1)
+        expect(unhandled).toEqual([])
+        expect(
+          reactErrors.filter((args) => /unmounted|not wrapped in act/.test(String(args[0])))
+        ).toEqual([])
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+        process.off('unhandledRejection', onUnhandled)
+        consoleError.mockRestore()
+      }
+    },
+    60_000
+  )
+
+  it(
+    'disposes the real client exactly once when unmounted before the 5 MB result lands',
+    async () => {
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason)
+      }
+      process.on('unhandledRejection', onUnhandled)
+      const reactErrors: unknown[][] = []
+      const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        reactErrors.push(args)
+      })
+
+      const directory = mkdtempSync(join(tmpdir(), 'opencompare-structured-inflight-'))
+      const leftPath = join(directory, 'inflight.left.json')
+      const rightPath = join(directory, 'inflight.right.json')
+      try {
+        writeFileSync(leftPath, sideText('left'))
+        writeFileSync(rightPath, sideText('right'))
+        const left = readFileSync(leftPath, 'utf8')
+        const right = readFileSync(rightPath, 'utf8')
+
+        const { client, dispose } = trackRealClient()
+        const { container, unmount } = render(
+          <StructuredView
+            pair={{
+              left: { path: leftPath, text: left },
+              right: { path: rightPath, text: right }
+            }}
+            format="json"
+            platform={platform}
+            createClient={() => client}
+          />
+        )
+        // The macrotask fallback has not run yet, so the result is still in flight.
+        expect(container.textContent).toContain('对比中')
+
+        unmount()
+        expect(dispose).toHaveBeenCalledTimes(1)
+
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(dispose).toHaveBeenCalledTimes(1)
+        expect(unhandled).toEqual([])
+        expect(
+          reactErrors.filter((args) => /unmounted|not wrapped in act/.test(String(args[0])))
+        ).toEqual([])
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+        process.off('unhandledRejection', onUnhandled)
+        consoleError.mockRestore()
       }
     },
     60_000
