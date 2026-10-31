@@ -13,15 +13,20 @@
  */
 import {
   chmod,
+  lstat,
+  lutimes,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
+  readlink,
   rm,
   stat,
+  symlink,
   utimes,
   writeFile
 } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -31,7 +36,8 @@ import {
   buildSyncPlan,
   executeSyncPlan,
   SyncRefreshError,
-  SyncTargetError
+  SyncTargetError,
+  SyncVerificationError
 } from '@core/directory/sync'
 import type { SyncDirection, SyncIo, SyncPlanGroup } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
@@ -89,6 +95,12 @@ const platform: PlatformPort = {
       readonly DirectoryListing[]
     >,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
+  readFileBytes: (path) =>
+    invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
+  writeFileBytes: (path, content, modifiedMs) =>
+    invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
+  setSymbolicLinkModifiedMs: (path, modifiedMs) =>
+    invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
   digestFiles: (paths, options) =>
     invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
@@ -112,8 +124,8 @@ const platform: PlatformPort = {
 
 function syncIo(port: PlatformPort): SyncIo {
   return {
-    readTextFile: (path) => port.readTextFile(path),
-    writeTextFile: (path, content, modifiedMs) => port.writeTextFile(path, content, modifiedMs),
+    readFileBytes: (path) => port.readFileBytes(path),
+    writeFileBytes: (path, content, modifiedMs) => port.writeFileBytes(path, content, modifiedMs),
     ensureDirectory: (path) => port.ensureDirectory(path),
     deleteFile: (path) => port.deleteFile(path),
     removeDirectory: (path) => port.removeDirectory(path),
@@ -133,9 +145,9 @@ function recordWrites(port: PlatformPort): {
     writes,
     port: {
       ...port,
-      writeTextFile: (path, content, modifiedMs) => {
+      writeFileBytes: (path, content, modifiedMs) => {
         writes.push(path)
-        return port.writeTextFile(path, content, modifiedMs)
+        return port.writeFileBytes(path, content, modifiedMs)
       }
     }
   }
@@ -829,8 +841,8 @@ describe('real-disk sync failure safety', () => {
       const controller = new AbortController()
       const cancelling: PlatformPort = {
         ...platform,
-        writeTextFile: async (path, content, modifiedMs) => {
-          await platform.writeTextFile(path, content, modifiedMs)
+        writeFileBytes: async (path, content, modifiedMs) => {
+          await platform.writeFileBytes(path, content, modifiedMs)
           // Abort right after one planned write landed; later items never start.
           if (path.endsWith('added/deep/two.txt')) controller.abort()
         }
@@ -875,11 +887,11 @@ describe('real-disk sync failure safety', () => {
 
       const failing: PlatformPort = {
         ...platform,
-        writeTextFile: async (path, content, modifiedMs) => {
+        writeFileBytes: async (path, content, modifiedMs) => {
           if (path.endsWith('added/one.txt')) {
             throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
           }
-          return platform.writeTextFile(path, content, modifiedMs)
+          return platform.writeFileBytes(path, content, modifiedMs)
         }
       }
 
@@ -919,8 +931,8 @@ describe('real-disk sync failure safety', () => {
           landed: () => landed,
           port: {
             ...platform,
-            writeTextFile: async (path, content, modifiedMs) => {
-              await platform.writeTextFile(path, content, modifiedMs)
+            writeFileBytes: async (path, content, modifiedMs) => {
+              await platform.writeFileBytes(path, content, modifiedMs)
               if (!landed && path === targetPath) {
                 landed = true
                 throw Object.assign(new Error('rename landed, mtime backfill failed'), {
@@ -1031,5 +1043,522 @@ describe('real-disk sync failure safety', () => {
       ).toEqual([])
     },
     60_000
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/* Binary byte fidelity on the same real temp disks                    */
+/* ------------------------------------------------------------------ */
+
+function rawSha(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+/** Real PNG signature + IHDR/IDAT-shaped bytes plus invalid UTF-8 sequences. */
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0xff, 0x80, 0xc3, 0x00, 0xfe, 0x7f
+])
+
+/** Bytes no UTF-8 decoder can round-trip: NULs, lone continuations, 0xC3 without a tail. */
+const RANDOM_BYTES = Buffer.from([
+  0x00, 0x01, 0x7f, 0x80, 0xff, 0xc3, 0x28, 0x00, 0x9f, 0x92, 0xe2, 0x28, 0xa1, 0x00, 0xc3, 0xed,
+  0xa0, 0x80, 0x00, 0x0a
+])
+
+interface BinaryFixture {
+  readonly root: string
+  readonly left: string
+  readonly right: string
+  /** Source-relative paths whose bytes the run must copy verbatim. */
+  readonly fidelity: readonly string[]
+}
+
+const BINARY_STAMP = 1_700_000_700_000
+
+async function writeStampedBytes(path: string, bytes: Uint8Array, stampMs: number): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, bytes)
+  await utimes(path, new Date(stampMs), new Date(stampMs))
+}
+
+/**
+ * One same text pair, three binary copies (PNG / invalid UTF-8 / empty) and one
+ * binary overwrite whose target body differs.
+ */
+async function buildBinaryFixture(): Promise<BinaryFixture> {
+  const root = await scratchRoot()
+  const left = join(root, 'left')
+  const right = join(root, 'right')
+  await mkdir(join(left, 'assets'), { recursive: true })
+  await mkdir(join(right, 'assets'), { recursive: true })
+
+  await writeStamped(join(left, 'shared.txt'), 'shared body\n', BINARY_STAMP)
+  await writeStamped(join(right, 'shared.txt'), 'shared body\n', BINARY_STAMP)
+
+  await writeStampedBytes(diskPath(left, 'assets/logo.png'), PNG_BYTES, BINARY_STAMP + 1)
+  await writeStampedBytes(diskPath(left, 'assets/random.bin'), RANDOM_BYTES, BINARY_STAMP + 2)
+  await writeStampedBytes(diskPath(left, 'assets/empty.bin'), Buffer.alloc(0), BINARY_STAMP + 3)
+  await writeStampedBytes(diskPath(left, 'assets/updated.png'), PNG_BYTES, BINARY_STAMP + 4)
+  await writeStampedBytes(
+    diskPath(right, 'assets/updated.png'),
+    Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05]),
+    BINARY_STAMP + 5
+  )
+
+  return {
+    root,
+    left,
+    right,
+    fidelity: ['assets/logo.png', 'assets/random.bin', 'assets/empty.bin', 'assets/updated.png']
+  }
+}
+
+describe('real-disk sync binary fidelity', () => {
+  it(
+    'copies and overwrites binary bodies byte for byte, empty files included',
+    async () => {
+      const fixture = await buildBinaryFixture()
+      const comparison = await comparePair(fixture.left, fixture.right)
+      expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 3, modified: 1 })
+
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+      expect(preview.plan.copy.count).toBe(3)
+      expect(preview.plan.update.count).toBe(1)
+
+      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(result.copied).toBe(3)
+      expect(result.updated).toBe(1)
+
+      for (const relativePath of fixture.fidelity) {
+        const sourcePath = diskPath(fixture.left, relativePath)
+        const targetPath = diskPath(fixture.right, relativePath)
+        const sourceBytes = await readFile(sourcePath)
+        const targetBytes = await readFile(targetPath)
+        expect(
+          targetBytes.equals(sourceBytes),
+          `binary fidelity: ${relativePath} bytes changed on copy`
+        ).toBe(true)
+        expect(targetBytes.length, `binary fidelity: ${relativePath} size`).toBe(sourceBytes.length)
+        expect(rawSha(targetBytes), `binary fidelity: ${relativePath} sha256`).toBe(
+          rawSha(sourceBytes)
+        )
+        expect(
+          Math.floor((await stat(targetPath)).mtimeMs),
+          `binary fidelity: ${relativePath} mtime`
+        ).toBe(Math.floor((await stat(sourcePath)).mtimeMs))
+      }
+
+      // A 0-byte source stays 0 bytes with the empty-content hash.
+      const emptyTarget = diskPath(fixture.right, 'assets/empty.bin')
+      expect((await stat(emptyTarget)).size, 'binary fidelity: empty file stays empty').toBe(0)
+      expect(rawSha(await readFile(emptyTarget)), 'binary fidelity: empty sha256').toBe(
+        createHash('sha256').update(Buffer.alloc(0)).digest('hex')
+      )
+
+      // UTF-8 text still round-trips exactly, and the four-state counting is unchanged.
+      expect(await readFile(diskPath(fixture.right, 'shared.txt'), 'utf8')).toBe('shared body\n')
+      expect(result.comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
+
+      // An immediately rebuilt plan is empty: the bytes and mtimes really match.
+      const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
+      expect(second.copy.count, 'binary fidelity: second copy count').toBe(0)
+      expect(second.update.count, 'binary fidelity: second update count').toBe(0)
+      expect(second.delete.count, 'binary fidelity: second delete count').toBe(0)
+    },
+    120_000
+  )
+
+  it(
+    'rolls a binary overwrite back to the exact previous bytes and mtime on failure',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const original = Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff, 0x80])
+      await writeStampedBytes(diskPath(left, 'a-update.png'), PNG_BYTES, BINARY_STAMP)
+      await writeStampedBytes(diskPath(left, 'z-copy.txt'), Buffer.from('copy me'), BINARY_STAMP + 1)
+      await writeStampedBytes(diskPath(right, 'a-update.png'), original, BINARY_STAMP + 2)
+
+      const comparison = await comparePair(left, right)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+      expect(preview.plan.update.count).toBe(1)
+      expect(preview.plan.copy.count).toBe(1)
+
+      const failing: PlatformPort = {
+        ...platform,
+        writeFileBytes: async (path, content, modifiedMs) => {
+          if (path.endsWith('z-copy.txt')) {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+          }
+          return platform.writeFileBytes(path, content, modifiedMs)
+        }
+      }
+
+      const error = await applySyncPreview(failing, preview, createComparisonCache(), []).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EACCES')
+
+      const restored = await readFile(diskPath(right, 'a-update.png'))
+      expect(restored.equals(original), 'binary fidelity: rollback restored different bytes').toBe(
+        true
+      )
+      expect(rawSha(restored), 'binary fidelity: rollback sha256').toBe(rawSha(original))
+      expect(
+        Math.floor((await stat(diskPath(right, 'a-update.png'))).mtimeMs),
+        'binary fidelity: rollback mtime'
+      ).toBe(BINARY_STAMP + 2)
+    },
+    60_000
+  )
+
+  it(
+    'rolls a checked binary deletion back to the exact previous bytes and mtime',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const stale = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x80])
+      await mkdir(left, { recursive: true })
+      await writeStampedBytes(diskPath(right, 'stale.bin'), stale, BINARY_STAMP + 9)
+
+      const comparison = await comparePair(left, right)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      expect(preview.plan.delete.count).toBe(1)
+      const checked = preview.plan.delete.items.map((item) => item.relativePath)
+
+      const failing: PlatformPort = {
+        ...platform,
+        deleteFile: async (path) => {
+          await platform.deleteFile(path)
+          throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
+        }
+      }
+
+      const error = await applySyncPreview(failing, preview, createComparisonCache(), checked).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EBUSY')
+
+      const restored = await readFile(diskPath(right, 'stale.bin'))
+      expect(
+        restored.equals(stale),
+        'binary fidelity: delete rollback restored different bytes'
+      ).toBe(true)
+      expect(rawSha(restored), 'binary fidelity: delete rollback sha256').toBe(rawSha(stale))
+      expect(
+        Math.floor((await stat(diskPath(right, 'stale.bin'))).mtimeMs),
+        'binary fidelity: delete rollback mtime'
+      ).toBe(BINARY_STAMP + 9)
+    },
+    60_000
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/* Completion consistency: the notice may only claim a matching target  */
+/* ------------------------------------------------------------------ */
+
+describe('real-disk sync completion consistency', () => {
+  it(
+    'rejects with a verification failure when a written target keeps bad bytes',
+    async () => {
+      const fixture = await buildBinaryFixture()
+      const comparison = await comparePair(fixture.left, fixture.right)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+
+      // The write seam "succeeds" but lands corrupted bytes for one file: only
+      // the post-write digest can catch this.
+      const corrupting: PlatformPort = {
+        ...platform,
+        writeFileBytes: async (path, content, modifiedMs) => {
+          if (path.endsWith('logo.png')) {
+            const corrupted = Buffer.from(content)
+            corrupted[0] = corrupted[0] ^ 0xff
+            return platform.writeFileBytes(path, corrupted, modifiedMs)
+          }
+          return platform.writeFileBytes(path, content, modifiedMs)
+        }
+      }
+
+      const error = await applySyncPreview(corrupting, preview, createComparisonCache(), []).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(error, 'completion consistency: a mismatched target must not resolve').toBeInstanceOf(
+        SyncVerificationError
+      )
+      expect(error).not.toBeInstanceOf(SyncRefreshError)
+      const verification = error as SyncVerificationError
+      expect(verification.mismatched, 'completion consistency: mismatch count').toBe(1)
+      expect(verification.paths[0]).toContain('logo.png')
+      expect(verification.message).toContain('1 个目标')
+      expect(verification.copied).toBe(3)
+      expect(verification.updated).toBe(1)
+      // Writes landed, so nothing is rolled back: only the notice is blocked.
+      const targetBytes = await readFile(diskPath(fixture.right, 'assets/logo.png'))
+      expect(targetBytes.equals(PNG_BYTES), 'completion consistency: no rollback').toBe(false)
+      // The refreshed comparison reports the real disk state.
+      expect(verification.comparison?.counts.modified, 'completion consistency: refresh truth').toBe(
+        1
+      )
+    },
+    120_000
+  )
+
+  it(
+    'resolves only when every written target matches its source, and verifies just those paths',
+    async () => {
+      const fixture = await buildBinaryFixture()
+      const comparison = await comparePair(fixture.left, fixture.right)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+
+      // Record every digest request the apply makes. The first one is the
+      // post-write check, which must read exactly this run's targets + sources.
+      const digestRequests: string[][] = []
+      const recording: PlatformPort = {
+        ...platform,
+        digestFiles: (paths, options) => {
+          digestRequests.push([...paths])
+          return platform.digestFiles(paths, options)
+        }
+      }
+
+      const result = await applySyncPreview(recording, preview, createComparisonCache(), [])
+      expect(result.copied).toBe(3)
+      expect(result.updated).toBe(1)
+
+      const writtenPaths = [...preview.plan.copy.items, ...preview.plan.update.items]
+      const expected = new Set([
+        ...writtenPaths.map((item) => item.targetPath),
+        ...writtenPaths.map((item) => item.sourcePath as string)
+      ])
+      expect(digestRequests.length, 'completion consistency: a check must run').toBeGreaterThan(0)
+      expect(
+        new Set(digestRequests[0]),
+        'completion consistency: the check must read exactly the written targets and their sources'
+      ).toEqual(expected)
+      // The untouched `same` file is never part of the post-write check.
+      expect(digestRequests[0]).not.toContain(diskPath(fixture.left, 'shared.txt'))
+
+      // Every written target is byte-equal to its source and the rebuild is empty.
+      for (const item of writtenPaths) {
+        expect(
+          rawSha(await readFile(item.targetPath)),
+          `completion consistency: ${item.relativePath} sha256`
+        ).toBe(rawSha(await readFile(item.sourcePath as string)))
+      }
+      const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
+      expect(second.copy.count).toBe(0)
+      expect(second.update.count).toBe(0)
+    },
+    120_000
+  )
+
+  it(
+    'does not treat unchecked mirror deletions as a failed check',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      await mkdir(left, { recursive: true })
+      await writeStampedBytes(diskPath(left, 'new.txt'), Buffer.from('new'), BINARY_STAMP)
+      await writeStampedBytes(diskPath(right, 'stale.txt'), Buffer.from('stale'), BINARY_STAMP + 1)
+
+      const comparison = await comparePair(left, right)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      expect(preview.plan.copy.count).toBe(1)
+      expect(preview.plan.delete.count).toBe(1)
+
+      // Deletions default to unchecked: the copied file lands, the stale one stays.
+      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(result.copied).toBe(1)
+      expect(result.deleted).toBe(0)
+      expect(await platform.exists(diskPath(right, 'stale.txt'))).toBe(true)
+      // The remaining difference is only the unchecked deletion, not a failure.
+      expect(result.comparison.counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
+    },
+    60_000
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/* Symbolic link metadata: lstat mtime alignment only                   */
+/* ------------------------------------------------------------------ */
+
+const LINK_SOURCE_STAMP = 1_700_001_000_000
+const LINK_TARGET_STAMP = 1_800_001_000_000
+
+async function linkWithStamp(target: string, path: string, stampMs: number): Promise<void> {
+  await symlink(target, path)
+  const seconds = Math.floor(stampMs) / 1000 + 1e-6
+  await lutimes(path, seconds, seconds)
+}
+
+describe('real-disk sync symlink metadata', () => {
+  it(
+    'aligns the target link lstat mtime to the source without changing target or counts',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+
+      for (const side of [left, right]) {
+        await linkWithStamp(
+          'shared.txt',
+          diskPath(side, 'same-target-link'),
+          side === left ? LINK_SOURCE_STAMP : LINK_TARGET_STAMP
+        )
+        await linkWithStamp(
+          'missing-target.txt',
+          diskPath(side, 'dangling-link'),
+          side === left ? LINK_SOURCE_STAMP + 1_000 : LINK_TARGET_STAMP + 1_000
+        )
+        await linkWithStamp(
+          'shared.txt',
+          diskPath(side, 'stable-link'),
+          LINK_SOURCE_STAMP - 1_000
+        )
+      }
+
+      const comparison = await comparePair(left, right)
+      // Links still judge by target string only: all four pairs are `same`.
+      expect(comparison.counts, 'symlink metadata: four-state counts').toEqual({
+        same: 4,
+        added: 0,
+        removed: 0,
+        modified: 0
+      })
+
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      // Metadata alignment never becomes a plan item or a counted group.
+      expect(preview.plan.copy.count, 'symlink metadata: alignment is not a copy').toBe(0)
+      expect(preview.plan.update.count, 'symlink metadata: alignment is not an update').toBe(0)
+      expect(preview.plan.delete.count, 'symlink metadata: alignment is not a delete').toBe(0)
+      const plannedLinks = [
+        ...preview.plan.copy.items,
+        ...preview.plan.update.items,
+        ...preview.plan.delete.items
+      ].map((item) => item.relativePath)
+      expect(plannedLinks, 'symlink metadata: no link enters the plan').toEqual([])
+
+      const stableBefore = Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs)
+      const recorded = recordWrites(platform)
+      const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
+      expect(result.copied).toBe(0)
+      expect(result.updated).toBe(0)
+      expect(result.deleted).toBe(0)
+      // Aligning a link mtime writes no ordinary file content at all.
+      expect(recorded.writes, 'symlink metadata: alignment writes no file content').toEqual([])
+
+      for (const relativePath of ['same-target-link', 'dangling-link']) {
+        const source = diskPath(left, relativePath)
+        const target = diskPath(right, relativePath)
+        const targetInfo = await lstat(target)
+        expect(
+          targetInfo.isSymbolicLink(),
+          `symlink metadata: ${relativePath} must stay a symlink`
+        ).toBe(true)
+        expect(
+          await readlink(target),
+          `symlink metadata: ${relativePath} link target`
+        ).toBe(await readlink(source))
+        expect(target, `symlink metadata: ${relativePath} relative path`).toBe(
+          diskPath(right, relativePath)
+        )
+        expect(
+          Math.floor(targetInfo.mtimeMs / 1000),
+          `symlink metadata: ${relativePath} lstat mtime seconds`
+        ).toBe(Math.floor((await lstat(source)).mtimeMs / 1000))
+      }
+
+      // A link whose mtime already matched is not touched at all.
+      expect(
+        Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs),
+        'symlink metadata: already-aligned link stays untouched'
+      ).toBe(stableBefore)
+
+      // Alignment still leaves the dry-run empty: neither byte nor count changed.
+      const second = await previewSync(platform, result.comparison, 'left-to-right', 'mirror', 2)
+      expect(second.plan.copy.count, 'symlink metadata: second dry-run copy').toBe(0)
+      expect(second.plan.update.count, 'symlink metadata: second dry-run update').toBe(0)
+      expect(second.plan.delete.count, 'symlink metadata: second dry-run delete').toBe(0)
+    },
+    60_000
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/* Idempotent dry-run after a select-all deletion                       */
+/* ------------------------------------------------------------------ */
+
+describe('real-disk sync idempotent dry-run', () => {
+  it(
+    'lists only the pending deletion after applying, and nothing once it is deleted',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await writeStamped(join(left, 'same.txt'), 'same\n', BINARY_STAMP)
+      await writeStamped(join(right, 'same.txt'), 'same\n', BINARY_STAMP)
+
+      const cache = createComparisonCache()
+
+      /** One cycle: dry-run → apply copy/update → dry-run → delete all → dry-run. */
+      async function cycle(round: number): Promise<void> {
+        await writeStampedBytes(diskPath(left, `round-${round}/new.txt`), Buffer.from('new'), BINARY_STAMP + round)
+        await writeStampedBytes(diskPath(right, `round-${round}/stale.txt`), Buffer.from('stale'), BINARY_STAMP + round)
+
+        const before = await comparePair(left, right, cache)
+        const first = await previewSync(platform, before, 'left-to-right', 'mirror', round * 10 + 1)
+        expect(first.plan.copy.count, `idempotent dry-run: round ${round} first copy`).toBe(1)
+        expect(first.plan.update.count, `idempotent dry-run: round ${round} first update`).toBe(0)
+        expect(first.plan.delete.count, `idempotent dry-run: round ${round} first delete`).toBe(1)
+        // Deletions stay opt-in: the preview lists them but nothing is checked.
+        expect(first.plan.delete.items.map((item) => item.relativePath)).toEqual([
+          `round-${round}/stale.txt`
+        ])
+
+        const applied = await applySyncPreview(platform, first, cache, [])
+        expect(applied.copied, `idempotent dry-run: round ${round} applied copy`).toBe(1)
+        expect(applied.deleted, `idempotent dry-run: round ${round} default delete`).toBe(0)
+
+        // Dry-run after the copy: the pending deletion is still listed, no writes.
+        const pending = await previewSync(platform, applied.comparison, 'left-to-right', 'mirror', round * 10 + 2)
+        expect(pending.plan.copy.count, `idempotent dry-run: round ${round} pending copy`).toBe(0)
+        expect(pending.plan.update.count, `idempotent dry-run: round ${round} pending update`).toBe(0)
+        expect(pending.plan.delete.count, `idempotent dry-run: round ${round} pending delete`).toBe(1)
+
+        const checked = pending.plan.delete.items.map((item) => item.relativePath)
+        const removed = await applySyncPreview(platform, pending, cache, checked)
+        expect(removed.deleted, `idempotent dry-run: round ${round} checked delete`).toBe(1)
+
+        // Dry-run after the select-all deletion: all three groups are empty.
+        const last = await previewSync(platform, removed.comparison, 'left-to-right', 'mirror', round * 10 + 3)
+        expect(last.plan.copy.count, `idempotent dry-run: round ${round} final copy`).toBe(0)
+        expect(last.plan.update.count, `idempotent dry-run: round ${round} final update`).toBe(0)
+        expect(last.plan.delete.count, `idempotent dry-run: round ${round} final delete`).toBe(0)
+        expect(last.plan.totalCount, `idempotent dry-run: round ${round} final total`).toBe(0)
+      }
+
+      await cycle(1)
+      // Repeating the same 1)–3) on the very same pair stays idempotent.
+      await cycle(2)
+    },
+    120_000
   )
 })

@@ -101,10 +101,15 @@ function createWritableFs(initial: FakeTree): WritableFs {
     list: listEntries,
     readTextFile: readFileText,
     io: {
-      readTextFile: readFileText,
-      writeTextFile: async (path, content, modifiedMs) => {
+      // The seam carries raw bytes; this text-only fake encodes/decodes them so
+      // the in-memory tree keeps its string bodies.
+      readFileBytes: async (path) => new TextEncoder().encode(await readFileText(path)),
+      writeFileBytes: async (path, content, modifiedMs) => {
         writes.push(path)
-        parentOf(path)[nameOf(path)] = { text: content, modifiedMs: modifiedMs ?? 0 }
+        parentOf(path)[nameOf(path)] = {
+          text: new TextDecoder().decode(content),
+          modifiedMs: modifiedMs ?? 0
+        }
       },
       ensureDirectory: async (path) => {
         ensureDir(path)
@@ -393,8 +398,8 @@ describe('sync failure safety', () => {
     // The atomic write landed (rename done) and the mtime backfill then failed.
     const failing: SyncIo = {
       ...fs.io,
-      writeTextFile: async (path, content, modifiedMs) => {
-        await fs.io.writeTextFile(path, content, modifiedMs)
+      writeFileBytes: async (path, content, modifiedMs) => {
+        await fs.io.writeFileBytes(path, content, modifiedMs)
         if (!landed && path.endsWith('update.txt')) {
           landed = true
           throw Object.assign(new Error('utimes failed'), { code: 'EACCES' })
@@ -488,8 +493,8 @@ describe('sync failure safety', () => {
     const controller = new AbortController()
     const cancelling: SyncIo = {
       ...fs.io,
-      writeTextFile: async (path, content, modifiedMs) => {
-        await fs.io.writeTextFile(path, content, modifiedMs)
+      writeFileBytes: async (path, content, modifiedMs) => {
+        await fs.io.writeFileBytes(path, content, modifiedMs)
         // Abort right after one planned write has landed: later items never run.
         if (path.endsWith('added-deep.txt')) controller.abort()
       }
@@ -525,11 +530,11 @@ describe('sync failure safety', () => {
     const before = structuredClone(fs.snapshot().right)
     const failing: SyncIo = {
       ...fs.io,
-      writeTextFile: async (path, content, modifiedMs) => {
+      writeFileBytes: async (path, content, modifiedMs) => {
         if (path.endsWith('nested/new/one.txt')) {
           throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
         }
-        return fs.io.writeTextFile(path, content, modifiedMs)
+        return fs.io.writeFileBytes(path, content, modifiedMs)
       }
     }
 

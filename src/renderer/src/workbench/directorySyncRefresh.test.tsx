@@ -84,8 +84,8 @@ describe('directory sync refresh failure', () => {
       )
     const port = {
       ...base,
-      writeTextFile: async (path: string, content: string, modifiedMs?: number) => {
-        await base.writeTextFile(path, content, modifiedMs)
+      writeFileBytes: async (path: string, content: Uint8Array, modifiedMs?: number) => {
+        await base.writeFileBytes(path, content, modifiedMs)
         written = true
       },
       listDirectory: async (path: string) => {
@@ -136,5 +136,54 @@ describe('directory sync refresh failure', () => {
     // pre-write split, which is exactly "the current session was not replaced".
     expect(legendNumbers()).toMatchObject({ same: 1, added: 0, removed: 1, modified: 0 })
     await expect(base.exists('/memory/refresh-right/new.txt')).resolves.toBe(true)
+  }, 60_000)
+
+  it('blocks the success notice and shows the danger notice when a target keeps bad bytes', async () => {
+    const base = createWebPlatformPort()
+    await base.writeTextFile('/memory/verify-left/same.txt', 'same\n')
+    await base.writeTextFile('/memory/verify-right/same.txt', 'same\n')
+    await base.writeTextFile('/memory/verify-left/new.txt', 'left only\n')
+
+    // The write "succeeds" but lands corrupted bytes: only the post-write digest
+    // can tell, and the shell must never claim success.
+    const port = {
+      ...base,
+      writeFileBytes: async (path: string, content: Uint8Array, modifiedMs?: number) => {
+        if (path.endsWith('/new.txt')) {
+          const corrupted = new Uint8Array(content)
+          corrupted[0] = corrupted[0] ^ 0xff
+          return base.writeFileBytes(path, corrupted, modifiedMs)
+        }
+        return base.writeFileBytes(path, content, modifiedMs)
+      }
+    }
+
+    renderWithI18n(<Workbench platform={port} />, 'zh')
+    await openDirectoryPair('/memory/verify-left', '/memory/verify-right')
+
+    const previewButton = await screen.findByRole(
+      'button',
+      { name: zh['directory.toolbar.previewSync'] },
+      { timeout: 30_000 }
+    )
+    await waitFor(() => expect((previewButton as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(previewButton)
+    const dialog = await screen.findByRole('dialog')
+    const apply = within(dialog).getByRole('button', { name: zh['directory.sync.apply'] })
+    await waitFor(() => expect((apply as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(apply)
+
+    const notice = await screen.findByRole('alert', {}, { timeout: 30_000 })
+    const text = notice.textContent ?? ''
+    expect(text).toContain('校验未通过')
+    expect(text).toContain('1 个目标')
+    expect(text).toContain('new.txt')
+    expect(text).not.toContain('同步完成')
+    expect(notice.className).toContain('text-danger')
+
+    // The applied preview is closed; the refreshed session tells the real state.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(legendNumbers()).toMatchObject({ same: 1, added: 0, removed: 0, modified: 1 })
+    await expect(base.exists('/memory/verify-right/new.txt')).resolves.toBe(true)
   }, 60_000)
 })

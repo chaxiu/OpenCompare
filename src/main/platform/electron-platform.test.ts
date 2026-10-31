@@ -106,6 +106,12 @@ const platform: PlatformPort = {
       readonly DirectoryListing[]
     >,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
+  readFileBytes: (path) =>
+    invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
+  writeFileBytes: (path, content, modifiedMs) =>
+    invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
+  setSymbolicLinkModifiedMs: (path, modifiedMs) =>
+    invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
   digestFiles: (paths, options) =>
     invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
@@ -252,11 +258,11 @@ describe('electron real-directory sync', () => {
 
       const failing: PlatformPort = {
         ...platform,
-        writeTextFile: async (path, content, modifiedMs) => {
+        writeFileBytes: async (path, content, modifiedMs) => {
           if (path.endsWith('左 仅此.txt')) {
             throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
           }
-          return platform.writeTextFile(path, content, modifiedMs)
+          return platform.writeFileBytes(path, content, modifiedMs)
         }
       }
 

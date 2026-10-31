@@ -56,6 +56,8 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Sync complete: {copied} copied · {updated} overwritten · {deleted} deleted.',
   'shell.notice.syncCancelled':
     'Sync cancelled: the target was rolled back to its previous state; preview or retry again.',
+  'shell.notice.syncVerifyFailed':
+    'Sync verification failed: {count} target(s) do not match the source (e.g. {paths}). The written state was kept; preview again before retrying.',
   'shell.notice.syncRefreshFailed':
     'Sync writes completed: {copied} copied · {updated} overwritten · {deleted} deleted; but refreshing the comparison failed: {reason}. The target already holds the written state, so preview again for the latest comparison.',
   'shell.notice.templateComplete':

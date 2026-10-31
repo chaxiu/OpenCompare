@@ -125,14 +125,14 @@ describe('directory sync cancel and failure recovery', () => {
     const attempted: string[] = []
     const port = {
       ...base,
-      writeTextFile: async (path: string, content: string, modifiedMs?: number) => {
+      writeFileBytes: async (path: string, content: Uint8Array, modifiedMs?: number) => {
         writes += 1
         attempted.push(path)
         if (writes === 2) {
           secondWriteStarted()
           await secondWriteHeld
         }
-        await base.writeTextFile(path, content, modifiedMs)
+        await base.writeFileBytes(path, content, modifiedMs)
       }
     }
 
@@ -206,16 +206,16 @@ describe('directory sync cancel and failure recovery', () => {
     let failingPath = ''
     const port = {
       ...base,
-      writeTextFile: async (path: string, content: string, modifiedMs?: number) => {
+      writeFileBytes: async (path: string, content: Uint8Array, modifiedMs?: number) => {
         writes += 1
         if (writes === 2) {
           failingPath = path
           throw new Error(
-            `Error invoking remote method 'platform:write-text-file': Error: ` +
+            `Error invoking remote method 'platform:write-file-bytes': Error: ` +
               `无法写入文件 ${path}：没有访问权限（EACCES）。`
           )
         }
-        await base.writeTextFile(path, content, modifiedMs)
+        await base.writeFileBytes(path, content, modifiedMs)
       }
     }
 
@@ -266,16 +266,16 @@ describe('directory sync cancel and failure recovery', () => {
     let failedOnce = false
     const port = {
       ...base,
-      writeTextFile: async (path: string, content: string, modifiedMs?: number) => {
+      writeFileBytes: async (path: string, content: Uint8Array, modifiedMs?: number) => {
         writes += 1
         if (writes === 2 && !failedOnce) {
           failedOnce = true
           throw new Error(
-            `Error invoking remote method 'platform:write-text-file': Error: ` +
+            `Error invoking remote method 'platform:write-file-bytes': Error: ` +
               `无法写入文件 ${path}：没有访问权限（EACCES）。`
           )
         }
-        await base.writeTextFile(path, content, modifiedMs)
+        await base.writeFileBytes(path, content, modifiedMs)
       }
     }
 

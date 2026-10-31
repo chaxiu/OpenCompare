@@ -46,6 +46,8 @@ export const shell = {
   'shell.notice.syncComplete':
     '同步完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}。',
   'shell.notice.syncCancelled': '同步已取消：目标侧已回滚到执行前状态，可再次预览或重试。',
+  'shell.notice.syncVerifyFailed':
+    '同步写入后校验未通过：{count} 个目标与源不一致（如 {paths}）。写入结果已保留，请重新预览后再同步。',
   'shell.notice.syncRefreshFailed':
     '同步写入已完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}；但刷新对比失败：{reason}。目标侧已是写入后的状态，请重新预览获取最新对比。',
   'shell.notice.templateComplete':

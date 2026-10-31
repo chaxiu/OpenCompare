@@ -7,6 +7,7 @@
 import {
   access,
   lstat,
+  lutimes,
   mkdir,
   readFile,
   readdir,
@@ -210,16 +211,30 @@ async function selectFile(options: DialogRequest): Promise<string | null> {
  * same temporary-file cleanup path. No `fsync` guarantee and no `EXDEV`
  * fallback: the temporary file always sits beside the target.
  */
-async function writeFileAtomically(target: string, content: string): Promise<void> {
+async function writeFileAtomically(target: string, content: string | Uint8Array): Promise<void> {
   const temporary = `${target}.${randomUUID()}.tmp`
   try {
-    await writeFile(temporary, content, 'utf8')
+    // A `Uint8Array` is written byte for byte; only a string is UTF-8 encoded,
+    // so a binary sync body never round-trips through a text decode.
+    await writeFile(temporary, content)
     await rename(temporary, target)
   } catch (error) {
     // Cleanup must never mask the original reason the write failed.
     await rm(temporary, { force: true }).catch(() => undefined)
     throw error
   }
+}
+
+/**
+ * Backfills a written file's mtime at whole-millisecond precision. `new Date(ms)`
+ * plus the platform's seconds conversion can land just below the integer
+ * millisecond (e.g. …348.999), which would re-flag a synced file as modified;
+ * numeric seconds with a sub-microsecond lift stay on the ms.
+ */
+async function backfillModifiedMs(target: string, modifiedMs: unknown): Promise<void> {
+  if (typeof modifiedMs !== 'number' || !Number.isFinite(modifiedMs)) return
+  const seconds = Math.floor(modifiedMs) / 1000 + 1e-6
+  await utimes(target, seconds, seconds)
 }
 
 async function saveFile(options: DialogRequest, content: string): Promise<string | null> {
@@ -478,6 +493,25 @@ async function readLocalTextFile(path: string): Promise<string> {
   } catch (error) {
     throw readableFailure('文件', error, path)
   }
+}
+
+/** Raw bytes of one file; a sample is text by definition and is UTF-8 encoded. */
+async function readLocalFileBytes(path: string): Promise<Uint8Array> {
+  if (isSamplePath(path)) {
+    const text = SAMPLE_FILES.get(path)
+    if (text === undefined) throw new Error(`No such sample file: ${path}`)
+    return new Uint8Array(Buffer.from(text, 'utf8'))
+  }
+  try {
+    return new Uint8Array(await readFile(path))
+  } catch (error) {
+    throw readableFailure('文件', error, path)
+  }
+}
+
+/** Whole-second mtime with a sub-microsecond lift, so it stays on the whole ms. */
+function linkSeconds(modifiedMs: number): number {
+  return Math.floor(modifiedMs) / 1000 + 1e-6
 }
 
 /** The minimal read-stream surface the digest owns and can destroy. */
@@ -823,6 +857,23 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     if (text === undefined) throw new Error(`No such sample file: ${target}`)
     return text
   })
+  ipcMain.handle(PLATFORM_CHANNELS.readFileBytes, (_event, path: unknown) =>
+    readLocalFileBytes(assertPath(path))
+  )
+  ipcMain.handle(
+    PLATFORM_CHANNELS.setSymbolicLinkModifiedMs,
+    async (_event, path: unknown, modifiedMs: unknown) => {
+      const target = assertWritable(assertPath(path))
+      if (typeof modifiedMs !== 'number' || !Number.isFinite(modifiedMs)) return
+      try {
+        const seconds = linkSeconds(modifiedMs)
+        // `lutimes` addresses the link itself; `utimes` would touch the target.
+        await lutimes(target, seconds, seconds)
+      } catch (error) {
+        throw readableWriteFailure(error, target)
+      }
+    }
+  )
   ipcMain.handle(
     PLATFORM_CHANNELS.writeTextFile,
     async (_event, path: unknown, content: unknown, modifiedMs: unknown) => {
@@ -832,14 +883,25 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
       // must never leave the target zero-byte, truncated or half-written.
       try {
         await writeFileAtomically(target, text)
-        if (typeof modifiedMs === 'number' && Number.isFinite(modifiedMs)) {
-          // Preserve the source mtime at whole-millisecond precision. `new Date(ms)`
-          // plus the platform's seconds conversion can land just below the integer
-          // millisecond (e.g. …348.999), which would re-flag a synced file as
-          // modified; numeric seconds with a sub-microsecond lift stay on the ms.
-          const seconds = Math.floor(modifiedMs) / 1000 + 1e-6
-          await utimes(target, seconds, seconds)
-        }
+        await backfillModifiedMs(target, modifiedMs)
+      } catch (error) {
+        throw readableWriteFailure(error, target)
+      }
+    }
+  )
+  ipcMain.handle(
+    PLATFORM_CHANNELS.writeFileBytes,
+    async (_event, path: unknown, content: unknown, modifiedMs: unknown) => {
+      const target = assertWritable(assertPath(path))
+      // Bytes arrive over IPC as a `Uint8Array`; anything else is a protocol bug.
+      if (!(content instanceof Uint8Array)) {
+        throw new TypeError('Expected raw bytes to write.')
+      }
+      // Same atomic directory-then-rename write as the text path, but the bytes
+      // are never encoded or decoded, so a binary body stays byte-identical.
+      try {
+        await writeFileAtomically(target, content)
+        await backfillModifiedMs(target, modifiedMs)
       } catch (error) {
         throw readableWriteFailure(error, target)
       }

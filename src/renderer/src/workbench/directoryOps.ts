@@ -8,7 +8,12 @@
  */
 import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, scanDirectory } from '@core/directory/compare'
-import type { ComparisonCache, DirectoryComparison, ScannedTree } from '@core/directory/compare'
+import type {
+  ComparisonCache,
+  DirectoryComparison,
+  DirectoryDiffNode,
+  ScannedTree
+} from '@core/directory/compare'
 import {
   buildSyncPlan,
   copyScannedTree,
@@ -16,9 +21,16 @@ import {
   invalidateComparisonCache,
   joinRelativePath,
   SyncRefreshError,
-  SyncTargetError
+  SyncTargetError,
+  SyncVerificationError
 } from '@core/directory/sync'
-import type { SyncDirection, SyncMode, SyncPlan } from '@core/directory/sync'
+import type {
+  SyncDirection,
+  SyncExecution,
+  SyncMode,
+  SyncPlan,
+  SyncVerificationMismatch
+} from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { extractTemplateMatches, matchTemplate, matchTemplateSlots } from '@core/directory/template'
 import type { TemplateMatchResult } from '@core/directory/template'
@@ -40,9 +52,10 @@ function basename(path: string): string {
 
 function syncIo(platform: PlatformPort) {
   return {
-    readTextFile: (path: string) => platform.readTextFile(path),
-    writeTextFile: (path: string, content: string, modifiedMs?: number) =>
-      platform.writeTextFile(path, content, modifiedMs),
+    // Raw bytes end to end: the sync write path never decodes a file as text.
+    readFileBytes: (path: string) => platform.readFileBytes(path),
+    writeFileBytes: (path: string, content: Uint8Array, modifiedMs?: number) =>
+      platform.writeFileBytes(path, content, modifiedMs),
     ensureDirectory: (path: string) => platform.ensureDirectory(path),
     deleteFile: (path: string) => platform.deleteFile(path),
     removeDirectory: (path: string) => platform.removeDirectory(path),
@@ -66,6 +79,7 @@ export function readableSyncFailure(cause: unknown): unknown {
   if (
     cause instanceof SyncTargetError ||
     cause instanceof SyncRefreshError ||
+    cause instanceof SyncVerificationError ||
     isOperationCancelled(cause)
   ) {
     return cause
@@ -127,6 +141,8 @@ async function scan(platform: PlatformPort, root: string): Promise<ScannedTree> 
 /** A previewed sync: the plan plus where its writes will actually land. */
 export interface SyncPreview {
   readonly plan: SyncPlan
+  /** The comparison the plan was built from; its scanned mtimes feed link metadata. */
+  readonly comparison?: DirectoryComparison
   /** True when the original target tree is read-only and gets materialised. */
   readonly materializeTarget: boolean
   readonly sourceRoot: string
@@ -158,6 +174,7 @@ export async function previewSync(
 
   return {
     plan: buildSyncPlan(comparison, direction, mode, targetRoot),
+    comparison,
     materializeTarget,
     sourceRoot,
     originalTargetRoot
@@ -183,6 +200,113 @@ async function compareRoots(
       listDirectories: (paths) => platform.listDirectories(paths)
     }
   )
+}
+
+/**
+ * Post-write proof that every target this run wrote is byte-identical to its
+ * source, and every checked deletion is really gone. Only this run's paths are
+ * read, so a 358k-file sync never re-hashes the whole tree. Deletions are checked
+ * through a listing (an `lstat` view), so a removed dangling link is not mistaken
+ * for "missing, therefore deleted".
+ */
+async function verifyWrittenTargets(
+  platform: PlatformPort,
+  execution: SyncExecution
+): Promise<SyncVerificationMismatch[]> {
+  const mismatches: SyncVerificationMismatch[] = []
+  const written = execution.written
+
+  if (written.length > 0) {
+    try {
+      const digests = await digestFilesForComparison(platform, [
+        ...written.map((item) => item.targetPath),
+        ...written.map((item) => item.sourcePath)
+      ])
+      const offset = written.length
+      written.forEach((item, index) => {
+        const target = digests[index]
+        const source = digests[offset + index]
+        if (target?.ok !== true || source?.ok !== true) {
+          mismatches.push({ path: item.targetPath, reason: 'cannot read the bytes used for verification' })
+          return
+        }
+        if (target.sha256 !== source.sha256 || target.bytes !== source.bytes) {
+          mismatches.push({ path: item.targetPath, reason: 'target bytes differ from source' })
+        }
+      })
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause)
+      for (const item of written) mismatches.push({ path: item.targetPath, reason })
+      return mismatches
+    }
+  }
+
+  for (const path of execution.deletedPaths) {
+    try {
+      if (await entryStillExists(platform, path)) {
+        mismatches.push({ path, reason: 'checked deletion still exists on the target' })
+      }
+    } catch (cause) {
+      mismatches.push({
+        path,
+        reason: cause instanceof Error ? cause.message : String(cause)
+      })
+    }
+  }
+
+  return mismatches
+}
+
+/** True when `path` still has a directory entry, links included (never followed). */
+async function entryStillExists(platform: PlatformPort, path: string): Promise<boolean> {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  if (separator <= 0) return (await platform.statPath(path)) !== 'missing'
+  const parent = path.slice(0, separator)
+  if ((await platform.statPath(parent)) !== 'directory') return false
+  const name = path.slice(separator + 1)
+  return (await platform.listDirectory(parent)).some((entry) => entry.name === name)
+}
+
+/**
+ * Aligns the target-side link metadata for pairs the comparison already scanned
+ * as `same` (equal link target) but whose link mtime differs. Both sides' nodes
+ * come from the existing scan, so no extra `lstat` walk runs, and nothing here
+ * enters the plan: `copy` / `update` / `delete` counts stay untouched.
+ */
+async function alignSymbolicLinkTimes(
+  platform: PlatformPort,
+  comparison: DirectoryComparison,
+  targetRoot: string,
+  direction: SyncDirection,
+  signal: AbortSignal | undefined
+): Promise<readonly SyncVerificationMismatch[]> {
+  const leftToRight = direction === 'left-to-right'
+  const failures: SyncVerificationMismatch[] = []
+  const stack: DirectoryDiffNode[] = [comparison.root]
+
+  while (stack.length > 0) {
+    const node = stack.pop() as DirectoryDiffNode
+    for (const child of node.children) stack.push(child)
+    if (node.kind !== 'file' || node.status !== 'same') continue
+    if (node.leftIsSymbolicLink !== true || node.rightIsSymbolicLink !== true) continue
+    const sourceMs = (leftToRight ? node.leftModifiedMs : node.rightModifiedMs) ?? 0
+    const targetMs = (leftToRight ? node.rightModifiedMs : node.leftModifiedMs) ?? 0
+    // The classifier compares links by target string, so equal targets stay
+    // `same`; only the link's own whole-second mtime can still be unequal.
+    if (Math.floor(sourceMs / 1000) === Math.floor(targetMs / 1000)) continue
+    if (signal?.aborted === true) break
+    const targetPath = joinRelativePath(targetRoot, node.relativePath)
+    try {
+      await platform.setSymbolicLinkModifiedMs(targetPath, sourceMs)
+    } catch (cause) {
+      failures.push({
+        path: targetPath,
+        reason: cause instanceof Error ? cause.message : String(cause)
+      })
+    }
+  }
+
+  return failures
 }
 
 export interface SyncApplyResult {
@@ -247,6 +371,22 @@ export async function applySyncPreview(
   }
   invalidateComparisonCache(cache, execution.affected)
 
+  // The completion notice is only truthful when the bytes just written really
+  // equal their sources. Verification reads exactly this run's targets (+ their
+  // sources) and the checked deletions' presence — never the whole tree.
+  const mismatches = await verifyWrittenTargets(platform, execution)
+  if (!preview.materializeTarget && preview.comparison !== undefined) {
+    mismatches.push(
+      ...(await alignSymbolicLinkTimes(
+        platform,
+        preview.comparison,
+        plan.targetRoot,
+        plan.direction,
+        options.signal
+      ))
+    )
+  }
+
   const leftToRight = plan.direction === 'left-to-right'
   const leftRoot = leftToRight ? preview.sourceRoot : plan.targetRoot
   const rightRoot = leftToRight ? plan.targetRoot : preview.sourceRoot
@@ -264,6 +404,21 @@ export async function applySyncPreview(
       updated: execution.updated,
       deleted: execution.deleted
     })
+  }
+
+  if (mismatches.length > 0) {
+    // The writes already landed, so nothing is rolled back; the refreshed
+    // comparison travels with the failure so the caller can show the real disk
+    // state and the danger notice instead of "sync complete".
+    throw new SyncVerificationError(
+      mismatches,
+      {
+        copied: execution.copied,
+        updated: execution.updated,
+        deleted: execution.deleted
+      },
+      comparison
+    )
   }
 
   return {

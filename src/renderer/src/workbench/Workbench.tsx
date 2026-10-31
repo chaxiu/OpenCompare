@@ -13,7 +13,7 @@ import { directoryReportSource } from '@core/directory/report'
 import type { DirectoryReportProgress } from '@core/directory/report'
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { StructuredFilter } from '@core/structured/diff'
-import { SyncRefreshError } from '@core/directory/sync'
+import { SyncRefreshError, SyncVerificationError } from '@core/directory/sync'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
@@ -1171,6 +1171,25 @@ export function Workbench({
             updated: cause.updated,
             deleted: cause.deleted,
             reason: cause.reason
+          })
+        )
+        setNoticeTone('danger')
+      } else if (cause instanceof SyncVerificationError) {
+        // Every byte landed, but at least one target does not match its source:
+        // never claim success. Close the applied preview, show the refreshed disk
+        // state and report the mismatching count with a path sample.
+        setSyncPreview(null)
+        if (cause.comparison !== undefined) {
+          const { leftRoot, rightRoot } = cause.comparison
+          replaceSession(
+            target.id,
+            createDirectorySession(cause.comparison, directorySides(leftRoot, rightRoot))
+          )
+        }
+        setNotice(
+          copyNotice('shell.notice.syncVerifyFailed', {
+            count: cause.mismatched,
+            paths: cause.paths.slice(0, 3).join('、')
           })
         )
         setNoticeTone('danger')
