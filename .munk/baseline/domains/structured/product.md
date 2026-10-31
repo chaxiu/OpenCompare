@@ -60,7 +60,7 @@ JSON / YAML 结构化语义归一化对比域（场景 D）：`src/core/structur
 ## 非目标
 
 - **不做结构化编辑 / 合并 / 写回**：不做一键采纳、左右覆写、写回文件、导出对比报告；文件对话框能力由 `PlatformPort.selectFile`（`foundation` 域）提供，本域只做 `StructuredView` 顶栏本地打开接线。
-- **定位层只做「路径 → 原文区间」单向映射**：不做行 → 节点反向索引（原文反选）、不做 UI 高亮 / 双栏同步滚动 / 过滤与切 tab 的位置保持，也不做 5 MB 大文件原文窗口化（已由 `structured-locate-sync` 域承接）；**renderer 后台对比（parse / diff / 定位脱离主线程、加载态、代次取代与取消语义）已移交 `structured-async-compare` 域**，本域只作为其复用的同步引擎 + 定位层；不碰 CRLF/LF 与编码归一化、不处理 UTF-8 BOM。
+- **定位层只做「路径 → 原文区间」单向映射**：不做行 → 节点反向索引（原文反选）、不做 UI 高亮 / 双栏同步滚动 / 过滤与切 tab 的位置保持，也不做 5 MB 大文件原文窗口化（已由 `structured-locate-sync` 域承接；≥5 MB 真实文件语义 / 定位 / 卸载验收证据归 `structured-scale-evidence` 域）；**renderer 后台对比（parse / diff / 定位脱离主线程、加载态、代次取代与取消语义）已移交 `structured-async-compare` 域**，本域只作为其复用的同步引擎 + 定位层；不碰 CRLF/LF 与编码归一化、不处理 UTF-8 BOM。
 - **不做 YAML 高级语义展开**（alias / merge key / 锚点解引用 / 多文档 / 重复键策略），不做 JSONPath 查询、schema 校验；定位层不手写 JSON / YAML 词法，一律复用 `jsonc-parser` / `yaml` 的 AST offset 与 `range`，避免与 `parseStructured` 出现两套接受口径。
 - **不做跨格式比对**：JSON 只对 JSON、YAML 只对 YAML；不做 JSON ↔ YAML 转换后对比。
 - **不做数组智能对齐**：数组按索引比对，不做 LCS / 按元素内容重新对齐数组项。
