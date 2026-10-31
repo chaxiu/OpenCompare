@@ -62,6 +62,7 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.sync.group.copy': 'Files to copy',
   'directory.sync.group.update': 'Files to overwrite',
   'directory.sync.group.delete': 'Files to delete (mirror)',
+  'directory.sync.group.align': 'Link times to align',
   'directory.sync.groupCount.one': '{count} item · {size}',
   'directory.sync.groupCount.other': '{count} items · {size}',
   'directory.none': 'None',
@@ -71,9 +72,10 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.sync.deleteItem': 'Delete {path}',
   'directory.sync.selectAll': 'Select all',
   'directory.sync.clearSelection': 'Clear',
-  'directory.sync.summary': 'This run: {copy} copy · {update} overwrite · {delete} delete',
+  'directory.sync.summary':
+    'This run: {copy} copy · {update} overwrite · {delete} delete · {align} link time aligned',
   'directory.sync.noExecutable':
-    'Delete items are unchecked by default. Select at least one delete item, or have files to copy or overwrite, to run.',
+    'Delete items are unchecked by default. Select at least one delete item, or have files to copy, overwrite or link times to align, to run.',
   'directory.template.title': 'Template placement preview',
   'directory.template.label.template': 'Template A: ',
   'directory.template.label.incoming': 'Scattered tree B: ',

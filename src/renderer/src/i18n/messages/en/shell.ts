@@ -53,7 +53,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Exported to {path} ({count} files, {skipped} unreadable entries skipped).',
   'shell.notice.snapshotMounted': 'Mounted snapshot {name} on the {side} side.',
   'shell.notice.syncComplete':
-    'Sync complete: {copied} copied · {updated} overwritten · {deleted} deleted.',
+    'Sync complete: {copied} copied · {updated} overwritten · {deleted} deleted · {aligned} link time aligned.',
   'shell.notice.syncCancelled':
     'Sync cancelled: the target was rolled back to its previous state; preview or retry again.',
   'shell.notice.syncVerifyFailed':

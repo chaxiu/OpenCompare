@@ -138,15 +138,82 @@ async function scan(platform: PlatformPort, root: string): Promise<ScannedTree> 
   })
 }
 
+/**
+ * One link pair the comparison already reads as `same` (equal link target) whose
+ * link's own whole-second mtime still differs; the run rewrites the target's link
+ * time only.
+ */
+export interface SyncLinkAlignment {
+  readonly relativePath: string
+  /** Absolute target-side path whose link mtime is rewritten (`lutimes` level). */
+  readonly targetPath: string
+  /** Source-side link mtime, copied onto the target link. */
+  readonly sourceMs: number
+}
+
 /** A previewed sync: the plan plus where its writes will actually land. */
 export interface SyncPreview {
   readonly plan: SyncPlan
-  /** The comparison the plan was built from; its scanned mtimes feed link metadata. */
-  readonly comparison?: DirectoryComparison
   /** True when the original target tree is read-only and gets materialised. */
   readonly materializeTarget: boolean
   readonly sourceRoot: string
   readonly originalTargetRoot: string
+  /**
+   * Link metadata the run will align on the target side. Empty when the target is
+   * materialised (its copy already carries the scanned metadata) and always
+   * disjoint from the plan's copy / update / delete groups.
+   */
+  readonly linkAlignments: readonly SyncLinkAlignment[]
+}
+
+/**
+ * The **one** executable predicate of a sync preview, shared by the Apply button
+ * and the real-disk gate. A preview is executable when it has bytes to copy or
+ * overwrite, link metadata to align, or mirror deletions the user kept checked:
+ * a preview that only aligns link mtimes still has real work to do, so the user
+ * must be able to run it (and the gate must judge it the same way).
+ */
+export function canApplySyncPreview(
+  preview: SyncPreview,
+  deletePaths: readonly string[] = []
+): boolean {
+  const { plan } = preview
+  if (plan.copy.count > 0 || plan.update.count > 0) return true
+  if (preview.linkAlignments.length > 0) return true
+  return plan.mode === 'mirror' && deletePaths.length > 0
+}
+
+/**
+ * Collects the link pairs whose metadata still differs, reusing the comparison's
+ * own scan (`leftIsSymbolicLink` / `rightIsSymbolicLink` + both mtimes) so no extra
+ * `lstat` walk runs. The classifier compares links by target string, so equal
+ * targets stay `same`; only the link's whole-second mtime can still be unequal.
+ */
+function collectLinkAlignments(
+  comparison: DirectoryComparison,
+  direction: SyncDirection,
+  targetRoot: string
+): SyncLinkAlignment[] {
+  const leftToRight = direction === 'left-to-right'
+  const alignments: SyncLinkAlignment[] = []
+  const stack: DirectoryDiffNode[] = [comparison.root]
+
+  while (stack.length > 0) {
+    const node = stack.pop() as DirectoryDiffNode
+    for (const child of node.children) stack.push(child)
+    if (node.kind !== 'file' || node.status !== 'same') continue
+    if (node.leftIsSymbolicLink !== true || node.rightIsSymbolicLink !== true) continue
+    const sourceMs = (leftToRight ? node.leftModifiedMs : node.rightModifiedMs) ?? 0
+    const targetMs = (leftToRight ? node.rightModifiedMs : node.leftModifiedMs) ?? 0
+    if (Math.floor(sourceMs / 1000) === Math.floor(targetMs / 1000)) continue
+    alignments.push({
+      relativePath: node.relativePath,
+      targetPath: joinRelativePath(targetRoot, node.relativePath),
+      sourceMs
+    })
+  }
+
+  return alignments
 }
 
 /**
@@ -174,10 +241,12 @@ export async function previewSync(
 
   return {
     plan: buildSyncPlan(comparison, direction, mode, targetRoot),
-    comparison,
     materializeTarget,
     sourceRoot,
-    originalTargetRoot
+    originalTargetRoot,
+    // A materialised target is written by the copy itself, which already carries
+    // the scanned metadata; only an in-place target needs the link alignment.
+    linkAlignments: materializeTarget ? [] : collectLinkAlignments(comparison, direction, targetRoot)
   }
 }
 
@@ -268,45 +337,32 @@ async function entryStillExists(platform: PlatformPort, path: string): Promise<b
 }
 
 /**
- * Aligns the target-side link metadata for pairs the comparison already scanned
- * as `same` (equal link target) but whose link mtime differs. Both sides' nodes
- * come from the existing scan, so no extra `lstat` walk runs, and nothing here
- * enters the plan: `copy` / `update` / `delete` counts stay untouched.
+ * Rewrites the target-side link metadata of the pairs `previewSync` collected.
+ * Nothing here enters the plan: `copy` / `update` / `delete` counts stay
+ * untouched, and no ordinary file is written.
  */
 async function alignSymbolicLinkTimes(
   platform: PlatformPort,
-  comparison: DirectoryComparison,
-  targetRoot: string,
-  direction: SyncDirection,
+  alignments: readonly SyncLinkAlignment[],
   signal: AbortSignal | undefined
-): Promise<readonly SyncVerificationMismatch[]> {
-  const leftToRight = direction === 'left-to-right'
+): Promise<{ readonly aligned: number; readonly failures: SyncVerificationMismatch[] }> {
   const failures: SyncVerificationMismatch[] = []
-  const stack: DirectoryDiffNode[] = [comparison.root]
+  let aligned = 0
 
-  while (stack.length > 0) {
-    const node = stack.pop() as DirectoryDiffNode
-    for (const child of node.children) stack.push(child)
-    if (node.kind !== 'file' || node.status !== 'same') continue
-    if (node.leftIsSymbolicLink !== true || node.rightIsSymbolicLink !== true) continue
-    const sourceMs = (leftToRight ? node.leftModifiedMs : node.rightModifiedMs) ?? 0
-    const targetMs = (leftToRight ? node.rightModifiedMs : node.leftModifiedMs) ?? 0
-    // The classifier compares links by target string, so equal targets stay
-    // `same`; only the link's own whole-second mtime can still be unequal.
-    if (Math.floor(sourceMs / 1000) === Math.floor(targetMs / 1000)) continue
+  for (const alignment of alignments) {
     if (signal?.aborted === true) break
-    const targetPath = joinRelativePath(targetRoot, node.relativePath)
     try {
-      await platform.setSymbolicLinkModifiedMs(targetPath, sourceMs)
+      await platform.setSymbolicLinkModifiedMs(alignment.targetPath, alignment.sourceMs)
+      aligned += 1
     } catch (cause) {
       failures.push({
-        path: targetPath,
+        path: alignment.targetPath,
         reason: cause instanceof Error ? cause.message : String(cause)
       })
     }
   }
 
-  return failures
+  return { aligned, failures }
 }
 
 export interface SyncApplyResult {
@@ -314,6 +370,8 @@ export interface SyncApplyResult {
   readonly copied: number
   readonly updated: number
   readonly deleted: number
+  /** Link mtimes this run realigned; never counted in copied / updated / deleted. */
+  readonly alignedLinks: number
 }
 
 /** Optional cancellation seam of one sync confirmation. */
@@ -375,16 +433,11 @@ export async function applySyncPreview(
   // equal their sources. Verification reads exactly this run's targets (+ their
   // sources) and the checked deletions' presence — never the whole tree.
   const mismatches = await verifyWrittenTargets(platform, execution)
-  if (!preview.materializeTarget && preview.comparison !== undefined) {
-    mismatches.push(
-      ...(await alignSymbolicLinkTimes(
-        platform,
-        preview.comparison,
-        plan.targetRoot,
-        plan.direction,
-        options.signal
-      ))
-    )
+  let alignedLinks = 0
+  if (!preview.materializeTarget) {
+    const alignment = await alignSymbolicLinkTimes(platform, preview.linkAlignments, options.signal)
+    alignedLinks = alignment.aligned
+    mismatches.push(...alignment.failures)
   }
 
   const leftToRight = plan.direction === 'left-to-right'
@@ -425,7 +478,8 @@ export async function applySyncPreview(
     comparison,
     copied: execution.copied,
     updated: execution.updated,
-    deleted: execution.deleted
+    deleted: execution.deleted,
+    alignedLinks
   }
 }
 

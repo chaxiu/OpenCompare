@@ -41,8 +41,10 @@ import {
 } from '@core/directory/sync'
 import type { SyncDirection, SyncIo, SyncPlanGroup } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
+import { en } from '@renderer/i18n/messages'
 import { digestFilesForComparison } from '@renderer/platform'
-import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
+import { syncPreviewGuidance } from '@renderer/views/directoryCopy'
+import { applySyncPreview, canApplySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DigestFilesResult,
@@ -1405,7 +1407,7 @@ async function linkWithStamp(target: string, path: string, stampMs: number): Pro
 
 describe('real-disk sync symlink metadata', () => {
   it(
-    'aligns the target link lstat mtime to the source without changing target or counts',
+    'is executable when only the link mtime differs, aligns it, and is idempotent',
     async () => {
       const root = await scratchRoot()
       const left = join(root, 'left')
@@ -1435,7 +1437,8 @@ describe('real-disk sync symlink metadata', () => {
 
       const comparison = await comparePair(left, right)
       // Links still judge by target string only: all four pairs are `same`.
-      expect(comparison.counts, 'symlink metadata: four-state counts').toEqual({
+      const countsBefore = { ...comparison.counts }
+      expect(countsBefore, 'symlink metadata: four-state counts').toEqual({
         same: 4,
         added: 0,
         removed: 0,
@@ -1453,13 +1456,45 @@ describe('real-disk sync symlink metadata', () => {
         ...preview.plan.delete.items
       ].map((item) => item.relativePath)
       expect(plannedLinks, 'symlink metadata: no link enters the plan').toEqual([])
+      expect(preview.plan.totalCount, 'symlink metadata: all three groups are empty').toBe(0)
+
+      // The user-facing executable predicate sees the pending alignment work.
+      expect(
+        canApplySyncPreview(preview),
+        'symlink metadata: only the link mtime differs is still executable'
+      ).toBe(true)
+      expect(
+        preview.linkAlignments.map((alignment) => alignment.relativePath).sort(),
+        'symlink metadata: pending alignment list'
+      ).toEqual(['dangling-link', 'same-target-link'])
+
+      // Copy rule: an empty plan with pending alignments must never claim the
+      // target already matches the source; it points at the alignment work.
+      expect(
+        syncPreviewGuidance(preview),
+        'symlink metadata: empty plan with pending links is not the empty copy'
+      ).toBe('changes')
+      expect(
+        en['directory.sync.empty'],
+        'symlink metadata: the forbidden copy says the target already matches'
+      ).toContain('already matches the source')
+      expect(
+        en['directory.sync.group.align'],
+        'symlink metadata: the dialog points at the pending alignment'
+      ).toBeTruthy()
 
       const stableBefore = Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs)
+      const sharedBefore = await stat(diskPath(right, 'shared.txt'))
+      const sharedDigestBefore = createHash('sha256')
+        .update(await readFile(diskPath(right, 'shared.txt')))
+        .digest('hex')
+
       const recorded = recordWrites(platform)
       const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
       expect(result.copied).toBe(0)
       expect(result.updated).toBe(0)
       expect(result.deleted).toBe(0)
+      expect(result.alignedLinks, 'symlink metadata: aligned link count').toBe(2)
       // Aligning a link mtime writes no ordinary file content at all.
       expect(recorded.writes, 'symlink metadata: alignment writes no file content').toEqual([])
 
@@ -1490,11 +1525,169 @@ describe('real-disk sync symlink metadata', () => {
         'symlink metadata: already-aligned link stays untouched'
       ).toBe(stableBefore)
 
+      // Ordinary files keep their bytes, size and whole-millisecond mtime.
+      const sharedAfter = await stat(diskPath(right, 'shared.txt'))
+      expect(sharedAfter.size, 'symlink metadata: ordinary file size').toBe(sharedBefore.size)
+      expect(sharedAfter.mtimeMs, 'symlink metadata: ordinary file mtime').toBe(
+        sharedBefore.mtimeMs
+      )
+      expect(
+        createHash('sha256').update(await readFile(diskPath(right, 'shared.txt'))).digest('hex'),
+        'symlink metadata: ordinary file bytes'
+      ).toBe(sharedDigestBefore)
+
+      // Alignment leaves the four-state counts and the three groups untouched.
+      expect(result.comparison.counts, 'symlink metadata: four-state counts after').toEqual(
+        countsBefore
+      )
+
       // Alignment still leaves the dry-run empty: neither byte nor count changed.
       const second = await previewSync(platform, result.comparison, 'left-to-right', 'mirror', 2)
       expect(second.plan.copy.count, 'symlink metadata: second dry-run copy').toBe(0)
       expect(second.plan.update.count, 'symlink metadata: second dry-run update').toBe(0)
       expect(second.plan.delete.count, 'symlink metadata: second dry-run delete').toBe(0)
+      expect(second.linkAlignments, 'symlink metadata: second dry-run alignment list').toEqual([])
+      expect(
+        canApplySyncPreview(second),
+        'symlink metadata: second dry-run is not executable'
+      ).toBe(false)
+      expect(
+        syncPreviewGuidance(second),
+        'symlink metadata: an already-aligned tree gets the empty copy'
+      ).toBe('empty')
+    },
+    60_000
+  )
+
+  it(
+    'stays executable in both modes while mirror deletes keep opting in',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await linkWithStamp('shared.txt', diskPath(left, 'same-target-link'), LINK_SOURCE_STAMP)
+      await linkWithStamp('shared.txt', diskPath(right, 'same-target-link'), LINK_TARGET_STAMP)
+      // Target-only file: a mirror deletion the user has not checked yet.
+      await writeStamped(join(right, 'stale.txt'), 'stale\n', BINARY_STAMP)
+
+      const comparison = await comparePair(left, right)
+      const incremental = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+      expect(incremental.plan.delete.count, 'symlink metadata: incremental has no delete').toBe(0)
+      expect(incremental.linkAlignments.length, 'symlink metadata: incremental alignment').toBe(1)
+      expect(
+        canApplySyncPreview(incremental),
+        'symlink metadata: incremental only-aligning preview is executable'
+      ).toBe(true)
+
+      const mirror = await previewSync(platform, comparison, 'left-to-right', 'mirror', 2)
+      expect(mirror.plan.delete.count, 'symlink metadata: mirror lists the stale file').toBe(1)
+      expect(
+        canApplySyncPreview(mirror),
+        'symlink metadata: unchecked mirror delete does not block link alignment'
+      ).toBe(true)
+      expect(
+        canApplySyncPreview(mirror, ['stale.txt']),
+        'symlink metadata: a checked mirror delete is executable too'
+      ).toBe(true)
+
+      // Counter-control: with the link times already equal, an unchecked mirror
+      // deletion alone keeps Apply disabled — the delete opt-in is unchanged.
+      const quietRoot = await scratchRoot()
+      const quietLeft = join(quietRoot, 'left')
+      const quietRight = join(quietRoot, 'right')
+      await mkdir(quietLeft, { recursive: true })
+      await mkdir(quietRight, { recursive: true })
+      await writeStamped(join(quietLeft, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await writeStamped(join(quietRight, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await linkWithStamp('shared.txt', diskPath(quietLeft, 'aligned-link'), LINK_SOURCE_STAMP)
+      await linkWithStamp('shared.txt', diskPath(quietRight, 'aligned-link'), LINK_SOURCE_STAMP)
+      await writeStamped(join(quietRight, 'stale.txt'), 'stale\n', BINARY_STAMP)
+
+      const quiet = await previewSync(
+        platform,
+        await comparePair(quietLeft, quietRight),
+        'left-to-right',
+        'mirror',
+        3
+      )
+      expect(quiet.linkAlignments, 'symlink metadata: equal link times need no alignment').toEqual(
+        []
+      )
+      expect(quiet.plan.delete.count, 'symlink metadata: counter-control delete count').toBe(1)
+      expect(
+        canApplySyncPreview(quiet),
+        'symlink metadata: unchecked mirror delete alone is not executable'
+      ).toBe(false)
+      expect(
+        canApplySyncPreview(quiet, ['stale.txt']),
+        'symlink metadata: checked mirror delete alone is executable'
+      ).toBe(true)
+    },
+    60_000
+  )
+
+  it(
+    'rejects through the verification path when resetting a link time fails',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+      await linkWithStamp('shared.txt', diskPath(left, 'same-target-link'), LINK_SOURCE_STAMP)
+      await linkWithStamp('shared.txt', diskPath(right, 'same-target-link'), LINK_TARGET_STAMP)
+
+      const preview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      expect(canApplySyncPreview(preview), 'symlink metadata: refused run is still executable').toBe(
+        true
+      )
+
+      const refusing: PlatformPort = {
+        ...platform,
+        setSymbolicLinkModifiedMs: async (path) => {
+          throw new Error(`无法设置链接时间 ${path}：没有访问权限（EACCES）。`)
+        }
+      }
+
+      let failure: unknown
+      try {
+        await applySyncPreview(refusing, preview, createComparisonCache(), [])
+      } catch (cause) {
+        failure = cause
+      }
+      expect(
+        failure,
+        'symlink metadata: refused link time is a verification failure'
+      ).toBeInstanceOf(SyncVerificationError)
+      const error = failure as SyncVerificationError
+      expect(error.paths, 'symlink metadata: refused link path').toEqual([
+        diskPath(right, 'same-target-link')
+      ])
+      // The refreshed real-disk comparison travels with the failure, and the
+      // unreset link keeps its old mtime: no success may be claimed.
+      expect(error.comparison, 'symlink metadata: refreshed comparison').toBeDefined()
+      expect(error.comparison?.counts, 'symlink metadata: refreshed counts').toEqual({
+        same: 2,
+        added: 0,
+        removed: 0,
+        modified: 0
+      })
+      expect(
+        Math.floor((await lstat(diskPath(right, 'same-target-link'))).mtimeMs / 1000),
+        'symlink metadata: refused link keeps its mtime'
+      ).toBe(Math.floor(LINK_TARGET_STAMP / 1000))
     },
     60_000
   )
