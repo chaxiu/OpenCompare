@@ -1,0 +1,21 @@
+{
+  "telemetry": { "enabled": true },
+  "service": {
+    "version": "2.0.0",
+    "name": "opencompare",
+    "features": {
+      "limits": {
+        "levels": {
+          "tier": {
+            "profile": {
+              "onlyRight": { "deep": "added-on-right" },
+              "weights": [1, 2, 3],
+              "name": "balanced"
+            }
+          }
+        },
+        "maxBytes": 104857600
+      }
+    }
+  }
+}

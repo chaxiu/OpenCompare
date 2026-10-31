@@ -1,0 +1,24 @@
+// OpenCompare locate fixture — left side
+{
+  "service": {
+    "name": "opencompare", // display name
+    "version": 2,
+    "features": {
+      "limits": {
+        "maxBytes": 104857600,
+        "levels": {
+          "tier": {
+            "profile": {
+              "name": "balanced",
+              "weights": [1, 2, 3],
+              "onlyLeft": "removed-on-right"
+            }
+          }
+        }
+      }
+    }
+  },
+  "telemetry": {
+    "enabled": false
+  },
+}
