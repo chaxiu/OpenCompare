@@ -436,10 +436,232 @@ describe('release body from repository notes', () => {
     expect(preCreate.match(/--notes-file/g)?.length).toBe(2)
   })
 
+  const bilingualNotesPathStatement = 'notes_zh_file="docs/release-notes/v${version}.zh-CN.md"'
+
+  it('reads the English and the zh-CN notes from package.json derived paths', () => {
+    const derive = preCreate.indexOf(
+      'version="$(node -p "require(\'./package.json\').version")"'
+    )
+    expect(derive).toBeGreaterThan(-1)
+    expect(preCreate).toContain(notesPathStatement)
+    expect(preCreate).toContain(bilingualNotesPathStatement)
+    expect(preCreate.indexOf(notesPathStatement)).toBeGreaterThan(derive)
+    expect(preCreate.indexOf(bilingualNotesPathStatement)).toBeGreaterThan(derive)
+    // Neither path may be pinned to a literal version.
+    expect(preCreate).not.toMatch(/docs\/release-notes\/v\d+\.\d+\.\d+/)
+  })
+
+  it('fails closed when either the English or the zh-CN notes file is missing', () => {
+    const missingEnglish = preCreate.indexOf('if [ ! -f "${notes_file}" ]; then')
+    const missingChinese = preCreate.indexOf('if [ ! -f "${notes_zh_file}" ]; then')
+    const create = preCreate.indexOf('gh release create')
+    const edit = preCreate.indexOf('gh release edit')
+    expect(missingEnglish).toBeGreaterThan(-1)
+    expect(missingChinese).toBeGreaterThan(missingEnglish)
+    expect(preCreate).toContain('::error::Missing release notes ${notes_file}')
+    expect(preCreate).toContain('::error::Missing release notes ${notes_zh_file}')
+    // Both missing guards exit before any draft is created or edited.
+    expect(preCreate.slice(missingEnglish, missingChinese)).toContain('exit 1')
+    expect(preCreate.slice(missingChinese, create)).toContain('exit 1')
+    expect(missingChinese).toBeLessThan(create)
+    expect(missingChinese).toBeLessThan(edit)
+  })
+
+  it('fails closed when either the English or the zh-CN notes file is blank', () => {
+    const blankEnglish = preCreate.indexOf(
+      'if [ -z "$(tr -d \'[:space:]\' < "${notes_file}")" ]; then'
+    )
+    const blankChinese = preCreate.indexOf(
+      'if [ -z "$(tr -d \'[:space:]\' < "${notes_zh_file}")" ]; then'
+    )
+    const create = preCreate.indexOf('gh release create')
+    const edit = preCreate.indexOf('gh release edit')
+    expect(blankEnglish).toBeGreaterThan(-1)
+    expect(blankChinese).toBeGreaterThan(blankEnglish)
+    // Each language names its own file so the failing side is identifiable.
+    expect(preCreate).toContain('::error::Release notes ${notes_file} are empty (English)')
+    expect(preCreate).toContain(
+      '::error::Release notes ${notes_zh_file} are empty (Simplified Chinese)'
+    )
+    // Neither blank guard can fall through to a draft write.
+    expect(preCreate.slice(blankEnglish, blankChinese)).toContain('exit 1')
+    expect(preCreate.slice(blankChinese, create)).toContain('exit 1')
+    expect(blankChinese).toBeLessThan(create)
+    expect(blankChinese).toBeLessThan(edit)
+  })
+
+  it('folds the zh-CN notes into a details block in body order', () => {
+    const english = preCreate.indexOf('cat "${notes_file}"')
+    const separator = preCreate.indexOf("echo '---'")
+    const open = preCreate.indexOf("echo '<details><summary>简体中文</summary>'")
+    const chinese = preCreate.indexOf('cat "${notes_zh_file}"')
+    const close = preCreate.indexOf("echo '</details>'")
+    const changelog = preCreate.indexOf('**Full Changelog**')
+    for (const offset of [english, separator, open, chinese, close, changelog]) {
+      expect(offset).toBeGreaterThan(-1)
+    }
+    expect(english).toBeLessThan(separator)
+    expect(separator).toBeLessThan(open)
+    expect(open).toBeLessThan(chinese)
+    expect(chinese).toBeLessThan(close)
+    expect(close).toBeLessThan(changelog)
+    // One fold block: the markers are neither duplicated nor nested.
+    expect(preCreate.match(/<details>/g) ?? []).toHaveLength(1)
+    expect(preCreate.match(/<\/details>/g) ?? []).toHaveLength(1)
+  })
+
+  it('has no single-language fallback path', () => {
+    expect(preCreate).not.toContain('--generate-notes')
+    // One body file is written from both languages, and it is written only into
+    // the draft create / draft-only edit.
+    expect(preCreate.match(/--notes-file/g) ?? []).toHaveLength(2)
+    expect(preCreate.match(/cat "\$\{notes_file\}"/g) ?? []).toHaveLength(1)
+    expect(preCreate.match(/cat "\$\{notes_zh_file\}"/g) ?? []).toHaveLength(1)
+    expect(preCreate).toContain('already public; leaving its body untouched')
+  })
+
   it('keeps the finalize step body-free', () => {
     expect(finalizeStep("Make the tag's release public")?.run).toBe(
       'gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest'
     )
+  })
+})
+
+// The published Release is the artifact consumers read, so finalize re-reads the
+// public body and fails when the zh-CN fold block or either language segment's
+// version is missing. The script is also executed against fixture bodies with a
+// stub `gh` on PATH, so the three fail-closed branches are proven, not just
+// spelled out.
+describe('published release body gate', () => {
+  const bodyGateName = 'Assert the published release body is bilingual'
+  const bodyGate = finalizeStep(bodyGateName)?.run ?? ''
+
+  it('runs in finalize after the release is made public and keeps the step order', () => {
+    const publish = releaseWorkflow.indexOf("name: Make the tag's release public")
+    const bodyGateIndex = releaseWorkflow.indexOf(`name: ${bodyGateName}`)
+    const unique = releaseWorkflow.indexOf('name: Verify the tag has exactly one public release')
+    const assets = releaseWorkflow.indexOf(
+      'name: Assert the public release has every platform asset'
+    )
+    const urls = releaseWorkflow.indexOf('name: Assert latest*.yml urls match the release assets')
+    const latest = releaseWorkflow.indexOf('name: Assert the tag is the latest published release')
+    expect(finalizeStep(bodyGateName)).toBeDefined()
+    expect(publish).toBeGreaterThan(-1)
+    expect(bodyGateIndex).toBeGreaterThan(publish)
+    expect(unique).toBeGreaterThan(publish)
+    expect(assets).toBeGreaterThan(unique)
+    expect(urls).toBeGreaterThan(assets)
+    expect(latest).toBeGreaterThan(urls)
+  })
+
+  it('re-reads the published body with a read-only gh release view', () => {
+    expect(bodyGate).toContain('set -euo pipefail')
+    expect(bodyGate).toContain('gh release view "${RELEASE_TAG}"')
+    expect(bodyGate).toContain('--json body')
+    expect(bodyGate).not.toMatch(/gh release (upload|edit|create|delete)/)
+    expect(bodyGate).not.toMatch(/--method\s+(POST|PATCH|PUT|DELETE)/)
+    // The published artifact is read, never the checked-out notes.
+    expect(bodyGate).not.toContain('docs/release-notes/')
+  })
+
+  it('asserts the zh-CN fold marker and both language segment versions', () => {
+    for (const marker of ['<details>', '简体中文', '</details>']) {
+      expect(bodyGate).toContain(marker)
+    }
+    expect(bodyGate).toContain('exit 1')
+    // Three locatable fail-closed branches: no fold block, English segment
+    // version mismatch, Chinese segment version mismatch.
+    expect(bodyGate).toContain('::error::')
+    expect(bodyGate).toMatch(/body is missing the zh-CN/)
+    expect(bodyGate).toMatch(/English segment does not carry the version/)
+    expect(bodyGate).toMatch(/Chinese segment does not carry the version/)
+    // The segments come from cutting the body at the fold block, so the Full
+    // Changelog line (which always carries the tag) cannot satisfy them.
+    expect(bodyGate).toContain('head -n "$((details_line - 1))"')
+    expect(bodyGate).toContain('zh_body')
+  })
+
+  // Tempdir fixtures are the only place this suite runs the gate script; `gh` is
+  // a local stub that echoes a fixture body, so no network or real release is
+  // ever touched.
+  const runBodyGate = (body: string): { status: number; output: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-body-gate-'))
+    try {
+      const fixture = join(dir, 'fixture-body.md')
+      writeFileSync(fixture, body)
+      const fakeGh = join(dir, 'gh')
+      writeFileSync(fakeGh, '#!/usr/bin/env bash\ncat "${FAKE_RELEASE_BODY}"\n', { mode: 0o755 })
+      const script = join(dir, 'body-gate.sh')
+      writeFileSync(script, bodyGate)
+      const result = spawnSync('bash', [script], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH ?? ''}`,
+          RUNNER_TEMP: dir,
+          RELEASE_TAG: currentTag,
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare',
+          FAKE_RELEASE_BODY: fixture
+        }
+      })
+      return {
+        status: result.status ?? -1,
+        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  // The changelog line always names the tag, so a gate that only greps the whole
+  // body would pass on it; every fixture keeps it to prove per-segment parity.
+  const publishedBody = (english: string, chinese: string): string =>
+    [
+      english,
+      '',
+      '---',
+      '',
+      '<details><summary>简体中文</summary>',
+      '',
+      chinese,
+      '',
+      '</details>',
+      '',
+      `**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/v0.2.12...${currentTag}`
+    ].join('\n')
+
+  it('passes a bilingual body whose segments both carry the tag version', () => {
+    const { status, output } = runBodyGate(
+      publishedBody(`# OpenCompare ${currentTag} release notes`, `# OpenCompare ${currentTag} 发布说明`)
+    )
+    expect(output).toContain(`Verified the published ${currentTag} body`)
+    expect(status).toBe(0)
+  })
+
+  it('fails closed when the published body has no zh-CN fold block', () => {
+    const { status, output } = runBodyGate(
+      `# OpenCompare ${currentTag} release notes\n\n**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/v0.2.12...${currentTag}\n`
+    )
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::')
+    expect(output).toContain('body is missing the zh-CN')
+  })
+
+  it('fails closed when the English segment misses the tag version', () => {
+    const { status, output } = runBodyGate(
+      publishedBody('# OpenCompare release notes', `# OpenCompare ${currentTag} 发布说明`)
+    )
+    expect(status).not.toBe(0)
+    expect(output).toContain('English segment does not carry the version')
+  })
+
+  it('fails closed when the Chinese segment misses the tag version', () => {
+    const { status, output } = runBodyGate(
+      publishedBody(`# OpenCompare ${currentTag} release notes`, '# OpenCompare 发布说明')
+    )
+    expect(status).not.toBe(0)
+    expect(output).toContain('Chinese segment does not carry the version')
   })
 })
 

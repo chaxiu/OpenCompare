@@ -192,9 +192,10 @@ jobs:
       # split the uploaded assets across them. The matrix now uploads into this
       # single release instead. Any duplicate releases left behind by an earlier
       # race are pruned so exactly one remains for the tag.
-      # The release body comes from the repository's own release notes for the
-      # checked-out tag plus a Full Changelog link; a missing or empty file fails
-      # closed instead of publishing an empty body.
+      # The release body comes from the repository's own bilingual release notes
+      # for the checked-out tag plus a Full Changelog link. Both language files
+      # are required: a missing or empty file on either side fails closed before
+      # any draft is created or edited, so a single-language body can never ship.
       - name: Pre-create the tag's release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -202,12 +203,21 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           notes_file="docs/release-notes/v${version}.md"
+          notes_zh_file="docs/release-notes/v${version}.zh-CN.md"
           if [ ! -f "${notes_file}" ]; then
-            echo "::error::Missing release notes ${notes_file}; refusing to publish without a release body."
+            echo "::error::Missing release notes ${notes_file} (English); refusing to publish without a bilingual release body."
             exit 1
           fi
           if [ -z "$(tr -d '[:space:]' < "${notes_file}")" ]; then
-            echo "::error::Release notes ${notes_file} are empty; refusing to publish without a release body."
+            echo "::error::Release notes ${notes_file} are empty (English); refusing to publish without a bilingual release body."
+            exit 1
+          fi
+          if [ ! -f "${notes_zh_file}" ]; then
+            echo "::error::Missing release notes ${notes_zh_file} (Simplified Chinese); refusing to publish without a bilingual release body."
+            exit 1
+          fi
+          if [ -z "$(tr -d '[:space:]' < "${notes_zh_file}")" ]; then
+            echo "::error::Release notes ${notes_zh_file} are empty (Simplified Chinese); refusing to publish without a bilingual release body."
             exit 1
           fi
 
@@ -221,6 +231,13 @@ jobs:
           body_file="${RUNNER_TEMP}/release-body-${RELEASE_TAG}.md"
           {
             cat "${notes_file}"
+            echo
+            echo '---'
+            echo '<details><summary>简体中文</summary>'
+            echo
+            cat "${notes_zh_file}"
+            echo
+            echo '</details>'
             echo
             echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${last}...${RELEASE_TAG}"
           } > "${body_file}"
@@ -690,6 +707,64 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+      # The published body is what release consumers read, so re-read it from the
+      # public release instead of trusting the checked-out notes. Read-only: it
+      # asserts the zh-CN details block exists and that the English and Chinese
+      # segments each carry this tag's version. The Full Changelog link sits
+      # after the details block, so it can never satisfy either segment.
+      - name: Assert the published release body is bilingual
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG}"
+          workdir="${RUNNER_TEMP}/release-body-check"
+          rm -rf "${workdir}"
+          mkdir -p "${workdir}"
+          body_file="${workdir}/body.md"
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body // ""' > "${body_file}"
+          if [ ! -s "${body_file}" ]; then
+            echo "::error::Published release ${RELEASE_TAG} has an empty body; refusing a single-language release body." >&2
+            exit 1
+          fi
+          details_line=0
+          summary_line=0
+          close_line=0
+          lineno=0
+          while IFS= read -r line; do
+            lineno=$((lineno + 1))
+            if [ "${details_line}" -eq 0 ] && [ "${line#*<details>}" != "${line}" ]; then
+              details_line="${lineno}"
+            fi
+            if [ "${summary_line}" -eq 0 ] && [ "${line#*<summary>简体中文</summary>}" != "${line}" ]; then
+              summary_line="${lineno}"
+            fi
+            if [ "${line#*</details>}" != "${line}" ]; then
+              close_line="${lineno}"
+            fi
+          done < "${body_file}"
+          if [ "${details_line}" -eq 0 ] || [ "${summary_line}" -eq 0 ] || [ "${close_line}" -eq 0 ]; then
+            echo "::error::Published release ${RELEASE_TAG} body is missing the zh-CN <details><summary>简体中文</summary> block; refusing a single-language release body." >&2
+            exit 1
+          fi
+          if [ "${details_line}" -gt "${summary_line}" ] || [ "${summary_line}" -gt "${close_line}" ]; then
+            echo "::error::Published release ${RELEASE_TAG} body has a malformed zh-CN details block (<details> ... <summary>简体中文</summary> ... </details>); refusing a malformed release body." >&2
+            exit 1
+          fi
+          en_body="${workdir}/body.en.md"
+          zh_body="${workdir}/body.zh-CN.md"
+          head -n "$((details_line - 1))" "${body_file}" > "${en_body}"
+          tail -n +"$((summary_line + 1))" "${body_file}" | head -n "$((close_line - summary_line - 1))" > "${zh_body}"
+          if ! grep -Fq "${tag}" "${en_body}"; then
+            echo "::error::Published release ${RELEASE_TAG} English segment does not carry the version ${tag}; refusing the bilingual body gate." >&2
+            exit 1
+          fi
+          if ! grep -Fq "${tag}" "${zh_body}"; then
+            echo "::error::Published release ${RELEASE_TAG} Chinese segment does not carry the version ${tag}; refusing the bilingual body gate." >&2
+            exit 1
+          fi
+          echo "Verified the published ${RELEASE_TAG} body: zh-CN details block present and both language segments carry ${tag}."
       # Enforce exactly one public release per tag across every API page: a
       # leftover duplicate (or a stray draft/prerelease) fails the run instead of
       # silently advertising two releases.
