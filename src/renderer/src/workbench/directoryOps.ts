@@ -59,9 +59,10 @@ const IPC_FAILURE_PREFIX = /^Error invoking remote method '[^']*':\s*(?:Error:\s
  * Keeps a localized sync failure, a "writes landed, refresh failed" error and a
  * cancellation exactly as they are, and strips the `Error invoking remote method
  * …` wrapper from anything else so the workbench never shows the IPC plumbing
- * instead of the reason.
+ * instead of the reason. Shared with the dry-run preview, whose preflight read
+ * goes through the same IPC channel.
  */
-function readableSyncFailure(cause: unknown): unknown {
+export function readableSyncFailure(cause: unknown): unknown {
   if (
     cause instanceof SyncTargetError ||
     cause instanceof SyncRefreshError ||
