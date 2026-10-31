@@ -183,3 +183,10 @@ v0.2.6 实测：
 - 对外承诺必须与运营任务的 `scheduleEnabled` / cron 一致。
 
 来源：产品目录 `projects/ops_df43e423451170fd/tasks/*.md` 的 `title` 与职责、产品约定 `AGENTS.md` 对外与运营。
+
+## 9. 2026-11-01 可执行判定必须 UI 与门禁同源：机制全绿 ≠ 用户拿得到
+
+- 事实（L3 实测，ops run `trun_9a298aabae0f6884` 腿 B，被测 main `a9082d9`）：两侧各 3 个普通文件 + 3 条同 target 且 link mtime 秒级不同的链接 + 1 条悬空链接，同步后链接仍为 symlink、`readlink` 与相对路径不变、普通文件 size + sha256 全等，但 lstat mtime **0/4 对齐**；dry-run 显示 `Total 0 items` + `This direction has no changes to sync`，`Apply changes` 按钮 disabled。
+- 根因：`alignSymbolicLinkTimes`（`src/renderer/src/workbench/directoryOps.ts`）逻辑本身正确，但对话框用内联 `executableCount === 0` 判禁用、用 `plan.totalCount === 0` 判空态，把「仅链接 lstat mtime 不同」整体判成无事可做；既有 `sync-real-gate` 用例只调 `applySyncPreview`，绕过了 UI 的可执行判定，所以一直是绿的。
+- 结论：可执行 / 可达性判定必须抽成纯函数（本项 `canApplySyncPreview`），UI 的 `disabled` 与门禁断言**共用同一实现**；只测被调用的内层函数不算覆盖。同类「机制全绿 ≠ 用户拿得到」本轮次已第二次出现（2026-10-22 同类结论）。
+- 断言位置：`src/sync-real-gate.test.ts`（`real-disk sync symlink metadata` 三条用例，断言消息以 `symlink metadata:` 开头）、`src/renderer/src/views/directorySyncDialog.test.tsx`（Apply `disabled` / 空态文案 / 待对齐计数与摘要同源）。

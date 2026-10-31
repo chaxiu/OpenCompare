@@ -1,6 +1,8 @@
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import type { MessageKey } from '@renderer/i18n/messages'
+import { canApplySyncPreview } from '@renderer/workbench/directoryOps'
+import type { SyncPreview } from '@renderer/workbench/directoryOps'
 
 /** Dictionary keys of the five status filters, resolved at render time. */
 export const FILTER_LABEL_KEYS: Record<DirectoryFilter, MessageKey> = {
@@ -25,4 +27,19 @@ export const SYNC_MODE_KEYS: Record<SyncMode, MessageKey> = {
 /** Picks the singular key only for exactly one item; every other count is plural. */
 export function countKey(one: MessageKey, other: MessageKey, count: number): MessageKey {
   return count === 1 ? one : other
+}
+
+/**
+ * Body copy a sync preview needs. `empty` claims the target already matches the
+ * source, so it is only allowed when the run truly has nothing to do — a preview
+ * holding pending link alignments always points at that work instead.
+ */
+export function syncPreviewGuidance(
+  preview: SyncPreview,
+  deletePaths: readonly string[] = []
+): 'changes' | 'empty' | 'noExecutable' {
+  if (!canApplySyncPreview(preview, deletePaths)) {
+    return preview.plan.totalCount + preview.linkAlignments.length > 0 ? 'noExecutable' : 'empty'
+  }
+  return 'changes'
 }

@@ -4,7 +4,7 @@
 
 ## 范围
 
-- **`docs/lessons.md` 是历史结论与口径沿革的唯一落点**：中文正文，UTF-8，承接产品约定 `AGENTS.md` 精简时移出的历史结论、一次性事故与已闭环版本实测口径，分八节：
+- **`docs/lessons.md` 是历史结论与口径沿革的唯一落点**：中文正文，UTF-8，承接产品约定 `AGENTS.md` 精简时移出的历史结论、一次性事故与已闭环版本实测口径，分九节：
   1. 已闭环版本实测口径（1.1 v0.2.7 四条负载腿与适用性 / 1.2 v0.2.8 负载面复验与 mtime 适用边界 / 1.3 v0.2.9 导出链路 358k 四条腿与 MiB 白名单沿革）
   2. v0.2.5 同会话 upsert / 多会话 ready 峰值诊断过程与 a 支结论
   3. v0.2.5 → v0.2.6 Windows 四入口失效事故与修复口径
@@ -13,6 +13,8 @@
   6. v0.2.10 空 tag 事实
   7. I#5 十一条分组结论与逐条定性
   8. 七条常驻 ops task 花名册
+  9. 2026-11-01 可执行判定必须 UI 与门禁同源（「机制全绿 ≠ 用户拿得到」的第二次复现：`alignSymbolicLinkTimes` 逻辑正确但入口可执行判定内联，导致仅链接 mtime 不同时 Apply 禁用、待对齐链接不可见；结论与断言位置见该节）
+- **`AGENTS.md` 硬约束的增补纪律**：`docs/lessons.md` 新增一条**可复用工程约束**（而非一次性事故）时，`AGENTS.md`「硬约束」小节可增补**恰好一行**概括该约束并指向 `docs/lessons.md` 对应节；只追加、不重排、不改既有行、不新增小节。2026-11-01 对应第 9 节的一行为「可执行 / 可达性判定（按钮 `disabled`、门禁断言）必须共用同一纯函数（如 `canApplySyncPreview`），禁止 UI 与门禁各留一份内联判定；只测内层函数不算覆盖（见 `docs/lessons.md` §9）」。
 - **写作口径**：只搬结论与证据指针，不重写判定；数字、阈值、commit / run 标识、`blocked` / `pass` 定性逐字对齐来源；不新增未实测数字；每条带「来源 + 证据指针」，证据路径按仓库既有写法（相对产品仓根）原样给出、不改写或缩写。
 - **历史不改写**：当时 `blocked` 的记录保持 `blocked`，不得按后来的复验结论重述；同一事实在两处出现时数字与判定必须一致，发现两种取数时如实并列（如 `9,674` 与 `9,682` 同源两取数）而不择一覆盖。
 - **与 README 的关系**：两版 README 的 docs 索引节（英文 `## Evidence and docs` / 中文 `## 证据与文档`）各追加**一行一个链接**指向 `docs/lessons.md`；英文链接文字为纯拉丁字符（如 `Lessons and decision history`），中文为「教训与口径沿革」。不新增 H2、不重排 9 节顺序、不再往 README 塞数字。
@@ -40,7 +42,9 @@
 - **ac-diff-scope**：`git diff --name-status` 相对 main 只有三处：新增 `docs/lessons.md`、修改 `README.md`、修改 `README.zh-CN.md`；`src/`、`package.json`、`CHANGELOG.md`、`.github/workflows/release.yml`、`docs/release-notes/**`、`docs/release-evidence/**` 零 diff。
 - **ac-single-commit-clean**：单条 commit 经 delivery 合入 main；交付时工作区干净（`git status --porcelain` 为空）。
 - **ac-agents-measured**：交付说明给出产品目录 `AGENTS.md` 的实测 `wc -l` 行数与去标点 CJK 字符数（仅统计 U+4E00–U+9FFF），并写明统计命令；路径不可读时写「不可读」，不得估数。
-- **ac-agents-lessons-entry**：仓根 `AGENTS.md` 相对基线只有一次 `+1 / −0` 改动，该行含 `docs/lessons.md` 链接文字；`wc -l AGENTS.md` = 基线 46 + 1 = 47；该行之外 `git diff -U0 AGENTS.md` 无任何其它 hunk（不重排、不扩写、不改既有小节）。
+- **ac-agents-lessons-entry**：仓根 `AGENTS.md` 相对基线只有一次 `+1 / −0` 改动，该行含 `docs/lessons.md` 链接文字；`wc -l AGENTS.md` = 基线 46 + 1 = 47；该行之外 `git diff -U0 AGENTS.md` 无任何其它 hunk（不重排、不扩写、不改既有小节）。（2026-10-30 口径：该轮以「沿革入口行」为唯一 `+1`；2026-11-01 起 `AGENTS.md` 的增补面由 `ac-agents-hard-constraint-line` 扩为「硬约束一行」，两条不叠加计数——每轮相对当轮基线仍只增一行。）
+- **ac-lessons-executable-predicate**：`docs/lessons.md` 存在 `## 9. 2026-11-01 可执行判定必须 UI 与门禁同源：机制全绿 ≠ 用户拿得到` 一节，含事实（L3 实测 ops run `trun_9a298aabae0f6884` 腿 B / 被测 main `a9082d9` / lstat mtime 0/4 对齐 / dry-run `Total 0 items` + Apply disabled）、根因（内联 `executableCount === 0` 与 `plan.totalCount === 0` 判定，`alignSymbolicLinkTimes` 无执行机会，既有门禁只测 `applySyncPreview`）、结论（可执行 / 可达性判定抽成纯函数、UI 与门禁共用、只测内层函数不算覆盖）与断言位置（`src/sync-real-gate.test.ts`、`src/renderer/src/views/directorySyncDialog.test.tsx`）；日期、run 标识与路径逐字保留。
+- **ac-agents-hard-constraint-line**：`AGENTS.md`「硬约束」小节新增**恰好一行**「可执行 / 可达性判定（按钮 `disabled`、门禁断言）必须共用同一纯函数（如 `canApplySyncPreview`），禁止 UI 与门禁各留一份内联判定；只测内层函数不算覆盖（见 `docs/lessons.md` §9）。」，`git diff -U0 AGENTS.md` 只有 `+1 / −0` 一个 hunk；不重排小节、不改既有行；`src/renderer/src/workbench/directoryOps.ts` 的 `canApplySyncPreview` 是该句点名的现行实现。
 
 ## 非目标
 
@@ -62,6 +66,13 @@
 - 域 fold 由 Delivery 承担：本域记录现行文档归属与写作口径，历史域记录（`release` / `perf-memory` / `compare-request` 各自的 AC 原文与当时证据）按当初事实保留，不改写。
 
 ## 最近交付证明
+
+- WI：`wi_intake_bdc57b0abb1db652`（交叉引用：`docs/lessons.md` 新增第 9 节「可执行判定必须 UI 与门禁同源」+ `AGENTS.md` 硬约束一行；主体修复与 AC 归 `domains/directory`，本域只承接教训归属与写作口径；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_bdc57b0abb1db652/code-gates/attempts/001`；`pnpm test` 96 files / 1420 passed + 1 skipped，`pnpm test:sync-real` 21 tests / 2.30s）。
+- 改动面：`docs/lessons.md` **+7 行**（新增第 9 节，含日期、事实、根因、结论、断言位置五个要点，沿用既有「事实 / 根因 / 结论 / 断言位置」四段式，与第 8 节同形）；`AGENTS.md` **+1 / −0**（「硬约束」小节第 3 行后插入一行可执行判定同源约束，指向 `docs/lessons.md` §9），`git diff -U0 AGENTS.md` 单一 hunk；`README.md` / `README.zh-CN.md` / `package.json` / `CHANGELOG.md` / `docs/release-notes/**` / `docs/release-evidence/**` 零 diff。
+- 验收落点：`ac-lessons-executable-predicate` 与 `ac-agents-hard-constraint-line` 满足；`ac-lessons-created` 的「8 个二级小节」口径由本轮扩为 **9 节**（第 9 节为本轮新增，其余 8 节逐字未改）。
+- 注：① 本节教训的**可复用性**是关键——它不是一次性事故，而是「机制全绿 ≠ 用户拿得到」的第二次复现，因此同时写进 `AGENTS.md` 硬约束，后续任何「预览里能做什么 / 按钮能不能点」的判定都以该句为准。② `docs/lessons.md` 的节数与 `ac-lessons-created` 的 8 节口径从此不一致是**已知的口径沿革**，不要把第 9 节并入第 1 节充数；下一次再加教训按第 10 节继续追加。③ 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例；逐条 AC 落档在 `domains/directory/qa/sync-link-align-visibility.md`。
 
 - WI：`wi_ws_0b248d40545e9eb4`（补上本域上一轮记下的缺口：仓根 `AGENTS.md` 加 **1 行** `docs/lessons.md` 入口；同一 WI 主体文档 `docs/ui-phase1-reference-audit.md` 归 `ui-reference-audit` 域，本域只承接入口行这个切片；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-10-30

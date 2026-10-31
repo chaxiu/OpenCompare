@@ -1150,7 +1150,8 @@ export function Workbench({
         copyNotice('shell.notice.syncComplete', {
           copied: result.copied,
           updated: result.updated,
-          deleted: result.deleted
+          deleted: result.deleted,
+          aligned: result.alignedLinks
         })
       )
       setNoticeTone('info')

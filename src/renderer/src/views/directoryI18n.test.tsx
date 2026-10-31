@@ -190,6 +190,7 @@ function makeSyncPreview(
     readonly copy?: readonly SyncPlanItem[]
     readonly update?: readonly SyncPlanItem[]
     readonly delete?: readonly SyncPlanItem[]
+    readonly links?: readonly string[]
     readonly materializeTarget?: boolean
   } = {}
 ): SyncPreview {
@@ -210,7 +211,12 @@ function makeSyncPreview(
     },
     materializeTarget: overrides.materializeTarget ?? false,
     sourceRoot: '/src',
-    originalTargetRoot: '/dst'
+    originalTargetRoot: '/dst',
+    linkAlignments: (overrides.links ?? []).map((relativePath) => ({
+      relativePath,
+      targetPath: `/dst/${relativePath}`,
+      sourceMs: 1_700_001_000_000
+    }))
   }
 }
 
@@ -729,7 +735,9 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect(screen.getByText('1 item · 100 B')).toBeDefined()
     expect(screen.getByText('2 items · 2.0 KiB')).toBeDefined()
     expect(screen.getByText('0 items · 0 B')).toBeDefined()
-    expect(screen.getByText('This run: 1 copy · 2 overwrite · 0 delete')).toBeDefined()
+    expect(
+      screen.getByText('This run: 1 copy · 2 overwrite · 0 delete · 0 link time aligned')
+    ).toBeDefined()
     expect(button('Cancel')).toBeDefined()
     expect((button('Apply changes') as HTMLButtonElement).disabled).toBe(false)
   })
@@ -872,7 +880,9 @@ describe('DirectorySyncDialog bilingual copy', () => {
 
     // A single explicit selection is the only deletion that can be confirmed.
     fireEvent.click(drop)
-    expect(screen.getByText('This run: 0 copy · 0 overwrite · 1 delete')).toBeDefined()
+    expect(
+      screen.getByText('This run: 0 copy · 0 overwrite · 1 delete · 0 link time aligned')
+    ).toBeDefined()
     expect((button('Apply changes') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(button('Apply changes'))
     expect(onConfirm).toHaveBeenCalledTimes(1)

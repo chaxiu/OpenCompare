@@ -1,24 +1,26 @@
 import { useMemo, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
-import type { SyncPlanGroup } from '@core/directory/sync'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
 import { formatBytes } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
+import { canApplySyncPreview } from '@renderer/workbench/directoryOps'
 import type { SyncPreview } from '@renderer/workbench/directoryOps'
-import { SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS, countKey } from './directoryCopy'
+import { SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS, countKey, syncPreviewGuidance } from './directoryCopy'
 
 function GroupHeader({
   title,
   tone,
-  group,
+  count,
+  bytes,
   actions
 }: {
   readonly title: string
   readonly tone: string
-  readonly group: SyncPlanGroup
+  readonly count: number
+  readonly bytes: number
   readonly actions?: ReactNode
 }): JSX.Element {
   const { t } = useI18n()
@@ -26,9 +28,9 @@ function GroupHeader({
     <div className="flex items-center gap-2">
       <span className={tone}>{title}</span>
       <span className="tabular font-mono text-2xs text-content-muted">
-        {t(countKey('directory.sync.groupCount.one', 'directory.sync.groupCount.other', group.count), {
-          count: group.count,
-          size: formatBytes(group.bytes)
+        {t(countKey('directory.sync.groupCount.one', 'directory.sync.groupCount.other', count), {
+          count,
+          size: formatBytes(bytes)
         })}
       </span>
       {actions ? <div className="ml-auto flex items-center gap-1">{actions}</div> : null}
@@ -86,6 +88,7 @@ export function DirectorySyncDialog({
 }: DirectorySyncDialogProps): JSX.Element {
   const { t } = useI18n()
   const { plan, materializeTarget } = preview
+  const alignments = preview.linkAlignments
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 
   const deletePaths = useMemo(
@@ -105,10 +108,15 @@ export function DirectorySyncDialog({
     })
   }
 
-  const empty = plan.totalCount === 0
-  const executableCount = plan.copy.count + plan.update.count + deletePaths.length
-  const blockedByDeletes =
-    !empty && executableCount === 0 && plan.mode === 'mirror' && plan.delete.count > 0
+  // Items this run acts on, link alignments included: the dialog never claims
+  // "nothing to sync" while there is link metadata left to align.
+  const totalItems = plan.totalCount + alignments.length
+  // The Apply button and the body copy are driven by the same predicate the
+  // real-disk gate asserts; `empty` is unreachable for a pending alignment.
+  const executable = canApplySyncPreview(preview, deletePaths)
+  const guidance = syncPreviewGuidance(preview, deletePaths)
+  const empty = guidance === 'empty'
+  const blockedByDeletes = guidance === 'noExecutable'
 
   return (
     <Dialog
@@ -121,8 +129,8 @@ export function DirectorySyncDialog({
           {t('directory.sync.targetRoot')}
           <span className="font-mono">{plan.targetRoot}</span>
           {materializeTarget ? t('directory.sync.materialize') : ''}
-          {t(countKey('directory.sync.total.one', 'directory.sync.total.other', plan.totalCount), {
-            count: plan.totalCount,
+          {t(countKey('directory.sync.total.one', 'directory.sync.total.other', totalItems), {
+            count: totalItems,
             size: formatBytes(plan.totalBytes)
           })}
         </>
@@ -136,7 +144,7 @@ export function DirectorySyncDialog({
           <ToolbarButton
             variant="primary"
             onClick={() => onConfirm(deletePaths)}
-            disabled={busy || executableCount === 0}
+            disabled={busy || !executable}
           >
             {busy ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
             {busy ? t('directory.sync.syncing') : t('directory.sync.apply')}
@@ -152,7 +160,8 @@ export function DirectorySyncDialog({
             <GroupHeader
               title={t('directory.sync.group.copy')}
               tone="text-diff-added"
-              group={plan.copy}
+              count={plan.copy.count}
+              bytes={plan.copy.bytes}
             />
             {plan.copy.items.length > 0 ? (
               <ul className="mt-1 rounded-sm border border-line-subtle">
@@ -174,7 +183,8 @@ export function DirectorySyncDialog({
             <GroupHeader
               title={t('directory.sync.group.update')}
               tone="text-diff-modified"
-              group={plan.update}
+              count={plan.update.count}
+              bytes={plan.update.bytes}
             />
             {plan.update.items.length > 0 ? (
               <ul className="mt-1 rounded-sm border border-line-subtle">
@@ -197,7 +207,8 @@ export function DirectorySyncDialog({
               <GroupHeader
                 title={t('directory.sync.group.delete')}
                 tone="text-diff-removed"
-                group={plan.delete}
+                count={plan.delete.count}
+                bytes={plan.delete.bytes}
                 actions={
                   plan.delete.items.length > 0 ? (
                     <>
@@ -253,12 +264,36 @@ export function DirectorySyncDialog({
             </section>
           ) : null}
 
+          {alignments.length > 0 ? (
+            <section>
+              <GroupHeader
+                title={t('directory.sync.group.align')}
+                tone="text-content-secondary"
+                count={alignments.length}
+                bytes={0}
+              />
+              <ul className="mt-1 rounded-sm border border-line-subtle">
+                {alignments.map((alignment) => (
+                  <li
+                    key={alignment.relativePath}
+                    className="flex items-center gap-2 px-2 py-1 odd:bg-surface-sunken/40"
+                  >
+                    <span className="truncate font-mono text-xs text-content-secondary">
+                      {alignment.relativePath}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           <div className="flex flex-col gap-1 border-t border-line-subtle pt-2">
             <p className="text-2xs text-content-secondary" aria-live="polite">
               {t('directory.sync.summary', {
                 copy: plan.copy.count,
                 update: plan.update.count,
-                delete: deletePaths.length
+                delete: deletePaths.length,
+                align: alignments.length
               })}
             </p>
             {blockedByDeletes ? (

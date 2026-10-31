@@ -44,7 +44,7 @@ export const shell = {
     '已导出到 {path}（{count} 个文件，跳过 {skipped} 个不可读项）。',
   'shell.notice.snapshotMounted': '已挂载快照 {name} 到{side}栏。',
   'shell.notice.syncComplete':
-    '同步完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}。',
+    '同步完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted} · 对齐链接时间 {aligned}。',
   'shell.notice.syncCancelled': '同步已取消：目标侧已回滚到执行前状态，可再次预览或重试。',
   'shell.notice.syncVerifyFailed':
     '同步写入后校验未通过：{count} 个目标与源不一致（如 {paths}）。写入结果已保留，请重新预览后再同步。',

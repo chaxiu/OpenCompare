@@ -23,6 +23,7 @@ OpenCompare 是对标 Beyond Compare 5 Pro 的现代跨平台桌面对比与三�
 
 - renderer 绝不直接 `import` Electron API；所有平台能力一律经 `PlatformPort`（Electron IPC 实现 / Web 内存实现）。
 - `src/core/` 禁止 electron / react / DOM 依赖，ESLint `no-restricted-imports` 已强制。
+- 可执行 / 可达性判定（按钮 `disabled`、门禁断言）必须共用同一纯函数（如 `canApplySyncPreview`），禁止 UI 与门禁各留一份内联判定；只测内层函数不算覆盖（见 `docs/lessons.md` §9）。
 
 ## 常用命令
 
