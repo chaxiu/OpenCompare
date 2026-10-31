@@ -223,6 +223,7 @@
 - **ac-link-fidelity-gates-eleven-green**（prd `ac-gates-eleven-green`，与既有同名 AC 区分改名）：`.munk/code-gates.json` 既有 11 个门禁 id 与命令不变且全绿（含 `test`、`sync-real-gate`）；不得删除、跳过或放宽任何既有断言；新增断言以 `symlink fidelity` 独立标识落在 `src/sync-real-gate.test.ts`（`real-disk sync symlink fidelity` 用例组 11 条）。
 - **ac-link-fidelity-no-new-dependency**（prd `ac-no-new-dependency-no-bump`，与既有 `ac-no-new-dependency` 区分改名）：`package.json` 依赖不新增、版本不 bump、不打 tag、不改导出与发布通道、不改任何已发布 release notes。
 - **ac-known-issues-posture**：`README.md` 与 `README.zh-CN.md` 的 Known issues / 已知问题段同时列出「Incremental 模式无删除组」与「外部改动需重扫」两条设计口径，且不包含「源侧独有 symlink 按普通文件同步」这类缺陷表述；既有 `release-packaging.test.ts` 断言保持全绿（保留 `None known right now.` / `当前没有已知未修复问题。` 原句，不删除、不放宽）。
+- **ac-features-sync-postures**（2026-11-01，口径前移到能力区；写作分工归 `domains/docs-governance`，5 条 / 9 节结构门面归 `domains/release`）：两版 README 能力区首条以**用户可见能力**陈述这三条**必须与本域引擎事实逐条对得上**的口径——① 增量同步只新增与覆盖、不删除（对应 `ac-sync-plan`：`delete` 组只在镜像模式产生）；② 镜像同步额外列出目标侧独有项为**待删除**，默认不勾、显式勾选才执行（对应 `ac-sync-mirror-delete` 的「初始全部未勾选 + 只删勾选项」）；③ 应用外改动在**下次对比时读取**、无后台文件监听（对应非目标「不做持续 / 定时自动同步与 watcher」与按需 `compareDirectories`）。三条**不得**升级为更强承诺（「增量会清理多余文件」「镜像默认删除」「实时监听目录变化」任一句即违反本条）；本轮不改任何同步代码，仅门面陈述。
 
 ## 非目标
 
@@ -293,6 +294,12 @@
 - **测试落位**：只扩 `src/sync-real-gate.test.ts`（`pnpm test:sync-real`），沿用 `vi.mock('electron')` + handler map + `mkdtemp` 真实临时目录与生产 `PlatformPort` handler，不 mock 文件系统、不新增 `code-gates.json` 矩阵项；链接形态断言必须用 `lstat` / `readlink`，不得用 `stat` / `readFile` 代替形态校验；新增断言消息以 `symlink fidelity` 标识，与既有 `binary fidelity` / `completion consistency` / `symlink metadata` / `idempotent dry-run` 可区分。
 
 ## 最近交付证明
+
+- WI：`wi_intake_5bf454ae71a62cd8`（**纯门面项，零代码改动**：把本域既有的两条同步设计口径从 Known issues 段「前移一份」到两版 README 的 Features / 核心能力首条，作为用户可见能力陈述；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_5bf454ae71a62cd8/code-gates/attempts/001/manifest.json`；`pnpm test` 96 files / 1431 passed + 1 skipped（1432）、`pnpm test:sync-real` 32 tests / 2.51s；`src/**` 零 diff，未新增 / 未改 `.munk/code-gates.json` 矩阵项；UI 自测不做）。
+- 覆盖摘要：`ac-features-sync-postures` 满足——`README.md` `## Features` 首条（`- **Directory comparison and sync**`）句尾含 `Incremental sync only adds and overwrites, never deletes` / `mirror sync also lists target-only items as pending deletions, which stay unchecked by default and run only when you check them` / `Changes made outside the app are read on the next comparison, with no background file watcher`；`README.zh-CN.md` `## 核心能力` 首条逐句镜像（「增量同步只做新增与覆盖、不删除」「镜像同步额外列出目标侧独有项作为待删除项，删除项默认不勾选，显式勾选后才执行」「应用外对目录的改动在下次对比时读取，没有后台文件监听」）。三条与本域既有 `ac-sync-plan` / `ac-sync-mirror-delete`（初始全未勾、只删勾选项）与非目标「不做 watcher / 按需触发」逐条一致，无升级表述。
+- 注：① 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 落档为本域新增的 `qa/readme-sync-postures.md`（非 change-pack 用例）。写作分工（两处双落点、Quickstart 不重复）归 `domains/docs-governance`，5 条 bullet / 9 节 / 词数余量等门面结构归 `domains/release`。② **口径与实现的唯一绑定点是这三条**：以后若真做「增量清理多余文件」或「后台监听」，必须先改本域 AC 与引擎，再改 README——禁止先改 README 把未实现的行为写成能力（上一轮 `wi_intake_b95f668b89a1770d` 的教训正是门面措辞可以变成验收豁免）。③ 本轮刻意**不动** `docs/lessons.md`（没有新的可复用约束，只是同一事实的第二落点），也不动 `AGENTS.md`。
 
 - WI：`wi_intake_b95f668b89a1770d`（目录同步按链接落盘：不跟随、不写穿、不误删；关闭此前登记的三个链接落盘 known issue，`kind: fix`）
 - 日期：2026-11-01
