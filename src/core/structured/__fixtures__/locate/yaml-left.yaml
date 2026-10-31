@@ -1,0 +1,22 @@
+# OpenCompare locate fixture — left side
+service:
+  # display name
+  "name": opencompare
+  'version': 2
+  features:
+    limits:
+      maxBytes: 104857600
+      levels:
+        tier:
+          profile:
+            name: balanced
+            weights:
+              - 1
+              - 2
+              - 3
+            onlyLeft: removed-on-right
+            banner: |
+              line one
+              line two
+telemetry:
+  enabled: false
