@@ -47,7 +47,8 @@ import {
   applySyncPreview,
   applyTemplateExtract,
   previewSync,
-  previewTemplate
+  previewTemplate,
+  readableSyncFailure
 } from './directoryOps'
 import type { SyncPreview, TemplatePreview } from './directoryOps'
 import { classifyFile } from './fileKinds'
@@ -1111,7 +1112,9 @@ export function Workbench({
       const preview = await previewSync(platform, comparison, direction, mode, opSequence.current)
       setSyncPreview(preview)
     } catch (cause) {
-      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
+      // The dry-run goes through the same IPC channels as the apply: strip the
+      // wrapper so the notice states the reason instead of the plumbing.
+      setNotice(detailNotice(errorText(readableSyncFailure(cause))))
       setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
