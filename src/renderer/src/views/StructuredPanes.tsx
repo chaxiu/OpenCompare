@@ -18,6 +18,7 @@ import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { useI18n } from '@renderer/i18n/context'
 import { cx } from '@renderer/components/utils'
 import {
+  ANCESTOR_CLASSES,
   CHANGE_ROW_HEIGHT,
   HIGHLIGHT_CLASSES,
   SOURCE_ROW_HEIGHT,
@@ -221,6 +222,8 @@ export function StructuredChangeList({
 
 export interface StructuredHighlight {
   readonly status: HighlightStatus
+  /** `exact` marks the node itself; `ancestor` marks a fallback span, weaker. */
+  readonly tone: 'exact' | 'ancestor'
   readonly startLine: number
   readonly endLine: number
 }
@@ -228,7 +231,7 @@ export interface StructuredHighlight {
 export interface StructuredSourcePaneProps {
   readonly side: 'left' | 'right'
   readonly text: string
-  /** Exact node range of the selected change, or `null` when nothing to mark. */
+  /** Exact range of the selected change, a fallback ancestor range, or `null`. */
   readonly highlight: StructuredHighlight | null
   /** Offset restored on mount (session switch / first paint). */
   readonly initialScrollTop: number
@@ -239,8 +242,9 @@ export interface StructuredSourcePaneProps {
 }
 
 /**
- * One original pane: fixed-height source lines, a sticky line gutter, exact
- * range highlighting and windowed rendering above the shared threshold.
+ * One original pane: fixed-height source lines, a sticky line gutter, range
+ * highlighting (exact or fallback ancestor) and windowed rendering above the
+ * shared threshold.
  */
 export function StructuredSourcePane({
   side,
@@ -283,16 +287,24 @@ export function StructuredSourcePane({
     const marked =
       highlight !== null && line >= highlight.startLine && line <= highlight.endLine
     const status = marked ? highlight.status : null
+    const tone = marked ? highlight.tone : null
     return (
       <div
         key={index}
         data-source-row={index}
         data-source-line={line}
-        data-highlight-status={status ?? undefined}
+        // Exact hits keep the status hook; a fallback ancestor uses its own one
+        // so the four-state assertions never see a row the node does not own.
+        data-highlight-status={tone === 'exact' ? (status ?? undefined) : undefined}
+        data-highlight-tone={tone === 'ancestor' ? 'ancestor' : undefined}
         onClick={() => onLineClick?.(side, line)}
         className={cx(
           'flex h-5 cursor-text',
-          status === null ? undefined : HIGHLIGHT_CLASSES[status]
+          status === null
+            ? undefined
+            : tone === 'ancestor'
+              ? ANCESTOR_CLASSES[status]
+              : HIGHLIGHT_CLASSES[status]
         )}
       >
         <span
