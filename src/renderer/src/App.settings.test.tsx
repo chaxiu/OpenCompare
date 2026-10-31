@@ -71,19 +71,36 @@ function openSettings(language: 'zh' | 'en'): HTMLElement {
   return settingsDialog(language)
 }
 
+/** Session tabs are structural, so the waits never depend on the UI language. */
+function sessionTabs(): NodeListOf<HTMLElement> {
+  return document.body.querySelectorAll<HTMLElement>('[data-session-tab]')
+}
+
 /** Starts all four built-in scenes through the settings sample entries. */
 async function loadDemoSamples(language: 'zh' | 'en'): Promise<void> {
   const panelTitle = language === 'zh' ? '设置' : 'Settings'
-  for (const id of ['directory', 'code', 'csv', 'structured']) {
+  const ids = ['directory', 'code', 'csv', 'structured'] as const
+  for (const [index, id] of ids.entries()) {
     const panel = openSettings(language)
     const entry = panel.querySelector(`[data-sample-entry="${id}"]`)
     if (!(entry instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
     fireEvent.click(entry)
     expect(screen.queryByRole('dialog', { name: panelTitle })).toBeNull()
+    // Every click commits one session of its own; the tab strip reappears only
+    // once that session is in, so the count is the settling signal. A directory
+    // scan slower than the other scenes can no longer leave three tabs behind.
+    await waitFor(() => expect(sessionTabs()).toHaveLength(index + 1), { timeout: 4000 })
   }
-  await screen.findByRole('tablist', { name: language === 'zh' ? '会话' : 'Sessions' }, {
-    timeout: 4000
-  })
+  await waitFor(
+    () => {
+      const tabs = sessionTabs()
+      expect(tabs).toHaveLength(ids.length)
+      expect(
+        tabs[tabs.length - 1].querySelector('[role="tab"]')?.getAttribute('aria-selected')
+      ).toBe('true')
+    },
+    { timeout: 4000 }
+  )
 }
 
 function languageOptions(panel: HTMLElement, language: 'zh' | 'en'): HTMLElement[] {
@@ -278,10 +295,9 @@ describe('language switch', () => {
       '简体中文'
     ])
 
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(writeUserSettings).toHaveBeenCalledTimes(1)
+    // The write is dispatched through the serial queue, but it never settles,
+    // so this waits for the dispatch instead of for the promise to resolve.
+    await waitFor(() => expect(writeUserSettings).toHaveBeenCalledTimes(1))
     expect(writeUserSettings).toHaveBeenCalledWith({ language: 'zh', theme: 'dark' })
     expect(readUserSettings.mock.calls.length).toBe(readsAtStartup)
 
