@@ -14,6 +14,7 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   stat,
   utimes,
   writeFile
@@ -277,13 +278,27 @@ function describeFileSystemCode(code: string | undefined, fallback = '文件系�
 }
 
 /**
- * Readable reason a save failed. The message carries the target path only —
- * never the temporary file's name — and keeps the OS code when there is one.
+ * Readable reason a file write or delete failed. The message carries the target
+ * path only — never the temporary file's name — and keeps the OS code when there
+ * is one.
  */
+function readableFileFailure(action: '写入' | '删除', error: unknown, path: string): Error {
+  const code = errorCode(error)
+  const fallback = action === '写入' ? '文件系统写入失败' : '文件系统删除失败'
+  return new Error(
+    `无法${action}文件 ${path}：${describeFileSystemCode(code, fallback)}${code ? `（${code}）` : ''}。`
+  )
+}
+
 function readableWriteFailure(error: unknown, path: string): Error {
+  return readableFileFailure('写入', error, path)
+}
+
+/** Readable reason a directory create / remove failed; keeps the OS code. */
+function readableDirectoryFailure(action: '创建' | '删除', error: unknown, path: string): Error {
   const code = errorCode(error)
   return new Error(
-    `无法写入文件 ${path}：${describeFileSystemCode(code, '文件系统写入失败')}${code ? `（${code}）` : ''}。`
+    `无法${action}目录 ${path}：${describeFileSystemCode(code, '文件系统操作失败')}${code ? `（${code}）` : ''}。`
   )
 }
 
@@ -812,14 +827,21 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     PLATFORM_CHANNELS.writeTextFile,
     async (_event, path: unknown, content: unknown, modifiedMs: unknown) => {
       const target = assertWritable(assertPath(path))
-      await writeFile(target, typeof content === 'string' ? content : String(content), 'utf8')
-      if (typeof modifiedMs === 'number' && Number.isFinite(modifiedMs)) {
-        // Preserve the source mtime at whole-millisecond precision. `new Date(ms)`
-        // plus the platform's seconds conversion can land just below the integer
-        // millisecond (e.g. …348.999), which would re-flag a synced file as
-        // modified; numeric seconds with a sub-microsecond lift stay on the ms.
-        const seconds = Math.floor(modifiedMs) / 1000 + 1e-6
-        await utimes(target, seconds, seconds)
+      const text = typeof content === 'string' ? content : String(content)
+      // Same directory-then-rename semantics as `saveFile`: the sync write path
+      // must never leave the target zero-byte, truncated or half-written.
+      try {
+        await writeFileAtomically(target, text)
+        if (typeof modifiedMs === 'number' && Number.isFinite(modifiedMs)) {
+          // Preserve the source mtime at whole-millisecond precision. `new Date(ms)`
+          // plus the platform's seconds conversion can land just below the integer
+          // millisecond (e.g. …348.999), which would re-flag a synced file as
+          // modified; numeric seconds with a sub-microsecond lift stay on the ms.
+          const seconds = Math.floor(modifiedMs) / 1000 + 1e-6
+          await utimes(target, seconds, seconds)
+        }
+      } catch (error) {
+        throw readableWriteFailure(error, target)
       }
     }
   )
@@ -830,14 +852,31 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   ipcMain.handle(PLATFORM_CHANNELS.statPath, (_event, path: unknown) =>
     statPath(assertPath(path))
   )
-  ipcMain.handle(PLATFORM_CHANNELS.ensureDirectory, (_event, path: unknown) => {
+  ipcMain.handle(PLATFORM_CHANNELS.ensureDirectory, async (_event, path: unknown) => {
     const target = assertPath(path)
-    if (isSamplePath(target)) return undefined
-    return mkdir(target, { recursive: true })
+    if (isSamplePath(target)) return
+    try {
+      await mkdir(target, { recursive: true })
+    } catch (error) {
+      throw readableDirectoryFailure('创建', error, target)
+    }
   })
-  ipcMain.handle(PLATFORM_CHANNELS.deleteFile, (_event, path: unknown) =>
-    rm(assertWritable(assertPath(path)))
-  )
+  ipcMain.handle(PLATFORM_CHANNELS.deleteFile, async (_event, path: unknown) => {
+    const target = assertWritable(assertPath(path))
+    try {
+      await rm(target)
+    } catch (error) {
+      throw readableFileFailure('删除', error, target)
+    }
+  })
+  ipcMain.handle(PLATFORM_CHANNELS.removeDirectory, async (_event, path: unknown) => {
+    const target = assertWritable(assertPath(path))
+    try {
+      await rmdir(target)
+    } catch (error) {
+      throw readableDirectoryFailure('删除', error, target)
+    }
+  })
   ipcMain.handle(PLATFORM_CHANNELS.temporaryDirectory, () => temporaryDirectory())
   ipcMain.handle(PLATFORM_CHANNELS.realpath, (_event, paths: unknown) =>
     resolveRealpaths(parsePathArray(paths, 'path'))

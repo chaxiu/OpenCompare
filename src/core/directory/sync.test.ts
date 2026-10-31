@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isOperationCancelled } from '../io'
 import type { ListDirectory } from './compare'
 import { compareDirectories, createComparisonCache, planContentReads, scanDirectory } from './compare'
 import type { SyncIo } from './sync'
@@ -6,7 +7,9 @@ import {
   buildSyncPlan,
   copyScannedTree,
   executeSyncPlan,
-  invalidateComparisonCache
+  invalidateComparisonCache,
+  SYNC_WRITE_PROBE_PREFIX,
+  SyncTargetError
 } from './sync'
 
 interface FakeFile {
@@ -74,32 +77,32 @@ function createWritableFs(initial: FakeTree): WritableFs {
     if (container[nameOf(path)] === undefined) container[nameOf(path)] = {}
   }
 
+  async function listEntries(path: string) {
+    const node = lookup(path)
+    if (node === null || isFile(node)) throw new Error(`not a directory: ${path}`)
+    return Object.entries(node).map(([name, child]) => ({
+      name,
+      path: path === '/' ? `/${name}` : `${path}/${name}`,
+      isDirectory: !isFile(child),
+      size: isFile(child) ? (child.size ?? child.text.length) : 0,
+      modifiedMs: isFile(child) ? (child.modifiedMs ?? 0) : 0
+    }))
+  }
+
+  async function readFileText(path: string): Promise<string> {
+    const node = lookup(path)
+    if (node === null || !isFile(node)) throw new Error(`not a file: ${path}`)
+    return node.text
+  }
+
   return {
     writes,
     deletes,
     snapshot: () => tree as FakeTree,
-    list: async (path) => {
-      const node = lookup(path)
-      if (node === null || isFile(node)) throw new Error(`not a directory: ${path}`)
-      return Object.entries(node).map(([name, child]) => ({
-        name,
-        path: path === '/' ? `/${name}` : `${path}/${name}`,
-        isDirectory: !isFile(child),
-        size: isFile(child) ? (child.size ?? child.text.length) : 0,
-        modifiedMs: isFile(child) ? (child.modifiedMs ?? 0) : 0
-      }))
-    },
-    readTextFile: async (path) => {
-      const node = lookup(path)
-      if (node === null || !isFile(node)) throw new Error(`not a file: ${path}`)
-      return node.text
-    },
+    list: listEntries,
+    readTextFile: readFileText,
     io: {
-      readTextFile: async (path) => {
-        const node = lookup(path)
-        if (node === null || !isFile(node)) throw new Error(`not a file: ${path}`)
-        return node.text
-      },
+      readTextFile: readFileText,
       writeTextFile: async (path, content, modifiedMs) => {
         writes.push(path)
         parentOf(path)[nameOf(path)] = { text: content, modifiedMs: modifiedMs ?? 0 }
@@ -110,7 +113,19 @@ function createWritableFs(initial: FakeTree): WritableFs {
       deleteFile: async (path) => {
         deletes.push(path)
         delete parentOf(path)[nameOf(path)]
-      }
+      },
+      removeDirectory: async (path) => {
+        const node = lookup(path)
+        if (node === null || isFile(node)) throw new Error(`not a directory: ${path}`)
+        if (Object.keys(node).length > 0) throw new Error(`not empty: ${path}`)
+        delete parentOf(path)[nameOf(path)]
+      },
+      statPath: async (path) => {
+        const node = lookup(path)
+        if (node === null) return 'missing'
+        return isFile(node) ? 'file' : 'directory'
+      },
+      listDirectory: listEntries
     }
   }
 }
@@ -133,6 +148,15 @@ async function compareTrees(fs: WritableFs, cache = createComparisonCache()) {
     comparison: await compareDirectories('/left', '/right', fs.list, fs.readTextFile, cache),
     cache
   }
+}
+
+/** Planned deletes only: the writability probe is written and removed each run. */
+function itemDeletes(deletes: readonly string[]): string[] {
+  return deletes.filter((path) => !path.includes(SYNC_WRITE_PROBE_PREFIX))
+}
+
+function mutable(tree: FakeFile | FakeTree): Record<string, FakeFile | FakeTree> {
+  return tree as Record<string, FakeFile | FakeTree>
 }
 
 describe('sync plan', () => {
@@ -251,7 +275,7 @@ describe('sync execution', () => {
 
     const execution = await executeSyncPlan(plan, fs.io, { deletePaths: ['drop-me.txt'] })
     expect(execution.deleted).toBe(1)
-    expect(fs.deletes).toEqual(['/right/drop-me.txt'])
+    expect(itemDeletes(fs.deletes)).toEqual(['/right/drop-me.txt'])
     expect(fs.snapshot().right).toHaveProperty('keep-me.txt')
   })
 
@@ -267,7 +291,7 @@ describe('sync execution', () => {
 
       const execution = await executeSyncPlan(plan, fs.io, options)
       expect(execution.deleted).toBe(0)
-      expect(fs.deletes).toEqual([])
+      expect(itemDeletes(fs.deletes)).toEqual([])
       expect(fs.snapshot().right).toHaveProperty('drop-me.txt')
       expect(fs.snapshot().right).toHaveProperty('keep-me.txt')
     }
@@ -284,5 +308,171 @@ describe('tree materialisation', () => {
     expect(fs.snapshot().scratch).toMatchObject({
       copy: { a: { 'one.txt': { text: '1' } }, 'root.txt': { text: 'r' } }
     })
+  })
+})
+
+describe('sync failure safety', () => {
+  const SAFETY_LEFT: FakeTree = {
+    'same.txt': { text: 'same', modifiedMs: 1000 },
+    'update.txt': { text: 'new body', modifiedMs: 2000 },
+    'added-deep.txt': { text: 'deep', modifiedMs: 2000 },
+    'added.txt': { text: 'flat', modifiedMs: 2000 },
+    nested: { new: { 'one.txt': { text: 'nested', modifiedMs: 2000 } } }
+  }
+
+  const SAFETY_RIGHT: FakeTree = {
+    'same.txt': { text: 'same', modifiedMs: 1000 },
+    'update.txt': { text: 'old', modifiedMs: 400 },
+    'stale-a.txt': { text: 'a', modifiedMs: 500 },
+    'stale-b.txt': { text: 'b', modifiedMs: 600 }
+  }
+
+  async function safetyPlan() {
+    const fs = createWritableFs({ left: SAFETY_LEFT, right: SAFETY_RIGHT })
+    const { comparison } = await compareTrees(fs)
+    return { fs, plan: buildSyncPlan(comparison, 'left-to-right', 'mirror') }
+  }
+
+  it('refuses an occupied target position before any write and leaves the tree identical', async () => {
+    const { fs, plan } = await safetyPlan()
+    expect(plan.copy.count).toBe(3)
+    expect(plan.update.count).toBe(1)
+    expect(plan.delete.count).toBe(2)
+
+    // The plan is stale by the time the run starts: a copy target is now a dir.
+    mutable(fs.snapshot().right)['added.txt'] = {}
+    const before = structuredClone(fs.snapshot().right)
+
+    const error = await executeSyncPlan(plan, fs.io, {
+      deletePaths: ['stale-a.txt', 'stale-b.txt']
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EISDIR')
+    const message = (error as Error).message
+    expect(message).toContain('/right/added.txt')
+    expect(message).toMatch(/EISDIR/)
+    expect(message).not.toContain('Error invoking remote method')
+    expect(fs.snapshot().right).toEqual(before)
+  })
+
+  it('refuses an unwritable target root before touching any planned item', async () => {
+    const { fs, plan } = await safetyPlan()
+    const before = structuredClone(fs.snapshot().right)
+    const denied: SyncIo = {
+      ...fs.io,
+      writeTextFile: async () => {
+        throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+      }
+    }
+
+    const error = await executeSyncPlan(plan, denied).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
+    expect((error as Error).message).toContain('/right')
+    expect((error as Error).message).toMatch(/EACCES/)
+    expect(fs.writes).toEqual([])
+    expect(fs.snapshot().right).toEqual(before)
+  })
+
+  it('rolls a mid-plan failure back to the exact previous bytes and mtimes', async () => {
+    const { fs, plan } = await safetyPlan()
+    const before = structuredClone(fs.snapshot().right)
+    const failing: SyncIo = {
+      ...fs.io,
+      deleteFile: async (path) => {
+        if (path.endsWith('stale-b.txt')) {
+          throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+        }
+        return fs.io.deleteFile(path)
+      }
+    }
+
+    const error = await executeSyncPlan(plan, failing, {
+      deletePaths: ['stale-a.txt', 'stale-b.txt']
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EBUSY')
+    expect((error as Error).message).toContain('/right/stale-b.txt')
+    expect((error as Error).message).toMatch(/EBUSY/)
+    // Overwritten bytes and mtimes restored, the first deletion re-created and
+    // the files / directories this run created are gone again.
+    expect(fs.snapshot().right).toEqual(before)
+  })
+
+  it('cancels between single writes, rolls back and stays distinct from a failure', async () => {
+    const { fs, plan } = await safetyPlan()
+    const before = structuredClone(fs.snapshot().right)
+    const controller = new AbortController()
+    const cancelling: SyncIo = {
+      ...fs.io,
+      writeTextFile: async (path, content, modifiedMs) => {
+        await fs.io.writeTextFile(path, content, modifiedMs)
+        // Abort right after one planned write has landed: later items never run.
+        if (path.endsWith('added-deep.txt')) controller.abort()
+      }
+    }
+
+    const error = await executeSyncPlan(plan, cancelling, {
+      signal: controller.signal
+    }).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(isOperationCancelled(error)).toBe(true)
+    const message = (error as Error).message
+    expect(message).toContain('已取消')
+    expect(message).not.toMatch(/[（(]E[A-Z]+[）)]/)
+    expect(fs.snapshot().right).toEqual(before)
+
+    // A fresh dry-run reflects the rolled-back disk, not the cancelled plan.
+    const { comparison } = await compareTrees(fs)
+    const rebuilt = buildSyncPlan(comparison, 'left-to-right', 'mirror')
+    expect(rebuilt.copy.count).toBe(3)
+    expect(rebuilt.update.count).toBe(1)
+    expect(rebuilt.delete.count).toBe(2)
+    expect(rebuilt.totalCount).toBe(6)
+    expect(rebuilt.totalCount).toBe(
+      comparison.counts.added + comparison.counts.modified + comparison.counts.removed
+    )
+  })
+
+  it('keeps every unchecked mirror deletion intact when the run fails', async () => {
+    const { fs, plan } = await safetyPlan()
+    const before = structuredClone(fs.snapshot().right)
+    const failing: SyncIo = {
+      ...fs.io,
+      writeTextFile: async (path, content, modifiedMs) => {
+        if (path.endsWith('nested/new/one.txt')) {
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+        }
+        return fs.io.writeTextFile(path, content, modifiedMs)
+      }
+    }
+
+    const error = await executeSyncPlan(plan, failing).then(
+      () => undefined,
+      (reason: unknown) => reason
+    )
+
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
+    // Zero checked deletions: nothing was removed, even though the run failed
+    // after two copies had already landed.
+    expect(fs.snapshot().right).toEqual(before)
+    expect(fs.snapshot().right).toHaveProperty('stale-a.txt')
+    expect(fs.snapshot().right).toHaveProperty('stale-b.txt')
   })
 })

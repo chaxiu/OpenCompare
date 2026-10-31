@@ -48,6 +48,8 @@ const platform: PlatformPort = {
   ensureDirectory: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => ipcRenderer.invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
+  removeDirectory: (path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
   temporaryDirectory: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
   realpath: (paths) =>

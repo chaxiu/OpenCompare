@@ -95,6 +95,18 @@ describe('web PlatformPort', () => {
 
     expect(await platform.readTextFile('/memory/note.txt')).toBe('hello')
   })
+
+  it('removes exactly one empty directory and rejects a non-empty one', async () => {
+    const platform = createWebPlatformPort()
+
+    await platform.ensureDirectory('/memory/sync/deep/empty')
+    await platform.removeDirectory('/memory/sync/deep/empty')
+
+    expect(await platform.statPath('/memory/sync/deep/empty')).toBe('missing')
+    expect(await platform.statPath('/memory/sync/deep')).toBe('directory')
+
+    await expect(platform.removeDirectory('/memory/sync')).rejects.toThrow('not empty')
+  })
 })
 
 describe('web byte digest', () => {

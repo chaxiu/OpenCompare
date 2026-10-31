@@ -54,6 +54,8 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.notice.snapshotMounted': 'Mounted snapshot {name} on the {side} side.',
   'shell.notice.syncComplete':
     'Sync complete: {copied} copied · {updated} overwritten · {deleted} deleted.',
+  'shell.notice.syncCancelled':
+    'Sync cancelled: the target was rolled back to its previous state; preview or retry again.',
   'shell.notice.templateComplete':
     'Template placement complete: {extracted} files written; verification matched {matched} · missing {missing} · conflicts {conflicts}.',
   'shell.side.left': 'left',

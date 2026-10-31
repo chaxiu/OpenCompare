@@ -12,8 +12,10 @@
  * second dry-run after an explicit select-all is empty.
  */
 import {
+  chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -25,8 +27,9 @@ import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { compareDirectories, createComparisonCache, scanDirectory } from '@core/directory/compare'
 import type { ComparisonCache, DirectoryComparison } from '@core/directory/compare'
-import { buildSyncPlan, executeSyncPlan } from '@core/directory/sync'
+import { buildSyncPlan, executeSyncPlan, SyncTargetError } from '@core/directory/sync'
 import type { SyncDirection, SyncIo, SyncPlanGroup } from '@core/directory/sync'
+import { isOperationCancelled } from '@core/io'
 import { digestFilesForComparison } from '@renderer/platform'
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
@@ -91,6 +94,7 @@ const platform: PlatformPort = {
   statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
   ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
   deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
+  removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
   temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
   realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
   readUserSettings: () =>
@@ -105,7 +109,10 @@ function syncIo(port: PlatformPort): SyncIo {
     readTextFile: (path) => port.readTextFile(path),
     writeTextFile: (path, content, modifiedMs) => port.writeTextFile(path, content, modifiedMs),
     ensureDirectory: (path) => port.ensureDirectory(path),
-    deleteFile: (path) => port.deleteFile(path)
+    deleteFile: (path) => port.deleteFile(path),
+    removeDirectory: (path) => port.removeDirectory(path),
+    statPath: (path) => port.statPath(path),
+    listDirectory: (path) => port.listDirectory(path)
   }
 }
 
@@ -474,6 +481,10 @@ describe('real-disk mirror sync gate', () => {
       expect(await listRelativeFiles(fixture.right)).toEqual(
         fixture.leftFiles.map((file) => file.relativePath).sort()
       )
+      // Atomic writes clean up after themselves on the success path too.
+      expect(
+        (await listRelativeFiles(fixture.right)).filter((relativePath) => relativePath.endsWith('.tmp'))
+      ).toEqual([])
 
       // The returned comparison is the single source of the refreshed state.
       const fresh = await comparePair(fixture.left, fixture.right)
@@ -546,5 +557,301 @@ describe('real-disk mirror sync gate', () => {
       expect(second.totalBytes).toBe(0)
     },
     120_000
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/* Failure safety on the same real temp disks                          */
+/* ------------------------------------------------------------------ */
+
+interface DiskSnapshot {
+  readonly files: ReadonlyMap<string, { readonly content: string; readonly modifiedMs: number }>
+  readonly directories: readonly string[]
+}
+
+/** Every file's bytes + millisecond mtime and every directory, keyed by rel path. */
+async function snapshotTree(root: string): Promise<DiskSnapshot> {
+  const files = new Map<string, { content: string; modifiedMs: number }>()
+  const directories: string[] = []
+
+  async function walk(relativePath: string): Promise<void> {
+    const absolute = relativePath === '' ? root : diskPath(root, relativePath)
+    for (const entry of await readdir(absolute, { withFileTypes: true })) {
+      const child = relativePath === '' ? entry.name : `${relativePath}/${entry.name}`
+      if (entry.isDirectory()) {
+        directories.push(child)
+        await walk(child)
+      } else if (entry.isFile()) {
+        const info = await stat(diskPath(root, child))
+        files.set(child, {
+          content: await readFile(diskPath(root, child), 'utf8'),
+          modifiedMs: Math.floor(info.mtimeMs)
+        })
+      }
+    }
+  }
+
+  await walk('')
+  return { files, directories: directories.sort() }
+}
+
+/** Item-by-item equality, plus "no residue" for temporary files. */
+function expectSameSnapshot(before: DiskSnapshot, after: DiskSnapshot): void {
+  expect(after.directories).toEqual(before.directories)
+  expect([...after.files.keys()].sort()).toEqual([...before.files.keys()].sort())
+  for (const [relativePath, file] of before.files) {
+    expect(after.files.get(relativePath)?.content, relativePath).toBe(file.content)
+    expect(after.files.get(relativePath)?.modifiedMs, relativePath).toBe(file.modifiedMs)
+  }
+  expect([...after.files.keys()].filter((relativePath) => relativePath.endsWith('.tmp'))).toEqual([])
+}
+
+const SAFETY_STAMP = 1_700_000_500_000
+
+async function writeStamped(path: string, text: string, stampMs: number): Promise<void> {
+  await writeFile(path, text, 'utf8')
+  await utimes(path, new Date(stampMs), new Date(stampMs))
+}
+
+interface SafetyFixture {
+  readonly root: string
+  readonly left: string
+  readonly right: string
+}
+
+/**
+ * Small real fixture (9 files): one same pair, one modified pair, three copies
+ * into a two-level new directory, two target-only mirror deletions. Whole-ms
+ * mtimes keep the rollback comparison exact without rounding surprises.
+ */
+async function buildSafetyFixture(): Promise<SafetyFixture> {
+  const root = await scratchRoot()
+  const left = join(root, 'left')
+  const right = join(root, 'right')
+  await mkdir(join(left, 'added', 'deep'), { recursive: true })
+  await mkdir(right, { recursive: true })
+
+  await writeStamped(join(left, 'same.txt'), 'same body\n', SAFETY_STAMP)
+  await writeStamped(join(right, 'same.txt'), 'same body\n', SAFETY_STAMP)
+  await writeStamped(join(left, 'update.txt'), 'new body!!\n', SAFETY_STAMP + 1_000)
+  await writeStamped(join(right, 'update.txt'), 'old body\n', SAFETY_STAMP + 2_000)
+  await writeStamped(diskPath(left, 'added/one.txt'), 'copy one\n', SAFETY_STAMP + 3_000)
+  await writeStamped(diskPath(left, 'added/deep/two.txt'), 'copy two\n', SAFETY_STAMP + 4_000)
+  await writeStamped(diskPath(left, 'added/deep/three.txt'), 'copy three\n', SAFETY_STAMP + 5_000)
+  await writeStamped(join(right, 'stale-a.txt'), 'stale a\n', SAFETY_STAMP + 6_000)
+  await writeStamped(join(right, 'stale-b.txt'), 'stale b\n', SAFETY_STAMP + 7_000)
+
+  return { root, left, right }
+}
+
+function isRootUser(): boolean {
+  return typeof process.getuid === 'function' && process.getuid() === 0
+}
+
+describe('real-disk sync failure safety', () => {
+  it.skipIf(isRootUser())(
+    'refuses a read-only target before writing any planned item',
+    async () => {
+      // Permission bits are meaningless for root; only this case is skipped.
+      const fixture = await buildSafetyFixture()
+      const comparison = await comparePair(fixture.left, fixture.right)
+      const plan = buildSyncPlan(comparison, 'left-to-right', 'mirror')
+      expect(plan.totalCount).toBe(6)
+      const before = await snapshotTree(fixture.right)
+
+      let error: unknown
+      try {
+        await chmod(fixture.right, 0o555)
+        error = await executeSyncPlan(plan, syncIo(platform), {
+          deletePaths: ['stale-a.txt', 'stale-b.txt']
+        }).then(
+          () => undefined,
+          (reason: unknown) => reason
+        )
+      } finally {
+        await chmod(fixture.right, 0o755)
+      }
+
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toMatch(/^(EACCES|EPERM|EROFS)$/)
+      const message = (error as Error).message
+      expect(message).toMatch(/[一-龥]/)
+      expect(message).toContain(fixture.right)
+      expect(message).toMatch(/EACCES|EPERM|EROFS/)
+      expect(message).not.toContain('Error invoking remote method')
+
+      // Nothing was written, deleted or left behind: the target is identical.
+      expectSameSnapshot(before, await snapshotTree(fixture.right))
+    },
+    60_000
+  )
+
+  it(
+    'refuses an occupied copy target before any partial write and keeps it intact',
+    async () => {
+      const fixture = await buildSafetyFixture()
+      const comparison = await comparePair(fixture.left, fixture.right)
+      const plan = buildSyncPlan(comparison, 'left-to-right', 'mirror')
+      const copyItem = plan.copy.items.find((item) => item.relativePath === 'added/one.txt')
+      if (copyItem === undefined) throw new Error('fixture has no added/one.txt copy item')
+
+      // The plan is stale by the time it runs: a same-named directory now sits
+      // at a path the plan still wants to copy a file to.
+      await mkdir(copyItem.targetPath, { recursive: true })
+      const before = await snapshotTree(fixture.right)
+
+      const error = await executeSyncPlan(plan, syncIo(platform), {
+        deletePaths: ['stale-a.txt', 'stale-b.txt']
+      }).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EISDIR')
+      const message = (error as Error).message
+      expect(message).toMatch(/[一-龥]/)
+      expect(message).toContain(copyItem.targetPath)
+      expect(message).toContain('EISDIR')
+      expect(message).not.toContain('Error invoking remote method')
+
+      // No earlier item landed, and the occupying directory is untouched.
+      expectSameSnapshot(before, await snapshotTree(fixture.right))
+      expect((await stat(copyItem.targetPath)).isDirectory()).toBe(true)
+      expect(await readdir(copyItem.targetPath)).toEqual([])
+    },
+    60_000
+  )
+
+  it(
+    'rolls a mid-plan failure back to the exact previous disk and stays retryable',
+    async () => {
+      const fixture = await buildSafetyFixture()
+      const cache = createComparisonCache()
+      const comparison = await comparePair(fixture.left, fixture.right, cache)
+      expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 3, modified: 1 })
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      const checked = preview.plan.delete.items.map((item) => item.relativePath)
+      const before = await snapshotTree(fixture.right)
+
+      // Fail the run after every copy / update and one of the two deletions.
+      const failing: PlatformPort = {
+        ...platform,
+        deleteFile: async (path) => {
+          if (path.endsWith('stale-b.txt')) {
+            throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
+          }
+          return platform.deleteFile(path)
+        }
+      }
+
+      const error = await applySyncPreview(failing, preview, cache, checked).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EBUSY')
+      const message = (error as Error).message
+      expect(message).toMatch(/[一-龥]/)
+      expect(message).toContain('stale-b.txt')
+      expect(message).toContain('EBUSY')
+      expect(message).not.toContain('Error invoking remote method')
+
+      // Overwritten bytes / mtimes restored, the deleted file re-created, the
+      // files and both created directory levels removed again.
+      expectSameSnapshot(before, await snapshotTree(fixture.right))
+      // The failed apply produced no new comparison: the caller session is intact.
+      expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 3, modified: 1 })
+
+      // The very same preview is retryable and now lands everything.
+      const retry = await applySyncPreview(platform, preview, cache, checked)
+      expect(retry.copied).toBe(3)
+      expect(retry.updated).toBe(1)
+      expect(retry.deleted).toBe(2)
+      expect(retry.comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
+    },
+    60_000
+  )
+
+  it(
+    'cancels mid-plan, rolls back and reports a cancellation distinct from failure',
+    async () => {
+      const fixture = await buildSafetyFixture()
+      const cache = createComparisonCache()
+      const comparison = await comparePair(fixture.left, fixture.right, cache)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      const before = await snapshotTree(fixture.right)
+
+      const controller = new AbortController()
+      const cancelling: PlatformPort = {
+        ...platform,
+        writeTextFile: async (path, content, modifiedMs) => {
+          await platform.writeTextFile(path, content, modifiedMs)
+          // Abort right after one planned write landed; later items never start.
+          if (path.endsWith('added/deep/two.txt')) controller.abort()
+        }
+      }
+
+      const error = await applySyncPreview(cancelling, preview, cache, [], {
+        signal: controller.signal
+      }).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(isOperationCancelled(error)).toBe(true)
+      const message = (error as Error).message
+      expect(message).toContain('已取消')
+      expect(message).not.toMatch(/[（(]E[A-Z]+[）)]/)
+      expectSameSnapshot(before, await snapshotTree(fixture.right))
+
+      // A cold dry-run immediately after the cancellation reflects the real disk.
+      const rebuiltComparison = await comparePair(fixture.left, fixture.right)
+      const rebuilt = buildSyncPlan(rebuiltComparison, 'left-to-right', 'mirror')
+      expect(rebuilt.copy.count).toBe(3)
+      expect(rebuilt.update.count).toBe(1)
+      expect(rebuilt.delete.count).toBe(2)
+      expect(rebuilt.totalCount).toBe(
+        rebuiltComparison.counts.added +
+          rebuiltComparison.counts.removed +
+          rebuiltComparison.counts.modified
+      )
+    },
+    60_000
+  )
+
+  it(
+    'keeps unchecked mirror deletions untouched when the run fails',
+    async () => {
+      const fixture = await buildSafetyFixture()
+      const cache = createComparisonCache()
+      const comparison = await comparePair(fixture.left, fixture.right, cache)
+      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+      const before = await snapshotTree(fixture.right)
+
+      const failing: PlatformPort = {
+        ...platform,
+        writeTextFile: async (path, content, modifiedMs) => {
+          if (path.endsWith('added/one.txt')) {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+          }
+          return platform.writeTextFile(path, content, modifiedMs)
+        }
+      }
+
+      // Zero checked deletions; the run still fails after earlier copies landed.
+      const error = await applySyncPreview(failing, preview, cache, []).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+
+      expect(error).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EACCES')
+      expectSameSnapshot(before, await snapshotTree(fixture.right))
+      expect(await platform.exists(diskPath(fixture.right, 'stale-a.txt'))).toBe(true)
+      expect(await platform.exists(diskPath(fixture.right, 'stale-b.txt'))).toBe(true)
+    },
+    60_000
   )
 })

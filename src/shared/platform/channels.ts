@@ -18,6 +18,7 @@ export const PLATFORM_CHANNELS = {
   statPath: 'platform:stat-path',
   ensureDirectory: 'platform:ensure-directory',
   deleteFile: 'platform:delete-file',
+  removeDirectory: 'platform:remove-directory',
   temporaryDirectory: 'platform:temporary-directory',
   realpath: 'platform:realpath',
   readUserSettings: 'platform:read-user-settings',

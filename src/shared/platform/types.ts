@@ -225,6 +225,11 @@ export interface PlatformPort {
   ensureDirectory(path: string): Promise<void>
   /** Removes one file. Directories and read-only mounts are rejected. */
   deleteFile(path: string): Promise<void>
+  /**
+   * Removes one **empty** directory; used by sync rollback to drop only the
+   * directories that run created. A non-empty directory is rejected.
+   */
+  removeDirectory(path: string): Promise<void>
   /** Writable scratch root for materialising read-only trees (per runtime). */
   temporaryDirectory(): Promise<string>
   /**
