@@ -740,6 +740,13 @@ export interface DirectoryDiffNode {
    */
   readonly leftIsSymbolicLink?: boolean
   readonly rightIsSymbolicLink?: boolean
+  /**
+   * Literal link target string of each side (`readlink`, never resolved).
+   * Informational, so a sync plan can re-create the link itself instead of
+   * reading the body it points at. Absent on ordinary file entries.
+   */
+  readonly leftLinkTarget?: string
+  readonly rightLinkTarget?: string
   /** Shape of a symbolic-link target; absent on ordinary file entries. */
   readonly linkTargetKind?: LinkTargetKind
 }
@@ -904,6 +911,8 @@ function markSubtree(
       rightModifiedMs: side === 'right' ? node.modifiedMs : undefined,
       leftIsSymbolicLink: side === 'left' ? node.linkTarget !== undefined : undefined,
       rightIsSymbolicLink: side === 'right' ? node.linkTarget !== undefined : undefined,
+      leftLinkTarget: side === 'left' ? node.linkTarget : undefined,
+      rightLinkTarget: side === 'right' ? node.linkTarget : undefined,
       linkTargetKind: node.linkTargetKind
     }
   }
@@ -974,6 +983,8 @@ function buildNode(
       rightModifiedMs: right.modifiedMs,
       leftIsSymbolicLink: left.linkTarget !== undefined,
       rightIsSymbolicLink: right.linkTarget !== undefined,
+      leftLinkTarget: left.linkTarget,
+      rightLinkTarget: right.linkTarget,
       linkTargetKind: left.linkTargetKind ?? right.linkTargetKind
     }
   }
@@ -996,6 +1007,8 @@ function buildNode(
       rightModifiedMs: right.kind === 'file' ? right.modifiedMs : undefined,
       leftIsSymbolicLink: left.linkTarget !== undefined,
       rightIsSymbolicLink: right.linkTarget !== undefined,
+      leftLinkTarget: left.linkTarget,
+      rightLinkTarget: right.linkTarget,
       linkTargetKind: left.linkTargetKind ?? right.linkTargetKind
     }
   }

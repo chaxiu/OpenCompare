@@ -52,6 +52,8 @@ describe('preload bridge', () => {
         'readFileBytes',
         'writeFileBytes',
         'setSymbolicLinkModifiedMs',
+        'readSymbolicLink',
+        'createSymbolicLink',
         'digestFiles',
         'cancelOperation',
         'writeTextFile',

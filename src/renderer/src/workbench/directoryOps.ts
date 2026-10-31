@@ -6,7 +6,7 @@
  * materialises read-only sample trees into a writable scratch root before any
  * write, and keeps the comparison cache honest after bytes change.
  */
-import type { PlatformPort } from '@shared/platform/types'
+import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 import { compareDirectories, scanDirectory } from '@core/directory/compare'
 import type {
   ComparisonCache,
@@ -56,6 +56,13 @@ function syncIo(platform: PlatformPort) {
     readFileBytes: (path: string) => platform.readFileBytes(path),
     writeFileBytes: (path: string, content: Uint8Array, modifiedMs?: number) =>
       platform.writeFileBytes(path, content, modifiedMs),
+    // Link awareness: a synced link is read and created as a link, never through
+    // the body it points at.
+    readSymbolicLink: (path: string) => platform.readSymbolicLink(path),
+    createSymbolicLink: (target: string, path: string) =>
+      platform.createSymbolicLink(target, path),
+    setSymbolicLinkModifiedMs: (path: string, modifiedMs: number) =>
+      platform.setSymbolicLinkModifiedMs(path, modifiedMs),
     ensureDirectory: (path: string) => platform.ensureDirectory(path),
     deleteFile: (path: string) => platform.deleteFile(path),
     removeDirectory: (path: string) => platform.removeDirectory(path),
@@ -272,11 +279,13 @@ async function compareRoots(
 }
 
 /**
- * Post-write proof that every target this run wrote is byte-identical to its
- * source, and every checked deletion is really gone. Only this run's paths are
- * read, so a 358k-file sync never re-hashes the whole tree. Deletions are checked
- * through a listing (an `lstat` view), so a removed dangling link is not mistaken
- * for "missing, therefore deleted".
+ * Post-write proof that every target this run wrote matches its source, and every
+ * checked deletion is really gone. Only this run's paths are read, so a 358k-file
+ * sync never re-hashes the whole tree. An ordinary file is proven by bytes; a
+ * symbolic link is proven by **form** (`lstat` view + literal `readlink` + own
+ * whole-second mtime), because a link may dangle and its body is not its payload.
+ * Deletions are checked through a listing (an `lstat` view), so a removed
+ * dangling link is not mistaken for "missing, therefore deleted".
  */
 async function verifyWrittenTargets(
   platform: PlatformPort,
@@ -284,15 +293,17 @@ async function verifyWrittenTargets(
 ): Promise<SyncVerificationMismatch[]> {
   const mismatches: SyncVerificationMismatch[] = []
   const written = execution.written
+  const files = written.filter((item) => item.linkTarget === undefined)
+  const links = written.filter((item) => item.linkTarget !== undefined)
 
-  if (written.length > 0) {
+  if (files.length > 0) {
     try {
       const digests = await digestFilesForComparison(platform, [
-        ...written.map((item) => item.targetPath),
-        ...written.map((item) => item.sourcePath)
+        ...files.map((item) => item.targetPath),
+        ...files.map((item) => item.sourcePath)
       ])
-      const offset = written.length
-      written.forEach((item, index) => {
+      const offset = files.length
+      files.forEach((item, index) => {
         const target = digests[index]
         const source = digests[offset + index]
         if (target?.ok !== true || source?.ok !== true) {
@@ -305,8 +316,34 @@ async function verifyWrittenTargets(
       })
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : String(cause)
-      for (const item of written) mismatches.push({ path: item.targetPath, reason })
+      for (const item of files) mismatches.push({ path: item.targetPath, reason })
       return mismatches
+    }
+  }
+
+  for (const item of links) {
+    try {
+      const entry = await entryNamed(platform, item.targetPath)
+      if (entry === undefined) {
+        mismatches.push({ path: item.targetPath, reason: 'written link is missing on the target' })
+        continue
+      }
+      if (entry.isSymbolicLink !== true) {
+        mismatches.push({ path: item.targetPath, reason: 'target is not a symbolic link' })
+        continue
+      }
+      if (entry.linkTarget !== item.linkTarget) {
+        mismatches.push({ path: item.targetPath, reason: 'target link target differs from source' })
+        continue
+      }
+      if (Math.floor(entry.modifiedMs / 1000) !== Math.floor(item.modifiedMs / 1000)) {
+        mismatches.push({ path: item.targetPath, reason: 'target link mtime differs from source' })
+      }
+    } catch (cause) {
+      mismatches.push({
+        path: item.targetPath,
+        reason: cause instanceof Error ? cause.message : String(cause)
+      })
     }
   }
 
@@ -326,14 +363,24 @@ async function verifyWrittenTargets(
   return mismatches
 }
 
+/** The target's current entry (an `lstat` view), or `undefined` when absent. */
+async function entryNamed(
+  platform: PlatformPort,
+  path: string
+): Promise<DirectoryEntry | undefined> {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  if (separator <= 0) return undefined
+  const parent = path.slice(0, separator)
+  if ((await platform.statPath(parent)) !== 'directory') return undefined
+  const name = path.slice(separator + 1)
+  return (await platform.listDirectory(parent)).find((entry) => entry.name === name)
+}
+
 /** True when `path` still has a directory entry, links included (never followed). */
 async function entryStillExists(platform: PlatformPort, path: string): Promise<boolean> {
   const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   if (separator <= 0) return (await platform.statPath(path)) !== 'missing'
-  const parent = path.slice(0, separator)
-  if ((await platform.statPath(parent)) !== 'directory') return false
-  const name = path.slice(separator + 1)
-  return (await platform.listDirectory(parent)).some((entry) => entry.name === name)
+  return (await entryNamed(platform, path)) !== undefined
 }
 
 /**

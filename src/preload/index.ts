@@ -44,6 +44,10 @@ const platform: PlatformPort = {
       path,
       modifiedMs
     ) as Promise<void>,
+  readSymbolicLink: (path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
+  createSymbolicLink: (target, path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
   digestFiles: (paths, options) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>

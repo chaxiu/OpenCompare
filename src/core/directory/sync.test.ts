@@ -111,6 +111,15 @@ function createWritableFs(initial: FakeTree): WritableFs {
           modifiedMs: modifiedMs ?? 0
         }
       },
+      // The fake tree is a plain file/directory map: no case here creates or
+      // reads a link, so these seam members only keep the contract honest.
+      readSymbolicLink: async (path) => {
+        throw new Error(`not a symbolic link: ${path}`)
+      },
+      createSymbolicLink: async (target, path) => {
+        throw new Error(`symbolic links are not supported: ${path} -> ${target}`)
+      },
+      setSymbolicLinkModifiedMs: async () => undefined,
       ensureDirectory: async (path) => {
         ensureDir(path)
       },

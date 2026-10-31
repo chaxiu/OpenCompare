@@ -34,6 +34,7 @@ import { compareDirectories, createComparisonCache, scanDirectory } from '@core/
 import type { ComparisonCache, DirectoryComparison } from '@core/directory/compare'
 import {
   buildSyncPlan,
+  copyScannedTree,
   executeSyncPlan,
   SyncRefreshError,
   SyncTargetError,
@@ -103,6 +104,10 @@ const platform: PlatformPort = {
     invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
   setSymbolicLinkModifiedMs: (path, modifiedMs) =>
     invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
+  readSymbolicLink: (path) =>
+    invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
+  createSymbolicLink: (target, path) =>
+    invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
   digestFiles: (paths, options) =>
     invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
@@ -128,6 +133,9 @@ function syncIo(port: PlatformPort): SyncIo {
   return {
     readFileBytes: (path) => port.readFileBytes(path),
     writeFileBytes: (path, content, modifiedMs) => port.writeFileBytes(path, content, modifiedMs),
+    readSymbolicLink: (path) => port.readSymbolicLink(path),
+    createSymbolicLink: (target, path) => port.createSymbolicLink(target, path),
+    setSymbolicLinkModifiedMs: (path, modifiedMs) => port.setSymbolicLinkModifiedMs(path, modifiedMs),
     ensureDirectory: (path) => port.ensureDirectory(path),
     deleteFile: (path) => port.deleteFile(path),
     removeDirectory: (path) => port.removeDirectory(path),
@@ -1690,6 +1698,831 @@ describe('real-disk sync symlink metadata', () => {
       ).toBe(Math.floor(LINK_TARGET_STAMP / 1000))
     },
     60_000
+  )
+})
+
+/* ------------------------------------------------------------------ */
+/* Symlink fidelity: links land as links, never as their target bodies  */
+/* ------------------------------------------------------------------ */
+
+const LINK_FIDELITY_STAMP = 1_700_002_000_000
+const LINK_NAMES = ['link-dangling', 'link-dir', 'link-rel'] as const
+
+interface FileFingerprint {
+  readonly sha256: string
+  readonly size: number
+  readonly modifiedMs: number
+}
+
+/** Bytes + size + whole-ms mtime of one real file, to prove it was not touched. */
+async function fingerprint(path: string): Promise<FileFingerprint> {
+  const info = await stat(path)
+  return {
+    sha256: rawSha(await readFile(path)),
+    size: info.size,
+    modifiedMs: Math.floor(info.mtimeMs)
+  }
+}
+
+function expectSameFingerprint(
+  before: FileFingerprint,
+  after: FileFingerprint,
+  message: string
+): void {
+  expect(after.sha256, `${message}: sha256`).toBe(before.sha256)
+  expect(after.size, `${message}: size`).toBe(before.size)
+  expect(after.modifiedMs, `${message}: mtime`).toBe(before.modifiedMs)
+}
+
+/** True when a directory entry exists at `path`, links included (never followed). */
+async function entryExistsOnDisk(path: string): Promise<boolean> {
+  return lstat(path).then(
+    () => true,
+    () => false
+  )
+}
+
+/** The link must be a link, keep its literal target and its whole-second mtime. */
+async function expectSameLink(source: string, target: string, message: string): Promise<void> {
+  const targetInfo = await lstat(target)
+  expect(targetInfo.isSymbolicLink(), `${message}: target must stay a symlink`).toBe(true)
+  expect(await readlink(target), `${message}: readlink must stay verbatim`).toBe(
+    await readlink(source)
+  )
+  expect(Math.floor(targetInfo.mtimeMs / 1000), `${message}: lstat mtime seconds`).toBe(
+    Math.floor((await lstat(source)).mtimeMs / 1000)
+  )
+}
+
+interface LinkFidelityFixture {
+  readonly root: string
+  readonly left: string
+  readonly right: string
+  readonly outside: string
+  /** The side holding the source-only links. */
+  readonly linkSide: 'left' | 'right'
+}
+
+/**
+ * Source-side-only links of all three shapes: a relative target that already
+ * exists on the target side with its own bytes, a dangling target, and a relative
+ * link to a directory outside the pair. The pointed-at file inside the target
+ * side is the proof the link write never reads or rewrites it.
+ */
+async function buildLinkFidelityFixture(
+  linkSide: 'left' | 'right'
+): Promise<LinkFidelityFixture> {
+  const root = await scratchRoot()
+  const left = join(root, 'left')
+  const right = join(root, 'right')
+  const outside = join(root, 'outside')
+  await mkdir(left, { recursive: true })
+  await mkdir(right, { recursive: true })
+  await mkdir(join(outside, 'kept-dir', 'nested'), { recursive: true })
+
+  await writeStamped(join(left, 'shared.txt'), 'shared body\n', LINK_FIDELITY_STAMP)
+  await writeStamped(join(right, 'shared.txt'), 'shared body\n', LINK_FIDELITY_STAMP)
+  await writeStamped(join(outside, 'kept.txt'), 'kept body\n', LINK_FIDELITY_STAMP + 1)
+  await writeStamped(join(outside, 'kept-dir', 'child.txt'), 'child\n', LINK_FIDELITY_STAMP + 2)
+  await writeStamped(
+    join(outside, 'kept-dir', 'nested', 'deep.txt'),
+    'deep\n',
+    LINK_FIDELITY_STAMP + 3
+  )
+
+  const source = linkSide === 'left' ? left : right
+  const target = linkSide === 'left' ? right : left
+  await writeStamped(join(target, 'only-on-target.txt'), 'target side body\n', LINK_FIDELITY_STAMP + 4)
+  await linkWithStamp('only-on-target.txt', join(source, 'link-rel'), LINK_FIDELITY_STAMP + 10)
+  await linkWithStamp('missing-target.txt', join(source, 'link-dangling'), LINK_FIDELITY_STAMP + 11)
+  await linkWithStamp('../outside/kept-dir', join(source, 'link-dir'), LINK_FIDELITY_STAMP + 12)
+
+  return { root, left, right, outside, linkSide }
+}
+
+describe('real-disk sync symlink fidelity', () => {
+  it(
+    'copies relative, dangling and directory links as links in both directions and both modes',
+    async () => {
+      const combos = [
+        ['left-to-right', 'left', 'incremental'],
+        ['left-to-right', 'left', 'mirror'],
+        ['right-to-left', 'right', 'incremental'],
+        ['right-to-left', 'right', 'mirror']
+      ] as const
+
+      let sequence = 0
+      for (const [direction, linkSide, mode] of combos) {
+        sequence += 1
+        const fixture = await buildLinkFidelityFixture(linkSide)
+        const source = linkSide === 'left' ? fixture.left : fixture.right
+        const target = linkSide === 'left' ? fixture.right : fixture.left
+        const label = `symlink fidelity: ${direction} ${mode}`
+
+        // Files the run must never touch: the link's relative target on the
+        // target side, and everything the directory link points at.
+        const targetOnlyBefore = await fingerprint(join(target, 'only-on-target.txt'))
+        const outsideFileBefore = await fingerprint(join(fixture.outside, 'kept.txt'))
+        const outsideChildBefore = await fingerprint(join(fixture.outside, 'kept-dir', 'child.txt'))
+
+        const comparison = await comparePair(fixture.left, fixture.right)
+        const preview = await previewSync(platform, comparison, direction, mode, sequence)
+
+        const linkItems = preview.plan.copy.items.filter(
+          (item) => item.linkTarget !== undefined
+        )
+        expect(
+          linkItems.map((item) => item.relativePath).sort(),
+          `${label}: every source-only link is one copy item`
+        ).toEqual([...LINK_NAMES])
+        expect(preview.plan.copy.count, `${label}: one copy per link`).toBe(3)
+        expect(preview.plan.update.count, `${label}: no update`).toBe(0)
+        expect(preview.plan.delete.count, `${label}: target-only file is the only delete`).toBe(
+          mode === 'mirror' ? 1 : 0
+        )
+        for (const item of linkItems) {
+          expect(item.linkTarget, `${label}: ${item.relativePath} linkTarget`).toBe(
+            await readlink(item.sourcePath as string)
+          )
+        }
+        for (const item of preview.plan.delete.items) {
+          expect(item.linkTarget, `${label}: a delete item is not a link write`).toBeUndefined()
+        }
+
+        expect(canApplySyncPreview(preview), `${label}: links are executable work`).toBe(true)
+        const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+        expect(result.copied, `${label}: link copies are counted`).toBe(3)
+        expect(result.updated, `${label}: no update landed`).toBe(0)
+        expect(result.deleted, `${label}: unchecked deletes stay put`).toBe(0)
+
+        for (const relativePath of LINK_NAMES) {
+          await expectSameLink(
+            diskPath(source, relativePath),
+            diskPath(target, relativePath),
+            `${label}: ${relativePath}`
+          )
+        }
+        // The relative target string is kept literally, not resolved to an absolute path.
+        expect(await readlink(diskPath(target, 'link-rel')), `${label}: relative link`).toBe(
+          'only-on-target.txt'
+        )
+        expect(
+          await readlink(diskPath(target, 'link-dangling')),
+          `${label}: dangling link string`
+        ).toBe('missing-target.txt')
+        // The directory target is never materialised into the target tree: the
+        // link itself is the only entry, no ordinary copy of its children.
+        const targetNames = (await readdir(target)).sort()
+        expect(targetNames, `${label}: no directory subtree materialised`).toEqual([
+          'link-dangling',
+          'link-dir',
+          'link-rel',
+          'only-on-target.txt',
+          'shared.txt'
+        ])
+        expect(
+          (await lstat(diskPath(target, 'link-dir'))).isDirectory(),
+          `${label}: a directory link is not a real directory`
+        ).toBe(false)
+
+        expectSameFingerprint(
+          targetOnlyBefore,
+          await fingerprint(join(target, 'only-on-target.txt')),
+          `${label}: the relative link target was not written through`
+        )
+        expectSameFingerprint(
+          outsideFileBefore,
+          await fingerprint(join(fixture.outside, 'kept.txt')),
+          `${label}: an outside file was not touched`
+        )
+        expectSameFingerprint(
+          outsideChildBefore,
+          await fingerprint(join(fixture.outside, 'kept-dir', 'child.txt')),
+          `${label}: a directory link target subtree was not touched`
+        )
+      }
+    },
+    180_000
+  )
+
+  it(
+    'never reads a link path for content: every read and digest skips the links',
+    async () => {
+      const fixture = await buildLinkFidelityFixture('left')
+      // One ordinary source-only file proves the recording really sees content
+      // reads; the links below must stay out of every read and digest.
+      await writeStampedBytes(
+        diskPath(fixture.left, 'extra-copy.bin'),
+        Buffer.from([0x00, 0x01, 0xff]),
+        LINK_FIDELITY_STAMP + 5
+      )
+      const reads: string[] = []
+      const digests: string[] = []
+      const recording: PlatformPort = {
+        ...platform,
+        readFileBytes: async (path) => {
+          reads.push(path)
+          return platform.readFileBytes(path)
+        },
+        digestFiles: async (paths, options) => {
+          digests.push(...paths)
+          return platform.digestFiles(paths, options)
+        }
+      }
+
+      const preview = await previewSync(
+        recording,
+        await compareDirectories(
+          fixture.left,
+          fixture.right,
+          (path) => recording.listDirectory(path),
+          (path) => recording.readTextFile(path),
+          createComparisonCache(),
+          undefined,
+          {
+            digestFiles: (paths) => digestFilesForComparison(recording, paths),
+            listDirectories: (paths) => recording.listDirectories(paths)
+          }
+        ),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      const result = await applySyncPreview(recording, preview, createComparisonCache(), [])
+      expect(result.copied, 'symlink fidelity: dangling links still land').toBe(4)
+
+      const linkPaths = LINK_NAMES.flatMap((name) => [
+        diskPath(fixture.left, name),
+        diskPath(fixture.right, name)
+      ])
+      for (const path of linkPaths) {
+        expect(reads, `symlink fidelity: ${path} must never be read as bytes`).not.toContain(path)
+        expect(digests, `symlink fidelity: ${path} must never be digested`).not.toContain(path)
+      }
+      // Counter-control: ordinary content reads really were recorded.
+      expect(reads, 'symlink fidelity: ordinary reads are still recorded').toContain(
+        diskPath(fixture.left, 'extra-copy.bin')
+      )
+      expect(digests, 'symlink fidelity: ordinary digests are still recorded').toContain(
+        diskPath(fixture.left, 'extra-copy.bin')
+      )
+    },
+    60_000
+  )
+
+  it(
+    'replaces a target-side link with the source link and leaves the old target intact',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const outside = join(root, 'outside')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await mkdir(outside, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(outside, 'source-target.txt'), 'source target\n', LINK_FIDELITY_STAMP + 1)
+      await writeStamped(join(outside, 'old-target.txt'), 'old target\n', LINK_FIDELITY_STAMP + 2)
+      await linkWithStamp('../outside/source-target.txt', join(left, 'swap-link'), LINK_FIDELITY_STAMP + 3)
+      await linkWithStamp('../outside/old-target.txt', join(right, 'swap-link'), LINK_FIDELITY_STAMP + 4)
+      const oldTargetBefore = await fingerprint(join(outside, 'old-target.txt'))
+      const sourceTargetBefore = await fingerprint(join(outside, 'source-target.txt'))
+
+      const preview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      expect(preview.plan.copy.count, 'symlink fidelity: nothing to copy').toBe(0)
+      expect(preview.plan.update.count, 'symlink fidelity: different links are one update').toBe(1)
+      expect(
+        preview.plan.update.items[0].linkTarget,
+        'symlink fidelity: the update carries the source link string'
+      ).toBe('../outside/source-target.txt')
+      expect(canApplySyncPreview(preview), 'symlink fidelity: link update is executable').toBe(true)
+
+      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(result.updated, 'symlink fidelity: a link replacement counts as updated').toBe(1)
+      expect(result.copied).toBe(0)
+      expect(result.deleted).toBe(0)
+      await expectSameLink(
+        diskPath(left, 'swap-link'),
+        diskPath(right, 'swap-link'),
+        'symlink fidelity: replaced link'
+      )
+      expect(await readlink(diskPath(right, 'swap-link'))).toBe('../outside/source-target.txt')
+      expectSameFingerprint(
+        oldTargetBefore,
+        await fingerprint(join(outside, 'old-target.txt')),
+        'symlink fidelity: the replaced link target was not written through'
+      )
+      expectSameFingerprint(
+        sourceTargetBefore,
+        await fingerprint(join(outside, 'source-target.txt')),
+        'symlink fidelity: the new link target was not touched'
+      )
+    },
+    60_000
+  )
+
+  it(
+    'replaces a target-side link with an ordinary file without writing through it',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const outside = join(root, 'outside')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await mkdir(outside, { recursive: true })
+      await writeStamped(join(left, 'plain.txt'), 'source body\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(left, 'copied.txt'), 'copied body\n', LINK_FIDELITY_STAMP + 1)
+      await writeStamped(join(outside, 'old.txt'), 'old body\n', LINK_FIDELITY_STAMP + 2)
+      await linkWithStamp('../outside/old.txt', join(right, 'plain.txt'), LINK_FIDELITY_STAMP + 3)
+      const oldBefore = await fingerprint(join(outside, 'old.txt'))
+
+      const recorded = recordWrites(platform)
+      const preview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      expect(preview.plan.update.count, 'symlink fidelity: file over link is one update').toBe(1)
+      expect(preview.plan.copy.count, 'symlink fidelity: ordinary copy is one item').toBe(1)
+      for (const item of [...preview.plan.update.items, ...preview.plan.copy.items]) {
+        expect(item.linkTarget, 'symlink fidelity: an ordinary file item has no linkTarget')
+          .toBeUndefined()
+      }
+
+      const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
+      expect(result.updated, 'symlink fidelity: file over link counts as updated').toBe(1)
+      expect(result.copied).toBe(1)
+
+      const targetInfo = await lstat(diskPath(right, 'plain.txt'))
+      expect(
+        targetInfo.isSymbolicLink(),
+        'symlink fidelity: the target path is a regular file now'
+      ).toBe(false)
+      const sourceInfo = await stat(diskPath(left, 'plain.txt'))
+      expect(targetInfo.size, 'symlink fidelity: replaced file size').toBe(sourceInfo.size)
+      expect(
+        rawSha(await readFile(diskPath(right, 'plain.txt'))),
+        'symlink fidelity: replaced file sha256'
+      ).toBe(rawSha(await readFile(diskPath(left, 'plain.txt'))))
+      expect(
+        Math.floor(targetInfo.mtimeMs),
+        'symlink fidelity: replaced file whole-ms mtime'
+      ).toBe(Math.floor(sourceInfo.mtimeMs))
+
+      expectSameFingerprint(
+        oldBefore,
+        await fingerprint(join(outside, 'old.txt')),
+        'symlink fidelity: the old link target keeps bytes and mtime'
+      )
+      expect(recorded.writes, 'symlink fidelity: only planned paths were written').toContain(
+        diskPath(right, 'plain.txt')
+      )
+      expect(recorded.writes, 'symlink fidelity: the old target file was never written').not.toContain(
+        join(outside, 'old.txt')
+      )
+    },
+    60_000
+  )
+
+  it(
+    'replaces a target-side ordinary file with the source link without writing through it',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const outside = join(root, 'outside')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await mkdir(outside, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
+      await linkWithStamp('../outside/keep.txt', join(left, 'link-over-file'), LINK_FIDELITY_STAMP + 2)
+      await writeStamped(join(right, 'link-over-file'), 'old file body\n', LINK_FIDELITY_STAMP + 3)
+      const keepBefore = await fingerprint(join(outside, 'keep.txt'))
+
+      const preview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      expect(preview.plan.update.count, 'symlink fidelity: link over a file is one update').toBe(1)
+      expect(
+        preview.plan.update.items[0].linkTarget,
+        'symlink fidelity: the update carries the source link string'
+      ).toBe('../outside/keep.txt')
+
+      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(result.updated, 'symlink fidelity: link over a file counts as updated').toBe(1)
+      await expectSameLink(
+        diskPath(left, 'link-over-file'),
+        diskPath(right, 'link-over-file'),
+        'symlink fidelity: link replacing a file'
+      )
+      expect(
+        (await lstat(diskPath(right, 'link-over-file'))).isFile(),
+        'symlink fidelity: the target is a link, not a file'
+      ).toBe(false)
+      expectSameFingerprint(
+        keepBefore,
+        await fingerprint(join(outside, 'keep.txt')),
+        'symlink fidelity: the link target was not written through'
+      )
+    },
+    60_000
+  )
+
+  it(
+    'materialises a scanned tree link as a link instead of its target body',
+    async () => {
+      const root = await scratchRoot()
+      const source = join(root, 'source')
+      const target = join(root, 'materialised')
+      await mkdir(source, { recursive: true })
+      await writeStamped(join(source, 'plain.txt'), 'plain body\n', LINK_FIDELITY_STAMP)
+      await linkWithStamp('plain.txt', join(source, 'relative-link'), LINK_FIDELITY_STAMP + 1)
+      await linkWithStamp('missing.txt', join(source, 'dangling-link'), LINK_FIDELITY_STAMP + 2)
+
+      const tree = await scanDirectory(source, (path) => platform.listDirectory(path))
+      const copied = await copyScannedTree(tree, target, syncIo(platform))
+      expect(copied, 'symlink fidelity: every scanned entry was materialised').toBe(3)
+      await expectSameLink(
+        diskPath(source, 'relative-link'),
+        diskPath(target, 'relative-link'),
+        'symlink fidelity: materialised relative link'
+      )
+      await expectSameLink(
+        diskPath(source, 'dangling-link'),
+        diskPath(target, 'dangling-link'),
+        'symlink fidelity: materialised dangling link'
+      )
+      expect(await readFile(diskPath(target, 'plain.txt'), 'utf8')).toBe('plain body\n')
+      expect(
+        (await lstat(diskPath(target, 'plain.txt'))).isSymbolicLink(),
+        'symlink fidelity: an ordinary file stays a file'
+      ).toBe(false)
+    },
+    60_000
+  )
+
+  it(
+    'deletes only the target-side links in mirror mode, and only when checked',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const outside = join(root, 'outside')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await mkdir(join(outside, 'kept-dir'), { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
+      await writeStamped(join(outside, 'kept-dir', 'child.txt'), 'child\n', LINK_FIDELITY_STAMP + 2)
+      await linkWithStamp('../outside/keep.txt', join(right, 'file-link'), LINK_FIDELITY_STAMP + 3)
+      await linkWithStamp('../outside/kept-dir', join(right, 'dir-link'), LINK_FIDELITY_STAMP + 4)
+      const keepBefore = await fingerprint(join(outside, 'keep.txt'))
+      const childBefore = await fingerprint(join(outside, 'kept-dir', 'child.txt'))
+
+      const preview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'mirror',
+        1
+      )
+      expect(preview.plan.copy.count, 'symlink fidelity: nothing to copy').toBe(0)
+      expect(preview.plan.update.count).toBe(0)
+      expect(
+        preview.plan.delete.items.map((item) => item.relativePath).sort(),
+        'symlink fidelity: target-only links are delete items'
+      ).toEqual(['dir-link', 'file-link'])
+      expect(
+        canApplySyncPreview(preview),
+        'symlink fidelity: unchecked link deletions are not executable work'
+      ).toBe(false)
+      expect(
+        canApplySyncPreview(preview, ['dir-link', 'file-link']),
+        'symlink fidelity: checked link deletions are executable'
+      ).toBe(true)
+
+      // Default run: nothing is checked, so both links stay and the dry-run
+      // still lists them with the same count.
+      const untouched = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(untouched.deleted, 'symlink fidelity: link deletes stay opt-in').toBe(0)
+      expect(await entryExistsOnDisk(diskPath(right, 'file-link'))).toBe(true)
+      expect(await entryExistsOnDisk(diskPath(right, 'dir-link'))).toBe(true)
+      const stillListed = await previewSync(
+        platform,
+        untouched.comparison,
+        'left-to-right',
+        'mirror',
+        2
+      )
+      expect(stillListed.plan.delete.count, 'symlink fidelity: dry-run still lists both').toBe(2)
+
+      const checkedPreview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'mirror',
+        3
+      )
+      const removed = await applySyncPreview(
+        platform,
+        checkedPreview,
+        createComparisonCache(),
+        ['dir-link', 'file-link']
+      )
+      expect(removed.deleted, 'symlink fidelity: checked link deletions are counted').toBe(2)
+      expect(await entryExistsOnDisk(diskPath(right, 'file-link'))).toBe(false)
+      expect(await entryExistsOnDisk(diskPath(right, 'dir-link'))).toBe(false)
+      expectSameFingerprint(
+        keepBefore,
+        await fingerprint(join(outside, 'keep.txt')),
+        'symlink fidelity: a deleted link target file is untouched'
+      )
+      expectSameFingerprint(
+        childBefore,
+        await fingerprint(join(outside, 'kept-dir', 'child.txt')),
+        'symlink fidelity: a deleted directory link target is untouched'
+      )
+      expect((await readdir(join(outside, 'kept-dir'))).sort()).toEqual(['child.txt'])
+    },
+    60_000
+  )
+
+  it(
+    'rolls a link deletion back as a link with its own target and mtime',
+    async () => {
+      const root = await scratchRoot()
+      const left = join(root, 'left')
+      const right = join(root, 'right')
+      const outside = join(root, 'outside')
+      await mkdir(left, { recursive: true })
+      await mkdir(right, { recursive: true })
+      await mkdir(outside, { recursive: true })
+      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+      await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
+      await linkWithStamp('../outside/keep.txt', join(right, 'stale-link'), LINK_FIDELITY_STAMP + 2)
+      const keepBefore = await fingerprint(join(outside, 'keep.txt'))
+      const linkTargetBefore = await readlink(diskPath(right, 'stale-link'))
+      const linkMtimeBefore = Math.floor(
+        (await lstat(diskPath(right, 'stale-link'))).mtimeMs / 1000
+      )
+
+      const preview = await previewSync(
+        platform,
+        await comparePair(left, right),
+        'left-to-right',
+        'mirror',
+        1
+      )
+      expect(preview.plan.delete.count, 'symlink fidelity: link is a delete item').toBe(1)
+
+      const failing: PlatformPort = {
+        ...platform,
+        deleteFile: async (path) => {
+          await platform.deleteFile(path)
+          if (path === diskPath(right, 'stale-link')) {
+            throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
+          }
+        }
+      }
+
+      const error = await applySyncPreview(failing, preview, createComparisonCache(), [
+        'stale-link'
+      ]).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+      expect(error, 'symlink fidelity: a failed link delete is a target error').toBeInstanceOf(
+        SyncTargetError
+      )
+      expect((error as SyncTargetError).code).toBe('EBUSY')
+
+      const restored = await lstat(diskPath(right, 'stale-link'))
+      expect(
+        restored.isSymbolicLink(),
+        'symlink fidelity: rollback rebuilt the link, not a plain file'
+      ).toBe(true)
+      expect(await readlink(diskPath(right, 'stale-link'))).toBe(linkTargetBefore)
+      expect(Math.floor(restored.mtimeMs / 1000)).toBe(linkMtimeBefore)
+      expectSameFingerprint(
+        keepBefore,
+        await fingerprint(join(outside, 'keep.txt')),
+        'symlink fidelity: a link-delete rollback never touches the target'
+      )
+    },
+    60_000
+  )
+
+  it(
+    'treats a failed link-mtime alignment as a write failure and rolls the links back',
+    async () => {
+      const fixture = await buildLinkFidelityFixture('left')
+      const preview = await previewSync(
+        platform,
+        await comparePair(fixture.left, fixture.right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      const failing: PlatformPort = {
+        ...platform,
+        setSymbolicLinkModifiedMs: async (path, modifiedMs) => {
+          if (path.endsWith('link-rel')) {
+            throw new Error(`无法设置链接时间 ${path}：没有访问权限（EACCES）。`)
+          }
+          return platform.setSymbolicLinkModifiedMs(path, modifiedMs)
+        }
+      }
+
+      const error = await applySyncPreview(failing, preview, createComparisonCache(), []).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+      expect(
+        error,
+        'symlink fidelity: a failing link mtime is a write failure, not a soft check'
+      ).toBeInstanceOf(SyncTargetError)
+      expect((error as SyncTargetError).code).toBe('EACCES')
+      // The run rolled back: no link of this plan survives on the target.
+      for (const relativePath of LINK_NAMES) {
+        expect(
+          await entryExistsOnDisk(diskPath(fixture.right, relativePath)),
+          `symlink fidelity: ${relativePath} was rolled back`
+        ).toBe(false)
+      }
+      // The retry on the real port lands the whole plan.
+      const retry = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(retry.copied, 'symlink fidelity: retry after rollback').toBe(3)
+    },
+    60_000
+  )
+
+  it(
+    'verifies links by form and rejects a wrong target or an unaligned link mtime',
+    async () => {
+      const wrongTargetFixture = await buildLinkFidelityFixture('left')
+      const wrongTargetPreview = await previewSync(
+        platform,
+        await comparePair(wrongTargetFixture.left, wrongTargetFixture.right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      const wrongTarget: PlatformPort = {
+        ...platform,
+        // "Succeeded", but the link lands pointing somewhere else.
+        createSymbolicLink: async (_target, path) =>
+          platform.createSymbolicLink('wrong-target.txt', path)
+      }
+      const wrongTargetError = await applySyncPreview(
+        wrongTarget,
+        wrongTargetPreview,
+        createComparisonCache(),
+        []
+      ).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+      expect(
+        wrongTargetError,
+        'symlink fidelity: a wrong readlink must not resolve'
+      ).toBeInstanceOf(SyncVerificationError)
+      expect(
+        (wrongTargetError as SyncVerificationError).paths.some((path) =>
+          path.endsWith('link-rel')
+        ),
+        'symlink fidelity: the wrong target is named'
+      ).toBe(true)
+
+      const unalignedFixture = await buildLinkFidelityFixture('left')
+      const unalignedPreview = await previewSync(
+        platform,
+        await comparePair(unalignedFixture.left, unalignedFixture.right),
+        'left-to-right',
+        'incremental',
+        1
+      )
+      const unaligned: PlatformPort = {
+        ...platform,
+        // "Succeeded", but the link keeps its creation time instead of the source's.
+        setSymbolicLinkModifiedMs: async () => undefined
+      }
+      const unalignedError = await applySyncPreview(
+        unaligned,
+        unalignedPreview,
+        createComparisonCache(),
+        []
+      ).then(
+        () => undefined,
+        (reason: unknown) => reason
+      )
+      expect(
+        unalignedError,
+        'symlink fidelity: an unaligned link mtime must not resolve'
+      ).toBeInstanceOf(SyncVerificationError)
+      expect(
+        (unalignedError as SyncVerificationError).mismatched,
+        'symlink fidelity: every copied link is unaligned'
+      ).toBe(3)
+    },
+    120_000
+  )
+
+  it(
+    'leaves an empty second dry-run and an all-same comparison after copying links',
+    async () => {
+      const runs = [
+        { linkSide: 'left', direction: 'left-to-right' },
+        { linkSide: 'right', direction: 'right-to-left' }
+      ] as const
+
+      let sequence = 0
+      for (const run of runs) {
+        sequence += 1
+        const fixture = await buildLinkFidelityFixture(run.linkSide)
+        const target = run.linkSide === 'left' ? fixture.right : fixture.left
+        const comparison = await comparePair(fixture.left, fixture.right)
+        const preview = await previewSync(
+          platform,
+          comparison,
+          run.direction,
+          'mirror',
+          sequence
+        )
+        expect(
+          preview.plan.delete.count,
+          `symlink fidelity: ${run.direction} lists the target-only file`
+        ).toBe(1)
+        const checked = preview.plan.delete.items.map((item) => item.relativePath)
+
+        const result = await applySyncPreview(
+          platform,
+          preview,
+          createComparisonCache(),
+          checked
+        )
+        expect(result.copied, `symlink fidelity: ${run.direction} copied links`).toBe(3)
+        expect(result.deleted, `symlink fidelity: ${run.direction} deleted one file`).toBe(1)
+        // The returned comparison is the refreshed real-disk state, not the old object.
+        expect(result.comparison, `symlink fidelity: ${run.direction} refreshes`).not.toBe(
+          comparison
+        )
+
+        // Four-state truth: every entry is `same`, independently asserted.
+        expect(result.comparison.counts, `symlink fidelity: ${run.direction} four states`).toEqual({
+          same: result.comparison.fileCount,
+          added: 0,
+          removed: 0,
+          modified: 0
+        })
+        expect(result.comparison.fileCount, `symlink fidelity: ${run.direction} file count`).toBe(4)
+
+        // Second dry-run on the same pair, same direction and mode: all empty.
+        const second = await previewSync(
+          platform,
+          result.comparison,
+          run.direction,
+          'mirror',
+          sequence + 100
+        )
+        expect(second.plan.copy.count, `symlink fidelity: ${run.direction} second copy`).toBe(0)
+        expect(second.plan.update.count, `symlink fidelity: ${run.direction} second update`).toBe(0)
+        expect(second.plan.delete.count, `symlink fidelity: ${run.direction} second delete`).toBe(0)
+        expect(second.plan.totalCount, `symlink fidelity: ${run.direction} second total`).toBe(0)
+        expect(second.linkAlignments, `symlink fidelity: ${run.direction} second alignment`).toEqual(
+          []
+        )
+        expect(
+          canApplySyncPreview(second),
+          `symlink fidelity: ${run.direction} second preview is not executable`
+        ).toBe(false)
+
+        for (const relativePath of LINK_NAMES) {
+          expect(
+            (await lstat(diskPath(target, relativePath))).isSymbolicLink(),
+            `symlink fidelity: ${run.direction} ${relativePath} stays a link`
+          ).toBe(true)
+        }
+      }
+    },
+    120_000
   )
 })
 

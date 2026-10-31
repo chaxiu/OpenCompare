@@ -65,6 +65,11 @@ src/shared/     跨进程共享类型、PlatformPort 契约与内置样本
 
 当前没有已知未修复问题。可复现的问题请提交到 [Issues](https://github.com/chaxiu/OpenCompare/issues)。
 
+以下为设计口径，不是缺陷：
+
+- Incremental 模式不列出删除项，需要删除目标侧独有项时切换到 Mirror。
+- 应用外部的改动不会自动出现，需要重新扫描/预览。
+
 ## 证据与文档
 
 [发布流程](docs/release-process.md) · [签名凭据](docs/release-signing.md) · [符号链接口径](docs/symlink-no-follow.md) · [大目录内存](docs/perf/large-directory-memory.md)。

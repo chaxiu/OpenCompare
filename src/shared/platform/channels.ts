@@ -14,6 +14,8 @@ export const PLATFORM_CHANNELS = {
   readFileBytes: 'platform:read-file-bytes',
   writeFileBytes: 'platform:write-file-bytes',
   setSymbolicLinkModifiedMs: 'platform:set-symbolic-link-modified-ms',
+  readSymbolicLink: 'platform:read-symbolic-link',
+  createSymbolicLink: 'platform:create-symbolic-link',
   digestFiles: 'platform:digest-files',
   cancelOperation: 'platform:cancel-operation',
   writeTextFile: 'platform:write-text-file',

@@ -112,6 +112,10 @@ const platform: PlatformPort = {
     invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
   setSymbolicLinkModifiedMs: (path, modifiedMs) =>
     invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
+  readSymbolicLink: (path) =>
+    invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
+  createSymbolicLink: (target, path) =>
+    invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
   digestFiles: (paths, options) =>
     invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>

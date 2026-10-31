@@ -4,7 +4,7 @@
 
 ## 范围
 
-- **`docs/lessons.md` 是历史结论与口径沿革的唯一落点**：中文正文，UTF-8，承接产品约定 `AGENTS.md` 精简时移出的历史结论、一次性事故与已闭环版本实测口径，分九节：
+- **`docs/lessons.md` 是历史结论与口径沿革的唯一落点**：中文正文，UTF-8，承接产品约定 `AGENTS.md` 精简时移出的历史结论、一次性事故与已闭环版本实测口径，分十节：
   1. 已闭环版本实测口径（1.1 v0.2.7 四条负载腿与适用性 / 1.2 v0.2.8 负载面复验与 mtime 适用边界 / 1.3 v0.2.9 导出链路 358k 四条腿与 MiB 白名单沿革）
   2. v0.2.5 同会话 upsert / 多会话 ready 峰值诊断过程与 a 支结论
   3. v0.2.5 → v0.2.6 Windows 四入口失效事故与修复口径
@@ -14,6 +14,8 @@
   7. I#5 十一条分组结论与逐条定性
   8. 七条常驻 ops task 花名册
   9. 2026-11-01 可执行判定必须 UI 与门禁同源（「机制全绿 ≠ 用户拿得到」的第二次复现：`alignSymbolicLinkTimes` 逻辑正确但入口可执行判定内联，导致仅链接 mtime 不同时 Apply 禁用、待对齐链接不可见；结论与断言位置见该节）
+  10. 2026-11-01 目录同步的类型保真缺口：known issue 不是验收豁免（`writeItem` 一律 `readFileBytes` + `writeFileBytes`，源侧独有 symlink 落盘后退化为普通文件且内容校验仍判一致；结论「known issue 不得用于掩盖打穿验收条款的类型保真缺口」与断言位置见该节）
+- **README 的 known issue 段不再承载「形态保真」类缺陷**：`README.md` / `README.zh-CN.md` 的 Known issues / 已知问题段只保留既有 `None known right now.` / `当前没有已知未修复问题。` 原句，其后以「设计口径，不是缺陷」/「Design postures, not defects」列出两条口径（Incremental 不列删除项、外部改动需重扫），**不得**再登记「源侧独有 symlink 按普通文件同步」这类类型保真缺口；该段落的门面结构与 `release-packaging.test.ts` 断言归 `release` 域，本域只约束「不要用 known issue 掩盖打穿验收的缺口」这条写作纪律。
 - **`AGENTS.md` 硬约束的增补纪律**：`docs/lessons.md` 新增一条**可复用工程约束**（而非一次性事故）时，`AGENTS.md`「硬约束」小节可增补**恰好一行**概括该约束并指向 `docs/lessons.md` 对应节；只追加、不重排、不改既有行、不新增小节。2026-11-01 对应第 9 节的一行为「可执行 / 可达性判定（按钮 `disabled`、门禁断言）必须共用同一纯函数（如 `canApplySyncPreview`），禁止 UI 与门禁各留一份内联判定；只测内层函数不算覆盖（见 `docs/lessons.md` §9）」。
 - **写作口径**：只搬结论与证据指针，不重写判定；数字、阈值、commit / run 标识、`blocked` / `pass` 定性逐字对齐来源；不新增未实测数字；每条带「来源 + 证据指针」，证据路径按仓库既有写法（相对产品仓根）原样给出、不改写或缩写。
 - **历史不改写**：当时 `blocked` 的记录保持 `blocked`，不得按后来的复验结论重述；同一事实在两处出现时数字与判定必须一致，发现两种取数时如实并列（如 `9,674` 与 `9,682` 同源两取数）而不择一覆盖。
@@ -23,6 +25,7 @@
 
 ## 验收
 
+- **ac-lessons-link-fidelity**：`docs/lessons.md` 存在 `## 10. 2026-11-01 目录同步的类型保真缺口：known issue 不是验收豁免` 一节，逐字含「known issue 不得用于掩盖打穿验收条款的类型保真缺口：链接/二进制/权限等形态保真必须由真实落盘端到端断言钉住，且校验不得用内容 hash 代替形态」，并含事实（`writeItem` 一律 `readFileBytes` + `writeFileBytes`、`readFileBytes` 跟随链接、源侧独有 symlink 落盘退化为普通文件且校验仍判一致、目标侧链接被写穿 / 镜像删除误删 / 悬空链接读不到）、落盘口径（计划项带 `linkTarget` 分派、先 unlink 再 `symlink` + `lutimes`、回滚按原形态）与断言位置（`src/sync-real-gate.test.ts` 的 `real-disk sync symlink fidelity`，消息前缀 `symlink fidelity:`）；带日期 `2026-11-01`，节标题与第 9 节同形、不并入既有小节。
 - **ac-lessons-created**：`docs/lessons.md` 新建且非空，含 8 个二级小节（第 1 节含上述三个子节），节标题语义与「范围」列出的八类一一对应；文件为 UTF-8 中文正文。
 - **ac-v027-legs**：文中保留 v0.2.7 四条负载腿原名与判定——`180 s` 冷跑、`60 s`、`3 s 采样`、`15 s 取消`；写明当时为 blocked 及原因（ZenMind 侧缩水到 `9,674` 文件，基线 `745,652`），并写明「不据此否定 v0.2.8 收口口径」。
 - **ac-v028-boundary**：文中保留 v0.2.8 复验数字 `358,155` / `358,208` 条目、`32.6 万文件/侧`、冷跑 `8,262 ms`、热跑 `7,898 ms`、取消 `116 ms` 零残留、`855.5 MiB` / `1,310.4 MiB`；并原样写明适用边界：codeload tarball 让两侧同名文件 mtime 必不同 → size/mtime 快路径把每对判 modified，该对照只测**元数据扫描管线**、不是 hash 管线。
@@ -66,6 +69,13 @@
 - 域 fold 由 Delivery 承担：本域记录现行文档归属与写作口径，历史域记录（`release` / `perf-memory` / `compare-request` 各自的 AC 原文与当时证据）按当初事实保留，不改写。
 
 ## 最近交付证明
+
+- WI：`wi_intake_b95f668b89a1770d`（交叉引用：`docs/lessons.md` 新增第 10 节「目录同步的类型保真缺口：known issue 不是验收豁免」；主体修复与 AC 归 `domains/directory`，本域只承接教训归属与写作口径；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_b95f668b89a1770d/code-gates/attempts/001`；`pnpm test` 96 files / 1431 passed + 1 skipped、`pnpm test:sync-real` 32 tests / 2.54s）。
+- 改动面：`docs/lessons.md` **+7 行**（新增第 10 节，含事实 / 结论 / 落盘口径 / 断言位置，沿用第 9 节的四段式）；`AGENTS.md` **零 diff**（本条教训是本轮缺陷的形态保真口径，不是新增可复用硬约束——既有硬约束「遍路判定同源」已覆盖相邻主题，故按「只追加真正可复用约束」纪律不加行）；`package.json` / `CHANGELOG.md` / `docs/release-notes/**` / `docs/release-evidence/**` 零 diff。
+- 验收落点：`ac-lessons-link-fidelity` 满足；`ac-lessons-created` 的「8 个二级小节」口径由第 9 轮扩为 9 节、本轮再扩为 **10 节**（第 10 节为本轮新增，其余 9 节逐字未改）。
+- 注：① `docs/lessons.md` 的节数与 `ac-lessons-created` 的 8 节口径不一致是**已知的口径沿革**（见第 9 轮注记），第 10 节按约定继续追加、未并入既有小节。② 「known issue 不是验收豁免」这条纪律与 `domains/release` 的 README known-issues 门面口径互为一对：**写入口径**在本域，**门面结构与断言**在 `release` 域，改动任一侧都要同时看另一侧。③ 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例；逐条 AC 落档在 `domains/directory/qa/sync-link-fidelity.md`。
 
 - WI：`wi_intake_bdc57b0abb1db652`（交叉引用：`docs/lessons.md` 新增第 9 节「可执行判定必须 UI 与门禁同源」+ `AGENTS.md` 硬约束一行；主体修复与 AC 归 `domains/directory`，本域只承接教训归属与写作口径；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-11-01
