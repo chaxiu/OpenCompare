@@ -189,6 +189,21 @@ export interface PlatformPort {
   ): Promise<readonly DirectoryListing[]>
   readTextFile(path: string): Promise<string>
   /**
+   * Reads one file's **raw bytes**, never decoding text. Binary bodies (a PNG,
+   * invalid UTF-8, `0x00`) therefore survive a byte-for-byte copy unchanged.
+   */
+  readFileBytes(path: string): Promise<Uint8Array>
+  /**
+   * Writes **raw bytes** atomically. When `modifiedMs` is given the file's
+   * modification time is set to it afterwards, exactly like {@link writeTextFile}.
+   */
+  writeFileBytes(path: string, content: Uint8Array, modifiedMs?: number): Promise<void>
+  /**
+   * Sets a **symbolic link's own** modification time (`lutimes`-level), never
+   * the target's, so a synced link keeps the source link's metadata.
+   */
+  setSymbolicLinkModifiedMs(path: string, modifiedMs: number): Promise<void>
+  /**
    * Digests each file's **raw bytes** with SHA-256, in input order. Nothing is
    * decoded as text, so binary content (including invalid UTF-8) is compared
    * byte for byte. A file that cannot be read only marks that item failed; the

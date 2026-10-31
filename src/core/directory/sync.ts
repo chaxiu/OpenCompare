@@ -163,10 +163,15 @@ export function buildSyncPlan(
   }
 }
 
-/** IO seam the executor writes through; the app binds it to `PlatformPort`. */
+/**
+ * IO seam the executor writes through; the app binds it to `PlatformPort`.
+ *
+ * Content crosses this seam as **raw bytes**, so a binary source (a PNG, invalid
+ * UTF-8, `0x00`) is copied byte for byte and never decoded as text on the way.
+ */
 export interface SyncIo {
-  readonly readTextFile: (path: string) => Promise<string>
-  readonly writeTextFile: (path: string, content: string, modifiedMs?: number) => Promise<void>
+  readonly readFileBytes: (path: string) => Promise<Uint8Array>
+  readonly writeFileBytes: (path: string, content: Uint8Array, modifiedMs?: number) => Promise<void>
   readonly ensureDirectory: (path: string) => Promise<void>
   readonly deleteFile: (path: string) => Promise<void>
   /** Removes one **empty** directory; rollback only deletes directories it created. */
@@ -197,12 +202,23 @@ export interface SyncExecutionOptions {
   readonly signal?: AbortSignal
 }
 
+/** One file this run wrote: its source and the target it landed on. */
+export interface SyncWrittenTarget {
+  readonly relativePath: string
+  readonly sourcePath: string
+  readonly targetPath: string
+}
+
 export interface SyncExecution {
   readonly copied: number
   readonly updated: number
   readonly deleted: number
   /** Absolute target paths that changed, so caches can drop them. */
   readonly affected: readonly string[]
+  /** Exactly the files this run wrote, in write order; the post-write check scope. */
+  readonly written: readonly SyncWrittenTarget[]
+  /** Target paths this run deleted (only user-checked mirror deletions). */
+  readonly deletedPaths: readonly string[]
 }
 
 /** Chinese gloss of the OS codes a sync write path can surface. */
@@ -259,6 +275,51 @@ export class SyncRefreshError extends Error {
     this.updated = counts.updated
     this.deleted = counts.deleted
     this.reason = reason
+  }
+}
+
+/** One written target that does not match its source after the run. */
+export interface SyncVerificationMismatch {
+  readonly path: string
+  /** Readable reason this target is not equivalent to its source. */
+  readonly reason: string
+}
+
+/**
+ * The plan's writes all landed, but the **post-write check** found at least one
+ * target that is not equivalent to its source. Nothing is rolled back (the bytes
+ * are already on disk), so the caller must keep the written state, close the
+ * applied preview and report a failure instead of "sync complete".
+ */
+export class SyncVerificationError extends Error {
+  readonly mismatched: number
+  readonly paths: readonly string[]
+  readonly copied: number
+  readonly updated: number
+  readonly deleted: number
+  /** The refreshed comparison of the written disk state, when it could be read. */
+  readonly comparison: DirectoryComparison | undefined
+
+  constructor(
+    mismatches: readonly SyncVerificationMismatch[],
+    counts: { copied: number; updated: number; deleted: number },
+    comparison?: DirectoryComparison
+  ) {
+    const sample = mismatches
+      .slice(0, 3)
+      .map((mismatch) => mismatch.path)
+      .join('、')
+    super(
+      `同步写入后校验未通过：${mismatches.length} 个目标与源不一致（如 ${sample}）。` +
+        '目标侧已保留写入结果，请重新预览后再同步。'
+    )
+    this.name = 'SyncVerificationError'
+    this.mismatched = mismatches.length
+    this.paths = mismatches.map((mismatch) => mismatch.path)
+    this.copied = counts.copied
+    this.updated = counts.updated
+    this.deleted = counts.deleted
+    this.comparison = comparison
   }
 }
 
@@ -406,7 +467,8 @@ async function preflight(
 }
 
 interface FileBackup {
-  readonly content: string
+  /** Raw bytes, so a binary target is restored byte for byte. */
+  readonly content: Uint8Array
   readonly modifiedMs: number
 }
 
@@ -420,7 +482,7 @@ async function backupTarget(
   if (entry.isDirectory) {
     throw new SyncTargetError(targetPath, 'EISDIR', SYSTEM_CODE_GLOSS.EISDIR)
   }
-  const content = await targetCall(targetPath, () => state.io.readTextFile(targetPath))
+  const content = await targetCall(targetPath, () => state.io.readFileBytes(targetPath))
   return { content, modifiedMs: entry.modifiedMs }
 }
 
@@ -459,7 +521,7 @@ async function writeItem(
   await ensureDirectoryTracked(state, parentPath(item.targetPath), undo)
   const backup = await backupTarget(state, item.targetPath)
   checkCancelled(signal)
-  const content = await targetCall(sourcePath, () => state.io.readTextFile(sourcePath))
+  const content = await targetCall(sourcePath, () => state.io.readFileBytes(sourcePath))
   checkCancelled(signal)
   // The restore is registered **before** the target is touched: the write can
   // land and still reject (the rename succeeded, the mtime backfill failed), and
@@ -467,10 +529,10 @@ async function writeItem(
   undo.push(
     backup === null
       ? () => state.io.deleteFile(item.targetPath)
-      : () => state.io.writeTextFile(item.targetPath, backup.content, backup.modifiedMs)
+      : () => state.io.writeFileBytes(item.targetPath, backup.content, backup.modifiedMs)
   )
   await targetCall(item.targetPath, () =>
-    state.io.writeTextFile(item.targetPath, content, item.modifiedMs)
+    state.io.writeFileBytes(item.targetPath, content, item.modifiedMs)
   )
 }
 
@@ -512,6 +574,8 @@ export async function executeSyncPlan(
 
   const undo: (() => Promise<void>)[] = []
   const affected: string[] = []
+  const written: SyncWrittenTarget[] = []
+  const deletedPaths: string[] = []
   let copied = 0
   let updated = 0
   let deleted = 0
@@ -521,12 +585,14 @@ export async function executeSyncPlan(
       checkCancelled(options.signal)
       await writeItem(item, state, options.signal, undo)
       affected.push(item.targetPath)
+      written.push(writtenTarget(item))
       copied += 1
     }
     for (const item of plan.update.items) {
       checkCancelled(options.signal)
       await writeItem(item, state, options.signal, undo)
       affected.push(item.targetPath)
+      written.push(writtenTarget(item))
       updated += 1
     }
     for (const item of plan.delete.items) {
@@ -537,10 +603,11 @@ export async function executeSyncPlan(
       // Registered before the delete for the same reason as a write: a delete
       // that landed and then rejected still has to be undone.
       undo.push(() =>
-        state.io.writeTextFile(item.targetPath, backup.content, backup.modifiedMs)
+        state.io.writeFileBytes(item.targetPath, backup.content, backup.modifiedMs)
       )
       await targetCall(item.targetPath, () => state.io.deleteFile(item.targetPath))
       affected.push(item.targetPath)
+      deletedPaths.push(item.targetPath)
       deleted += 1
     }
   } catch (error) {
@@ -548,7 +615,16 @@ export async function executeSyncPlan(
     throw error
   }
 
-  return { copied, updated, deleted, affected }
+  return { copied, updated, deleted, affected, written, deletedPaths }
+}
+
+function writtenTarget(item: SyncPlanItem): SyncWrittenTarget {
+  // `copy` / `update` never carry a null source; the guard keeps the type honest.
+  return {
+    relativePath: item.relativePath,
+    sourcePath: item.sourcePath ?? '',
+    targetPath: item.targetPath
+  }
 }
 
 /**
@@ -559,7 +635,7 @@ export async function executeSyncPlan(
 export async function copyScannedTree(
   tree: ScannedTree,
   targetRoot: string,
-  io: Pick<SyncIo, 'readTextFile' | 'writeTextFile' | 'ensureDirectory'>
+  io: Pick<SyncIo, 'readFileBytes' | 'writeFileBytes' | 'ensureDirectory'>
 ): Promise<number> {
   const files = [...tree.index.entries()]
     .filter(([, node]) => node.kind === 'file')
@@ -569,8 +645,9 @@ export async function copyScannedTree(
     const target = joinRelativePath(targetRoot, relativePath)
     const parent = parentPath(target)
     if (parent !== '') await io.ensureDirectory(parent)
-    const content = await io.readTextFile(file.path)
-    await io.writeTextFile(target, content, file.modifiedMs)
+    // Raw bytes end to end: a binary sample is materialised unchanged.
+    const content = await io.readFileBytes(file.path)
+    await io.writeFileBytes(target, content, file.modifiedMs)
   }
 
   return files.length

@@ -308,6 +308,19 @@ export function createWebPlatformPort(): PlatformPort {
       if (node.isDirectory) throw new Error(`Cannot read a directory as text: ${path}`)
       return node.content
     },
+    // The memory tree stores text, so its "bytes" are exactly the UTF-8 encoding
+    // of that text; sample and text behaviour is unchanged across both runtimes.
+    readFileBytes: async (path) => {
+      const node = requireNode(path)
+      if (node.isDirectory) throw new Error(`Cannot read a directory as bytes: ${path}`)
+      return new TextEncoder().encode(node.content)
+    },
+    writeFileBytes: async (path, content, modifiedMs) => {
+      writeNode(path, new TextDecoder().decode(content), modifiedMs)
+    },
+    // The memory file system has no symbolic links, so there is never a link
+    // mtime to align; the seam keeps the very same signature and semantics.
+    setSymbolicLinkModifiedMs: async () => undefined,
     // Same raw-byte SHA-256 as the main process (`node:crypto`), computed with
     // the pure JS core so the web runtime stays free of Node and WebCrypto.
     digestFiles: async (paths, options) => {

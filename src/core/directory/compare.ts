@@ -734,6 +734,12 @@ export interface DirectoryDiffNode {
   /** Modification time on the left side; lets a copy preserve source metadata. */
   readonly leftModifiedMs?: number
   readonly rightModifiedMs?: number
+  /**
+   * True when this side's entry is a symbolic link. Informational: the
+   * comparison still judges links by their target string only.
+   */
+  readonly leftIsSymbolicLink?: boolean
+  readonly rightIsSymbolicLink?: boolean
   /** Shape of a symbolic-link target; absent on ordinary file entries. */
   readonly linkTargetKind?: LinkTargetKind
 }
@@ -896,6 +902,8 @@ function markSubtree(
       rightSize: side === 'right' ? node.size : undefined,
       leftModifiedMs: side === 'left' ? node.modifiedMs : undefined,
       rightModifiedMs: side === 'right' ? node.modifiedMs : undefined,
+      leftIsSymbolicLink: side === 'left' ? node.linkTarget !== undefined : undefined,
+      rightIsSymbolicLink: side === 'right' ? node.linkTarget !== undefined : undefined,
       linkTargetKind: node.linkTargetKind
     }
   }
@@ -964,6 +972,8 @@ function buildNode(
       rightSize: right.size,
       leftModifiedMs: left.modifiedMs,
       rightModifiedMs: right.modifiedMs,
+      leftIsSymbolicLink: left.linkTarget !== undefined,
+      rightIsSymbolicLink: right.linkTarget !== undefined,
       linkTargetKind: left.linkTargetKind ?? right.linkTargetKind
     }
   }
@@ -984,6 +994,8 @@ function buildNode(
       rightSize: right.kind === 'file' ? right.size : undefined,
       leftModifiedMs: left.kind === 'file' ? left.modifiedMs : undefined,
       rightModifiedMs: right.kind === 'file' ? right.modifiedMs : undefined,
+      leftIsSymbolicLink: left.linkTarget !== undefined,
+      rightIsSymbolicLink: right.linkTarget !== undefined,
       linkTargetKind: left.linkTargetKind ?? right.linkTargetKind
     }
   }

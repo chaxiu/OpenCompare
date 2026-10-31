@@ -14,6 +14,7 @@
 - **快照线格式不变下的链接记录（`buildSnapshot` / `snapshotToScannedTree`）**：`SNAPSHOT_SCHEMA` 仍为 `opencompare.snapshot/v1`，`SnapshotEntry` 字段集合不变（`path` / `size` / `modifiedMs` / `sha256` / 可选 `content`）。链接条目沿用 `content` 字段存 `\u0000opencompare-symlink:v1:<kind>:<target>` 标记（`sha256` 对标记串计算），**即使 `inlineContent` 返回 false 也写标记**（否则导入后链接会退化成普通文件）；`snapshotToScannedTree` 解码该标记还原 `linkTarget` / `linkTargetKind`，无标记条目行为不变。链接条目不读目标正文，目标子树不进快照。
 - **真实目录取证（`docs/evidence/` + `scripts/measure-symlink-footer.evidence.test.ts`）**：`pnpm measure:symlink`（独立 `vitest.evidence.config.mts`）用应用同一条平台 + 核心入口（`listDirectories` + `compareDirectories` + `digestFiles`）测量真实 `/Users/zhutao/Cursor/DawnChat` ↔ `/Users/zhutao/Cursor/ZenMind`，落盘 `symlink-footer-old.json` / `-new.json`。序列化契约集中在 `scripts/symlink-evidence-format.ts`：`OPENCOMPARE_SYMLINK_EVIDENCE <JSON>` 标记行只走 stdout；设置 `OPENCOMPARE_EVIDENCE_OUT` 时同一 report 以**纯 JSON** 落盘（可直接 `JSON.parse`），不再写带前缀的非法 JSON，也不再产出 `.raw.log` 文件。`docs/symlink-no-follow.md` 第 6 节给出新旧 footer 对照表（条目总数、四态、跳过左/右）、被测 commit、复现命令与机器可读结果路径，并归因差额。真实目录只用于人工取证，不进 `pnpm test`；`src/main/symlink-evidence.test.ts` 只读断言两份 JSON 可解析且数字未变、harness 输出与入库文件逐字节一致、文档引用的 `docs/...` 路径全部存在。
 - **门禁钉死（`pnpm test`）**：真实落盘 `mkdtemp` + `symlink` 样本覆盖链接环、悬空链接、指向目录的链接、指向文件的链接；断言不跟随、四态、按侧跳过、快照 roundtrip 与下钻；失败即红，单次运行时间有界（不扫 41G 全量目录）。
+- **比较结果携带链接身份标记（2026-11-01，口径不变的前提）**：`DirectoryDiffNode` 增补**信息性**可选字段 `leftIsSymbolicLink` / `rightIsSymbolicLink`（由扫描节点的 `linkTarget !== undefined` 派生），供同步侧区「两侧都是链接」与「链接 vs 普通文件」；**判等口径一字不改**——`classifyPair` 仍只按 `linkTarget` 串判 `same` / `modified`，lstat mtime 不参与四态判定，四态计数、快照格式与下钻规则均不变。同步写盘侧的「已扫描链接对 lstat mtime 对齐」（`PlatformPort.setSymbolicLinkModifiedMs`，`lutimes` 不跟随链接）归 `directory` 域，本域只钉住它**不得**反过来影响判等。**已知缺口**：符号链接的**新建 / 替换 / 悬空链接落盘**仍不在任何已交付路径内——`buildSyncPlan`/`executeSyncPlan` 没有建链 / 改链动作、`SyncPlanItem` 不带 `linkTarget`，源侧独有的链接会被当作普通文件拷正文（跟随链接），即链接在同步后会退化为普通文件；该缺口已在 `domains/directory` 验收的「已知缺口」登记为三个独立子项。
 
 ## 验收
 
@@ -21,6 +22,7 @@
 - **ac-scan-no-follow**：在真实落盘临时目录（左侧含指向目录的链接，目标子树 ≥10 个文件；另有指向上级目录构成链接环）调用平台 `listDirectories` + 核心 `scanDirectory` 后，扫描树节点与 `fileCount` 只把该链接计为 1 条叶条目，目标子树路径 0 命中；扫描在 5 秒内返回，不挂死、不栈溢出、不抛 ELOOP 之外的错误。
 - **ac-link-four-states**：两侧链接指向相同 → 恰好 1 条 `same`；指向不同 → 1 条 `modified`；仅一侧 → 1 条 `added`（左侧独有则 `removed`）；链接 vs 同路径普通文件 → 1 条 `modified`；且 `counts` 四态之和 = `fileCount` = 计入条目数（链接各 1）。
 - **ac-target-not-content**：两侧链接指向同一目标但目标文件内容不同 → 仍为 `same`；两侧链接指向不同目标但目标内容相同 → 仍为 `modified`（四态只看链接目标，不看目标内容）。
+- **ac-link-identity-informational**：`DirectoryDiffNode` 暴露 `leftIsSymbolicLink` / `rightIsSymbolicLink`（可选），对「两侧链接同一 target」「链接 vs 普通文件」「单侧链接」三种形态分别为 `(true,true)` / `(true,false)` 或 `(false,true)` / 单侧 `true`；这些字段**只作信息**——同一 fixture 在加入字段前后四态计数、`classifyPair` 结果与快照线格式逐项相等（mtime 不参与判等，`ac-target-not-content` 不回退）。同步侧对已扫描链接对的 lstat mtime 对齐（`setSymbolicLinkModifiedMs`）不改变任何四态计数，也不进入同步计划；符号链接的新建 / 替换 / 悬空落盘仍是已知缺口（见范围条，不在本域 AC 内）。
 - **ac-dangling-link-compared**：两侧悬空链接指向相同 → 1 条 `same`；一侧悬空一侧缺失 → `added` / `removed`；悬空链接存在时 `leftSkipped` / `rightSkipped` 均为 0（不再计入跳过）。
 - **ac-skip-per-side**：仅真正不可读的条目/目录计入跳过且左右分列——样本「左 1 个不可读、右 0 个」时断言 `leftSkipped === 1 && rightSkipped === 0`（反之亦然）；`DirectoryView` footer 与工作台提示显示 `已跳过：左 X / 右 Y`，两侧均为 0 时该行不出现，且不再出现合并总数文案。
 - **ac-drilldown-link**：指向文件的链接在树中双击可打开文件对比视图并展示目标文件正文（不是链接路径字符串）；指向目录的链接在树中不是可展开目录节点，双击不发起内容读取、不报错。
@@ -56,6 +58,12 @@
 - 测试沿用仓库既有模式：`src/main/platform/electron-platform.test.ts` 已有 `mkdtemp` + `symlink` + `chmod` 真实落盘样本与 `vi.mock('electron')`；核心语义断言在 `src/core/directory/*.test.ts`，UI 提示 / 下钻在 `src/renderer/src/App.test.tsx`。
 
 ## 最近交付证明
+
+- WI：`wi_intake_654321843130fa1f`（交叉引用：比较结果补链接身份标记、同步侧链接 mtime 对齐；判等口径不变；`kind: fix`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_654321843130fa1f/code-gates/attempts/001`）。同步语义与 AC 归 `domains/directory`（`qa/sync-symlink-metadata.md`），本域只钉住「判等口径不变」与已知缺口。
+- 覆盖摘要：`src/core/directory/compare.ts` 的 `DirectoryDiffNode` 增补 `leftIsSymbolicLink` / `rightIsSymbolicLink`（由扫描节点 `linkTarget !== undefined` 派生，`buildNode` / `markSubtree` 三处构造同步维护），`classifyPair` 与四态计数**零改动**；真实磁盘证据 `sync-real-gate` 的 `symlink metadata: four-state counts` 断言同一 fixture 四态计数不变，且 1,000+ 文件规模镜像同步的既有无链接 fixture 不受影响。
+- 注：本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。**后续注意**：① 这三个字段是**信息性**的，任何把它们塞进 `classifyPair` 做判等的改动都会推翻「链接只按 target 判等」这条现行口径（含 `ac-target-not-content`）；② 同步侧「新建 / 替换 / 悬空链接落盘」未实现——源侧独有的链接当前会被当普通文件拷正文（跟随链接）并在完成后仍报成功，做该子项时必须同时改 `SyncPlanItem`（带 `linkTarget`）、写路径（`symlink` / 替换）与校验口径（按 `lstat` + `readlink` 比，而非比正文），否则缺口会以「完成态一致但类型不对」的形态静默存续。
 
 - WI：`wi_ws_78db9f76d9541e6e`（v0.2.5 发布证据采集与元数据实测——本域承担其中两处符号链接证据文档断头路；`kind: release-evidence`）
 - 日期：2026-10-22

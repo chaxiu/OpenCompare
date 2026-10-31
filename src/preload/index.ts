@@ -34,6 +34,16 @@ const platform: PlatformPort = {
     >,
   readTextFile: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
+  readFileBytes: (path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
+  writeFileBytes: (path, content, modifiedMs) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
+  setSymbolicLinkModifiedMs: (path, modifiedMs) =>
+    ipcRenderer.invoke(
+      PLATFORM_CHANNELS.setSymbolicLinkModifiedMs,
+      path,
+      modifiedMs
+    ) as Promise<void>,
   digestFiles: (paths, options) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
   cancelOperation: (operationId) =>
