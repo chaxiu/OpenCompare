@@ -92,6 +92,8 @@ export const files: Record<keyof typeof zhFiles, string> = {
   'files.structured.countsLabel': 'structured counts',
   'files.structured.nodeCount': '{count} nodes · counts reflect the runtime comparison',
   'files.structured.changes': 'Node path changes',
+  'files.structured.changeList': 'Node change list',
+  'files.structured.missingSide': 'Not on this side',
   'files.structured.parseFailed': 'Parse failed',
   'files.structured.showing': 'Showing {visible} / {total}',
   'files.structured.comparing': 'Comparing',

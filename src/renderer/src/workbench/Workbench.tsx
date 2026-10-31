@@ -11,6 +11,7 @@ import { visibleDirectoryCounts } from '@core/directory/rows'
 import { directoryReportSource } from '@core/directory/report'
 import type { DirectoryReportProgress } from '@core/directory/report'
 import type { DirectoryFilter } from '@core/directory/filter'
+import type { StructuredFilter } from '@core/structured/diff'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
@@ -32,6 +33,7 @@ import { CsvView } from '@renderer/views/CsvView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
+import type { StructuredScroll } from '@renderer/views/StructuredView'
 import {
   createDirectorySession,
   createDrilldownSession,
@@ -119,6 +121,24 @@ interface DirectoryScroll {
 }
 
 const EMPTY_SCROLL: DirectoryScroll = { left: 0, right: 0 }
+
+/**
+ * The navigation state the shell keeps per structured session: the status
+ * filter and the selected JSON Pointer survive a tab switch (the view remounts)
+ * and never cross over between structured sessions.
+ */
+interface StructuredViewState {
+  readonly filter: StructuredFilter
+  readonly selectedPath: string | null
+}
+
+const EMPTY_STRUCTURED_STATE: StructuredViewState = {
+  filter: 'all',
+  selectedPath: null
+}
+
+/** Scroll offsets of a structured session's two original panes. */
+const EMPTY_STRUCTURED_SCROLL: StructuredScroll = { left: 0, right: 0 }
 
 /** Live progress of the directory comparison currently running, if any. */
 interface DirectoryProgressState {
@@ -355,6 +375,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   const [noticeTone, setNoticeTone] = useState<'danger' | 'info'>('danger')
   const [directoryStates, setDirectoryStates] = useState<Record<string, DirectoryViewState>>({})
   const [directoryScroll, setDirectoryScroll] = useState<Record<string, DirectoryScroll>>({})
+  const [structuredStates, setStructuredStates] = useState<Record<string, StructuredViewState>>({})
+  const [structuredScroll, setStructuredScroll] = useState<Record<string, StructuredScroll>>({})
   /**
    * Privacy switch of the HTML report. It lives on the shell, not on a session,
    * so switching tabs or remounting the view keeps the user's choice.
@@ -505,6 +527,8 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
     setSessions((current) => closeSessions(current, id))
     setDirectoryStates((current) => withoutKey(current, id))
     setDirectoryScroll((current) => withoutKey(current, id))
+    setStructuredStates((current) => withoutKey(current, id))
+    setStructuredScroll((current) => withoutKey(current, id))
     setCodeMerge((current) => withoutKey(current, id))
     setCsvAlign((current) => (current?.sessionId === id ? null : current))
     setCloseTarget(null)
@@ -583,6 +607,27 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
   function rememberDirectoryScroll(id: string, side: SidePosition, scrollTop: number): void {
     setDirectoryScroll((current) => {
       const scroll = current[id] ?? { left: 0, right: 0 }
+      if (scroll[side] === scrollTop) return current
+      return { ...current, [id]: { ...scroll, [side]: scrollTop } }
+    })
+  }
+
+  /** Applies one patch on top of a structured session's kept view state. */
+  function patchStructuredState(id: string, patch: Partial<StructuredViewState>): void {
+    setStructuredStates((current) => ({
+      ...current,
+      [id]: { ...(current[id] ?? EMPTY_STRUCTURED_STATE), ...patch }
+    }))
+  }
+
+  /** Remembers one original pane's offset so a remount re-applies it. */
+  function rememberStructuredScroll(
+    id: string,
+    side: SidePosition,
+    scrollTop: number
+  ): void {
+    setStructuredScroll((current) => {
+      const scroll = current[id] ?? EMPTY_STRUCTURED_SCROLL
       if (scroll[side] === scrollTop) return current
       return { ...current, [id]: { ...scroll, [side]: scrollTop } }
     })
@@ -1363,24 +1408,34 @@ export function Workbench({ platform }: { readonly platform: PlatformPort }): JS
           />
         ) : null
       }
-      case 'structured':
+      case 'structured': {
+        const structuredState = structuredStates[session.id] ?? EMPTY_STRUCTURED_STATE
+        const scrollTops = structuredScroll[session.id] ?? EMPTY_STRUCTURED_SCROLL
+        const shared = {
+          filter: structuredState.filter,
+          onFilterChange: (filter: StructuredFilter) =>
+            patchStructuredState(session.id, { filter }),
+          selectedPath: structuredState.selectedPath,
+          onSelectPath: (selectedPath: string | null) =>
+            patchStructuredState(session.id, { selectedPath }),
+          scrollTops,
+          onScrollTopChange: (side: SidePosition, scrollTop: number) =>
+            rememberStructuredScroll(session.id, side, scrollTop),
+          platform,
+          toolbarLeading
+        }
         return session.adhoc ? (
           <StructuredView
             key={session.id}
+            {...shared}
             pair={session.adhoc.pair}
             format={session.adhoc.format}
-            platform={platform}
-            toolbarLeading={toolbarLeading}
             onOpenSide={(side, file) => handleSessionFileOpen(session.id, side, file)}
           />
         ) : (
-          <StructuredView
-            key={session.id}
-            fixture={STRUCTURED_SCENE}
-            platform={platform}
-            toolbarLeading={toolbarLeading}
-          />
+          <StructuredView key={session.id} {...shared} fixture={STRUCTURED_SCENE} />
         )
+      }
     }
   }
 

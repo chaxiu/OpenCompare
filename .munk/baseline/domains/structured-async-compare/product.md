@@ -1,6 +1,6 @@
 # Domain: structured-async-compare
 
-结构化对比的 **renderer 后台执行层**：把 JSON / YAML 语义对比的整条计算链（parse → by-node-path diff → 非 `same` 条目的左右原文行列定位）从 renderer 主线程搬到 renderer Worker，并给 `StructuredView` 接上「对比中」加载态、代次取代、取消与卸载终止语义。本域只拥有**执行与调度**这一层：语义规则、状态 / 计数口径、JSON Pointer 格式归 `structured` 域（`src/core/structured/`，本域零改动）；`structured` 域的定位层（`createStructuredLocator`）在这里被复用，但差异行点选跳转 / 原文反选 / 双栏同步滚动 / 原文窗口化不属本域。
+结构化对比的 **renderer 后台执行层**：把 JSON / YAML 语义对比的整条计算链（parse → by-node-path diff → 非 `same` 条目的左右原文行列定位）从 renderer 主线程搬到 renderer Worker，并给 `StructuredView` 接上「对比中」加载态、代次取代、取消与卸载终止语义。本域只拥有**执行与调度**这一层：语义规则、状态 / 计数口径、JSON Pointer 格式归 `structured` 域（`src/core/structured/`，本域零改动）；`structured` 域的定位层（`createStructuredLocator`）在这里被复用，但差异行点选跳转 / 原文反选 / 双栏同步滚动 / 原文窗口化不属本域（归 `structured-locate-sync` 域）。
 
 ## 范围
 
@@ -37,8 +37,8 @@
 
 ## 非目标
 
-- 不做差异行点选跳转 / 高亮、原文反选、双栏同步滚动、过滤与切 tab 的选中项 / 滚动位置保持（下游「定位与同步滚动」子项）。
-- 不做原文与变更列表的窗口化 / 渲染行数有界（同属下游子项）；本域只保证解析、差异、定位不占主线程，5 MB 的可交互性在对比层与挂起客户端上断言，不以「整页渲染 5 MB 后仍流畅」为验收。
+- 不做差异行点选跳转 / 高亮、原文反选、双栏同步滚动、过滤与切 tab 的选中项 / 滚动位置保持（已由 `structured-locate-sync` 域承接）。
+- 不做原文与变更列表的窗口化 / 渲染行数有界（同属 `structured-locate-sync` 域）；本域只保证解析、差异、定位不占主线程，5 MB 的可交互性在对比层与挂起客户端上断言，不以「整页渲染 5 MB 后仍流畅」为验收。
 - 不做行 → 节点反向索引；`ranges` 只按变更条目的路径正向产出。
 - 不改 `diffStructured` / `parseStructured` / `locateStructuredPath` 的签名、状态与计数口径、JSON Pointer 格式；不改 `src/core/structured/` 的语义规则。
 - 不改主进程 IPC / 扫描 / 哈希；大文件仍走既有 `readTextFile` 整串读取；不新增 npm 依赖、网络依赖、UI 库或第二套虚拟化体系。

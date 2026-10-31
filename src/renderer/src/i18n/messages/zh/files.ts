@@ -88,6 +88,8 @@ export const files = {
   'files.structured.countsLabel': '结构化计数',
   'files.structured.nodeCount': '共 {count} 个节点 · 计数为运行时对比结果',
   'files.structured.changes': '节点路径变更',
+  'files.structured.changeList': '节点变更列表',
+  'files.structured.missingSide': '此侧不存在',
   'files.structured.parseFailed': '解析失败',
   'files.structured.showing': '显示 {visible} / {total}',
   'files.structured.comparing': '对比中',
