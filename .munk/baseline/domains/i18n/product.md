@@ -195,6 +195,11 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **ac-sync-align-copy-keys**：`messages/{zh,en}/directory.ts` 成对新增 `directory.sync.group.align`（zh `待对齐链接时间` / en `Link times to align`），`directory.sync.summary` 与 `directory.sync.noExecutable` 就地扩写为含待对齐口径，`messages/{zh,en}/shell.ts` 的 `shell.notice.syncComplete` 扩为四占位符（`copied` / `updated` / `deleted` / `aligned`）；同键 zh / en 占位符集合逐项一致、en 值零 `\p{Script=Han}`、键集相等，`messages.test.ts` 的键完整性 / 占位符 parity / en 零汉字 / 卫生断言全绿；既有键未改名、未删除。
 - **ac-sync-align-copy-rendered**：`views/directorySyncDialog.test.tsx` 与 `workbench/directoryI18n.test.tsx` 在 zh / en 下断言摘要句含对齐数（en `… · 0 link time aligned`）、完成提示含对齐数（zh `对齐链接时间 1`），且仅含对齐项的一轮不出现「该方向没有需要同步的变更」类空态句。
 
+### 同步预览「已选」词条（2026-11-01）
+
+- **ac-sync-summary-selected-key**：`messages/{zh,en}/directory.ts` 成对新增 `directory.sync.groupCountSelected`（zh ` · 已选 {selected}` / en ` · {selected} selected`）；同键 zh / en 占位符集合一致（仅 `{selected}`）、en 值零 `\p{Script=Han}`、键集相等，`messages.test.ts` 的键完整性 / 占位符 parity / en 零汉字 / 卫生断言全绿；既有 `directory.sync.groupCount.*` 未改名、未删除。
+- **ac-sync-summary-selected-rendered**：`views/directoryI18n.test.tsx` 与 `views/directorySyncDialog.test.tsx` 断言删除组头在 zh / en 下都同时读出计划总数与已选数（zh `1 个 · 20 B · 已选 0`、en `0 items · 0 B · 0 selected`），勾选后该后缀随 `syncPreviewAction(...).delete` 变化为 1；新增 / 覆盖组头不出现该后缀（仍为计划数）。
+
 ## 非目标
 
 - 不做设置面板的更多分区（主题 / 快捷键）、持久化草稿或批量保存、成功 toast（`settings.saved` 保持未使用）；不发成功提示不改 `settings.saved` 语义。
@@ -239,6 +244,12 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **收口轮接线纪律**：本 WI 允许改动的只有「文案载体」——词典值、`key + params` 映射、错误 code → 词典键的映射、注释语言、测试；不得改行为契约（调用序列、会话身份、过滤 / 选中 / 滚动、错误 code、平台 filter 的 `extensions`）。非 React 模块（`snapshotOps` / `loadSampleSessions` / `directoryCompare` / `fileIO`）不得自己解析语言：已知错误按「稳定 code + 参数」产出，由 `Workbench` 在渲染期用 `t(...)` 生成文案；未知错误仍走 `detailNotice` 原样展示。平台对话框 filter 名称由调用点按当前语言构造（纯工厂函数），`TEXT_FILE_FILTER` 的 `extensions` 与 `SNAPSHOT_FILE_FILTER` 的 `extensions` 保持不变；不得把 `t()` 结果缓存进模块级常量。因本轮把 `SplitPane` 接上 `useI18n()`，无 Provider 时仍回落 zh，既有组件单测断言不变；不得把 `language` 用作任何组件 / 视图的 `key`。视图 / 壳层文案变化会连带既有测试里的中文 selector 失效：如确需更新，改为词典取值或 en 真实文案，不允许放宽断言或删除用例。冒烟写法沿用既有约定：en 用 `renderWithI18n(ui, 'en')`，App 级用 `localStorage['opencompare.userSettings']` 预置记录 + `await screen.findByRole(...)`；zh 断言取 `zh[key]` 值；不对含临时路径的整棵 DOM 做全量汉字扫描，只对指定表面元素断言。术语表以测试常量呈现（不改生产 i18n API），canonical 词形与 en 词典现状一致（美式拼写）。
 
 ## 最近交付证明
+
+- WI：`wi_intake_5f07e9ba2c93369b`（交叉引用：同步预览删除分组标题的「已选 N」词条；`kind: fix`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_5f07e9ba2c93369b/code-gates/attempts/001`；`pnpm test` 96 files / 1435 passed + 1 skipped，`pnpm test:sync-real` 33 tests / 2.54s）。摘要 / Apply 同源语义与 AC 归 `domains/directory`（`qa/sync-summary-selection-sync.md`），本域只同步词条口径。
+- 覆盖摘要：`messages/{zh,en}/directory.ts` 成对新增一键 `directory.sync.groupCountSelected`（zh ` · 已选 {selected}` / en ` · {selected} selected`，单占位符 `{selected}`，无句末标点，供组头「N 个 · X 字节」后缀拼接）；`en` 侧仍由 `Record<keyof typeof zhDirectory, string>` 编译期兜住漏补，`messages.test.ts` 的键集相等 / 占位符一致 / en 无汉字断言全绿，并把该键登记进 `INLINE_COPY_KEYS` 白名单（组头文案是插值片段而非独立句子）。渲染断言：`views/directoryI18n.test.tsx`（en `0 items · 0 B · 0 selected`、zh `1 个 · 20 B · 已选 0`）、`views/directorySyncDialog.test.tsx`（勾选后 `已选 1` 与摘要 / Apply 同屏同步）。
+- 注：① **该键是后缀片段**（以空格 + 分隔符开头、无独立主语），只能接在 `directory.sync.groupCount.*` 之后；当成独立句使用会读成「已选 1」孤句，所以它进了 `INLINE_COPY_KEYS` 白名单。② 只有删除组（opt-in 组）渲染这个后缀——给新增 / 覆盖组也加上会让「计划数」与「勾选数」两套语义并存，本轮 prd 明确禁止。③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。
 
 - WI：`wi_intake_bdc57b0abb1db652`（交叉引用：同步「待对齐链接时间」分组与摘要 / 完成提示的对齐计数词条；`kind: fix`）
 - 日期：2026-11-01

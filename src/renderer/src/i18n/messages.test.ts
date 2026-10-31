@@ -59,6 +59,7 @@ const INLINE_COPY_KEYS = new Set([
   'directory.sync.materialize',
   'directory.sync.total.one',
   'directory.sync.total.other',
+  'directory.sync.groupCountSelected',
   'directory.template.label.template',
   'directory.template.label.incoming',
   'directory.template.label.output'

@@ -61,6 +61,7 @@ export const directory = {
   'directory.sync.group.align': '待对齐链接时间',
   'directory.sync.groupCount.one': '{count} 个 · {size}',
   'directory.sync.groupCount.other': '{count} 个 · {size}',
+  'directory.sync.groupCountSelected': ' · 已选 {selected}',
   'directory.none': '无',
   'directory.sync.empty': '该方向没有需要同步的变更，目标侧已与源侧一致。',
   'directory.sync.syncing': '正在同步…',

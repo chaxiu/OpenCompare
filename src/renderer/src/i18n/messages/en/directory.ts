@@ -65,6 +65,7 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.sync.group.align': 'Link times to align',
   'directory.sync.groupCount.one': '{count} item · {size}',
   'directory.sync.groupCount.other': '{count} items · {size}',
+  'directory.sync.groupCountSelected': ' · {selected} selected',
   'directory.none': 'None',
   'directory.sync.empty': 'This direction has no changes to sync; the target already matches the source.',
   'directory.sync.syncing': 'Syncing…',

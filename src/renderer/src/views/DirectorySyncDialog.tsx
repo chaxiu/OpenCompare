@@ -6,21 +6,24 @@ import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
 import { formatBytes } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
-import { canApplySyncPreview } from '@renderer/workbench/directoryOps'
+import { syncPreviewAction } from '@renderer/workbench/directoryOps'
 import type { SyncPreview } from '@renderer/workbench/directoryOps'
-import { SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS, countKey, syncPreviewGuidance } from './directoryCopy'
+import { SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS, countKey } from './directoryCopy'
 
 function GroupHeader({
   title,
   tone,
   count,
   bytes,
+  selectedCount,
   actions
 }: {
   readonly title: string
   readonly tone: string
   readonly count: number
   readonly bytes: number
+  /** Opt-in group only: how many of the planned items the user checked. */
+  readonly selectedCount?: number
   readonly actions?: ReactNode
 }): JSX.Element {
   const { t } = useI18n()
@@ -32,6 +35,9 @@ function GroupHeader({
           count,
           size: formatBytes(bytes)
         })}
+        {selectedCount === undefined
+          ? null
+          : t('directory.sync.groupCountSelected', { selected: selectedCount })}
       </span>
       {actions ? <div className="ml-auto flex items-center gap-1">{actions}</div> : null}
     </div>
@@ -108,15 +114,11 @@ export function DirectorySyncDialog({
     })
   }
 
-  // Items this run acts on, link alignments included: the dialog never claims
-  // "nothing to sync" while there is link metadata left to align.
-  const totalItems = plan.totalCount + alignments.length
-  // The Apply button and the body copy are driven by the same predicate the
-  // real-disk gate asserts; `empty` is unreachable for a pending alignment.
-  const executable = canApplySyncPreview(preview, deletePaths)
-  const guidance = syncPreviewGuidance(preview, deletePaths)
-  const empty = guidance === 'empty'
-  const blockedByDeletes = guidance === 'noExecutable'
+  // Summary counts, Apply state and body copy are one reading of the shared
+  // predicate (also asserted by the real-disk gate), so they cannot disagree.
+  const action = syncPreviewAction(preview, deletePaths)
+  const empty = action.guidance === 'empty'
+  const blockedByDeletes = action.guidance === 'noExecutable'
 
   return (
     <Dialog
@@ -129,8 +131,8 @@ export function DirectorySyncDialog({
           {t('directory.sync.targetRoot')}
           <span className="font-mono">{plan.targetRoot}</span>
           {materializeTarget ? t('directory.sync.materialize') : ''}
-          {t(countKey('directory.sync.total.one', 'directory.sync.total.other', totalItems), {
-            count: totalItems,
+          {t(countKey('directory.sync.total.one', 'directory.sync.total.other', action.planned), {
+            count: action.planned,
             size: formatBytes(plan.totalBytes)
           })}
         </>
@@ -144,7 +146,7 @@ export function DirectorySyncDialog({
           <ToolbarButton
             variant="primary"
             onClick={() => onConfirm(deletePaths)}
-            disabled={busy || !executable}
+            disabled={busy || !action.executable}
           >
             {busy ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
             {busy ? t('directory.sync.syncing') : t('directory.sync.apply')}
@@ -160,7 +162,7 @@ export function DirectorySyncDialog({
             <GroupHeader
               title={t('directory.sync.group.copy')}
               tone="text-diff-added"
-              count={plan.copy.count}
+              count={action.copy}
               bytes={plan.copy.bytes}
             />
             {plan.copy.items.length > 0 ? (
@@ -183,7 +185,7 @@ export function DirectorySyncDialog({
             <GroupHeader
               title={t('directory.sync.group.update')}
               tone="text-diff-modified"
-              count={plan.update.count}
+              count={action.update}
               bytes={plan.update.bytes}
             />
             {plan.update.items.length > 0 ? (
@@ -208,6 +210,7 @@ export function DirectorySyncDialog({
                 title={t('directory.sync.group.delete')}
                 tone="text-diff-removed"
                 count={plan.delete.count}
+                selectedCount={action.delete}
                 bytes={plan.delete.bytes}
                 actions={
                   plan.delete.items.length > 0 ? (
@@ -223,7 +226,7 @@ export function DirectorySyncDialog({
                       <ToolbarButton
                         size="sm"
                         variant="ghost"
-                        disabled={busy || deletePaths.length === 0}
+                        disabled={busy || action.delete === 0}
                         onClick={() => setSelected(new Set())}
                       >
                         {t('directory.sync.clearSelection')}
@@ -264,12 +267,12 @@ export function DirectorySyncDialog({
             </section>
           ) : null}
 
-          {alignments.length > 0 ? (
+          {action.align > 0 ? (
             <section>
               <GroupHeader
                 title={t('directory.sync.group.align')}
                 tone="text-content-secondary"
-                count={alignments.length}
+                count={action.align}
                 bytes={0}
               />
               <ul className="mt-1 rounded-sm border border-line-subtle">
@@ -290,10 +293,10 @@ export function DirectorySyncDialog({
           <div className="flex flex-col gap-1 border-t border-line-subtle pt-2">
             <p className="text-2xs text-content-secondary" aria-live="polite">
               {t('directory.sync.summary', {
-                copy: plan.copy.count,
-                update: plan.update.count,
-                delete: deletePaths.length,
-                align: alignments.length
+                copy: action.copy,
+                update: action.update,
+                delete: action.delete,
+                align: action.align
               })}
             </p>
             {blockedByDeletes ? (

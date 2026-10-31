@@ -173,21 +173,71 @@ export interface SyncPreview {
   readonly linkAlignments: readonly SyncLinkAlignment[]
 }
 
+/** Body copy a sync preview needs, derived from {@link SyncPreviewAction}. */
+export type SyncPreviewGuidance = 'changes' | 'empty' | 'noExecutable'
+
 /**
- * The **one** executable predicate of a sync preview, shared by the Apply button
- * and the real-disk gate. A preview is executable when it has bytes to copy or
- * overwrite, link metadata to align, or mirror deletions the user kept checked:
- * a preview that only aligns link mtimes still has real work to do, so the user
- * must be able to run it (and the gate must judge it the same way).
+ * What one confirmation would actually execute, read **once** from the preview
+ * and the current checked deletions. A preview is executable when it has bytes
+ * to copy or overwrite, link metadata to align, or mirror deletions the user
+ * kept checked: an only-aligning preview still has real work to do.
+ *
+ * `delete` counts only the checked paths the mirror plan would really remove,
+ * so the summary never advertises a deletion the run would not perform;
+ * `planned` is everything the preview lists (plan items + link alignments).
+ * The dialog's counts, its Apply `disabled` state and its body copy all read
+ * this one result, and the real-disk gate asserts the same object.
+ */
+export interface SyncPreviewAction {
+  readonly copy: number
+  readonly update: number
+  /** Checked mirror deletions this run would remove (0 in incremental mode). */
+  readonly delete: number
+  readonly align: number
+  /** Plan items + pending link alignments: what the preview lists in total. */
+  readonly planned: number
+  readonly executable: boolean
+  readonly guidance: SyncPreviewGuidance
+}
+
+/**
+ * The **one** predicate and count source of a sync preview, shared by the dialog
+ * (summary / Apply / guidance) and the real-disk gate.
+ */
+export function syncPreviewAction(
+  preview: SyncPreview,
+  deletePaths: readonly string[] = []
+): SyncPreviewAction {
+  const { plan } = preview
+  const copy = plan.copy.count
+  const update = plan.update.count
+  const align = preview.linkAlignments.length
+  const checked = new Set(deletePaths)
+  // Deletions are mirror-only opt-ins and only the plan's own delete items can
+  // run, so an unknown or incremental-mode path never counts as a deletion.
+  const deleted =
+    plan.mode === 'mirror'
+      ? plan.delete.items.filter((item) => checked.has(item.relativePath)).length
+      : 0
+  const planned = plan.totalCount + align
+  const executable = copy > 0 || update > 0 || align > 0 || deleted > 0
+  const guidance: SyncPreviewGuidance = executable
+    ? 'changes'
+    : planned > 0
+      ? 'noExecutable'
+      : 'empty'
+  return { copy, update, delete: deleted, align, planned, executable, guidance }
+}
+
+/**
+ * The executable bit of {@link syncPreviewAction}, kept as its own export because
+ * the real-disk gate and the dialog have always asked this question by name.
  */
 export function canApplySyncPreview(
   preview: SyncPreview,
   deletePaths: readonly string[] = []
 ): boolean {
-  const { plan } = preview
-  if (plan.copy.count > 0 || plan.update.count > 0) return true
-  if (preview.linkAlignments.length > 0) return true
-  return plan.mode === 'mirror' && deletePaths.length > 0
+  return syncPreviewAction(preview, deletePaths).executable
 }
 
 /**

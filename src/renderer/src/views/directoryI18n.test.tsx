@@ -734,7 +734,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect(screen.getByText('Files to delete (mirror)')).toBeDefined()
     expect(screen.getByText('1 item · 100 B')).toBeDefined()
     expect(screen.getByText('2 items · 2.0 KiB')).toBeDefined()
-    expect(screen.getByText('0 items · 0 B')).toBeDefined()
+    expect(screen.getByText('0 items · 0 B · 0 selected')).toBeDefined()
     expect(
       screen.getByText('This run: 1 copy · 2 overwrite · 0 delete · 0 link time aligned')
     ).toBeDefined()
@@ -770,7 +770,7 @@ describe('DirectorySyncDialog bilingual copy', () => {
     expect(screen.getByText(zh['directory.sync.group.delete'])).toBeDefined()
     expect(screen.getByText('1 个 · 100 B')).toBeDefined()
     expect(screen.getByText('1 个 · 1.0 KiB')).toBeDefined()
-    expect(screen.getByText('1 个 · 20 B')).toBeDefined()
+    expect(screen.getByText('1 个 · 20 B · 已选 0')).toBeDefined()
     expect(button('取消')).toBeDefined()
     expect(button('确认执行')).toBeDefined()
   })
