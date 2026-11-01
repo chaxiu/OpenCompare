@@ -33,8 +33,54 @@ const EXPECTED_GATES = [
   { id: 'cancel-gate', command: 'pnpm test:cancel' },
   { id: 'memory-gate', command: 'pnpm test:memory' },
   { id: 'structured-semantics', command: 'pnpm test:structured' },
-  { id: 'sync-real-gate', command: 'pnpm test:sync-real' }
+  { id: 'sync-real-gate', command: 'pnpm test:sync-real' },
+  {
+    id: 'template-default-unchecked',
+    command: 'pnpm test src/template-gate-default-unchecked.test.ts'
+  },
+  {
+    id: 'template-single-source',
+    command: 'pnpm test src/template-gate-single-source.test.ts'
+  },
+  { id: 'template-sha-mtime', command: 'pnpm test src/template-gate-sha-mtime.test.ts' },
+  {
+    id: 'template-cancel-zero-write',
+    command: 'pnpm test src/template-gate-cancel-zero-write.test.ts'
+  },
+  { id: 'template-e2e-real', command: 'pnpm test src/template-e2e-real-directory.test.ts' }
 ] as const
+
+/** The five template placement gate files, mapped by gate id. */
+const TEMPLATE_GATES = [
+  {
+    id: 'template-default-unchecked',
+    file: 'src/template-gate-default-unchecked.test.ts',
+    marker: 'conflict and overwrite default-unchecked'
+  },
+  {
+    id: 'template-single-source',
+    file: 'src/template-gate-single-source.test.ts',
+    marker: 'counts and apply read one resolved plan'
+  },
+  {
+    id: 'template-sha-mtime',
+    file: 'src/template-gate-sha-mtime.test.ts',
+    marker: 'source sha256 and mtimeSec preserved'
+  },
+  {
+    id: 'template-cancel-zero-write',
+    file: 'src/template-gate-cancel-zero-write.test.ts',
+    marker: 'cancel writes nothing'
+  },
+  {
+    id: 'template-e2e-real',
+    file: 'src/template-e2e-real-directory.test.ts',
+    marker: 'real-directory end-to-end'
+  }
+] as const
+
+/** Sample-mount / built-in fixture references the template gates may never carry. */
+const SAMPLE_MARKERS = ['@shared/fixtures', 'DIRECTORY_SAMPLE_PATHS', ['', 'samples'].join('/')]
 
 const SINGLE_ARGV_FORBIDDEN = ['&&', '||', '|', ';'] as const
 
@@ -51,16 +97,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly eleven pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly sixteen pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(11)
+    expect(defaultManifest.gates).toHaveLength(16)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the eleven commands verbatim with cwd "."', () => {
+  it('keeps the sixteen commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
@@ -104,6 +150,56 @@ describe('default code-gates matrix', () => {
         existsSync(resolve(process.cwd(), relativePath)),
         `manifest: ${relativePath} exists`
       ).toBe(true)
+    }
+  })
+
+  it('registers the five template placement gates at the end of the matrix', () => {
+    const tail = defaultManifest.gates.slice(-TEMPLATE_GATES.length)
+    expect(tail.map((gate) => gate.id)).toEqual(TEMPLATE_GATES.map((gate) => gate.id))
+    for (const expected of TEMPLATE_GATES) {
+      const gate = gateById(defaultManifest, expected.id)
+      expect(gate, `manifest: gate ${expected.id}`).toBeDefined()
+      expect(gate?.cwd, `manifest: cwd of ${expected.id}`).toBe('.')
+      expect(gate?.command, `manifest: command of ${expected.id}`).toBe(
+        `pnpm test ${expected.file}`
+      )
+      expect(existsSync(resolve(process.cwd(), expected.file)), `manifest: ${expected.file} exists`).toBe(
+        true
+      )
+      for (const forbidden of SINGLE_ARGV_FORBIDDEN) {
+        expect(gate?.command, `manifest: ${expected.id} is single argv`).not.toContain(forbidden)
+      }
+    }
+  })
+
+  it('maps the four template placement behaviours onto the template gates', () => {
+    const description = defaultManifest.description
+    for (const expected of TEMPLATE_GATES) {
+      expect(description.toLowerCase(), `manifest: marker "${expected.marker}"`).toContain(
+        expected.marker.toLowerCase()
+      )
+      expect(description, `manifest: mapped gate id ${expected.id}`).toContain(
+        `\`${expected.id}\``
+      )
+      expect(description, `manifest: mapped file ${expected.file}`).toContain(expected.file)
+    }
+    // The earlier sync behaviour map stays intact.
+    for (const marker of [
+      'mirror delete opt-in',
+      'idempotent dry-run',
+      'mtime and relative structure preserved',
+      'link mtime alignment'
+    ]) {
+      expect(description.toLowerCase(), `manifest: sync marker "${marker}"`).toContain(marker)
+    }
+  })
+
+  it('keeps every template gate free of sample fixtures and sample mount paths', () => {
+    for (const expected of TEMPLATE_GATES) {
+      const source = readFileSync(resolve(process.cwd(), expected.file), 'utf8')
+      for (const marker of SAMPLE_MARKERS) {
+        expect(source, `${expected.file}: must not reference ${marker}`).not.toContain(marker)
+      }
     }
   })
 
