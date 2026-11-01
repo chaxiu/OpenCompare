@@ -203,6 +203,13 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-icons-no-orphan**：`icons.test.ts` 全绿：每个 vendored svg 与 `ICON_PATHS` 一一对应，`SHELL_ENTRY_ICONS` / `UI_ICON_ACTIONS` 无悬空引用，渲染源码不再引用已删图标（`layers` / `sparkles` 与 `UI_ICON_ACTIONS.sample`）。
 - **ac-code-gates-green**：本项 worktree 内 10 道 gate（`install` / `lint` / `typecheck` / `build` / `build-web` / `test` / `test-compare-request` / `cancel-gate` / `memory-gate` / `structured-semantics`）全部退出码 0。
 
+### 样本入口归位补钉（2026-11-01）
+
+- **ac-toolbar-sample-entries-zero**：空工作台与目录对比会话下，`[data-sample-entry]`、`[data-shell-entry="samples"]`、`[data-shell-entry="samples-menu"]` 的 DOM 命中数均为 0；样本入口只出现在设置面板（5 条 `data-sample-entry`）。
+- **ac-first-screen-no-sample-path**：空工作台首屏与样本读取失败态在 zh / en 下可见文本（含按钮 / 元素 `title`）都不含 `/samples` 片段；失败态仍保留错误标题与「重试」按钮，en 文本零汉字。
+- **ac-workflow-toolbar-no-sample-path**：目录视图工具栏所有按钮的可见文案与 `title` 都不含 `/samples`；模板按钮 tooltip 不再点名内置散乱树（词条口径归 `domains/i18n` 的 `ac-template-tooltip-copy-no-path`）。
+- **ac-settings-samples-load**：设置「示例与调试」在 zh / en 下列出 5 个用户入口（directory / code / csv / structured / remote-snapshot），点击任一入口关闭设置面板并激活对应会话；调试开关开启时失败演示入口（`data-sample-failure`）存在且不计入 5 条。既有 `ac-settings-samples-five-entries` / `ac-settings-entry-starts-session` / `ac-settings-failure-entry-debug-only` 口径不变。
+
 ## 非目标
 
 - **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域。各视图只读呈现内容，不做差异高亮与统计；除目录会话（其四态计数由运行时对比结果按过滤档派生，语义归 `directory` 域）外，其余视图的状态栏计数与标签取自样本自带 answer key（编辑期标注），非运行时计算。
@@ -240,6 +247,12 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **工具区滚动兜底只落行容器、不落 band**：三行统一使用同一兜底表达式 `min-w-0 overflow-x-auto scrollbar-none`，不做按行差异化判断（不溢出时无滚动条，视觉零变化）；`scrollbar-none` 放在 `main.css` `@utility` 区、与既有 4 个 utility 同级（Tailwind v4 `@utility` 语法），不改 `@theme` token 段。断言以「类语义 + 可访问名」为准（jsdom 零布局，不做像素测量），可访问名统一走 `translate('zh')` 的 i18n key，禁止硬编码中文字面量；新增断言落在 `shellLayout.dom.test.tsx` 既有 `describe.each(TIERS)` 块内、紧跟「每行单行」用例之后。截图口径：`git diff --name-only` 仅 3 个允许文件、`docs/assets/*.png` 与 `docs/screenshots.md` 零改动即视为「未重跑截图，2560 宽画面零变化」；若实现意外改变 2560 画面才需 `pnpm screenshots` 并同步 `docs/screenshots.md` 的 `- commit:` 行（两项同步改，不得只换图）。
 
 ## 最近交付证明
+
+- WI：`wi_ws_2f5af7320d12ad9f`（样本入口归位补钉：首屏 / 目录工具栏零样本入口、零样本路径；同步失败本地化词条口径归 `domains/i18n`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_2c5dead54f30bd31/code-gates/attempts/001`）。本 change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合，本域无新增 qa 折叠用例。
+- 覆盖摘要：入口归位本身沿用既有 `SettingsDialog` 的「示例与调试」分区（5 条 `data-sample-entry` + 调试专用 `data-sample-failure`），本轮不新增入口组件、不改加载路径；只把「样本出口归位」从顶栏 / 目录工具栏补钉到**可见文案**层面——`shell.error.sampleRead` 与 `directory.toolbar.templateTitle` 中英同批去掉 `/samples` 路径与「内置散乱树 / built-in scattered tree」点名（词条归 `domains/i18n`）。断言：`App.i18n.test.tsx` 新增「首屏双语无 `/samples`、所有 `[title]` 无 `/samples`、三类样本入口 DOM 命中均为 0」「zh 失败态仍可重试且无样本路径」「设置 5 条入口顺序 + remote-snapshot 点击关面板并起会话」三条，既有 en 样本读取失败断言改写为无路径句并追加 `Try again`；`views/directoryI18n.test.tsx` 新增「目录工具栏按钮文本 / `title` 无 `/samples`、三类样本入口为 0、模板 tooltip 不再点名内置树」一条。
+- 注：① **「入口归位」≠「文案去样本」**：入口早已在设置里，但错误态与 tooltip 仍写着 `/samples/...`，用户会去顶栏/工具栏找样本——后续任何新增 shell 文案都不得再写内置样本路径（`ac-first-screen-no-sample-path` 按 `[title]` 全量扫，不只是可见文本）。② 失败态断言同时要求「重试按钮存在」，不要为了去路径把错误态简化成一句死句。③ 该组断言依赖 `data-sample-entry` / `data-sample-failure` 锚点，别在重构设置分区时改这两个属性名。
 
 - WI：`wi_ws_e93fdbef0443dbcf`（scene 由打开对象决定，移除顶栏 scene 分段控件；`kind: feature`，`needSelfTest=false`，UI 自测跳过）
 - 日期：2026-10-31

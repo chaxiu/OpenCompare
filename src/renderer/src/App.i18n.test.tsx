@@ -269,9 +269,64 @@ describe('English shell copy', () => {
     ).toBeDefined()
     const main = screen.getByRole('main')
     expect(main.textContent).toContain(
-      'Could not read the built-in sample library: /samples/csv/orders.left.csv is missing.'
+      'Could not read the built-in sample library: a built-in sample file is missing or unreadable.'
     )
+    expect(main.textContent ?? '').not.toContain('/samples')
     expect(main.textContent ?? '').not.toMatch(/\p{Script=Han}/u)
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined()
+  })
+
+  it('keeps sample entries and sample paths out of the empty first screen in both languages', async () => {
+    for (const [language, heading] of [
+      ['en', EMPTY_EN],
+      ['zh', EMPTY_ZH]
+    ] as const) {
+      const view = renderWithI18n(<Workbench platform={createWebPlatformPort()} />, language)
+      await screen.findByRole('heading', { name: heading })
+
+      expect(document.body.textContent ?? '', language).not.toContain('/samples')
+      for (const element of Array.from(document.querySelectorAll('[title]'))) {
+        expect(element.getAttribute('title') ?? '', language).not.toContain('/samples')
+      }
+      expect(document.querySelectorAll('[data-sample-entry]').length, language).toBe(0)
+      expect(document.querySelectorAll('[data-shell-entry="samples"]').length, language).toBe(0)
+      expect(document.querySelectorAll('[data-shell-entry="samples-menu"]').length, language).toBe(
+        0
+      )
+      view.unmount()
+    }
+  })
+
+  it('keeps the zh sample failure state retryable and free of sample paths', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} showDebugSamples />, 'zh')
+    startSampleFailure()
+
+    expect(
+      await screen.findByRole('heading', { name: '样本库读取失败' }, { timeout: 4000 })
+    ).toBeDefined()
+    const main = screen.getByRole('main')
+    expect(main.textContent ?? '').not.toContain('/samples')
+    expect(main.textContent).toContain('无法读取内置样本库')
+    expect(screen.getByRole('button', { name: '重试' })).toBeDefined()
+  })
+
+  it('lists the five settings sample entries and opens the remote snapshot from there', async () => {
+    renderWithI18n(<Workbench platform={createWebPlatformPort()} />, 'en')
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+    const panel = screen.getByRole('dialog', { name: 'Settings' })
+    const ids = Array.from(panel.querySelectorAll('[data-sample-entry]')).map((entry) =>
+      entry.getAttribute('data-sample-entry')
+    )
+    expect(ids).toEqual(['directory', 'code', 'csv', 'structured', 'remote-snapshot'])
+    // The debug switch is off for production, so the failure entry stays out.
+    expect(panel.querySelector('[data-sample-failure]')).toBeNull()
+
+    const remote = panel.querySelector('[data-sample-entry="remote-snapshot"]')
+    if (!(remote instanceof HTMLElement)) throw new Error('missing the remote snapshot entry')
+    fireEvent.click(remote)
+
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    await screen.findByRole('tab', { name: /baseline ↔ remote-prod/ }, { timeout: 4000 })
   })
 
   it('renders sample sessions from dictionary keys instead of fixture Chinese', async () => {

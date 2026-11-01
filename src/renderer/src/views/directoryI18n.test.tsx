@@ -392,6 +392,29 @@ describe('DirectoryView bilingual copy', () => {
     expect(labels).toEqual(DIRECTORY_FILTERS.map((filter) => zh[FILTER_LABEL_KEYS[filter]]))
   })
 
+  it('keeps sample paths and sample entries out of the workflow toolbar', () => {
+    for (const language of ['en', 'zh'] as const) {
+      const view = renderWithI18n(<ViewHarness comparison={buildComparison()} />, language)
+
+      const buttons = screen.getAllByRole('button')
+      expect(buttons.length, language).toBeGreaterThan(0)
+      for (const element of buttons) {
+        expect(element.textContent ?? '', language).not.toContain('/samples')
+        expect(element.getAttribute('title') ?? '', language).not.toContain('/samples')
+      }
+      expect(document.querySelectorAll('[data-sample-entry]').length, language).toBe(0)
+      expect(document.querySelectorAll('[data-shell-entry="samples"]').length, language).toBe(0)
+      expect(document.querySelectorAll('[data-shell-entry="samples-menu"]').length, language).toBe(
+        0
+      )
+      view.unmount()
+    }
+
+    // The template tooltip no longer names the built-in scattered tree either.
+    expect(en['directory.toolbar.templateTitle']).not.toContain('built-in')
+    expect(zh['directory.toolbar.templateTitle']).not.toContain('内置')
+  })
+
   it('localizes all nine real toolbar buttons and their titles', () => {
     renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'en')
     for (const [label, key] of EN_TOOLBAR) {

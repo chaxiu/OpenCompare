@@ -23,7 +23,7 @@ export const shell = {
   'shell.loading.description':
     '读取内置样本库，扫描内置样本目录并按大小 / 修改时间 / 内容哈希完成对比，同时解析 CSV / TSV 表格。',
   'shell.error.title': '样本库读取失败',
-  'shell.error.sampleRead': '无法读取内置样本库：/samples/csv/orders.left.csv 不存在。',
+  'shell.error.sampleRead': '无法读取内置样本库：内置样本文件缺失或不可读。',
   'shell.error.unknown': '读取内置样本时发生未知错误。',
   'shell.error.hint': '样本库随应用内置，可直接重试。',
   'shell.notice.skipped': '已跳过：左 {left} / 右 {right}',
@@ -50,6 +50,18 @@ export const shell = {
     '同步写入后校验未通过：{count} 个目标与源不一致（如 {paths}）。写入结果已保留，请重新预览后再同步。',
   'shell.notice.syncRefreshFailed':
     '同步写入已完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}；但刷新对比失败：{reason}。目标侧已是写入后的状态，请重新预览获取最新对比。',
+  'shell.sync.error.target': '无法同步到目标 {path}：{reason}。',
+  'shell.sync.reason.EACCES': '没有访问权限（{code}）',
+  'shell.sync.reason.EPERM': '没有操作权限（{code}）',
+  'shell.sync.reason.EISDIR': '目标位置是目录（{code}）',
+  'shell.sync.reason.EROFS': '目标所在磁盘为只读（{code}）',
+  'shell.sync.reason.EBUSY': '目标文件被其他程序占用（{code}）',
+  'shell.sync.reason.ENOTDIR': '目标路径的上级不是目录（{code}）',
+  'shell.sync.reason.ENOENT': '目标路径不存在或已被移动（{code}）',
+  'shell.sync.reason.ENOTEMPTY': '目标目录非空（{code}）',
+  'shell.sync.reason.EEXIST': '目标已存在（{code}）',
+  'shell.sync.reason.ENOSPC': '磁盘空间不足（{code}）',
+  'shell.sync.reason.fallback': '文件系统操作失败（未给出可识别的系统错误码）',
   'shell.notice.templateComplete':
     '模板归位完成：写入 {extracted} 个文件；复核已写入槽位 已匹配 {matched} · 缺失 {missing} · 冲突 {conflicts}。',
   'shell.side.left': '左',
