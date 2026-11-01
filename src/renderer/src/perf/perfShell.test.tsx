@@ -123,6 +123,10 @@ function sessionOf(leftRoot: string, rightRoot: string): WorkbenchSession {
 const EMPTY: readonly string[] = []
 const ZERO = { left: 0, right: 0 } as const
 const noop = (): void => undefined
+/** The perf shell never opens the template dialog, so confirming is unreachable. */
+const ignoreTemplateConfirm = async (): Promise<never> => {
+  throw new Error('template confirm is not used in the perf shell')
+}
 
 function viewProps(session: WorkbenchSession) {
   const comparison = session.directory as DirectoryComparison
@@ -160,7 +164,7 @@ function viewProps(session: WorkbenchSession) {
     onConfirmSync: noop,
     onPreviewTemplateRoots: async () => null,
     onCancelTemplate: noop,
-    onConfirmTemplate: noop
+    onConfirmTemplate: ignoreTemplateConfirm
   }
 }
 

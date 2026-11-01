@@ -7,7 +7,7 @@
  * write, and keeps the comparison cache honest after bytes change.
  */
 import { normalizePathValue } from '@shared/compareRequest'
-import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
+import type { DirectoryEntry, PathProbeKind, PlatformPort } from '@shared/platform/types'
 import { compareDirectories, scanDirectory } from '@core/directory/compare'
 import type {
   ComparisonCache,
@@ -33,11 +33,18 @@ import type {
   SyncVerificationMismatch
 } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
-import { createTemplatePlan, executeTemplatePlan, matchTemplate } from '@core/directory/template'
+import {
+  createTemplatePlan,
+  executeTemplatePlan,
+  matchTemplate,
+  verifyTemplateExtraction
+} from '@core/directory/template'
 import type {
   TemplateExecution,
   TemplatePlan,
-  TemplateResolvedPlan
+  TemplateResolvedPlan,
+  TemplateVerification,
+  TemplateWrittenEntry
 } from '@core/directory/template'
 import { digestFilesForComparison } from '../platform'
 import { aliasSideRoots } from './rootAliases'
@@ -692,14 +699,113 @@ export async function previewTemplate(
  * Writes exactly the resolved manifest's executable rows. The renderer never
  * re-derives the selection: the dialog hands over {@link resolveTemplatePlan}'s
  * result, and this binding only supplies the platform IO.
+ *
+ * The output root is preflighted with the non-writing {@link PlatformPort.checkWritable}
+ * before the first directory or byte is touched, so a read-only root refuses the
+ * whole run instead of failing per row. When the root does not exist yet the
+ * nearest existing ancestor answers the question. The raw OS code travels with
+ * {@link TemplateApplyError} so the dialog localizes it.
  */
 export async function applyTemplatePlan(
   platform: PlatformPort,
   resolved: TemplateResolvedPlan
-): Promise<TemplateExecution> {
-  return executeTemplatePlan(resolved, {
+): Promise<TemplateApplyOutcome> {
+  await preflightTemplateOutput(platform, resolved.plan.outputRoot)
+  const execution = await executeTemplatePlan(resolved, {
     readTextFile: (path) => platform.readTextFile(path),
     writeTextFile: (path, content, modifiedMs) => platform.writeTextFile(path, content, modifiedMs),
     ensureDirectory: (path) => platform.ensureDirectory(path)
+  })
+  const verification = await verifyTemplatePlan(platform, execution.written)
+  return { execution, verification }
+}
+
+/** One confirmation's result: what was written and the per-row disk re-check. */
+export interface TemplateApplyOutcome {
+  readonly execution: TemplateExecution
+  readonly verification: TemplateVerification
+}
+
+/** A template run refused before its first write; `code` is the raw OS code. */
+export class TemplateApplyError extends Error {
+  readonly path: string
+  readonly code?: string
+
+  constructor(path: string, code: string | undefined, detail: string) {
+    super(detail)
+    this.name = 'TemplateApplyError'
+    this.path = path
+    this.code = code
+  }
+}
+
+const SYSTEM_CODE = /\b(E[A-Z]{2,})\b/
+
+/** The raw OS code of a platform refusal, whether it survived as `.code` or only in text. */
+function osCodeOf(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code
+  if (typeof code === 'string' && code !== '') return code
+  const message = error instanceof Error ? error.message : ''
+  return SYSTEM_CODE.exec(message)?.[1]
+}
+
+/**
+ * Asks the OS whether the output root (or, when it does not exist yet, the
+ * nearest existing ancestor) accepts a write. `checkWritable` never creates,
+ * truncates or deletes anything, so a refusal leaves the tree untouched.
+ */
+async function preflightTemplateOutput(
+  platform: PlatformPort,
+  outputRoot: string
+): Promise<void> {
+  let probe = outputRoot
+  for (;;) {
+    let kind: PathProbeKind
+    try {
+      kind = await platform.statPath(probe)
+    } catch (error) {
+      throw new TemplateApplyError(
+        probe,
+        osCodeOf(error),
+        error instanceof Error ? error.message : String(error)
+      )
+    }
+    if (kind === 'file') {
+      throw new TemplateApplyError(
+        probe,
+        'ENOTDIR',
+        `template output refused: not a directory (${probe})`
+      )
+    }
+    if (kind === 'directory') {
+      try {
+        await platform.checkWritable(probe)
+        return
+      } catch (error) {
+        throw new TemplateApplyError(
+          probe,
+          osCodeOf(error),
+          error instanceof Error ? error.message : String(error)
+        )
+      }
+    }
+    const separator = Math.max(probe.lastIndexOf('/'), probe.lastIndexOf('\\'))
+    if (separator <= 0) return
+    probe = probe.slice(0, separator)
+  }
+}
+
+/**
+ * Re-checks exactly the rows this run wrote: existence, the source SHA-256
+ * recomputed from the target body, and the whole-second mtime. The dialog only
+ * renders this answer; it never compares on its own.
+ */
+export async function verifyTemplatePlan(
+  platform: PlatformPort,
+  written: readonly TemplateWrittenEntry[]
+): Promise<TemplateVerification> {
+  return verifyTemplateExtraction(written, {
+    readTextFile: (path) => platform.readTextFile(path),
+    listDirectory: (path) => platform.listDirectory(path)
   })
 }

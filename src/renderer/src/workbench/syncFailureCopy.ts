@@ -46,6 +46,11 @@ function reasonFor(code: string | undefined): SyncCopyFragment {
     : { message: key, params: { code: code ?? '' } }
 }
 
+/** The same reason mapping for other write paths (template placement, …). */
+export function syncReasonFragment(code: string | undefined): SyncCopyFragment {
+  return reasonFor(code)
+}
+
 /**
  * Copy of a target-side write refusal, carrying the offending path and (when
  * the system gave one) the raw OS code. `null` for any other failure.

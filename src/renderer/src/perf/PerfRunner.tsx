@@ -28,6 +28,10 @@ const ignorePath = (): void => undefined
 const ignoreSide = (): void => undefined
 const ignoreSideScroll = (): void => undefined
 const ignoreImport = (): void => undefined
+/** The perf shell never opens the template dialog, so confirming is unreachable. */
+const ignoreTemplateConfirm = async (): Promise<never> => {
+  throw new Error('template confirm is not used in the perf shell')
+}
 
 /** Resolves after the browser has painted the committed tree at least once. */
 function nextPaint(): Promise<void> {
@@ -224,7 +228,7 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
             onConfirmSync={ignorePath}
             onPreviewTemplateRoots={async () => null}
             onCancelTemplate={ignorePath}
-            onConfirmTemplate={ignorePath}
+            onConfirmTemplate={ignoreTemplateConfirm}
           />
         ) : (
           <p className="p-3 text-2xs text-content-muted">第 1 轮对比结果就绪后在此渲染真实目录视图。</p>

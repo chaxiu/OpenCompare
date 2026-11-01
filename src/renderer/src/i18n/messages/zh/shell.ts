@@ -62,7 +62,6 @@ export const shell = {
   'shell.sync.reason.EEXIST': '目标已存在（{code}）',
   'shell.sync.reason.ENOSPC': '磁盘空间不足（{code}）',
   'shell.sync.reason.fallback': '文件系统操作失败（未给出可识别的系统错误码）',
-  'shell.notice.templateApplied': '模板归位完成：写入 {written} 个，失败 {failed} 个。',
   'shell.side.left': '左',
   'shell.side.right': '右',
   'shell.notice.returnUnavailable': '来源目录会话已不可用，当前也没有其他目录对比会话可返回。',

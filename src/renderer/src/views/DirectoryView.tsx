@@ -22,6 +22,7 @@ import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type {
   SyncPreview,
+  TemplateApplyOutcome,
   TemplatePreview,
   TemplatePreviewFailure,
   TemplateRoots
@@ -89,7 +90,7 @@ export interface DirectoryViewProps {
   readonly onPreviewTemplateRoots: (roots: TemplateRoots) => Promise<TemplatePreviewFailure | null>
   readonly onCancelTemplate: () => void
   /** Receives `resolveTemplatePlan`'s manifest, never a re-derived selection. */
-  readonly onConfirmTemplate: (resolved: TemplateResolvedPlan) => void
+  readonly onConfirmTemplate: (resolved: TemplateResolvedPlan) => Promise<TemplateApplyOutcome>
 }
 
 /**

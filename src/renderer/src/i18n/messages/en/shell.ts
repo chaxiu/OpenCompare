@@ -73,7 +73,6 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.sync.reason.ENOSPC': 'the disk is full ({code})',
   'shell.sync.reason.fallback':
     'the file system operation failed without a recognizable system error code',
-  'shell.notice.templateApplied': 'Template placement complete: {written} written, {failed} failed.',
   'shell.side.left': 'left',
   'shell.side.right': 'right',
   'shell.notice.returnUnavailable':
