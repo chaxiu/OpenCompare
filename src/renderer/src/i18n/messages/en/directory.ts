@@ -89,6 +89,45 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.count.other': '{count} items',
   'directory.template.reason.ambiguous': 'Multiple candidates with the same name',
   'directory.template.reason.contentMismatch': 'Same name, different content',
+  'directory.template.setupTitle': 'Template placement · Choose roots',
+  'directory.template.setupHint':
+    'Template A is the current left root; choose, drop, or type a directory for scattered tree B and for the output root (supports ~).',
+  'directory.template.readonly': 'Current left root · read-only',
+  'directory.template.incoming.input': 'Scattered tree B root',
+  'directory.template.output.input': 'Output root',
+  'directory.template.pickIncoming': 'Choose tree B',
+  'directory.template.pickOutput': 'Choose output root',
+  'directory.template.pickIncomingTitle': 'Pick the scattered tree B root with the system directory picker',
+  'directory.template.pickOutputTitle': 'Pick the output root with the system directory picker',
+  'directory.template.dropHint': 'You can also drop a folder here',
+  'directory.template.preview': 'Build dry run',
+  'directory.template.previewing': 'Scanning the roots…',
+  'directory.template.output.willCreate': 'Will be created',
+  'directory.template.output.exists': 'Exists',
+  'directory.template.rows': 'Template placement rows',
+  'directory.template.checkSlot': 'Check {path}',
+  'directory.template.overwrite': 'Overwrites an existing file in the output root',
+  'directory.template.occupied': 'A directory occupies the target',
+  'directory.template.executableCount': '{count} executable',
+  'directory.template.rejectedCount': '{count} rejected',
+  'directory.template.error.snapshotLeft':
+    'The left side is a snapshot and cannot be template A; open a real directory comparison first.',
+  'directory.template.error.incomingEmpty':
+    'The scattered tree B root is empty; type a directory path.',
+  'directory.template.error.outputEmpty': 'The output root is empty; type a directory path.',
+  'directory.template.error.previewFailed':
+    'Could not build the dry run; check the roots and try again.',
+  'directory.template.error.incomingMissing': 'The scattered tree B root does not exist: {path}',
+  'directory.template.error.incomingNotDirectory':
+    'The scattered tree B root is not a directory: {path}',
+  'directory.template.error.incomingEqualsTemplate':
+    'The scattered tree B root cannot equal the template A root.',
+  'directory.template.error.outputEqualsTemplate':
+    'The output root cannot equal the template A root.',
+  'directory.template.error.outputEqualsIncoming':
+    'The output root cannot equal the scattered tree B root.',
+  'directory.template.error.outputNotDirectory':
+    'The output root exists but is not a directory: {path}',
   'directory.template.placing': 'Placing…',
   'directory.template.place': 'Extract and place',
   'directory.report.toolbar.export': 'Export HTML report',

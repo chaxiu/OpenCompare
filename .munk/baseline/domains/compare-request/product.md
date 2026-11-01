@@ -11,6 +11,7 @@
 - **规范化规则**：去首尾空白、剥掉成对的首尾引号、展开 `~` / `~/...`（`~user` 不展开）、相对路径按调用方显式传入的 `baseDir` 解析并做词法 `.` / `..` 折叠、绝对路径原样（仅去掉根以外的尾部斜杠）；不转小写、不做 Unicode NFC/NFD 归一，保留空格/中文/Unicode；不做 `realpath` / 符号链接解析。
 - **Windows 绝对路径词法规范化**：先统一把 `\` 归一为 `/`，再做绝对性判定与折叠。`C:\…` / `c:/…`（盘符大小写原样保留）、盘根 `C:\` / `C:/`、UNC `\\server\share\…` 一律判为绝对，绝不拼到 `baseDir`/cwd 后面；`/…`、`//server/share/…`、`^[A-Za-z]:/` 为绝对；`C:foo`（drive-relative）不算绝对。`baseDir` 自身先按同一规则规范化再参与拼接。内部规范形式：分隔符一律 `/`，盘根输出 `C:/`，UNC 输出 `//server/share/…`，根以外去掉尾部多余分隔符；`..` 可折叠但不得越过 `/`、盘根或 UNC 共享根。成功结果不含任何 `\`。
 - **按平台回显**：导出的纯函数 `toDisplayPath(path, platform)` 把规范 `/` 形式还原为平台写法（`win32` → `\`，其他平台原样），供错误消息与 UI 复用；`PathContext` / `ResolveContext` 增加可选 `platform`，`resolveCompareRequest` 在该字段显式为 `'win32'` 时用 `\` 回显错误里的路径，缺省仍用 `/`（既有断言与既有行为不变）。
+- **路径规范化单点复用（2026-11-01）**：`normalizePathValue(raw, context)` 由内部函数改为导出，作为「去空白 / 剥引号 / 展开 `~` / 按 `baseDir` 解析 / 词法折叠」的唯一实现；目录模板归位的两个根输入（散乱树 B 根、输出根）直接复用它，renderer 不得复制第二份。函数签名与既有行为（含返回 `null` 表示空输入）不变，仍不做 `realpath` / 符号链接解析。
 - **Windows 门禁**：`.munk/code-gates.json` 增加聚焦 gate `test-compare-request`（`pnpm test src/shared/compareRequest.test.ts`），并新增独立 CI job 在 `windows-latest` 上跑同一测试文件，真实可执行、无 `continue-on-error`、失败即红——Windows 专属规则不依赖本机实机验收。
 - **稳定错误码**：重复边（同一入口给出两次 left 或 right）、缺边、空串、未知 scheme/host 均产出稳定错误码与中文提示。
 - **校验与类型探测**：解析结果 + `PlatformPort` 探测（`statPath` 真实路径校验 / file·directory 类型探测）合并为最终 `CompareRequest`；定义不存在、单边不存在、file↔directory 类型不一致、扩展名不受支持、权限拒绝的错误码与可读中文提示。
@@ -33,6 +34,7 @@
 - **ac-quotes-stripped**：手工输入 `"/tmp/dir with space"`、`'/tmp/中文'` 与 `“/tmp/中文”` 均剥掉成对首尾引号；内部空格/引号保留，单边不成对的引号原样保留。
 - **ac-whitespace-trim**：首尾空格、制表符、换行被去掉，内部连续空格保留；去空白后为空的输入返回 `EMPTY_PATH`。
 - **ac-tilde-expanded**：给定 `homeDir=/Users/demo`，`~/项目/a.txt` → `/Users/demo/项目/a.txt`，`~` 单独 → `/Users/demo`；`~other/x` 不被展开（保持字面量）。
+- **ac-normalize-shared-by-root-inputs**：`normalizePathValue` 为公开导出且行为与既有规范化完全一致（空串 / 纯空白 → `null`，引号剥离、`~` 展开、词法折叠不变）；目录模板归位的 B 根 / 输出根键入路径经它展开后用于扫描，`a/` 与 `a` 归一到同一根，renderer 内不存在第二份 `~` 展开 / 折叠实现。
 - **ac-relative-base**：给定 `baseDir=/work/项目`，`./a.txt` → `/work/项目/a.txt`，`../b/c.txt` → `/work/b/c.txt`，`a/../b` → `/work/项目/b`；绝对路径 `baseDir` 不参与拼接。
 - **ac-trailing-separator**：`/tmp/dir/` → `/tmp/dir`，根 `/` 保持 `/`；路径不做大小写折叠，也不做 Unicode 归一化（NFC/NFD 输入原样输出）。
 - **ac-request-probe-file**：两侧探测均为 `file` 且扩展名受支持（如 `.txt`、`.json`、无扩展名）时产出 `{ ok: true, request: { left, right, kind: 'file' } }`。
@@ -86,6 +88,12 @@
 - 所有门禁沿用 `.munk/code-gates.json`：install / lint / typecheck / build / build:web / test 全绿；另加聚焦 gate `test-compare-request`（仅跑 `src/shared/compareRequest.test.ts`），Windows 专属规则由 `.github/workflows/windows.yml` 的 `windows-latest` job 跑同一命令兜底。
 
 ## 最近交付证明
+
+- WI：`wi_ws_dcf61d0392d48f0e`（交叉引用：导出 `normalizePathValue` 供模板归位根输入复用；`kind: feature`）
+- 日期：2026-11-01
+- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_10c60d152fac2135/code-gates/attempts/001/manifest.json`；`pnpm test` 1506 passed + 1 skipped，含 `compareRequest.test.ts` 原样通过；模板入口行为 AC 归 `domains/directory`）。
+- 覆盖摘要：`src/shared/compareRequest.ts` 的 `normalizePathValue` 由内部函数改为导出（仅加导出与注释，函数体零改动），供 `views/TemplateDialog.tsx` 与 `workbench/directoryOps.ts` 的模板根键入 / `~` 展开 / 根相等规范化复用；`views/TemplateDialog.test.tsx` 断言 `~/…` 经 `homeDirectory` 展开后才发起扫描、空串不扫描，`workbench/templateOps.test.ts` 断言 `a/` 与 `a` 同一根。未新增依赖、未改 `compareRequest.test.ts` 既有断言、未动 `resolveCompareRequest` / `toDisplayPath` 行为。
+- 注：`normalizePathValue` 现在是对外契约（模板根输入复用），改其返回 `null` 的条件、引号剥离或折叠规则会同时影响模板归位入口与既有 `resolveCompareRequest` 断言；renderer 侧不要再复制 `~` 展开逻辑（`ac-normalize-shared-by-root-inputs` 已钉住单点）。
 
 - WI：`wi_intake_21460f51dc85ea67`（修复 Windows 绝对路径规范化：盘符 / 盘根 / UNC + Windows 测试门禁，`kind: fix`）
 - 日期：2026-10-23

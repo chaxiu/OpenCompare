@@ -26,6 +26,7 @@ import type { DirectoryRowModel } from '@core/directory/rows'
 import type { DirectoryReportProgress } from '@core/directory/report'
 import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { zh } from '@renderer/i18n/messages'
+import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DirectoryView } from './DirectoryView'
 import { FILTER_LABEL_KEYS } from './directoryCopy'
 
@@ -223,11 +224,14 @@ function Harness({
       onCancelReportExport={onCancelReportExport}
       onPreviewSync={() => {}}
       onPreviewTemplate={() => {}}
+      platform={createWebPlatformPort()}
       syncPreview={null}
       templatePreview={null}
+      templateOpen={false}
       onCancelSync={() => {}}
       onAbortSync={() => {}}
       onConfirmSync={() => {}}
+      onPreviewTemplateRoots={async () => null}
       onCancelTemplate={() => {}}
       onConfirmTemplate={() => {}}
     />

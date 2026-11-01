@@ -215,11 +215,14 @@ export function PerfRunner({ platform }: { readonly platform: PlatformPort }): J
             onExportReport={ignorePath}
             onPreviewSync={ignorePath}
             onPreviewTemplate={ignorePath}
+            platform={platform}
             syncPreview={null}
             templatePreview={null}
+            templateOpen={false}
             onCancelSync={ignorePath}
             onAbortSync={ignorePath}
             onConfirmSync={ignorePath}
+            onPreviewTemplateRoots={async () => null}
             onCancelTemplate={ignorePath}
             onConfirmTemplate={ignorePath}
           />

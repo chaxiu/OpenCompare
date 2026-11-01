@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, JSX } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { IconName } from '@renderer/assets/icons'
-import { CODE_SCENE, CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
+import { CODE_SCENE, CSV_SCENE, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { SampleComposition, SceneId } from '@shared/fixtures'
 import type { CompareRequest, CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
@@ -15,6 +15,7 @@ import type { DirectoryFilter } from '@core/directory/filter'
 import type { StructuredFilter } from '@core/structured/diff'
 import { SyncRefreshError, SyncVerificationError } from '@core/directory/sync'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
+import type { TemplateResolvedPlan } from '@core/directory/template'
 import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
@@ -45,12 +46,18 @@ import {
 } from './directoryCompare'
 import {
   applySyncPreview,
-  applyTemplateExtract,
+  applyTemplatePlan,
   previewSync,
   previewTemplate,
-  readableSyncFailure
+  readableSyncFailure,
+  TemplateRootError
 } from './directoryOps'
-import type { SyncPreview, TemplatePreview } from './directoryOps'
+import type {
+  SyncPreview,
+  TemplatePreview,
+  TemplatePreviewFailure,
+  TemplateRoots
+} from './directoryOps'
 import { classifyFile } from './fileKinds'
 import {
   buildDirectoryReportForComparisonAsync,
@@ -332,6 +339,7 @@ export function Workbench({
   const [hideLocalPaths, setHideLocalPaths] = useState(true)
   const [pendingLeft, setPendingLeft] = useState<PendingLeft | null>(null)
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null)
+  const [templateOpen, setTemplateOpen] = useState(false)
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null)
   /** The dirty session whose close is waiting for the unsaved-edits prompt. */
   const [closeTarget, setCloseTarget] = useState<WorkbenchSession | null>(null)
@@ -1219,52 +1227,61 @@ export function Workbench({
     syncAbortController.current?.abort()
   }
 
-  /** Matches the shuffled incoming tree against the left (template) tree. */
-  async function handlePreviewTemplate(): Promise<void> {
+  /**
+   * Opens the real template entry. A snapshot left side can never be template A,
+   * so it is refused before any root is scanned or any dialog is shown.
+   */
+  function handlePreviewTemplate(): void {
+    if (active?.directory === undefined) return
+    if (activeSides?.left.kind === 'snapshot') {
+      report(copyNotice('directory.template.error.snapshotLeft'))
+      return
+    }
+    setTemplatePreview(null)
+    setTemplateOpen(true)
+  }
+
+  /**
+   * Builds the dry-run from the two real roots the dialog collected. A refusal
+   * comes back as a stable code and is localized inside the dialog, so no
+   * Chinese error sentence from the platform ever reaches the screen.
+   */
+  async function handleTemplatePreview(roots: TemplateRoots): Promise<TemplatePreviewFailure | null> {
     const comparison = active?.directory
-    if (!comparison) return
+    if (comparison === undefined) return 'preview-failed'
 
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      opSequence.current += 1
-      const preview = await previewTemplate(
-        platform,
-        comparison.leftRoot,
-        DIRECTORY_SAMPLE_PATHS.incoming,
-        opSequence.current
-      )
+      const preview = await previewTemplate(platform, { ...roots, templateRoot: comparison.leftRoot })
       setTemplatePreview(preview)
+      return null
     } catch (cause) {
-      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
-      setNoticeTone('danger')
+      if (cause instanceof TemplateRootError) return cause.code
+      report(detailNotice(errorText(cause)))
+      return 'preview-failed'
     } finally {
       setDirectoryBusy(false)
     }
   }
 
-  /** Extracts the matched files and re-verifies the rebuilt structure. */
-  async function handleConfirmTemplate(): Promise<void> {
-    const preview = templatePreview
-    if (!preview) return
-
+  /** Writes exactly the manifest the dialog resolved and reports its own counts. */
+  async function handleConfirmTemplate(resolved: TemplateResolvedPlan): Promise<void> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      const result = await applyTemplateExtract(platform, preview)
+      const execution = await applyTemplatePlan(platform, resolved)
+      setTemplateOpen(false)
       setTemplatePreview(null)
-      setNotice(
-        copyNotice('shell.notice.templateComplete', {
-          extracted: result.extracted,
-          matched: result.verifiedMatched,
-          missing: result.verifiedMissing,
-          conflicts: result.verifiedConflicts
-        })
+      report(
+        copyNotice('shell.notice.templateApplied', {
+          written: execution.writtenCount,
+          failed: execution.failedCount
+        }),
+        execution.failedCount > 0 ? 'danger' : 'info'
       )
-      setNoticeTone('info')
     } catch (cause) {
-      setNotice(detailNotice(cause instanceof Error ? cause.message : String(cause)))
-      setNoticeTone('danger')
+      report(detailNotice(errorText(cause)))
     } finally {
       setDirectoryBusy(false)
     }
@@ -1349,14 +1366,20 @@ export function Workbench({
             reportProgress={reportProgress}
             onCancelReportExport={cancelReportExport}
             onPreviewSync={(direction, mode) => void handlePreviewSync(direction, mode)}
-            onPreviewTemplate={() => void handlePreviewTemplate()}
+            onPreviewTemplate={handlePreviewTemplate}
+            platform={platform}
             syncPreview={syncPreview}
             templatePreview={templatePreview}
+            templateOpen={templateOpen}
             onCancelSync={() => setSyncPreview(null)}
             onAbortSync={cancelSync}
             onConfirmSync={(deletePaths) => void handleConfirmSync(deletePaths)}
-            onCancelTemplate={() => setTemplatePreview(null)}
-            onConfirmTemplate={() => void handleConfirmTemplate()}
+            onPreviewTemplateRoots={handleTemplatePreview}
+            onCancelTemplate={() => {
+              setTemplateOpen(false)
+              setTemplatePreview(null)
+            }}
+            onConfirmTemplate={(resolved) => void handleConfirmTemplate(resolved)}
           />
         )
       }

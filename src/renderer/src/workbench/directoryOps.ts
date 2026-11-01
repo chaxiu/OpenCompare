@@ -6,6 +6,7 @@
  * materialises read-only sample trees into a writable scratch root before any
  * write, and keeps the comparison cache honest after bytes change.
  */
+import { normalizePathValue } from '@shared/compareRequest'
 import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 import { compareDirectories, scanDirectory } from '@core/directory/compare'
 import type {
@@ -32,8 +33,12 @@ import type {
   SyncVerificationMismatch
 } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
-import { extractTemplateMatches, matchTemplate, matchTemplateSlots } from '@core/directory/template'
-import type { TemplateMatchResult } from '@core/directory/template'
+import { createTemplatePlan, executeTemplatePlan, matchTemplate } from '@core/directory/template'
+import type {
+  TemplateExecution,
+  TemplatePlan,
+  TemplateResolvedPlan
+} from '@core/directory/template'
 import { digestFilesForComparison } from '../platform'
 import { aliasSideRoots } from './rootAliases'
 
@@ -580,24 +585,77 @@ export async function applySyncPreview(
   }
 }
 
-/** A previewed template placement: the mapping plus its writable output root. */
-export interface TemplatePreview {
-  readonly result: TemplateMatchResult
+/** The three roots one template placement preview is scoped to. */
+export interface TemplateRoots {
   readonly templateRoot: string
   readonly incomingRoot: string
-  readonly targetRoot: string
+  readonly outputRoot: string
+}
+
+/** A previewed template placement: the plan plus the roots it was built from. */
+export interface TemplatePreview extends TemplateRoots {
+  readonly plan: TemplatePlan
+  /** False when the output root does not exist yet; Apply creates it. */
+  readonly outputRootExists: boolean
+}
+
+/** Stable refusals of the template entry; every one has a zh / en dictionary pair. */
+export type TemplateRootErrorCode =
+  | 'incoming-missing'
+  | 'incoming-not-directory'
+  | 'incoming-equals-template'
+  | 'output-equals-template'
+  | 'output-equals-incoming'
+  | 'output-not-directory'
+
+/** Why one preview attempt did not open: a root refusal or an unexpected read failure. */
+export type TemplatePreviewFailure = TemplateRootErrorCode | 'preview-failed'
+
+/** A template entry refused before anything was scanned or written. */
+export class TemplateRootError extends Error {
+  readonly code: TemplateRootErrorCode
+
+  constructor(code: TemplateRootErrorCode) {
+    super(`template root refused: ${code}`)
+    this.name = 'TemplateRootError'
+    this.code = code
+  }
+}
+
+/** Canonical form shared by the equality checks, so `a/` and `a` are one root. */
+function canonicalRoot(path: string): string {
+  return normalizePathValue(path, {}) ?? path
 }
 
 /**
- * Matches the shuffled incoming tree B against the template tree A and picks a
- * fresh writable output root. Nothing is written until the user confirms.
+ * Scans the real scattered tree B and the output root, matches them against the
+ * template A tree and expands the result into one plan. The output root's
+ * existing files and directories are passed in, so overwrite / directory
+ * occupancy come from the real disk instead of defaulting to writable. Nothing
+ * is written: no directory is created and no file is touched.
  */
 export async function previewTemplate(
   platform: PlatformPort,
-  templateRoot: string,
-  incomingRoot: string,
-  sequence: number
+  roots: TemplateRoots
 ): Promise<TemplatePreview> {
+  const templateRoot = roots.templateRoot
+  const incomingRoot = canonicalRoot(roots.incomingRoot)
+  const outputRoot = canonicalRoot(roots.outputRoot)
+
+  if (incomingRoot === canonicalRoot(templateRoot)) {
+    throw new TemplateRootError('incoming-equals-template')
+  }
+  if (outputRoot === canonicalRoot(templateRoot)) {
+    throw new TemplateRootError('output-equals-template')
+  }
+  if (outputRoot === incomingRoot) {
+    throw new TemplateRootError('output-equals-incoming')
+  }
+
+  const incomingKind = await platform.statPath(incomingRoot)
+  if (incomingKind === 'missing') throw new TemplateRootError('incoming-missing')
+  if (incomingKind !== 'directory') throw new TemplateRootError('incoming-not-directory')
+
   const [template, incoming] = await Promise.all([
     scan(platform, templateRoot),
     scan(platform, incomingRoot)
@@ -606,54 +664,42 @@ export async function previewTemplate(
     readTextFile: (path) => platform.readTextFile(path)
   })
 
-  const temp = await platform.temporaryDirectory()
-  const targetRoot = `${temp}/restored/${sequence}-${basename(templateRoot)}`
+  const outputKind = await platform.statPath(outputRoot)
+  if (outputKind === 'file') throw new TemplateRootError('output-not-directory')
 
-  return { result, templateRoot, incomingRoot, targetRoot }
-}
+  let existingFiles: readonly string[] = []
+  let existingDirectories: readonly string[] = []
+  if (outputKind === 'directory') {
+    const output = await scan(platform, outputRoot)
+    existingFiles = [...output.index.entries()]
+      .filter(([, node]) => node.kind === 'file')
+      .map(([relativePath]) => relativePath)
+    existingDirectories = [...output.index.entries()]
+      .filter(([relativePath, node]) => relativePath !== '' && node.kind === 'directory')
+      .map(([relativePath]) => relativePath)
+  }
 
-export interface TemplateExtractResult {
-  readonly extracted: number
-  /** Written slots that re-matched in the output; equals `extracted` on success. */
-  readonly verifiedMatched: number
-  /** Written slots absent from the output; `0` means every restore landed. */
-  readonly verifiedMissing: number
-  readonly verifiedConflicts: number
+  return {
+    templateRoot,
+    incomingRoot,
+    outputRoot,
+    outputRootExists: outputKind === 'directory',
+    plan: createTemplatePlan(result, { outputRoot, existingFiles, existingDirectories })
+  }
 }
 
 /**
- * Writes every matched file under the template A relative structure, then
- * re-matches the output through the same matcher to prove every restored slot
- * landed. Verification is scoped to the matched slots (template slots that had
- * no counterpart in B stay missing by design and must not count as a failure).
+ * Writes exactly the resolved manifest's executable rows. The renderer never
+ * re-derives the selection: the dialog hands over {@link resolveTemplatePlan}'s
+ * result, and this binding only supplies the platform IO.
  */
-export async function applyTemplateExtract(
+export async function applyTemplatePlan(
   platform: PlatformPort,
-  preview: TemplatePreview
-): Promise<TemplateExtractResult> {
-  const extraction = await extractTemplateMatches(preview.result, preview.targetRoot, {
-    writeTextFile: (path, content) => platform.writeTextFile(path, content),
+  resolved: TemplateResolvedPlan
+): Promise<TemplateExecution> {
+  return executeTemplatePlan(resolved, {
+    readTextFile: (path) => platform.readTextFile(path),
+    writeTextFile: (path, content, modifiedMs) => platform.writeTextFile(path, content, modifiedMs),
     ensureDirectory: (path) => platform.ensureDirectory(path)
   })
-
-  const [template, output] = await Promise.all([
-    scan(platform, preview.templateRoot),
-    scan(platform, preview.targetRoot)
-  ])
-
-  // Scope verification to the slots this extract actually wrote: a template slot
-  // that B never provided stays missing by design and is not a failed restore.
-  const verification = await matchTemplateSlots(
-    template,
-    output,
-    preview.result.matched.map((item) => item.relativePath),
-    { readTextFile: (path) => platform.readTextFile(path) }
-  )
-
-  return {
-    extracted: extraction.written,
-    verifiedMatched: verification.matched.length,
-    verifiedMissing: verification.missing.length,
-    verifiedConflicts: verification.conflicts.length
-  }
 }

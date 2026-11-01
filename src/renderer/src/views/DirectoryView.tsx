@@ -3,12 +3,14 @@ import type { JSX } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import type { SampleComposition } from '@shared/fixtures'
 import { trackLive } from '@shared/perf/liveness'
+import type { PlatformPort } from '@shared/platform/types'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
 import { buildDirectoryRowModel } from '@core/directory/rows'
 import type { DirectoryReportProgress } from '@core/directory/report'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
+import type { TemplateResolvedPlan } from '@core/directory/template'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Icon } from '@renderer/components/Icon'
 import { Panel } from '@renderer/components/Panel'
@@ -18,7 +20,12 @@ import { CompositionLegend } from '@renderer/components/StatusBar'
 import { TreeView } from '@renderer/components/TreeView'
 import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
-import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
+import type {
+  SyncPreview,
+  TemplatePreview,
+  TemplatePreviewFailure,
+  TemplateRoots
+} from '@renderer/workbench/directoryOps'
 import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 import type { SidePosition } from '@renderer/workbench/snapshotOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
@@ -69,14 +76,20 @@ export interface DirectoryViewProps {
   readonly onCancelReportExport?: () => void
   readonly onPreviewSync: (direction: SyncDirection, mode: SyncMode) => void
   readonly onPreviewTemplate: () => void
+  /** Platform seam of the template setup step (pickers, drops, `~`). */
+  readonly platform: PlatformPort
   readonly syncPreview: SyncPreview | null
   readonly templatePreview: TemplatePreview | null
+  /** True while the template dialog is on screen; it starts on the setup step. */
+  readonly templateOpen: boolean
   readonly onCancelSync: () => void
   /** Stops the running sync; stays usable while `busy` (unlike `onCancelSync`). */
   readonly onAbortSync: () => void
   readonly onConfirmSync: (deletePaths: readonly string[]) => void
+  readonly onPreviewTemplateRoots: (roots: TemplateRoots) => Promise<TemplatePreviewFailure | null>
   readonly onCancelTemplate: () => void
-  readonly onConfirmTemplate: () => void
+  /** Receives `resolveTemplatePlan`'s manifest, never a re-derived selection. */
+  readonly onConfirmTemplate: (resolved: TemplateResolvedPlan) => void
 }
 
 /**
@@ -112,11 +125,14 @@ export function DirectoryView({
   onCancelReportExport,
   onPreviewSync,
   onPreviewTemplate,
+  platform,
   syncPreview,
   templatePreview,
+  templateOpen,
   onCancelSync,
   onAbortSync,
   onConfirmSync,
+  onPreviewTemplateRoots,
   onCancelTemplate,
   onConfirmTemplate
 }: DirectoryViewProps): JSX.Element {
@@ -469,10 +485,13 @@ export function DirectoryView({
           onConfirm={onConfirmSync}
         />
       ) : null}
-      {templatePreview ? (
+      {templateOpen ? (
         <TemplateDialog
+          platform={platform}
+          templateRoot={comparison.leftRoot}
           preview={templatePreview}
           busy={busy}
+          onPreview={onPreviewTemplateRoots}
           onCancel={onCancelTemplate}
           onConfirm={onConfirmTemplate}
         />
