@@ -231,6 +231,7 @@ function makeTemplatePreview(overrides: Partial<TemplateMatchResult> = {}): Temp
         sourcePath: '/incoming/x/a.ts',
         size: 12,
         hash: 'a1',
+        modifiedMs: 1_700_000_000_000,
         text: 'a'
       }
     ],
@@ -241,15 +242,17 @@ function makeTemplatePreview(overrides: Partial<TemplateMatchResult> = {}): Temp
         templatePath: '/template/app/c.ts',
         reason: 'ambiguous',
         candidates: [
-          { path: '/incoming/one/c.ts', size: 1, hash: 'c1' },
-          { path: '/incoming/two/c.ts', size: 2, hash: 'c2' }
+          { path: '/incoming/one/c.ts', size: 1, hash: 'c1', modifiedMs: 1_700_000_000_001 },
+          { path: '/incoming/two/c.ts', size: 2, hash: 'c2', modifiedMs: 1_700_000_000_002 }
         ]
       },
       {
         relativePath: 'app/d.ts',
         templatePath: '/template/app/d.ts',
         reason: 'content-mismatch',
-        candidates: [{ path: '/incoming/three/d.ts', size: 3, hash: 'c3' }]
+        candidates: [
+          { path: '/incoming/three/d.ts', size: 3, hash: 'c3', modifiedMs: 1_700_000_000_003 }
+        ]
       }
     ],
     unused: [
