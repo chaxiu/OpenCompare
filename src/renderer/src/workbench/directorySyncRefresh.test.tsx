@@ -120,7 +120,8 @@ describe('directory sync refresh failure', () => {
     const text = notice.textContent ?? ''
     expect(text).toContain('写入已完成')
     expect(text).toContain('新增拷贝 1')
-    expect(text).toContain('无法读取目录')
+    expect(text).toContain('刷新对比失败')
+    expect(text).toContain('没有访问权限')
     expect(text).toContain('EACCES')
     expect(text).not.toContain('Error invoking remote method')
     expect(notice.className).toContain('text-danger')

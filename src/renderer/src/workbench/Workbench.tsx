@@ -84,6 +84,7 @@ import {
 } from './snapshotOps'
 import type { ComparisonSides, SidePosition } from './snapshotOps'
 import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
+import { syncRefreshReasonCopy, syncTargetFailureCopy } from './syncFailureCopy'
 import type { CodeFileBuffer, WorkbenchSession } from './session'
 import { entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
 import type { ShellEntryId } from './shellLayout'
@@ -162,6 +163,7 @@ interface ActiveDirectoryOperation {
 /** A localized fragment inside a notice parameter, resolved when it renders. */
 interface NoticeMessage {
   readonly message: MessageKey
+  readonly params?: Readonly<Record<string, string | number>>
 }
 
 type NoticeParams = Readonly<Record<string, string | number | NoticeMessage>>
@@ -195,7 +197,7 @@ function noticeText(notice: Notice, t: Translate): string {
   if (params === undefined) return t(notice.key)
   const resolved: Record<string, string | number> = {}
   for (const [name, value] of Object.entries(params)) {
-    resolved[name] = typeof value === 'object' ? t(value.message) : value
+    resolved[name] = typeof value === 'object' ? t(value.message, value.params) : value
   }
   return t(notice.key, resolved)
 }
@@ -282,6 +284,12 @@ function sampleErrorNotice(cause: unknown): Notice {
   return cause instanceof SampleLibraryError
     ? copyNotice('shell.error.sampleRead')
     : detailNotice(errorText(cause))
+}
+
+/** Localizes a target-side sync refusal; `null` for any other failure. */
+function syncTargetNotice(cause: unknown): Notice | null {
+  const copy = syncTargetFailureCopy(cause)
+  return copy === null ? null : copyNotice(copy.key, copy.params)
 }
 
 /** Multi-session workbench shell: toolbar, split work area and status bar. */
@@ -1113,8 +1121,10 @@ export function Workbench({
       setSyncPreview(preview)
     } catch (cause) {
       // The dry-run goes through the same IPC channels as the apply: strip the
-      // wrapper so the notice states the reason instead of the plumbing.
-      setNotice(detailNotice(errorText(readableSyncFailure(cause))))
+      // wrapper so the notice states the reason instead of the plumbing, and
+      // localize a refusal by its stable code.
+      const readable = readableSyncFailure(cause)
+      setNotice(syncTargetNotice(readable) ?? detailNotice(errorText(readable)))
       setNoticeTone('danger')
     } finally {
       setDirectoryBusy(false)
@@ -1171,7 +1181,7 @@ export function Workbench({
             copied: cause.copied,
             updated: cause.updated,
             deleted: cause.deleted,
-            reason: cause.reason
+            reason: syncRefreshReasonCopy(cause)
           })
         )
         setNoticeTone('danger')
@@ -1195,7 +1205,7 @@ export function Workbench({
         )
         setNoticeTone('danger')
       } else {
-        setNotice(detailNotice(errorText(cause)))
+        setNotice(syncTargetNotice(cause) ?? detailNotice(errorText(cause)))
         setNoticeTone('danger')
       }
     } finally {
