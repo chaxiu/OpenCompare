@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "OpenCompare quality gates. Each command is a single argv (no && || | ;). install/build kept separate.",
+  "description": "OpenCompare quality gates. Each command is a single argv (no && || | ;). install/build kept separate. Coverage map for the four single-direction mirror sync behaviours: (1) mirror delete opt-in - deletions start unchecked and only an explicitly checked path is deleted, with the summary, the executable count and Apply reading the same predicate; gates `sync-real-gate` (src/sync-real-gate.test.ts) and `test` (src/renderer/src/views/directorySyncDialog.test.tsx). (2) idempotent dry-run - after a select-all deletion the next dry-run of the same direction lists copy, update and delete all empty, and a repeated round stays empty; gate `sync-real-gate` (src/sync-real-gate.test.ts). (3) mtime and relative structure preserved - every written target keeps the source whole-ms mtime at the same relative path, including CJK / spaces and deep nesting; gate `sync-real-gate` (src/sync-real-gate.test.ts). (4) link mtime alignment - same-target links that differ only in lstat mtime give a positive align count with a runnable Apply, and align to the source, while the dialog and the gate share canApplySyncPreview / syncPreviewAction; gates `sync-real-gate` (src/sync-real-gate.test.ts) and `test` (src/renderer/src/views/directorySyncDialog.test.tsx).",
   "gates": [
     {
       "id": "install",

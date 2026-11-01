@@ -1618,6 +1618,18 @@ describe('real-disk sync symlink metadata', () => {
         'symlink metadata: pending alignment list'
       ).toEqual(['dangling-link', 'same-target-link'])
 
+      // The shared action counts exactly the pending links, and that count is
+      // what keeps Apply executable even though all three groups are empty.
+      const pendingAction = syncPreviewAction(preview)
+      expect(
+        pendingAction.align,
+        'symlink metadata: pending align count is positive'
+      ).toBeGreaterThan(0)
+      expect(
+        pendingAction.align,
+        'symlink metadata: pending align count equals the alignment list'
+      ).toBe(preview.linkAlignments.length)
+
       // Copy rule: an empty plan with pending alignments must never claim the
       // target already matches the source; it points at the alignment work.
       expect(
@@ -1697,6 +1709,10 @@ describe('real-disk sync symlink metadata', () => {
       expect(second.plan.update.count, 'symlink metadata: second dry-run update').toBe(0)
       expect(second.plan.delete.count, 'symlink metadata: second dry-run delete').toBe(0)
       expect(second.linkAlignments, 'symlink metadata: second dry-run alignment list').toEqual([])
+      expect(
+        syncPreviewAction(second).align,
+        'symlink metadata: align count returns to zero after applying'
+      ).toBe(0)
       expect(
         canApplySyncPreview(second),
         'symlink metadata: second dry-run is not executable'
@@ -2720,7 +2736,20 @@ describe('real-disk sync idempotent dry-run', () => {
         expect(last.plan.copy.count, `idempotent dry-run: round ${round} final copy`).toBe(0)
         expect(last.plan.update.count, `idempotent dry-run: round ${round} final update`).toBe(0)
         expect(last.plan.delete.count, `idempotent dry-run: round ${round} final delete`).toBe(0)
+        // All three groups are empty item by item, not just counted as zero.
+        expect(last.plan.copy.items, `idempotent dry-run: round ${round} final copy items`).toEqual(
+          []
+        )
+        expect(
+          last.plan.update.items,
+          `idempotent dry-run: round ${round} final update items`
+        ).toEqual([])
+        expect(
+          last.plan.delete.items,
+          `idempotent dry-run: round ${round} final delete items`
+        ).toEqual([])
         expect(last.plan.totalCount, `idempotent dry-run: round ${round} final total`).toBe(0)
+        expect(last.plan.totalBytes, `idempotent dry-run: round ${round} final bytes`).toBe(0)
       }
 
       await cycle(1)
