@@ -22,7 +22,7 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
     'Build the change list, show a dry-run preview, and write only after you confirm',
   'directory.toolbar.template': 'Place from template',
   'directory.toolbar.templateTitle':
-    'Use the left (source) folder as the structure template and place files from the built-in scattered tree /samples/directory/incoming',
+    'Use the left (source) folder as the structure template and place files from a scattered tree',
   'directory.toolbar.exportLeft': 'Export left snapshot',
   'directory.toolbar.exportLeftTitle':
     'Scan the left folder into a snapshot and export it as <name>.ocsnap.json through the system save dialog (a mounted snapshot is re-exported as is)',

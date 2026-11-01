@@ -27,7 +27,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Reading the built-in sample library, scanning the sample directories, comparing by size / modification time / content hash and parsing the CSV / TSV tables.',
   'shell.error.title': 'Could not read the sample library',
   'shell.error.sampleRead':
-    'Could not read the built-in sample library: /samples/csv/orders.left.csv is missing.',
+    'Could not read the built-in sample library: a built-in sample file is missing or unreadable.',
   'shell.error.unknown': 'An unknown error occurred while reading the built-in samples.',
   'shell.error.hint': 'The sample library ships with the app, so you can retry right away.',
   'shell.notice.skipped': 'Skipped: {left} on the left / {right} on the right',
@@ -60,6 +60,19 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Sync verification failed: {count} target(s) do not match the source (e.g. {paths}). The written state was kept; preview again before retrying.',
   'shell.notice.syncRefreshFailed':
     'Sync writes completed: {copied} copied · {updated} overwritten · {deleted} deleted; but refreshing the comparison failed: {reason}. The target already holds the written state, so preview again for the latest comparison.',
+  'shell.sync.error.target': 'Could not sync to the target {path}: {reason}.',
+  'shell.sync.reason.EACCES': 'permission denied ({code})',
+  'shell.sync.reason.EPERM': 'operation not permitted ({code})',
+  'shell.sync.reason.EISDIR': 'the target is a folder ({code})',
+  'shell.sync.reason.EROFS': 'the target volume is read-only ({code})',
+  'shell.sync.reason.EBUSY': 'the target file is in use by another program ({code})',
+  'shell.sync.reason.ENOTDIR': 'a parent of the target path is not a folder ({code})',
+  'shell.sync.reason.ENOENT': 'the target path is missing or was moved ({code})',
+  'shell.sync.reason.ENOTEMPTY': 'the target folder is not empty ({code})',
+  'shell.sync.reason.EEXIST': 'the target already exists ({code})',
+  'shell.sync.reason.ENOSPC': 'the disk is full ({code})',
+  'shell.sync.reason.fallback':
+    'the file system operation failed without a recognizable system error code',
   'shell.notice.templateComplete':
     'Template placement complete: {extracted} files written; verification matched {matched} · missing {missing} · conflicts {conflicts}.',
   'shell.side.left': 'left',

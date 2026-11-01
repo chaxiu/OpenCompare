@@ -19,7 +19,7 @@ export const directory = {
   'directory.toolbar.previewSyncTitle': '生成变更清单后弹出 Dry-run 预览，确认才写入',
   'directory.toolbar.template': '模板归位',
   'directory.toolbar.templateTitle':
-    '以左（源）目录为结构模板，从内置散乱目录树 /samples/directory/incoming 归位文件',
+    '以左（源）目录为结构模板，从散乱目录树归位文件',
   'directory.toolbar.exportLeft': '导出左侧快照',
   'directory.toolbar.exportLeftTitle':
     '把左侧目录扫描为快照并经系统保存对话框导出为 <name>.ocsnap.json（已挂载快照则原样重导出）',
