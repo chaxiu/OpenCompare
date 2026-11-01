@@ -9,6 +9,7 @@ import { compareDirectories, createComparisonCache } from '@core/directory/compa
 import { App } from './App'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
+import { exportSideSnapshot } from './workbench/snapshotOps'
 
 /**
  * Counts real row-model builds, so a tab switch can prove that only the active
@@ -153,6 +154,33 @@ interface PortScript {
 /** Memory PlatformPort with scripted picker answers and dropped paths. */
 function scriptedPort(script: PortScript): PlatformPort {
   const base = createWebPlatformPort()
+  const files = [...(script.files ?? [])]
+  const directories = [...(script.directories ?? [])]
+  const dropped = [...(script.dropped ?? [])]
+  return {
+    ...base,
+    selectFile: async () => files.shift() ?? null,
+    selectDirectory: async () => directories.shift() ?? null,
+    resolveDroppedPath: async () => dropped.shift() ?? ''
+  }
+}
+
+/** Files of the real external template trees the new entry tests drive. */
+const EXTERNAL_TEMPLATE_FILES: Readonly<Record<string, string>> = {
+  '/ext/a/src/core/strings.ts': 'export const text = "same"\n',
+  '/ext/a/src/core/engine.ts': 'export const engine = 1\n',
+  '/ext/b/misc/deep/strings.ts': 'export const text = "same"\n',
+  '/ext/b/other/engine.ts': 'export const engine = 1\n',
+  '/ext/b/zbak/unused.ts': 'unused\n',
+  '/ext/out/src/core/engine.ts': 'stale engine\n'
+}
+
+/** Memory PlatformPort seeded with real external template / output roots. */
+async function templatePort(script: PortScript): Promise<PlatformPort> {
+  const base = createWebPlatformPort()
+  for (const [path, text] of Object.entries(EXTERNAL_TEMPLATE_FILES)) {
+    await base.writeTextFile(path, text)
+  }
   const files = [...(script.files ?? [])]
   const directories = [...(script.directories ?? [])]
   const dropped = [...(script.dropped ?? [])]
@@ -448,28 +476,127 @@ describe('workbench shell', () => {
     expect(refreshedLabel).not.toContain(DIRECTORY_SAMPLE_PATHS.right)
   })
 
-  it('previews the template placement and extracts it into a writable root', async () => {
-    await renderApp()
+  it('previews the template placement and extracts it into a real output root', async () => {
+    const port = await templatePort({ directories: ['/ext/a', '/ext/b'] })
+    render(<Workbench platform={port} />)
 
-    await loadDemoSamples()
-    await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /a ↔ b/ }, { timeout: 4000 })
 
     fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
-    const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
+    const setup = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
 
-    expect(within(dialog).getByText('src/core/utils/strings.ts')).toBeDefined()
-    expect(
-      within(dialog).getByText('/samples/directory/incoming/misc/deep/deeper/strings.ts')
-    ).toBeDefined()
-    expect(within(dialog).getByText('缺失槽位')).toBeDefined()
+    // Template A is the current left root and stays read-only: no input holds it.
+    expect(within(setup).getByText('/ext/a')).toBeDefined()
+    expect(screen.queryByDisplayValue('/ext/a')).toBeNull()
+
+    fireEvent.change(within(setup).getByLabelText('散乱树 B 根'), {
+      target: { value: '/ext/b' }
+    })
+    fireEvent.change(within(setup).getByLabelText('输出根'), {
+      target: { value: '/ext/out' }
+    })
+    fireEvent.click(within(setup).getByRole('button', { name: '生成 Dry-run' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
+    expect(within(dialog).getByText('src/core/strings.ts')).toBeDefined()
+    expect(within(dialog).getByText('/ext/b/misc/deep/strings.ts')).toBeDefined()
+    expect(within(dialog).getByText(/已存在/)).toBeDefined()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
-    const notice = await screen.findByText(/模板归位完成/)
-    expect(notice.textContent).toContain('已匹配 9')
-    // Complete restore: every written slot lands, nothing missing or conflicting.
-    expect(notice.textContent).toContain('缺失 0')
-    expect(notice.textContent).toContain('冲突 0')
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toContain('写入 1')
+    expect(notice.textContent).toContain('失败 0')
     expect(screen.queryByRole('dialog')).toBeNull()
+    await expect(port.readTextFile('/ext/out/src/core/strings.ts')).resolves.toBe(
+      EXTERNAL_TEMPLATE_FILES['/ext/b/misc/deep/strings.ts']
+    )
+    // The overwrite row started unchecked, so the existing file is untouched.
+    await expect(port.readTextFile('/ext/out/src/core/engine.ts')).resolves.toBe('stale engine\n')
+  })
+
+  it('reports the failed count when a checked template write is refused', async () => {
+    const base = await templatePort({ directories: ['/ext/a', '/ext/b'] })
+    let refuseWrites = false
+    const port: PlatformPort = {
+      ...base,
+      writeTextFile: async (path, content, modifiedMs) => {
+        if (refuseWrites && path.startsWith('/ext/out/')) throw new Error('EACCES')
+        return base.writeTextFile(path, content, modifiedMs)
+      }
+    }
+    render(<Workbench platform={port} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /a ↔ b/ }, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    const setup = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
+    fireEvent.change(within(setup).getByLabelText('散乱树 B 根'), {
+      target: { value: '/ext/b' }
+    })
+    fireEvent.change(within(setup).getByLabelText('输出根'), {
+      target: { value: '/ext/out' }
+    })
+    fireEvent.click(within(setup).getByRole('button', { name: '生成 Dry-run' }))
+    const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
+
+    refuseWrites = true
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
+
+    const notice = await screen.findByRole('alert')
+    expect(notice.textContent).toContain('写入 0')
+    expect(notice.textContent).toContain('失败 1')
+    // A refused write is never reported as an all-success run.
+    expect(notice.textContent).not.toContain('全部成功')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
+    ).toBeGreaterThan(0)
+  })
+
+  it('refuses template placement when the left side is a mounted snapshot', async () => {
+    const port = await templatePort({ directories: ['/ext/a', '/ext/b'] })
+    const listDirectory = vi.fn(port.listDirectory)
+    const writeTextFile = vi.fn(port.writeTextFile)
+    const ensureDirectory = vi.fn(port.ensureDirectory)
+    render(
+      <Workbench platform={{ ...port, listDirectory, writeTextFile, ensureDirectory }} />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /a ↔ b/ }, { timeout: 4000 })
+
+    const exported = await exportSideSnapshot(port, { kind: 'directory', path: '/ext/a' })
+    fireEvent.change(screen.getByLabelText('选择左侧快照文件'), {
+      target: {
+        files: [
+          new File([exported.text], 'a.ocsnap.json', { type: 'application/json' })
+        ]
+      }
+    })
+    await screen.findAllByText('/snapshots/left/a')
+
+    listDirectory.mockClear()
+    writeTextFile.mockClear()
+    ensureDirectory.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(
+      '当前左侧是快照，不能作为模板 A；请先打开真实目录对比。'
+    )
+    // No setup step, and neither root was scanned or written.
+    expect(screen.queryByRole('dialog', { name: '模板归位 · 选择根' })).toBeNull()
+    expect(listDirectory).not.toHaveBeenCalled()
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(ensureDirectory).not.toHaveBeenCalled()
+    // The session stays usable: its tab is still there and still mounts the snapshot.
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
+    ).toBeGreaterThan(0)
+    expect(screen.getAllByText('/snapshots/left/a').length).toBeGreaterThan(0)
   })
 })
 
@@ -2665,7 +2792,11 @@ describe('directory progress and cancel UI', () => {
   })
 
   it('renders no progress bar while nothing is comparing', async () => {
-    render(<Workbench platform={scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] })} />)
+    const port = await templatePort({
+      files: [LEFT_ENGINE, RIGHT_ENGINE],
+      directories: ['/ext/a', '/ext/b']
+    })
+    render(<Workbench platform={port} />)
 
     // Idle empty workbench.
     expect(progressBar()).toBeNull()
@@ -2675,8 +2806,8 @@ describe('directory progress and cancel UI', () => {
     await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
     expect(progressBar()).toBeNull()
 
-    // Load the demo directory, then run sync / template flows.
-    await loadDemoSamples()
+    // A real external directory pair, then the sync / template flows.
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '预览并同步' })).toBeDefined())
     expect(progressBar()).toBeNull()
 
@@ -2687,6 +2818,15 @@ describe('directory progress and cancel UI', () => {
     expect(progressBar()).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    const setupDialog = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
+    expect(progressBar()).toBeNull()
+    fireEvent.change(within(setupDialog).getByLabelText('散乱树 B 根'), {
+      target: { value: '/ext/b' }
+    })
+    fireEvent.change(within(setupDialog).getByLabelText('输出根'), {
+      target: { value: '/ext/out' }
+    })
+    fireEvent.click(within(setupDialog).getByRole('button', { name: '生成 Dry-run' }))
     const templateDialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
     expect(progressBar()).toBeNull()
     fireEvent.click(within(templateDialog).getByRole('button', { name: '确认提取归位' }))

@@ -12,9 +12,12 @@ import type {
   SyncPlanGroup,
   SyncPlanItem
 } from '@core/directory/sync'
+import { createTemplatePlan } from '@core/directory/template'
 import type { TemplateMatchResult } from '@core/directory/template'
+import type { PlatformPort } from '@shared/platform/types'
 import { en, zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
+import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { DirectoryView } from './DirectoryView'
@@ -263,8 +266,17 @@ function makeTemplatePreview(overrides: Partial<TemplateMatchResult> = {}): Temp
     templateFileCount: 4,
     ...overrides
   }
-  return { result, templateRoot: '/template', incomingRoot: '/incoming', targetRoot: '/out' }
+  return {
+    plan: createTemplatePlan(result, { outputRoot: '/out' }),
+    templateRoot: '/template',
+    incomingRoot: '/incoming',
+    outputRoot: '/out',
+    outputRootExists: true
+  }
 }
+
+/** Platform seam of the setup step; the copy tests never reach the disk. */
+const templatePlatform: PlatformPort = createWebPlatformPort()
 
 /* ------------------------------------------------------------------ */
 /* View harness                                                        */
@@ -331,11 +343,14 @@ function ViewHarness({
       onExportReport={() => undefined}
       onPreviewSync={() => undefined}
       onPreviewTemplate={() => undefined}
+      platform={templatePlatform}
       syncPreview={null}
       templatePreview={null}
+      templateOpen={false}
       onCancelSync={() => undefined}
       onAbortSync={() => {}}
       onConfirmSync={() => undefined}
+      onPreviewTemplateRoots={async () => null}
       onCancelTemplate={() => undefined}
       onConfirmTemplate={() => undefined}
     />
@@ -988,8 +1003,11 @@ describe('TemplateDialog bilingual copy', () => {
   it('localizes title, description, sections, reasons and counts in English', () => {
     renderWithI18n(
       <TemplateDialog
+        platform={templatePlatform}
+        templateRoot="/template"
         preview={makeTemplatePreview()}
         busy={false}
+        onPreview={async () => null}
         onCancel={() => undefined}
         onConfirm={() => undefined}
       />,
@@ -1020,8 +1038,11 @@ describe('TemplateDialog bilingual copy', () => {
   it('keeps the zh template wording unchanged', () => {
     renderWithI18n(
       <TemplateDialog
+        platform={templatePlatform}
+        templateRoot="/template"
         preview={makeTemplatePreview()}
         busy={false}
+        onPreview={async () => null}
         onCancel={() => undefined}
         onConfirm={() => undefined}
       />,
@@ -1047,8 +1068,11 @@ describe('TemplateDialog bilingual copy', () => {
   it('disables the confirm action when nothing matched and shows None', () => {
     renderWithI18n(
       <TemplateDialog
+        platform={templatePlatform}
+        templateRoot="/template"
         preview={makeTemplatePreview({ matched: [], templateFileCount: 3 })}
         busy={false}
+        onPreview={async () => null}
         onCancel={() => undefined}
         onConfirm={() => undefined}
       />,
@@ -1060,8 +1084,11 @@ describe('TemplateDialog bilingual copy', () => {
 
     renderWithI18n(
       <TemplateDialog
+        platform={templatePlatform}
+        templateRoot="/template"
         preview={makeTemplatePreview({ matched: [], templateFileCount: 3 })}
         busy
+        onPreview={async () => null}
         onCancel={() => undefined}
         onConfirm={() => undefined}
       />,
@@ -1073,8 +1100,11 @@ describe('TemplateDialog bilingual copy', () => {
   it('keeps the whole en template dialog Han free', () => {
     const { container } = renderWithI18n(
       <TemplateDialog
+        platform={templatePlatform}
+        templateRoot="/template"
         preview={makeTemplatePreview()}
         busy={false}
+        onPreview={async () => null}
         onCancel={() => undefined}
         onConfirm={() => undefined}
       />,

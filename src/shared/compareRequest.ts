@@ -196,8 +196,12 @@ function foldPath(value: string): string {
   return body === '' ? root : `${root}/${body}`
 }
 
-/** Trims, strips paired quotes, expands `~`, resolves against `baseDir`, folds segments. */
-function normalizePathValue(raw: string, context: PathContext): string | null {
+/**
+ * Trims, strips paired quotes, expands `~`, resolves against `baseDir`, folds segments.
+ * Exported for the template root inputs, which must reuse this exact normalisation
+ * instead of growing a second renderer-side copy.
+ */
+export function normalizePathValue(raw: string, context: PathContext): string | null {
   const trimmed = raw.trim()
   const unquoted = stripPairedQuotes(trimmed).trim()
   if (unquoted === '') return null

@@ -248,6 +248,8 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 
 ## 最近交付证明
 
+- 交叉引用（非本域 AC）：`wi_ws_dcf61d0392d48f0e`（2026-11-01，`kind: feature`）让模板归位入口在 `Workbench` 侧从「立即预览内置散乱树」改为「先开选根对话框」——快照左根在打开前拒绝（`directory.template.error.snapshotLeft` 通知），`templateOpen` 与 `templatePreview` 两个状态分离，确认时把对话框的 `TemplateResolvedPlan` 原样交给 `applyTemplatePlan`，完成通知改 `shell.notice.templateApplied` 并按 `failedCount > 0` 走 danger。模板入口 / Dry-run 的行为与词条 AC 归 `domains/directory`（`qa/template-entry-dryrun.md`）与 `domains/i18n`；本域既有 `ac-workflow-toolbar-no-sample-path` / `ac-directory-toolbar-real-entries-kept` 不变（模板工具栏入口与三行结构未改）。
+
 - WI：`wi_ws_2f5af7320d12ad9f`（样本入口归位补钉：首屏 / 目录工具栏零样本入口、零样本路径；同步失败本地化词条口径归 `domains/i18n`）
 - 日期：2026-11-01
 - 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_2c5dead54f30bd31/code-gates/attempts/001`）。本 change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合，本域无新增 qa 折叠用例。

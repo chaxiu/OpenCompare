@@ -15,6 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import { SessionTabs } from '@renderer/components/SessionTabs'
+import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { createDirectorySession, directoryViewKey } from '@renderer/workbench/directoryCompare'
 import type { WorkbenchSession } from '@renderer/workbench/session'
@@ -150,11 +151,14 @@ function viewProps(session: WorkbenchSession) {
     onExportReport: noop,
     onPreviewSync: noop,
     onPreviewTemplate: noop,
+    platform: createWebPlatformPort(),
     syncPreview: null,
     templatePreview: null,
+    templateOpen: false,
     onCancelSync: noop,
     onAbortSync: noop,
     onConfirmSync: noop,
+    onPreviewTemplateRoots: async () => null,
     onCancelTemplate: noop,
     onConfirmTemplate: noop
   }
