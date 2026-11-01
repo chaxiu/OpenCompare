@@ -2,7 +2,7 @@
 
 OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application 签名** 与 **Apple 公证（Notarization）**，否则 Gatekeeper 会拦截、无法作为合规正式版分发。相关配置已接线，但**凭据必须由人类录入**，AI 不获取、不录入、不在本地执行公证。缺凭据时 CI 显式失败（fail-closed），**绝不产出、上传或公开未签名裸包**。
 
-> **当前状态：v0.2.14 已发布。** 最新公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.14>，发布说明见 `docs/release-notes/v0.2.14.md`；发布证据见 `docs/release-evidence/v0.2.14.md`。v0.2.11 作为历史保留，其发布证据已归档到 `docs/release-evidence/v0.2.11.md`；v0.2.8 的发布证据作为历史保留在 `docs/release-evidence/v0.2.8.md`，v0.2.7 的发布证据作为历史保留在 `docs/release-evidence/v0.2.7.md`，v0.2.6 的发布证据同样作为历史保留在 `docs/release-evidence/v0.2.6.md`。公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
+> **当前状态：v0.2.15 已发布。** 最新公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.15>，发布说明见 `docs/release-notes/v0.2.15.md`；发布证据见 `docs/release-evidence/v0.2.15.md`。v0.2.14 作为历史保留，其发布证据已归档到 `docs/release-evidence/v0.2.14.md`；v0.2.11 作为历史保留，其发布证据已归档到 `docs/release-evidence/v0.2.11.md`；v0.2.8 的发布证据作为历史保留在 `docs/release-evidence/v0.2.8.md`，v0.2.7 的发布证据作为历史保留在 `docs/release-evidence/v0.2.7.md`，v0.2.6 的发布证据同样作为历史保留在 `docs/release-evidence/v0.2.6.md`。公司 Apple Developer 账户已就位，签名与公证链路已在 `electron-builder.yml` / CI 中接线。正式版 macOS 安装包经 **Developer ID 签名 + Apple 公证** 流程产出，由 tag 触发的 CI 发布为每个版本唯一的公开 Release；若 tag 已推送但 Release 未完成，可用 `workflow_dispatch` 补发（见第五节）。签名 + 公证的实际结果以那次 CI 为准。
 >
 > **凭据录入：** Developer ID 证书与 App Store Connect API Key 由人类按标准协助机制录入 **GitHub CI Secrets**（只进 Secrets，禁止写入仓库、构建脚本或日志）；6 项 Secret 齐备后推送 `v*` 标签即可由 CI 产出签名 + 公证的包。
 
@@ -63,7 +63,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 本地 annotated tag `v0.1.2` 的 tag 对象为 `c4a6a95`，指向 commit `7ea2cc6`，该 commit 是 `main` / `origin/main` 的祖先；远端 `v0.1.2` 是轻量 tag，指向 commit `bb0c0b1`，该 commit 不在 `v0.2.0`（`285ee28`）的祖先链上（`v0.1.2..HEAD`=29，`HEAD..v0.1.2`=2）。两条仅远端 tag 可达提交（`bb0c0b1` / `b2c4e51`）经 `git cherry HEAD` 判定均为 `-`：补丁已等价存在于 `HEAD`，零内容丢失。漂移的实质是 tag 之后的修复没有进入已发布资产。
 - 规划基线时 `main` 领先 `v0.1.2` 13 个提交（含签名 / 打包修复），这些提交未进入已发布的 v0.1.2 资产；13 只是规划基线快照，实际领先数以打 tag 时的 `main` 为准。
 - 远端 `v0.1.2` Release 为公开、非预发布，共 11 个资产：`latest-linux.yml`、`latest-mac.yml`、`latest.yml`、`OpenCompare-0.1.2-arm64-mac.zip(.blockmap)`、`OpenCompare-0.1.2-arm64.dmg(.blockmap)`、`OpenCompare-0.1.2.AppImage`、`OpenCompare.Setup.0.1.2.exe(.blockmap)`、`opencompare_0.1.2_amd64.deb`。
-- **不删除、不移动、不重打、不替换** `v0.1.2` 的 tag 与资产；tag 之后的修复由 v0.2.15 承接。后续如需修订只能发布更高版本，不改写历史。
+- **不删除、不移动、不重打、不替换** `v0.1.2` 的 tag 与资产；tag 之后的修复由 v0.2.12 承接。后续如需修订只能发布更高版本，不改写历史。
 
 ## 五、祖先门语义与补发入口（不改 tag）
 
