@@ -6,7 +6,7 @@
  * Static manifest assertions only — no Electron, no temp dirs, no network.
  * Restoring or appending `perf-gate` to the default matrix turns this red.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -73,6 +73,38 @@ describe('default code-gates matrix', () => {
     expect(gateById(defaultManifest, 'cancel-gate')?.command).toBe('pnpm test:cancel')
     expect(gateById(defaultManifest, 'memory-gate')?.command).toBe('pnpm test:memory')
     expect(gateById(defaultManifest, 'sync-real-gate')?.command).toBe('pnpm test:sync-real')
+  })
+
+  it('maps the four single-direction mirror sync behaviours onto real gate files', () => {
+    const description = defaultManifest.description
+
+    // The stable behaviour markers the real-disk / dialog suites are pinned to.
+    for (const marker of [
+      'mirror delete opt-in',
+      'idempotent dry-run',
+      'mtime and relative structure preserved',
+      'link mtime alignment'
+    ]) {
+      expect(description.toLowerCase(), `manifest: behaviour marker "${marker}"`).toContain(marker)
+    }
+
+    // Both gates that carry the behaviour assertions are named in the map.
+    for (const gateId of ['sync-real-gate', 'test']) {
+      expect(gateById(defaultManifest, gateId), `manifest: gate ${gateId}`).toBeDefined()
+      expect(description, `manifest: mapped gate id ${gateId}`).toContain(`\`${gateId}\``)
+    }
+
+    // ... and both test files exist under the repo root the gate runs in.
+    for (const relativePath of [
+      'src/sync-real-gate.test.ts',
+      'src/renderer/src/views/directorySyncDialog.test.tsx'
+    ]) {
+      expect(description, `manifest: mapped test file ${relativePath}`).toContain(relativePath)
+      expect(
+        existsSync(resolve(process.cwd(), relativePath)),
+        `manifest: ${relativePath} exists`
+      ).toBe(true)
+    }
   })
 
   it('does not run the real perf:dir measurement from any default gate', () => {

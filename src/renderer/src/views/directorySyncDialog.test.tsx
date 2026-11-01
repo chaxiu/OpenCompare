@@ -117,6 +117,8 @@ describe('directory sync dialog executability', () => {
   it('keeps Apply enabled and shows the pending link count when only link times differ', () => {
     const preview = previewOf({ mode: 'incremental', links: ['same-target-link', 'dangling-link'] })
     expect(canApplySyncPreview(preview), 'dialog: shared predicate').toBe(true)
+    const action = syncPreviewAction(preview)
+    expect(action.align, 'dialog: pending link count comes from the shared action').toBe(2)
 
     const { apply } = renderDialog(preview)
 
@@ -130,7 +132,7 @@ describe('directory sync dialog executability', () => {
           .replace('{copy}', '0')
           .replace('{update}', '0')
           .replace('{delete}', '0')
-          .replace('{align}', '2')
+          .replace('{align}', String(action.align))
       )
     ).toBeDefined()
     expect(screen.getByText('same-target-link')).toBeDefined()
@@ -154,6 +156,11 @@ describe('directory sync dialog executability', () => {
 
     const { apply } = renderDialog(preview)
 
+    // The mirror deletion itself starts unchecked: the opt-in is the checkbox.
+    const checkbox = screen.getByRole('checkbox', {
+      name: zh['directory.sync.deleteItem'].replace('{path}', 'stale.txt')
+    }) as HTMLInputElement
+    expect(checkbox.checked, 'sync dialog: mirror deletion defaults to unchecked').toBe(false)
     expect(apply.disabled).toBe(true)
     expect(screen.getByText(zh['directory.sync.noExecutable'])).toBeDefined()
     expect(screen.queryByText(zh['directory.sync.empty'])).toBeNull()
