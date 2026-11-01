@@ -54,6 +54,7 @@ import {
 } from './directoryOps'
 import type {
   SyncPreview,
+  TemplateApplyOutcome,
   TemplatePreview,
   TemplatePreviewFailure,
   TemplateRoots
@@ -1265,23 +1266,18 @@ export function Workbench({
     }
   }
 
-  /** Writes exactly the manifest the dialog resolved and reports its own counts. */
-  async function handleConfirmTemplate(resolved: TemplateResolvedPlan): Promise<void> {
+  /**
+   * Runs exactly the manifest the dialog resolved and returns the outcome (what
+   * was written plus the per-row disk verification). The dialog owns the three
+   * steps and the localized failure copy, so the shell never closes it here.
+   */
+  async function handleConfirmTemplate(
+    resolved: TemplateResolvedPlan
+  ): Promise<TemplateApplyOutcome> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      const execution = await applyTemplatePlan(platform, resolved)
-      setTemplateOpen(false)
-      setTemplatePreview(null)
-      report(
-        copyNotice('shell.notice.templateApplied', {
-          written: execution.writtenCount,
-          failed: execution.failedCount
-        }),
-        execution.failedCount > 0 ? 'danger' : 'info'
-      )
-    } catch (cause) {
-      report(detailNotice(errorText(cause)))
+      return await applyTemplatePlan(platform, resolved)
     } finally {
       setDirectoryBusy(false)
     }
@@ -1379,7 +1375,7 @@ export function Workbench({
               setTemplateOpen(false)
               setTemplatePreview(null)
             }}
-            onConfirmTemplate={(resolved) => void handleConfirmTemplate(resolved)}
+            onConfirmTemplate={handleConfirmTemplate}
           />
         )
       }

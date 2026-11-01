@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PlatformPort } from '@shared/platform/types'
+import { sha256Hex } from '@core/directory/hash'
 import { resolveTemplatePlan } from '@core/directory/template'
+import type { TemplateWrittenEntry } from '@core/directory/template'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
-import { applyTemplatePlan, previewTemplate } from './directoryOps'
+import { applyTemplatePlan, previewTemplate, verifyTemplatePlan } from './directoryOps'
 
 /** Memory PlatformPort seeded with a real external tree; nothing else is faked. */
 async function seededPort(
@@ -186,14 +188,87 @@ describe('template apply', () => {
     expect(resolved.executableCount).toBe(1)
 
     const writeTextFile = vi.fn(port.writeTextFile)
-    const execution = await applyTemplatePlan({ ...port, writeTextFile }, resolved)
+    const outcome = await applyTemplatePlan({ ...port, writeTextFile }, resolved)
 
-    expect(execution.writtenCount).toBe(1)
-    expect(execution.failedCount).toBe(0)
+    expect(outcome.execution.writtenCount).toBe(1)
+    expect(outcome.execution.failedCount).toBe(0)
+    expect(outcome.verification.entries).toHaveLength(1)
+    expect(outcome.verification.verified).toBe(1)
+    expect(outcome.verification.failed).toBe(0)
     expect(writeTextFile).toHaveBeenCalledTimes(1)
     expect(writeTextFile).toHaveBeenCalledWith('/ext/out/src/a.ts', 'A', mtime)
     await expect(port.readTextFile('/ext/out/src/a.ts')).resolves.toBe('A')
     // The unchecked slot was never written.
     await expect(port.readTextFile('/ext/out/src/skip.ts')).rejects.toThrow()
+  })
+
+  it('refuses a read-only output root before the first write', async () => {
+    const port = await seededPort({ ...MATCHED_PAIR, '/ext/out/keep.txt': 'keep' })
+    const preview = await previewTemplate(
+      port,
+      { templateRoot: '/ext/a', incomingRoot: '/ext/b', outputRoot: '/ext/out' }
+    )
+    const resolved = resolveTemplatePlan(preview.plan, { checkedPaths: ['src/a.ts', 'src/b.ts'] })
+    const writeTextFile = vi.fn(port.writeTextFile)
+    const ensureDirectory = vi.fn(port.ensureDirectory)
+    const checkWritable = vi.fn(async () => {
+      throw new Error('无法写入目标 /ext/out：没有访问权限（EACCES）。')
+    })
+
+    await expect(
+      applyTemplatePlan({ ...port, writeTextFile, ensureDirectory, checkWritable }, resolved)
+    ).rejects.toMatchObject({ name: 'TemplateApplyError', code: 'EACCES', path: '/ext/out' })
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(ensureDirectory).not.toHaveBeenCalled()
+  })
+
+  it('re-checks hash, presence and second mtime for every written row', async () => {
+    const port = await seededPort({})
+    const written: readonly TemplateWrittenEntry[] = [
+      {
+        relativePath: 'ok.txt',
+        sourcePath: '/src/ok.txt',
+        targetPath: '/ext/v/ok.txt',
+        sourceHash: sha256Hex('OK'),
+        modifiedMs: 1_700_000_000_000
+      },
+      {
+        relativePath: 'hash.txt',
+        sourcePath: '/src/hash.txt',
+        targetPath: '/ext/v/hash.txt',
+        sourceHash: sha256Hex('HASH'),
+        modifiedMs: 1_700_000_001_000
+      },
+      {
+        relativePath: 'gone.txt',
+        sourcePath: '/src/gone.txt',
+        targetPath: '/ext/v/gone.txt',
+        sourceHash: sha256Hex('GONE'),
+        modifiedMs: 1_700_000_002_000
+      },
+      {
+        relativePath: 'mtime.txt',
+        sourcePath: '/src/mtime.txt',
+        targetPath: '/ext/v/mtime.txt',
+        sourceHash: sha256Hex('MTIME'),
+        modifiedMs: 1_700_000_003_000
+      }
+    ]
+    await port.writeTextFile('/ext/v/ok.txt', 'OK', 1_700_000_000_000)
+    await port.writeTextFile('/ext/v/hash.txt', 'tampered', 1_700_000_001_000)
+    // `gone.txt` is never written.
+    await port.writeTextFile('/ext/v/mtime.txt', 'MTIME', 1_700_000_004_000)
+
+    const verification = await verifyTemplatePlan(port, written)
+    const reasonOf = new Map(
+      verification.entries.map((entry) => [entry.relativePath, entry.reason])
+    )
+    expect(reasonOf.get('ok.txt')).toBeUndefined()
+    expect(reasonOf.get('hash.txt')).toBe('hash')
+    expect(reasonOf.get('gone.txt')).toBe('missing')
+    expect(reasonOf.get('mtime.txt')).toBe('mtime')
+    expect(verification.verified).toBe(1)
+    expect(verification.failed).toBe(3)
+    expect(verification.verified + verification.failed).toBe(verification.entries.length)
   })
 })

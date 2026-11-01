@@ -233,7 +233,9 @@ function Harness({
       onConfirmSync={() => {}}
       onPreviewTemplateRoots={async () => null}
       onCancelTemplate={() => {}}
-      onConfirmTemplate={() => {}}
+      onConfirmTemplate={async () => {
+        throw new Error('template confirm is not used by the directory view tests')
+      }}
     />
   )
 }

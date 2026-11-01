@@ -12,16 +12,27 @@ import { DIRECTORY_ROW_HEIGHT, createDirectoryScrollMap } from '@core/directory/
 import { resolveTemplatePlan } from '@core/directory/template'
 import type {
   TemplatePlanEntry,
+  TemplateRejectionReason,
   TemplateResolvedPlan,
-  TemplateUnused
+  TemplateUnused,
+  TemplateVerificationEntry,
+  TemplateWriteFailure
 } from '@core/directory/template'
 import { useI18n } from '@renderer/i18n/context'
+import type { Translate } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
 import type {
+  TemplateApplyOutcome,
   TemplatePreview,
   TemplatePreviewFailure,
   TemplateRoots
 } from '@renderer/workbench/directoryOps'
+import type { SyncFailureCopy } from '@renderer/workbench/syncFailureCopy'
+import {
+  templateApplyFailureCopy,
+  templateVerifyReasonKey,
+  templateWriteFailureCopy
+} from '@renderer/workbench/templateFailureCopy'
 import { countKey } from './directoryCopy'
 
 /** Field-level refusals of the setup step; every one has a zh / en pair. */
@@ -39,8 +50,20 @@ const ISSUE_KEYS: Record<TemplateIssue, MessageKey> = {
   'output-not-directory': 'directory.template.error.outputNotDirectory'
 }
 
+/** Localized reason of one row the resolved plan refused. */
+const REJECTION_KEYS: Record<TemplateRejectionReason, MessageKey> = {
+  'not-executable': 'directory.template.reject.notExecutable',
+  'conflict-unresolved': 'directory.template.reject.conflictUnresolved',
+  'conflict-candidate-outside-set': 'directory.template.reject.conflictCandidateOutsideSet',
+  'target-occupied-by-directory': 'directory.template.reject.targetOccupiedByDirectory',
+  'duplicate-source': 'directory.template.reject.duplicateSource'
+}
+
 const INPUT_CLASSES =
   'focus-ring h-7 w-full rounded-sm border border-line-subtle bg-surface-base px-2 font-mono text-xs text-content-primary placeholder:text-content-muted'
+
+const CANDIDATE_CLASSES =
+  'focus-ring h-6 max-w-64 shrink rounded-sm border border-line-subtle bg-surface-base px-1 font-mono text-2xs text-content-primary'
 
 /** Extra rows above and below the viewport so fast scrolling never shows gaps. */
 const ROW_OVERSCAN = 8
@@ -67,6 +90,10 @@ type TemplateRow =
   | { readonly kind: 'unused'; readonly item: TemplateUnused }
   | { readonly kind: 'empty'; readonly section: RowSection }
 
+type ResultRow =
+  | { readonly kind: 'verify'; readonly entry: TemplateVerificationEntry }
+  | { readonly kind: 'write-failure'; readonly failure: TemplateWriteFailure }
+
 export interface TemplateDialogProps {
   readonly platform: PlatformPort
   /** Template A, always the left root of the active comparison. */
@@ -76,8 +103,8 @@ export interface TemplateDialogProps {
   readonly busy: boolean
   readonly onPreview: (roots: TemplateRoots) => Promise<TemplatePreviewFailure | null>
   readonly onCancel: () => void
-  /** Receives the one resolved manifest; the shell never re-derives it. */
-  readonly onConfirm: (resolved: TemplateResolvedPlan) => void
+  /** Receives the one resolved manifest; the shell only binds the platform IO. */
+  readonly onConfirm: (resolved: TemplateResolvedPlan) => Promise<TemplateApplyOutcome>
 }
 
 function sameFiles(files: FileList | undefined): readonly File[] {
@@ -89,11 +116,21 @@ function isFileDrag(event: ReactDragEvent<HTMLDivElement>): boolean {
   return transfer !== null && Array.from(transfer.types).includes('Files')
 }
 
+/** Renders one dictionary copy with its nested reason fragment resolved first. */
+function copyText(t: Translate, copy: SyncFailureCopy): string {
+  const params: Record<string, string | number> = {}
+  for (const [name, value] of Object.entries(copy.params ?? {})) {
+    params[name] = typeof value === 'object' ? t(value.message, value.params) : value
+  }
+  return t(copy.key, params)
+}
+
 /**
  * Real template placement: first the two real roots (B and the output root),
- * then the dry-run of the plan built from them. Template A is always the
- * current left root and stays read-only. Nothing is written until the user
- * confirms, and the confirm action only sees the resolved manifest.
+ * then the dry-run of the plan built from them, then the per-row verification of
+ * what the run wrote. Template A is always the current left root and stays
+ * read-only. Nothing is written until the user confirms, and the confirm action
+ * only sees the resolved manifest.
  */
 export function TemplateDialog({
   platform,
@@ -109,15 +146,24 @@ export function TemplateDialog({
   const [outputInput, setOutputInput] = useState('')
   const [issue, setIssue] = useState<TemplateIssue | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set<string>())
+  const [conflictChoices, setConflictChoices] = useState<Readonly<Record<string, string>>>({})
+  const [outcome, setOutcome] = useState<TemplateApplyOutcome | null>(null)
+  const [applyFailure, setApplyFailure] = useState<unknown>(null)
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
-  const dryRun = preview !== null
-  const blocked = busy || submitting
+  const step: 'setup' | 'dry-run' | 'result' =
+    preview === null ? 'setup' : outcome !== null ? 'result' : 'dry-run'
+  const blocked = busy || submitting || applying
 
   // Default checks are the plan's own decision; conflict / missing / overwritten
-  // rows never start checked.
+  // rows never start checked. A new preview (a rescan) starts a fresh selection.
   useEffect(() => {
+    setOutcome(null)
+    setApplyFailure(null)
+    setIssue(null)
+    setConflictChoices({})
     if (preview === null) {
       setChecked(new Set<string>())
       return
@@ -128,8 +174,16 @@ export function TemplateDialog({
   }, [preview])
 
   const resolved = useMemo(
-    () => (preview === null ? null : resolveTemplatePlan(preview.plan, { checkedPaths: [...checked] })),
-    [preview, checked]
+    () =>
+      preview === null
+        ? null
+        : resolveTemplatePlan(preview.plan, { checkedPaths: [...checked], conflictChoices }),
+    [preview, checked, conflictChoices]
+  )
+
+  const rejectionByPath = useMemo(
+    () => new Map((resolved?.rejected ?? []).map((rejection) => [rejection.relativePath, rejection.reason])),
+    [resolved]
   )
 
   const rows = useMemo<readonly TemplateRow[]>(() => {
@@ -156,18 +210,28 @@ export function TemplateDialog({
     return next
   }, [preview])
 
+  const resultRows = useMemo<readonly ResultRow[]>(() => {
+    if (outcome === null) return []
+    return [
+      ...outcome.verification.entries.map<ResultRow>((entry) => ({ kind: 'verify', entry })),
+      ...outcome.execution.failed.map<ResultRow>((failure) => ({ kind: 'write-failure', failure }))
+    ]
+  }, [outcome])
+
+  const listRows: readonly (TemplateRow | ResultRow)[] = step === 'result' ? resultRows : rows
+
   // The virtualiser observes the scroll container; the row window comes from the
   // pure scroll map, exactly like the directory tree.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: listRows.length,
     getScrollElement: () => scrollElement,
     estimateSize: () => DIRECTORY_ROW_HEIGHT,
     overscan: ROW_OVERSCAN
   })
   const offset = virtualizer.scrollOffset ?? 0
   const viewportHeight = virtualizer.scrollRect?.height ?? 0
-  const scrollMap = createDirectoryScrollMap(rows.length, viewportHeight)
+  const scrollMap = createDirectoryScrollMap(listRows.length, viewportHeight)
   const range = scrollMap.visibleRange(offset, ROW_OVERSCAN)
 
   function issueText(next: TemplateIssue): string {
@@ -185,6 +249,30 @@ export function TemplateDialog({
       const next = new Set(current)
       if (next.has(relativePath)) next.delete(relativePath)
       else next.add(relativePath)
+      return next
+    })
+  }
+
+  /**
+   * Choosing a candidate never checks the row: the user still has to tick it.
+   * Clearing the choice leaves the row in the selection so the resolved plan
+   * reports `conflict-unresolved`, while the checkbox reads as unchecked (an
+   * unresolved conflict can never be executed). A fresh choice therefore drops
+   * any stale internal selection first, so selecting again never auto-checks.
+   */
+  function chooseCandidate(relativePath: string, path: string): void {
+    const hadChoice = conflictChoices[relativePath] !== undefined
+    setConflictChoices((current) => {
+      const next = { ...current }
+      if (path === '') delete next[relativePath]
+      else next[relativePath] = path
+      return next
+    })
+    if (path === '' || hadChoice) return
+    setChecked((current) => {
+      if (!current.has(relativePath)) return current
+      const next = new Set(current)
+      next.delete(relativePath)
       return next
     })
   }
@@ -265,6 +353,46 @@ export function TemplateDialog({
     void submit()
   }
 
+  /** Runs (or retries) the same resolved manifest; the dialog stays open either way. */
+  async function confirm(): Promise<void> {
+    if (blocked || resolved === null) return
+    setApplyFailure(null)
+    setApplying(true)
+    try {
+      setOutcome(await onConfirm(resolved))
+    } catch (cause) {
+      setApplyFailure(cause)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  /** Rebuilds the plan from the same three roots; nothing is written. */
+  async function rescan(): Promise<void> {
+    if (blocked || preview === null) return
+    setIssue(null)
+    setSubmitting(true)
+    try {
+      const failure = await onPreview({
+        templateRoot: preview.templateRoot,
+        incomingRoot: preview.incomingRoot,
+        outputRoot: preview.outputRoot
+      })
+      if (failure !== null) setIssue(failure)
+    } catch {
+      setIssue('preview-failed')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function applyFailureText(cause: unknown): string {
+    const copy = templateApplyFailureCopy(cause)
+    return copy === null
+      ? t('directory.template.error.applyFailed')
+      : copyText(t, copy)
+  }
+
   function renderField(
     target: 'incoming' | 'output',
     label: string,
@@ -343,16 +471,20 @@ export function TemplateDialog({
     }
 
     const entry = row.entry
+    const choice = conflictChoices[entry.relativePath]
+    const selectable = entry.outcome === 'matched' || entry.outcome === 'conflict'
+    const rejection = rejectionByPath.get(entry.relativePath)
+    const shownSource = entry.outcome === 'conflict' ? choice : entry.sourcePath
     return (
       <div className="flex h-6 items-center gap-2 px-2" data-template-row title={entry.relativePath}>
-        {entry.outcome === 'matched' ? (
+        {selectable ? (
           <input
             type="checkbox"
             className="size-4 shrink-0 accent-accent"
             aria-label={t('directory.template.checkSlot', { path: entry.relativePath })}
-            checked={checked.has(entry.relativePath)}
+            checked={checked.has(entry.relativePath) && (entry.outcome !== 'conflict' || choice !== undefined)}
             onChange={() => toggleChecked(entry.relativePath)}
-            disabled={busy}
+            disabled={blocked || (entry.outcome === 'conflict' && choice === undefined)}
           />
         ) : (
           <span aria-hidden className="size-4 shrink-0" />
@@ -369,30 +501,41 @@ export function TemplateDialog({
                   : 'directory.template.reason.contentMismatch'
               )}
             </span>
-            <span
-              className="truncate font-mono text-2xs text-content-muted"
-              title={entry.candidates.map((candidate) => candidate.path).join(' · ')}
+            <select
+              className={CANDIDATE_CLASSES}
+              aria-label={t('directory.template.conflict.candidate', { path: entry.relativePath })}
+              value={choice ?? ''}
+              onChange={(event) => chooseCandidate(entry.relativePath, event.target.value)}
+              disabled={blocked}
             >
-              {entry.candidates.map((candidate) => candidate.path).join(' · ')}
-            </span>
+              <option value="">{t('directory.template.conflict.choose')}</option>
+              {entry.candidates.map((candidate) => (
+                <option key={candidate.path} value={candidate.path}>
+                  {candidate.path}
+                </option>
+              ))}
+            </select>
           </>
-        ) : entry.sourcePath !== null ? (
+        ) : null}
+        {shownSource !== null && shownSource !== undefined ? (
           <>
             <span aria-hidden className="shrink-0 text-2xs text-content-muted">
               ←
             </span>
-            <span className="truncate font-mono text-2xs text-content-muted" title={entry.sourcePath}>
-              {entry.sourcePath}
+            <span className="truncate font-mono text-2xs text-content-muted" title={shownSource}>
+              {shownSource}
             </span>
           </>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {entry.overwrite ? (
+          {rejection !== undefined ? (
+            <span className="text-2xs text-danger">{t(REJECTION_KEYS[rejection])}</span>
+          ) : entry.overwrite ? (
             <span className="text-2xs text-diff-modified" title={t('directory.template.overwrite')}>
               {t('directory.template.overwrite')}
             </span>
           ) : null}
-          {entry.occupiedByDirectory ? (
+          {entry.occupiedByDirectory && rejection === undefined ? (
             <span className="text-2xs text-danger">{t('directory.template.occupied')}</span>
           ) : null}
           <span className="tabular font-mono text-2xs text-content-muted">
@@ -403,104 +546,197 @@ export function TemplateDialog({
     )
   }
 
-  const windowedRows: { readonly row: TemplateRow; readonly top: number }[] = []
+  function resultRowBody(row: ResultRow): JSX.Element {
+    if (row.kind === 'verify') {
+      const { entry } = row
+      const reasonKey = entry.ok || entry.reason === undefined
+        ? undefined
+        : templateVerifyReasonKey(entry.reason)
+      return (
+        <div
+          className="flex h-6 items-center gap-2 px-2"
+          data-template-result-row
+          title={entry.targetPath}
+        >
+          <span className="truncate font-mono text-xs text-content-secondary">
+            {entry.relativePath}
+          </span>
+          <span className="truncate font-mono text-2xs text-content-muted">{entry.targetPath}</span>
+          <span
+            className={`ml-auto shrink-0 text-2xs ${entry.ok ? 'text-diff-added' : 'text-danger'}`}
+          >
+            {entry.ok ? t('directory.template.result.ok') : t(reasonKey ?? 'directory.template.verify.unreadable')}
+          </span>
+        </div>
+      )
+    }
+
+    const { failure } = row
+    return (
+      <div
+        className="flex h-6 items-center gap-2 px-2"
+        data-template-failure-row
+        title={failure.targetPath}
+      >
+        <span className="truncate font-mono text-xs text-content-secondary">
+          {failure.relativePath}
+        </span>
+        <span className="truncate font-mono text-2xs text-content-muted">{failure.targetPath}</span>
+        <span className="ml-auto shrink-0 text-2xs text-danger">
+          {copyText(t, templateWriteFailureCopy(failure))}
+        </span>
+      </div>
+    )
+  }
+
+  function rowKey(row: TemplateRow | ResultRow): string {
+    switch (row.kind) {
+      case 'header':
+        return `header-${row.section}`
+      case 'empty':
+        return `empty-${row.section}`
+      case 'unused':
+        return `unused-${row.item.relativePath}`
+      case 'entry':
+        return `entry-${row.entry.relativePath}`
+      case 'verify':
+        return `verify-${row.entry.relativePath}`
+      case 'write-failure':
+        return `failure-${row.failure.relativePath}`
+    }
+  }
+
+  function renderListRow(row: TemplateRow | ResultRow): JSX.Element {
+    if (row.kind === 'verify' || row.kind === 'write-failure') return resultRowBody(row)
+    return rowBody(row)
+  }
+
+  const windowedRows: { readonly row: TemplateRow | ResultRow; readonly top: number }[] = []
   for (let index = range.start; index <= range.end; index += 1) {
-    const row = rows[index]
+    const row = listRows[index]
     if (row === undefined) continue
     windowedRows.push({ row, top: scrollMap.rowTop(index, offset) })
   }
 
+  const description =
+    step !== 'setup' && preview !== null ? (
+      <>
+        {t('directory.template.label.template')}
+        <span className="font-mono">{preview.templateRoot}</span> ·{' '}
+        {t('directory.template.label.incoming')}
+        <span className="font-mono">{preview.incomingRoot}</span> ·{' '}
+        {t('directory.template.label.output')}
+        <span className="font-mono">{preview.outputRoot}</span> ·{' '}
+        {t(
+          preview.outputRootExists
+            ? 'directory.template.output.exists'
+            : 'directory.template.output.willCreate'
+        )}
+      </>
+    ) : (
+      t('directory.template.setupHint')
+    )
+
+  function footer(): JSX.Element {
+    if (step === 'setup') {
+      return (
+        <>
+          <ToolbarButton variant="ghost" onClick={onCancel} disabled={blocked}>
+            {t('common.cancel')}
+          </ToolbarButton>
+          <ToolbarButton variant="primary" onClick={() => void submit()} disabled={blocked}>
+            {blocked ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
+            {blocked ? t('directory.template.previewing') : t('directory.template.preview')}
+          </ToolbarButton>
+        </>
+      )
+    }
+
+    if (step === 'result' && outcome !== null) {
+      return (
+        <>
+          <span className="tabular mr-auto flex items-center gap-2 text-2xs text-content-muted">
+            <span>{t('directory.template.result.written', { count: outcome.execution.writtenCount })}</span>
+            <span>
+              {t('directory.template.result.writeFailed', { count: outcome.execution.failedCount })}
+            </span>
+            <span>{t('directory.template.result.verified', { count: outcome.verification.verified })}</span>
+            <span>
+              {t('directory.template.result.verifyFailed', { count: outcome.verification.failed })}
+            </span>
+          </span>
+          <ToolbarButton variant="ghost" onClick={() => void rescan()} disabled={blocked}>
+            {t('directory.template.result.rescan')}
+          </ToolbarButton>
+          <ToolbarButton variant="primary" onClick={onCancel} disabled={blocked}>
+            {t('directory.template.result.done')}
+          </ToolbarButton>
+        </>
+      )
+    }
+
+    if (resolved === null) {
+      return (
+        <ToolbarButton variant="ghost" onClick={onCancel} disabled={blocked}>
+          {t('common.cancel')}
+        </ToolbarButton>
+      )
+    }
+
+    if (applyFailure !== null) {
+      return (
+        <>
+          <span role="alert" className="mr-auto text-2xs text-danger">
+            {applyFailureText(applyFailure)}
+          </span>
+          <ToolbarButton variant="ghost" onClick={onCancel} disabled={blocked}>
+            {t('common.cancel')}
+          </ToolbarButton>
+          <ToolbarButton variant="primary" onClick={() => void confirm()} disabled={blocked}>
+            {applying ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
+            {t('directory.template.result.retry')}
+          </ToolbarButton>
+        </>
+      )
+    }
+
+    return (
+      <>
+        <span className="tabular mr-auto text-2xs text-content-muted">
+          {t('directory.template.executableCount', { count: resolved.executableCount })} ·{' '}
+          {t('directory.template.rejectedCount', { count: resolved.rejectedCount })}
+        </span>
+        <ToolbarButton variant="ghost" onClick={onCancel} disabled={blocked}>
+          {t('common.cancel')}
+        </ToolbarButton>
+        <ToolbarButton
+          variant="primary"
+          onClick={() => void confirm()}
+          disabled={blocked || resolved.executableCount === 0}
+        >
+          {applying || busy ? (
+            <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" />
+          ) : null}
+          {applying || busy ? t('directory.template.placing') : t('directory.template.place')}
+        </ToolbarButton>
+      </>
+    )
+  }
+
   return (
     <Dialog
-      title={dryRun ? t('directory.template.title') : t('directory.template.setupTitle')}
-      description={
-        dryRun && preview !== null ? (
-          <>
-            {t('directory.template.label.template')}
-            <span className="font-mono">{preview.templateRoot}</span> ·{' '}
-            {t('directory.template.label.incoming')}
-            <span className="font-mono">{preview.incomingRoot}</span> ·{' '}
-            {t('directory.template.label.output')}
-            <span className="font-mono">{preview.outputRoot}</span> ·{' '}
-            {t(
-              preview.outputRootExists
-                ? 'directory.template.output.exists'
-                : 'directory.template.output.willCreate'
-            )}
-          </>
-        ) : (
-          t('directory.template.setupHint')
-        )
+      title={
+        step === 'setup'
+          ? t('directory.template.setupTitle')
+          : step === 'result'
+            ? t('directory.template.result.title')
+            : t('directory.template.title')
       }
+      description={description}
       onClose={blocked ? () => undefined : onCancel}
-      footer={
-        dryRun && resolved !== null ? (
-          <>
-            <span className="tabular mr-auto text-2xs text-content-muted">
-              {t('directory.template.executableCount', { count: resolved.executableCount })} ·{' '}
-              {t('directory.template.rejectedCount', { count: resolved.rejectedCount })}
-            </span>
-            <ToolbarButton variant="ghost" onClick={onCancel} disabled={busy}>
-              {t('common.cancel')}
-            </ToolbarButton>
-            <ToolbarButton
-              variant="primary"
-              onClick={() => onConfirm(resolved)}
-              disabled={busy || resolved.executableCount === 0}
-            >
-              {busy ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
-              {busy ? t('directory.template.placing') : t('directory.template.place')}
-            </ToolbarButton>
-          </>
-        ) : (
-          <>
-            <ToolbarButton variant="ghost" onClick={onCancel} disabled={blocked}>
-              {t('common.cancel')}
-            </ToolbarButton>
-            <ToolbarButton
-              variant="primary"
-              onClick={() => void submit()}
-              disabled={blocked}
-            >
-              {blocked ? <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin" /> : null}
-              {blocked ? t('directory.template.previewing') : t('directory.template.preview')}
-            </ToolbarButton>
-          </>
-        )
-      }
+      footer={footer()}
     >
-      {dryRun ? (
-        <div
-          ref={setScrollElement}
-          data-testid="template-rows"
-          role="list"
-          aria-label={t('directory.template.rows')}
-          className="relative h-72 overflow-auto rounded-sm border border-line-subtle"
-        >
-          <div className="relative" style={{ height: scrollMap.contentHeight }}>
-            {windowedRows.map(({ row, top }) => {
-              const key =
-                row.kind === 'header'
-                  ? `header-${row.section}`
-                  : row.kind === 'empty'
-                    ? `empty-${row.section}`
-                    : row.kind === 'unused'
-                      ? `unused-${row.item.relativePath}`
-                      : `entry-${row.entry.relativePath}`
-              return (
-                <div
-                  key={key}
-                  role="none"
-                  className="absolute top-0 left-0 w-full"
-                  style={{ height: DIRECTORY_ROW_HEIGHT, transform: `translateY(${top}px)` }}
-                >
-                  {rowBody(row)}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ) : (
+      {step === 'setup' ? (
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
           <div className="flex items-center gap-2">
             <span className="text-2xs text-content-secondary">
@@ -535,6 +771,38 @@ export function TemplateDialog({
             </p>
           ) : null}
         </form>
+      ) : (
+        <>
+          {issue !== null ? (
+            <p role="alert" className="mb-2 text-2xs text-danger">
+              {issueText(issue)}
+            </p>
+          ) : null}
+          <div
+            ref={setScrollElement}
+            data-testid={step === 'result' ? 'template-result-rows' : 'template-rows'}
+            role="list"
+            aria-label={
+              step === 'result'
+                ? t('directory.template.result.rows')
+                : t('directory.template.rows')
+            }
+            className="relative h-72 overflow-auto rounded-sm border border-line-subtle"
+          >
+            <div className="relative" style={{ height: scrollMap.contentHeight }}>
+              {windowedRows.map(({ row, top }) => (
+                <div
+                  key={rowKey(row)}
+                  role="none"
+                  className="absolute top-0 left-0 w-full"
+                  style={{ height: DIRECTORY_ROW_HEIGHT, transform: `translateY(${top}px)` }}
+                >
+                  {renderListRow(row)}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </Dialog>
   )

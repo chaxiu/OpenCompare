@@ -6,6 +6,7 @@ import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fix
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
+import { zh } from './i18n/messages'
 import { App } from './App'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
@@ -504,15 +505,42 @@ describe('workbench shell', () => {
     expect(within(dialog).getByText(/已存在/)).toBeDefined()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
-    const notice = await screen.findByRole('alert')
-    expect(notice.textContent).toContain('写入 1')
-    expect(notice.textContent).toContain('失败 0')
-    expect(screen.queryByRole('dialog')).toBeNull()
+    // The dialog stays open on the result step and re-checks every written row.
+    const result = await screen.findByRole('dialog', { name: zh['directory.template.result.title'] })
+    expect(
+      within(result).getByText(
+        zh['directory.template.result.written'].replace('{count}', '1')
+      )
+    ).toBeDefined()
+    expect(
+      within(result).getByText(
+        zh['directory.template.result.verified'].replace('{count}', '1')
+      )
+    ).toBeDefined()
+    expect(within(result).getByText('src/core/strings.ts')).toBeDefined()
     await expect(port.readTextFile('/ext/out/src/core/strings.ts')).resolves.toBe(
       EXTERNAL_TEMPLATE_FILES['/ext/b/misc/deep/strings.ts']
     )
     // The overwrite row started unchecked, so the existing file is untouched.
     await expect(port.readTextFile('/ext/out/src/core/engine.ts')).resolves.toBe('stale engine\n')
+
+    // A rescan stays inside the same session and reopens the dry-run with the
+    // written slot now marked as an overwrite (and unchecked again).
+    const tabsBefore = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+      .length
+    fireEvent.click(
+      within(result).getByRole('button', { name: zh['directory.template.result.rescan'] })
+    )
+    const rescanned = await screen.findByRole('dialog', { name: zh['directory.template.title'] })
+    expect(within(rescanned).getAllByText(zh['directory.template.overwrite']).length).toBeGreaterThan(
+      0
+    )
+    expect(
+      (within(rescanned).getByLabelText('勾选 src/core/strings.ts') as HTMLInputElement).checked
+    ).toBe(false)
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
+    ).toBe(tabsBefore)
   })
 
   it('reports the failed count when a checked template write is refused', async () => {
@@ -544,12 +572,22 @@ describe('workbench shell', () => {
     refuseWrites = true
     fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
 
-    const notice = await screen.findByRole('alert')
-    expect(notice.textContent).toContain('写入 0')
-    expect(notice.textContent).toContain('失败 1')
-    // A refused write is never reported as an all-success run.
-    expect(notice.textContent).not.toContain('全部成功')
-    expect(screen.queryByRole('dialog')).toBeNull()
+    // A refused write is never reported as an all-success run: the result step
+    // keeps the dialog open and lists the failed row with its OS code.
+    const result = await screen.findByRole('dialog', { name: zh['directory.template.result.title'] })
+    expect(
+      within(result).getByText(
+        zh['directory.template.result.written'].replace('{count}', '0')
+      )
+    ).toBeDefined()
+    expect(
+      within(result).getByText(
+        zh['directory.template.result.writeFailed'].replace('{count}', '1')
+      )
+    ).toBeDefined()
+    const failureRow = result.querySelector('[data-template-failure-row]') as HTMLElement
+    expect(failureRow.textContent).toContain('EACCES')
+    expect(result.textContent ?? '').not.toContain('全部成功')
     expect(
       within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
     ).toBeGreaterThan(0)
@@ -597,6 +635,45 @@ describe('workbench shell', () => {
       within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
     ).toBeGreaterThan(0)
     expect(screen.getAllByText('/snapshots/left/a').length).toBeGreaterThan(0)
+  })
+
+  it('cancels the template dry-run without writing and keeps the session usable', async () => {
+    const port = await templatePort({ directories: ['/ext/a', '/ext/b'] })
+    const writeTextFile = vi.fn(port.writeTextFile)
+    const ensureDirectory = vi.fn(port.ensureDirectory)
+    render(<Workbench platform={{ ...port, writeTextFile, ensureDirectory }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /a ↔ b/ }, { timeout: 4000 })
+    const tabsBefore = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
+      .length
+
+    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    const setup = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
+    fireEvent.change(within(setup).getByLabelText('散乱树 B 根'), {
+      target: { value: '/ext/b' }
+    })
+    fireEvent.change(within(setup).getByLabelText('输出根'), {
+      target: { value: '/ext/out' }
+    })
+    fireEvent.click(within(setup).getByRole('button', { name: '生成 Dry-run' }))
+    const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    // Cancelling before confirmation writes nothing and keeps the session.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(ensureDirectory).not.toHaveBeenCalled()
+    expect(
+      within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
+    ).toBe(tabsBefore)
+
+    // The entry is still usable after the cancel.
+    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    expect(
+      await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
+    ).toBeDefined()
   })
 })
 
@@ -2830,7 +2907,7 @@ describe('directory progress and cancel UI', () => {
     const templateDialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
     expect(progressBar()).toBeNull()
     fireEvent.click(within(templateDialog).getByRole('button', { name: '确认提取归位' }))
-    await screen.findByText(/模板归位完成/)
+    await screen.findByRole('dialog', { name: zh['directory.template.result.title'] })
     expect(progressBar()).toBeNull()
   })
 })

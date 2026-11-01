@@ -598,6 +598,12 @@ export interface TemplateWriteFailure {
   readonly sourcePath: string
   readonly targetPath: string
   readonly reason: TemplateWriteFailureReason
+  /**
+   * Stable OS code (`EACCES`, `EROFS`, …) the write or read refused with, when
+   * the platform surfaced one. The renderer localizes on this instead of the
+   * platform's own sentence.
+   */
+  readonly code?: string
 }
 
 export interface TemplateExecution {
@@ -630,12 +636,18 @@ export async function executeTemplatePlan(
   const failed: TemplateWriteFailure[] = []
   let cancelled = false
 
-  function fail(entry: TemplateExecutableEntry, reason: TemplateWriteFailureReason): void {
+  function fail(
+    entry: TemplateExecutableEntry,
+    reason: TemplateWriteFailureReason,
+    cause?: unknown
+  ): void {
+    const code = errorCodeOf(cause)
     failed.push({
       relativePath: entry.relativePath,
       sourcePath: entry.sourcePath,
       targetPath: entry.targetPath,
-      reason
+      reason,
+      ...(code === undefined ? {} : { code })
     })
   }
 
@@ -650,7 +662,7 @@ export async function executeTemplatePlan(
       text = await io.readTextFile(entry.sourcePath)
     } catch (error) {
       if (isOperationCancelled(error)) throw error
-      fail(entry, 'source-unreadable')
+      fail(entry, 'source-unreadable', error)
       continue
     }
 
@@ -673,7 +685,7 @@ export async function executeTemplatePlan(
       await io.writeTextFile(entry.targetPath, text, entry.modifiedMs)
     } catch (error) {
       if (isOperationCancelled(error)) throw error
-      fail(entry, 'write-failed')
+      fail(entry, 'write-failed', error)
       continue
     }
 
@@ -823,6 +835,14 @@ export async function verifyTemplateExtraction(
 
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true
+}
+
+/** Stable OS code of a thrown error: its own `code` first, then the message. */
+function errorCodeOf(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code
+  if (typeof code === 'string' && code !== '') return code
+  const message = error instanceof Error ? error.message : ''
+  return /\b(E[A-Z]{2,})\b/.exec(message)?.[1]
 }
 
 /** Content first, then whole-second mtime: each failure has one reason. */

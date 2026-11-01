@@ -18,7 +18,7 @@ import type { PlatformPort } from '@shared/platform/types'
 import { en, zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
-import type { SyncPreview, TemplatePreview } from '@renderer/workbench/directoryOps'
+import type { SyncPreview, TemplateApplyOutcome, TemplatePreview } from '@renderer/workbench/directoryOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { DirectoryView } from './DirectoryView'
 import { FILTER_LABEL_KEYS, SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS } from './directoryCopy'
@@ -278,6 +278,12 @@ function makeTemplatePreview(overrides: Partial<TemplateMatchResult> = {}): Temp
 /** Platform seam of the setup step; the copy tests never reach the disk. */
 const templatePlatform: PlatformPort = createWebPlatformPort()
 
+/** A confirm answer the copy tests never inspect: nothing is written here. */
+const templateOutcome = async (): Promise<TemplateApplyOutcome> => ({
+  execution: { written: [], writtenCount: 0, failed: [], failedCount: 0, cancelled: false },
+  verification: { entries: [], verified: 0, failed: 0 }
+})
+
 /* ------------------------------------------------------------------ */
 /* View harness                                                        */
 /* ------------------------------------------------------------------ */
@@ -352,7 +358,7 @@ function ViewHarness({
       onConfirmSync={() => undefined}
       onPreviewTemplateRoots={async () => null}
       onCancelTemplate={() => undefined}
-      onConfirmTemplate={() => undefined}
+      onConfirmTemplate={templateOutcome}
     />
   )
 }
@@ -1009,7 +1015,7 @@ describe('TemplateDialog bilingual copy', () => {
         busy={false}
         onPreview={async () => null}
         onCancel={() => undefined}
-        onConfirm={() => undefined}
+        onConfirm={templateOutcome}
       />,
       'en'
     )
@@ -1030,7 +1036,15 @@ describe('TemplateDialog bilingual copy', () => {
     expect(screen.getByText('3 items')).toBeDefined()
     expect(screen.getByText('Multiple candidates with the same name')).toBeDefined()
     expect(screen.getByText('Same name, different content')).toBeDefined()
-    expect(screen.getByText('/incoming/one/c.ts · /incoming/two/c.ts')).toBeDefined()
+    const candidate = screen.getByLabelText(
+      en['directory.template.conflict.candidate'].replace('{path}', 'app/c.ts')
+    ) as HTMLSelectElement
+    expect(Array.from(candidate.options).map((option) => option.value)).toEqual([
+      '',
+      '/incoming/one/c.ts',
+      '/incoming/two/c.ts'
+    ])
+    expect(screen.getAllByText(en['directory.template.conflict.choose']).length).toBe(2)
     expect(button('Cancel')).toBeDefined()
     expect(button('Extract and place')).toBeDefined()
   })
@@ -1044,7 +1058,7 @@ describe('TemplateDialog bilingual copy', () => {
         busy={false}
         onPreview={async () => null}
         onCancel={() => undefined}
-        onConfirm={() => undefined}
+        onConfirm={templateOutcome}
       />,
       'zh'
     )
@@ -1074,7 +1088,7 @@ describe('TemplateDialog bilingual copy', () => {
         busy={false}
         onPreview={async () => null}
         onCancel={() => undefined}
-        onConfirm={() => undefined}
+        onConfirm={templateOutcome}
       />,
       'en'
     )
@@ -1090,7 +1104,7 @@ describe('TemplateDialog bilingual copy', () => {
         busy
         onPreview={async () => null}
         onCancel={() => undefined}
-        onConfirm={() => undefined}
+        onConfirm={templateOutcome}
       />,
       'en'
     )
@@ -1106,7 +1120,7 @@ describe('TemplateDialog bilingual copy', () => {
         busy={false}
         onPreview={async () => null}
         onCancel={() => undefined}
-        onConfirm={() => undefined}
+        onConfirm={templateOutcome}
       />,
       'en'
     )
