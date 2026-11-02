@@ -47,6 +47,7 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **术语表与英文文案卫生（`i18n/messages.test.ts`）**：`GLOSSARY` 常量锁定 8 个核心概念的 canonical 美式词形（`comparison` / `difference` / `conflict` / `snapshot` / `sync` / `template` / `key column` / `session`），断言 en 值中每个词形至少命中一次；`BANNED_VARIANTS` 断言 `Synchronisation` / `Snap shot` / `Comparision` / `Cancelation` / `colour` / `behaviour` 命中为 0；`DIFFERENCE_ONLY_KEYS` 断言变更块 / 差异统计一律 `difference(s)` 且不出现 `diff`，`DIFF_VIEW_KEYS` 断言 `diff` 只用于视图 / 模式名；新增 en 文案卫生断言（非空、无 `TODO` / `未翻译`、无汉字、无双空格、除 `INLINE_COPY_KEYS` 允许单侧边界空格外的值必须已 trim）。
 - **中英双语冒烟（`App.smoke.test.tsx`）**：en（无设置记录 + `systemLocale='en-US'`）与 zh（预置 `{ language: 'zh' }`）各一条，覆盖首屏（品牌副标题、空态标题 / 描述 / 主按钮）、新建对比对话框、目录过滤五档与组名、代码 / CSV / 结构化三视图标题与主按钮、设置面板，断言 `en` / `zh` 词典值逐字渲染且指定表面汉字计数为 0。
 - **`<html lang>` 跟随界面语言（`i18n/htmlLang.ts` + `I18nProvider` + `index.html`）**：新增纯模块 `src/renderer/src/i18n/htmlLang.ts`（`htmlLang(language)` 单一映射 `en` → `en`、`zh` → `zh-CN`，`applyHtmlLang(language)` 在 DOM 存在时写 `document.documentElement.lang`、否则 no-op）；`I18nProvider` 用 `useLayoutEffect` 在首帧与每次 `language` 变化后同步该值，因此 `App` 启动（含无文字品牌帧 settle 后的首帧）与 `renderWithI18n(ui, 'en' | 'zh')` 测试挂载都得到正确 `lang`；`src/renderer/index.html` 的 `<html>` 静态 `lang` 由 `zh-CN` 改为英文默认 `en`，不再出现 `zh-CN`。回归断言落在既有三个测试文件（`App.i18n.test.tsx` 默认英文首屏 / `zh-CN` 系统语言首屏各一条，`I18nProvider.test.tsx` 挂载映射 + 切 zh 再切回 en + `htmlLang` 映射三条，`i18n/mainScan.test.ts` 一条 index.html 静态断言），不新建测试基建。
+- **i18n 渲染层测试的单一来源（locale 表助手）**：`src/renderer/src/i18n/localeTable.ts`（32 行、测试专用，产品运行时代码不得 import）只做派生——`LOCALE_ROWS` 恒等于 `Object.keys(zh)` 的逐键 `{ key, zh: zh[key], en: en[key] }` 行，`localeText(language, key, params?)` 复用既有 `interpolate` 按当前语言取值并插值；四个测试文件共用该助手取期望文案，禁止再提交手抄的 locale JSON 或逐键文案。`App.i18n.test.tsx`（234 行）与 `views/directoryI18n.test.tsx`（581 行）合计 815 行（基线 2,245），两文件只保留 5 条关键路径用例：运行时语言切换（含已显示通知条同节点重译）、`?perf=1` 测量窗口分支、locale 表单源与缺键 fail-closed、目录视图 + 同步 / 模板对话框同源取值、EACCES / EPERM 写入拒绝与「写入完成但刷新对比失败」双语等值断言。`views/TemplateDialog.test.tsx` 只把文案类断言（`directory.template.failure.writeFailed`、`shell.sync.reason.EACCES`）改为词典取值，`App.theme.test.tsx` 只把 1 条 `settings.saveError` 硬编码英文提示改为插值取值，`theme/themeSources.test.ts` 实测零文案断言、结构断言原样保留。产品词典、键集、运行时行为零 diff。
 
 ## 验收
 
@@ -213,6 +214,28 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 - **ac-sync-failure-dict-parity**：`shell.sync.error.target` 与全部 `shell.sync.reason.*`（10 个系统码 + fallback）在 zh / en 成对存在，同键占位符集合一致（`target` 为 `{path}` / `{reason}`，每条 reason 为 `{code}`），键集相等、en 零汉字、卫生断言全绿；既有 `shell.notice.sync*` 键未改名未删除。
 - **ac-sync-failure-refresh-reason**：`SyncRefreshError.reason` 中的稳定码被提取并渲染成本地化 reason（不再整段透传），无码时落到兜底句；`shell.notice.syncRefreshFailed` 的 `{reason}` 仍是单句片段，三项计数与「写入已完成」语义不变。
 
+### locale 表测试收敛轮（2026-11-02）
+
+- **ac-two-files-lines**：`App.i18n.test.tsx` 与 `views/directoryI18n.test.tsx` 合计 ≤900 行（实测 234 + 581 = 815，基线 928 + 1,317 = 2,245）。
+- **ac-locale-table-single-source**：四个测试文件的期望文案全部经 `i18n/localeTable.ts` 从 zh / en 词典取值；`LOCALE_ROWS.length === Object.keys(zh).length` 且每行值与 `messages.zh[key]` / `messages.en[key]` 全等（有用例断言该单一来源）；两文件 TS 内不出现手抄的界面文案句（仅允许路径、OS 码、IPC 包装串、`/samples`、`built-in` 等非文案字面量）。
+- **ac-key-paths-3-to-5**：两文件合计只保留 3–5 条关键路径用例（实测 5 条），且覆盖运行时语言切换、缺 key 回落、EACCES / EPERM 同步失败提示双语本地化。
+- **ac-language-switch**：en → zh → en 运行时切换后顶栏、空态、目录视图的文案逐字等于当前语言词典值（按命名 key 断言），en 侧可见文本命中 `\p{Script=Han}` 为 0。
+- **ac-missing-key-fail-closed**：删掉任一被关键路径引用的词典键（或让 en 值缺失）时，locale 表单源用例立即变红（缺键 / `undefined` 不再静默通过），恢复后全绿；断言用「渲染文本 === 词典插值结果」的等值比较，不用片段查找。
+- **ac-sync-eacces-eperm**：en 下 EACCES / EPERM 写入拒绝与「写入完成但刷新失败」提示逐字等于 `shell.sync.error.target`（`{path}` + 嵌套 `shell.sync.reason.<CODE>`）/ `shell.notice.syncRefreshFailed` 的插值结果，含目标路径与 OS code、零汉字、不含 `Error invoking remote method`；zh 下为对应中文词典值。
+- **ac-sync-notice-retranslate**：同一已显示的通知条在切换语言后按新语言重译（同一 DOM 节点文本从 en 词典值变为 zh 词典值），不要求重新触发同步。
+- **ac-template-theme-copy**：`TemplateDialog.test.tsx` 的文案断言改为词典键取值（`the write failed` → `directory.template.failure.writeFailed`，`permission denied` 由 `shell.sync.reason.EACCES` 派生）；`theme/themeSources.test.ts` 保留全部结构断言、0 条文案断言迁移；`App.theme.test.tsx` 的 1 条硬编码英文提示改为 `localeText('en','settings.saveError',{ reason })`；三者用例数与行为断言不变。
+- **ac-tocontain-budget**：两文件 `.toContain(` 调用点合计 ≤17（实测 2，基线 57），且参数中没有硬编码界面文案。
+- **ac-readfilesync-budget**：两文件 `readFileSync` 出现次数 ≤2（实测 0），不得用源码扫描取代真实渲染断言。
+- **ac-case-count**：`pnpm test` 汇总用例总数 ≥1,710（实测 1,744 passed + 1 skipped = 1,745，基线 1,800，降幅 3.1% 仍在 ≤5% 内）。
+- **ac-coverage-not-lower**：全仓覆盖 Statements ≥89.94%、Branches ≥82.74%、Functions ≥89.38%、Lines ≥92.54%（同一 `vitest run --coverage --reporter=text-summary` 命令；实测 89.94 / 82.74 / 89.39 / 92.54）。
+- **ac-deletion-mapping**：回执逐条给出「删除的文本断言 → 替代断言」映射（两文件 + TemplateDialog / App.theme 文案断言），替代断言不搬进 `.munk/` 或新增文件凑数；测试总行数 46,955 → 45,533。
+- **ac-inject-missing-key**：删一条 locale 键 → 相关用例变红（贴原始输出与失败用例名）→ 恢复 → 全绿，最终 `git diff` 无注入残留。
+- **ac-inject-hardcoded-zh**：把 en 侧同步失败提示临时改回中文 → en 用例必须红 → 恢复 → 全绿，最终 `git diff` 无注入残留。
+- **ac-no-locale-drift**：`src/renderer/src/i18n/messages/**` 最终 diff 为空（键、值、键集与 `e93a1d8` 一致）；`i18n/messages.test.ts` 的键集 / 占位符 / 无汉字断言仍全绿。
+- **ac-no-product-behavior-change**：除允许文件外 `src/**` 无运行时 diff；同步 / 模板 / 快照 / 算法行为与通知语气、清除时机不变；`App.smoke.test.tsx`、`i18n/messages.test.ts`、`i18n/mainScan.test.ts` 不改且全绿。
+- **ac-version-single-point**：`package.json#version` 仍为 `0.2.16`；不改 `CHANGELOG.md`、README 版本表与发布文件。
+- **ac-gates-green**：`.munk/code-gates.json` 全部 21 项门禁 passed，`code-gates.json` 不被修改。
+
 ## 非目标
 
 - 不做设置面板的更多分区（主题 / 快捷键）、持久化草稿或批量保存、成功 toast（`settings.saved` 保持未使用）；不发成功提示不改 `settings.saved` 语义。
@@ -258,7 +281,13 @@ renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider
 
 ## 最近交付证明
 
-- WI：`wi_ws_dcf61d0392d48f0e`（交叉引用：模板归位选根 / Dry-run 两步文案与完成通知；`kind: feature`）
+- WI：`wi_intake_a2dec1ffa5a717f2`（renderer i18n 测试收敛为 locale 表单一来源 + 同步失败提示双语复核；`kind: test/refactor`）
+- 日期：2026-11-02
+- 结果：`code_gates` passed（21 门，attempt 001，`.munk/runs/run_intake_a2dec1ffa5a717f2/code-gates/attempts/001`；`pnpm test` 114 files / 1,744 passed + 1 skipped / 1,745，Duration 31.57s）。交付前在同一 worktree 复测覆盖：Statements 89.94%（7,686/8,545）· Branches 82.74%（4,394/5,310）· Functions 89.39%（1,678/1,877）· Lines 92.54%（6,924/7,482），四项均不低于基线。
+- 覆盖摘要：① 新增测试专用派生模块 `src/renderer/src/i18n/localeTable.ts`（32 行）——`LOCALE_ROWS` 按 `Object.keys(zh)` 逐键生成 `{ key, zh, en }`，`localeText(language, key, params?)` 复用既有 `interpolate`；产品运行时代码不 import，四个测试文件共用同一来源。② 两文件 2,245 → 815 行（`App.i18n.test.tsx` 928→234、`views/directoryI18n.test.tsx` 1,317→581），用例 60 → 5 条关键路径：运行时语言切换（含同一通知条 DOM 节点重译）、`?perf=1` 测量窗口分支、locale 表单源 + 缺键 fail-closed、目录视图与同步 / 模板对话框同源取值、EACCES·EPERM 写入拒绝与刷新失败的双语等值断言。③ `.toContain(` 57 → 2（只剩路径与 OS code 片段）、`readFileSync` 0。④ `TemplateDialog.test.tsx` 两个文案断言改 `directory.template.failure.writeFailed` / `shell.sync.reason.EACCES`，`App.theme.test.tsx` 一条改 `settings.saveError` 插值，`theme/themeSources.test.ts` 零文案断言未动，三者用例数与行为断言不变。⑤ 全仓用例 1,800 → 1,745（−3.1%，≤5% 内），测试总行数 46,955 → 45,533。⑥ `i18n/messages/**`、`package.json#version`（0.2.16）、`.munk/code-gates.json`、`vitest.config.mts` 零 diff；`App.smoke.test.tsx` / `messages.test.ts` / `mainScan.test.ts` 未改。
+- 注：① **被推翻的假设**：这两个文件原先被当作 i18n 的产品行为回归网，实际 60 条里绝大多数是逐键抄写文案——它们只在词典成批改动时一起变红，对「语言切换 / 缺键回落 / 同步失败本地化」三条真回归没有区分度；收敛到 5 条等值断言后覆盖未掉点（两文件原贡献仅约 0.3pp）。② 缺键 fail-closed 靠的是表本身：任何「按语言取名字典值」的 helper 都必须保留 `LOCALE_ROWS.length === Object.keys(zh).length` 与逐行等值断言，否则删键后会静默跳过。③ EACCES / EPERM 的 en 文案由 `shell.sync.error.target` + 嵌套 `shell.sync.reason.<CODE>` 渲染期解析，断言必须与词典插值结果 `toBe` 等值比较，不要退回 `toContain('permission denied')` 这类片段（中文 detail 的英文尾巴也会命中）。④ 后续新增 i18n 断言直接用 `localeText()`，不要再往两文件加逐键用例——900 行 / 5 条是硬上限，需要更多覆盖时加深这 5 条关键路径。⑤ 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；本域验收落档为 `qa/locale-table-tests.md`。
+
+- 历史（上一轮）：WI：`wi_ws_dcf61d0392d48f0e`（交叉引用：模板归位选根 / Dry-run 两步文案与完成通知；`kind: feature`）
 - 日期：2026-11-01
 - 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_10c60d152fac2135/code-gates/attempts/001/manifest.json`；`pnpm test` 100 files / 1506 passed + 1 skipped、`pnpm test:sync-real` 33 tests；模板入口行为 AC 归 `domains/directory`，`qa/template-entry-dryrun.md`）。
 - 覆盖摘要：`messages/{zh,en}/directory.ts` 成对新增 30 个 `directory.template.*` 键（选根标题 / 说明 / 只读标、B 与输出根输入标签、四个选择按钮与 title、拖入提示、`Build dry run` 与扫描中、`Will be created` / `Exists`、列表 `aria-label` 与逐行勾选名、覆盖 / 目录占用标记、可执行 / 拒绝计数句、十个入口拒绝句）；`messages/{zh,en}/shell.ts` 删除 `shell.notice.templateComplete`，改为 `shell.notice.templateApplied`（`{written}` / `{failed}`），完成通知按 `failedCount > 0` 走 danger 语气（分支归 `domains/workbench`）。`views/directoryI18n.test.tsx` 的 `makeTemplatePreview` 与四段断言改为携带 `plan` 的新 `TemplatePreview`；`views/TemplateDialog.test.tsx` 断言 zh / en 键集合相等与 en 两步整屏无汉字；`messages.test.ts` 键集 / 占位符 / en 卫生断言全绿。

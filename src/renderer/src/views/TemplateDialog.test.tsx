@@ -14,6 +14,7 @@ import type {
   TemplateWriteFailure,
   TemplateWrittenEntry
 } from '@core/directory/template'
+import { localeText } from '@renderer/i18n/localeTable'
 import { en, zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
@@ -828,7 +829,9 @@ describe('template result step', () => {
     const failureRow = document.querySelector('[data-template-failure-row]') as HTMLElement
     expect(failureRow).not.toBeNull()
     expect(failureRow.textContent).toContain('EACCES')
-    expect(failureRow.textContent).toContain('the write failed')
+    expect(failureRow.textContent).toContain(
+      localeText('en', 'directory.template.failure.writeFailed')
+    )
     expect(container.textContent ?? '').not.toMatch(HAN)
   })
 
@@ -932,7 +935,9 @@ describe('template result step', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('/ext/out')
     expect(alert.textContent).toContain('EACCES')
-    expect(alert.textContent).toContain('permission denied')
+    expect(alert.textContent).toContain(
+      localeText('en', 'shell.sync.reason.EACCES', { code: 'EACCES' })
+    )
     expect(alert.textContent ?? '').not.toMatch(HAN)
     // The dry-run stays on screen with the same resolved manifest.
     expect(screen.getByRole('dialog', { name: en['directory.template.title'] })).toBeDefined()
