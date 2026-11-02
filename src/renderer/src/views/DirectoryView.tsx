@@ -30,7 +30,12 @@ import type {
 import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 import type { SidePosition } from '@renderer/workbench/snapshotOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
-import { FILTER_LABEL_KEYS, SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS } from './directoryCopy'
+import {
+  DIRECTORY_STATUS_LABEL_KEYS,
+  FILTER_LABEL_KEYS,
+  SYNC_DIRECTION_KEYS,
+  SYNC_MODE_KEYS
+} from './directoryCopy'
 import { TemplateDialog } from './TemplateDialog'
 
 const DIRECTION_VALUES: readonly SyncDirection[] = ['left-to-right', 'right-to-left']
@@ -219,7 +224,10 @@ export function DirectoryView({
               onChange={onFilterChange}
             />
           </span>
-          <CompositionLegend composition={visibleCounts} />
+          <CompositionLegend
+            composition={visibleCounts}
+            labelKeys={DIRECTORY_STATUS_LABEL_KEYS}
+          />
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <ToolbarButton
               size="sm"

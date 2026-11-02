@@ -360,9 +360,10 @@ describe('workbench shell', () => {
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
     expect(screen.queryByText('parser.ts')).toBeNull()
     expect(screen.getAllByText('engine.ts').length).toBe(2)
-    // Filtering also refreshes the status-bar legend.
+    // Filtering also refreshes the status-bar legend. Directory statuses use
+    // the directory vocabulary (right-only / left-only), not the text-diff words.
     expect(screen.getByRole('contentinfo').textContent).toContain(
-      `0相同${comparison.counts.added}新增${comparison.counts.removed}删除${comparison.counts.modified}修改`
+      `0${zh['directory.filter.same']}${comparison.counts.added}${zh['directory.filter.rightOnly']}${comparison.counts.removed}${zh['directory.filter.leftOnly']}${comparison.counts.modified}${zh['common.diff.modified']}`
     )
 
     fireEvent.click(screen.getByRole('tab', { name: '全部' }))

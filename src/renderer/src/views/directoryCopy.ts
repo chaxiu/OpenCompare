@@ -1,5 +1,6 @@
 import type { DirectoryFilter } from '@core/directory/filter'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
+import type { DiffStatus } from '@shared/fixtures'
 import type { MessageKey } from '@renderer/i18n/messages'
 import { syncPreviewAction } from '@renderer/workbench/directoryOps'
 import type { SyncPreview, SyncPreviewGuidance } from '@renderer/workbench/directoryOps'
@@ -11,6 +12,19 @@ export const FILTER_LABEL_KEYS: Record<DirectoryFilter, MessageKey> = {
   'left-only': 'directory.filter.leftOnly',
   'right-only': 'directory.filter.rightOnly',
   same: 'directory.filter.same'
+}
+
+/**
+ * Dictionary keys of the four directory statuses. A directory's `added` file is
+ * the right side's own entry and `removed` is the left side's, so the row badge
+ * and both legends reuse the filter vocabulary instead of the text-diff words.
+ */
+export const DIRECTORY_STATUS_LABEL_KEYS: Record<DiffStatus, MessageKey> = {
+  same: 'directory.filter.same',
+  added: 'directory.filter.rightOnly',
+  removed: 'directory.filter.leftOnly',
+  modified: 'common.diff.modified',
+  conflict: 'common.diff.conflict'
 }
 
 /** Dictionary keys of the sync directions and modes. */

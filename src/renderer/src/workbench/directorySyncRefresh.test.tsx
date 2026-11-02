@@ -2,10 +2,11 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { FileDiffStatus } from '@core/directory/compare'
-import { DIFF_LABEL_KEYS, DIFF_STATUSES } from '@renderer/components/diffSemantics'
+import { DIFF_STATUSES } from '@renderer/components/diffSemantics'
 import { zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import { Workbench } from './Workbench'
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
@@ -36,7 +37,7 @@ afterEach(() => {
 /** The four visible numbers of the first `CompositionLegend` on screen. */
 function legendNumbers(): Record<FileDiffStatus, number> {
   const labels = DIFF_STATUSES.filter((status) => status !== 'conflict').map(
-    (status) => zh[DIFF_LABEL_KEYS[status]]
+    (status) => zh[DIRECTORY_STATUS_LABEL_KEYS[status]]
   )
   const legend = Array.from(document.querySelectorAll<HTMLElement>('span')).find((span) => {
     const cells = Array.from(span.children)
