@@ -10,15 +10,15 @@ import {
   type ReleaseHistoryFacts,
   type VersionSourceFacts
 } from './release-gate'
-import { releaseFacts } from './release-doc-fixtures.test-helpers'
+import { pkg, releaseFacts } from './release-doc-fixtures.test-helpers'
 
 const versionFacts = (overrides: Partial<VersionSourceFacts> = {}): VersionSourceFacts => ({
-  pkgVersion: '0.2.16',
-  changelogTopTag: 'v0.2.16',
-  notesHeadingTag: 'v0.2.16',
-  readmeLine5Tag: 'v0.2.16',
-  workflowDispatchDefault: 'v0.2.16',
-  processDocDefault: 'v0.2.16',
+  pkgVersion: '9.9.9',
+  changelogTopTag: 'v9.9.9',
+  notesHeadingTag: 'v9.9.9',
+  readmeLine5Tag: 'v9.9.9',
+  workflowDispatchDefault: 'v9.9.9',
+  processDocDefault: 'v9.9.9',
   ...overrides
 })
 
@@ -32,12 +32,12 @@ const nonSemverFacts = (): VersionSourceFacts =>
     processDocDefault: 'v0.2'
   })
 const versionCases: Array<[string, VersionSourceFacts, string[]]> = [
-  ['agrees on v0.2.16', versionFacts(), []],
-  ['changelog top points elsewhere', versionFacts({ changelogTopTag: 'v0.2.15' }), ['tag-mismatch']],
-  ['notes title points elsewhere', versionFacts({ notesHeadingTag: 'v0.2.15' }), ['tag-mismatch']],
-  ['README line 5 points elsewhere', versionFacts({ readmeLine5Tag: 'v0.2.14' }), ['tag-mismatch']],
-  ['workflow default points elsewhere', versionFacts({ workflowDispatchDefault: 'v0.2.15' }), ['tag-mismatch']],
-  ['process doc default points elsewhere', versionFacts({ processDocDefault: 'v0.2.15' }), ['tag-mismatch']],
+  ['agrees on the synthetic tag', versionFacts(), []],
+  ['changelog top points elsewhere', versionFacts({ changelogTopTag: 'v9.9.8' }), ['tag-mismatch']],
+  ['notes title points elsewhere', versionFacts({ notesHeadingTag: 'v9.9.8' }), ['tag-mismatch']],
+  ['README line 5 points elsewhere', versionFacts({ readmeLine5Tag: 'v9.9.7' }), ['tag-mismatch']],
+  ['workflow default points elsewhere', versionFacts({ workflowDispatchDefault: 'v9.9.8' }), ['tag-mismatch']],
+  ['process doc default points elsewhere', versionFacts({ processDocDefault: 'v9.9.8' }), ['tag-mismatch']],
   ['package version is not semver', nonSemverFacts(), ['version-not-semver']],
   ['changelog top is absent', versionFacts({ changelogTopTag: '' }), ['missing']],
   ['notes title is absent', versionFacts({ notesHeadingTag: '' }), ['missing']],
@@ -54,8 +54,8 @@ describe('version single source', () => {
   })
 
   it('derives the tag from package.json#version alone', () => {
-    expect(judgeVersionSources(versionFacts({ pkgVersion: '9.9.9' })).issues[0].detail).toBe(
-      'expected v9.9.9, got v0.2.16'
+    expect(judgeVersionSources(versionFacts({ pkgVersion: '1.2.3' })).issues[0].detail).toBe(
+      'expected v1.2.3, got v9.9.9'
     )
   })
 
@@ -68,7 +68,7 @@ describe('version single source', () => {
       ['processDocDefault', 'docs/release-process.md#workflow_dispatch.default']
     ]
     for (const [field, path] of fieldPaths) {
-      const verdict = judgeVersionSources(versionFacts({ [field]: 'v0.2.15' }))
+      const verdict = judgeVersionSources(versionFacts({ [field]: 'v9.9.8' }))
       expect(verdict.ok).toBe(false)
       expect(verdict.issues[0].path).toBe(path)
     }
@@ -77,8 +77,8 @@ describe('version single source', () => {
 
 describe('bilingual notes bundle', () => {
   const presence = (overrides: Partial<NotesPresenceFacts> = {}): NotesPresenceFacts => ({
-    tag: 'v0.2.16',
-    notesHeadingTag: 'v0.2.16',
+    tag: 'v1.2.3',
+    notesHeadingTag: 'v1.2.3',
     englishExists: true,
     chineseExists: true,
     evidenceExists: true,
@@ -89,7 +89,7 @@ describe('bilingual notes bundle', () => {
     ['English notes are missing', presence({ englishExists: false }), ['notes-missing']],
     ['zh-CN notes are missing', presence({ chineseExists: false }), ['notes-missing']],
     ['evidence is missing', presence({ evidenceExists: false }), ['evidence-missing']],
-    ['notes title carries another tag', presence({ notesHeadingTag: 'v0.2.15' }), ['tag-mismatch']]
+    ['notes title carries another tag', presence({ notesHeadingTag: 'v9.9.8' }), ['tag-mismatch']]
   ]
   it.each(presenceCases)('%s', (_name, facts, codes) => {
     const verdict = judgeNotesPresence(facts)
@@ -102,22 +102,22 @@ describe('bilingual notes bundle', () => {
       presence({ englishExists: false, chineseExists: false, evidenceExists: false })
     )
     expect(verdict.issues.map((issue) => issue.path)).toEqual([
-      'docs/release-notes/v0.2.16.md',
-      'docs/release-notes/v0.2.16.zh-CN.md',
-      'docs/release-evidence/v0.2.16.md'
+      'docs/release-notes/v1.2.3.md',
+      'docs/release-notes/v1.2.3.zh-CN.md',
+      'docs/release-evidence/v1.2.3.md'
     ])
   })
 
-  const notes = (lines: string[]): NotesOrderFacts => ({ tag: 'v0.2.16', lines })
-  const title = '# OpenCompare v0.2.16 release notes'
-  const switcher = 'English | [简体中文](https://example.test/v0.2.16.zh-CN.md)'
+  const notes = (lines: string[]): NotesOrderFacts => ({ tag: 'v1.2.3', lines })
+  const title = '# OpenCompare v1.2.3 release notes'
+  const switcher = 'English | [简体中文](https://example.test/v1.2.3.zh-CN.md)'
   const orderCases: Array<[string, NotesOrderFacts, string[]]> = [
     ['title, language switch, then body', notes([title, '', switcher, '', 'Body.']), []],
     ['title is not on the first line', notes(['', title, switcher, '', 'Body.']), ['heading-not-first']],
     ['language switch precedes the title', notes([switcher, title, '', 'Body.']), ['heading-not-first', 'language-switch-before-heading']],
     ['language switch line is missing', notes([title, '', 'Body.']), ['language-switch-missing']],
     ['body is missing', notes([title, switcher]), ['body-missing']],
-    ['title carries another tag', notes(['# OpenCompare v0.2.15 release notes', switcher, 'Body.']), ['tag-mismatch']],
+    ['title carries another tag', notes(['# OpenCompare v9.9.8 release notes', switcher, 'Body.']), ['tag-mismatch']],
     ['the notes are empty', notes([]), ['heading-missing', 'language-switch-missing']]
   ]
   it.each(orderCases)('%s', (_name, facts, codes) => {
@@ -129,22 +129,22 @@ describe('bilingual notes bundle', () => {
 
 describe('release history ledger', () => {
   const evidence = (...tags: string[]) =>
-    tags.map((tag) => ({ tag, status: tag === 'v0.2.9' ? 'verified' : 'blocked' }))
+    tags.map((tag) => ({ tag, status: tag === 'v1.1.9' ? 'verified' : 'blocked' }))
   const history = (overrides: Partial<ReleaseHistoryFacts> = {}): ReleaseHistoryFacts => ({
-    currentTag: 'v0.2.16',
-    headings: ['v0.2.16', 'v0.2.15'],
-    evidence: evidence('v0.2.16', 'v0.2.15'),
+    currentTag: 'v1.2.3',
+    headings: ['v1.2.3', 'v1.2.2'],
+    evidence: evidence('v1.2.3', 'v1.2.2'),
     ...overrides
   })
   const historyCases: Array<[string, ReleaseHistoryFacts, string[]]> = [
     ['newest first with evidence for every entry', history(), []],
-    ['changelog top entry is not the current tag', history({ headings: ['v0.2.15'], evidence: evidence('v0.2.15') }), ['changelog-top-mismatch']],
+    ['changelog top entry is not the current tag', history({ headings: ['v1.2.2'], evidence: evidence('v1.2.2') }), ['changelog-top-mismatch']],
     ['changelog has no entries', history({ headings: [], evidence: [] }), ['changelog-empty']],
-    ['a heading repeats', history({ headings: ['v0.2.16', 'v0.2.16'] }), ['changelog-duplicate', 'changelog-order']],
-    ['headings are out of order', history({ headings: ['v0.2.16', 'v0.2.14', 'v0.2.15'], evidence: evidence('v0.2.16', 'v0.2.14', 'v0.2.15') }), ['changelog-order']],
-    ['a heading is not a tag', history({ headings: ['v0.2.16', 'release-1'] }), ['changelog-tag-invalid']],
-    ['a heading has no evidence file', history({ headings: ['v0.2.16', 'v0.2.10'] }), ['evidence-missing']],
-    ['verified evidence has no changelog entry', history({ headings: ['v0.2.16'], evidence: evidence('v0.2.16', 'v0.2.9') }), ['changelog-entry-missing']]
+    ['a heading repeats', history({ headings: ['v1.2.3', 'v1.2.3'] }), ['changelog-duplicate', 'changelog-order']],
+    ['headings are out of order', history({ headings: ['v1.2.3', 'v1.2.1', 'v1.2.2'], evidence: evidence('v1.2.3', 'v1.2.1', 'v1.2.2') }), ['changelog-order']],
+    ['a heading is not a tag', history({ headings: ['v1.2.3', 'release-1'] }), ['changelog-tag-invalid']],
+    ['a heading has no evidence file', history({ headings: ['v1.2.3', 'v1.2.0'] }), ['evidence-missing']],
+    ['verified evidence has no changelog entry', history({ headings: ['v1.2.3'], evidence: evidence('v1.2.3', 'v1.1.9') }), ['changelog-entry-missing']]
   ]
   it.each(historyCases)('%s', (_name, facts, codes) => {
     const verdict = judgeReleaseHistory(facts)
@@ -154,7 +154,7 @@ describe('release history ledger', () => {
 
   it('never requires evidence for the v0.1.2 anchor', () => {
     expect(
-      judgeReleaseHistory(history({ headings: ['v0.2.16', 'v0.1.2'], evidence: evidence('v0.2.16') }))
+      judgeReleaseHistory(history({ headings: ['v1.2.3', 'v0.1.2'], evidence: evidence('v1.2.3') }))
     ).toEqual({ ok: true, issues: [] })
   })
 })
@@ -170,7 +170,7 @@ describe('repository release facts', () => {
       judgeNotesOrder({ tag: releaseFacts.notes.tag, lines: releaseFacts.notes.chineseLines })
     ).toEqual({ ok: true, issues: [] })
     expect(judgeReleaseHistory(releaseFacts.history)).toEqual({ ok: true, issues: [] })
-    expect(releaseFacts.versionSources.pkgVersion).toBe('0.2.16')
+    expect(releaseFacts.versionSources.pkgVersion).toBe(pkg.version)
   })
 
   it('keeps the pure gate modules free of fs and platform imports', () => {

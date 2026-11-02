@@ -53,6 +53,13 @@
 - **ac-full-code-gates / ac-injection-red**：按 `.munk/code-gates.json` 顺序全量 gate 退出码 0；把 `judgeReleaseGate` 临时改为无条件 pass 后 gate 用例必须变红（记录注入点、命令、退出码、失败用例），还原后复跑为绿。
 - **ac-delivery-numbers / ac-delivery-claims / ac-deadline**：delivery 给出改前 / 改后实测数字（测试行数、`toContain`、`readFileSync`、`describe(`、执行用例 A/B、全仓测试文件行数、非测试源码行数），不得出现“测试代码量已解决”或等价表述；未在全绿前交付则只交缺口清单，不降门、不删断言。
 
+### 门禁测试瘦身与去真值化（WI `wi_intake_27a374d63891b37b`）
+
+- **ac-target-file-size**：`src/verify-release-gate.test.ts` 的 `wc -l` ≤ **500**（基线 599，净减 ≥ 99）；只许靠合并重复 `describe` / 表驱动化重复 `it` / 压缩样板达成，禁止把断言搬进新文件规避行数门，禁止为凑行数删行为断言。现行实测 **500**。
+- **ac-single-read-entry**：该文件 `readFileSync` 字面出现 ≤ **1**（只保留一个字节读取入口，文本读取由其派生）、`toContain(` = **0**、不新增任何 `*.test.ts`。现行实测 1 / 0 / 0。
+- **ac-behavior-preserved**：`pnpm test src/verify-release-gate.test.ts` 全绿且 0 skipped；全仓 collected ≥ **1779**（基线 1872，降幅 ≤5%）；被合并 / 改写的每条断言必须有「原断言 → 替代断言」映射，且以下行为各至少一条断言在跑：A 层 15 项固定 registry、平台过滤、CLI 参数拒绝、A 层全绿与零 heap / 零本机夹具、13 条平台 fail 腿、missing / unexpected / skip / count / env / evidence / step 字段 fail-closed、三平台聚合、B 层三轮与 16 MiB 线、纯函数判定、AST 结构契约、post-release workflow 契约、code-gates 清单契约。
+- **ac-synthetic-version**：本文件内不出现当前发布版本字面量（`v?0.2.16`），judge 入参一律合成版本（`9.9.9` / `v9.9.9` / `v1.2.3`），`judgeReleaseGate` 等纯函数判定逻辑不变。
+
 ## 非目标
 
 - 不改 `release.yml` 的发布通道、门禁口径、双语组装、finalize 逻辑；不新增签名密钥；不修改已公开 tag / Release / 资产 / 正文。
@@ -74,7 +81,13 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_5907ad21fa9994e5`（verify-release 终局门判定抽成纯函数 `judgeReleaseGate` + 压缩 gate 测试；`deliveryIntent: local merge`，`needSelfTest=false`，基线 HEAD `15a6313`）
+- WI：`wi_intake_27a374d63891b37b`（**release 门禁测试瘦身与去真值化**，test-only 清债：`src/verify-release-gate.test.ts` 599 → **500 行**（净减 99）、`toContain` 0、`readFileSync` 1、执行用例 46 passed / 0 skipped、全仓 collected 1852；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-02
+- 结果：`code_gates` passed（**21 gates**，attempt 001 全 exit 0，`.munk/runs/run_intake_27a374d63891b37b/code-gates/attempts/001`，`latest.json` `ok: true` / `"code_gates passed (21 gates, attempt 001)"`、`failedGateIds: []`）；`test` 门 115 files / **1851 passed + 1 skipped**（1852）、32.64s；本文件单跑 **46 passed**、17.91s。
+- 覆盖摘要：① **行数（`ac-target-file-size`）**——599 → 500，重复 `describe` / `it` 收敛为表驱动（`failCases` / 平台腿 / fail-closed 字段矩阵），未新增测试文件。② **单一读取入口（`ac-single-read-entry`）**——`readBytes` 是唯一 `readFileSync`，`readText` / `readJson` 由其派生；`toContain` 归零，Markdown 断言改读解析后的 atoms（标题 / 代码 span / 表格 / 列表项），不再对原文整句断言。③ **行为覆盖不降（`ac-behavior-preserved`）**——15 项 registry、平台过滤、CLI 参数拒绝、A 层全绿与零 heap / 零本机 6.4 GiB 访问、13 条平台 fail 腿、missing / unexpected / skip / count / env / evidence / step fail-closed、三平台聚合、B 层三轮与 16 MiB 线、`judgeReleaseGate` 纯函数、AST 结构契约、post-release workflow 契约、code-gates 清单契约逐项仍有断言；用例 71 → 46 是合并同构断言的结果，映射落 `qa/verify-release-gate-slim-de-truing.md`。④ **去真值化（`ac-synthetic-version`）**——文件内 `v?0.2.16` 归零，`TAG = 'v9.9.9'` / `VERSION = '9.9.9'` 合成版本；纯函数判定逻辑零改动。
+- 注：① 本 WI change pack **只有 `prd.md`**（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；QA 档案由 Delivery 按 prd AC 落档。② **用例数不是覆盖指标**：71 → 46 是 `it.each` 展开前的字面 `it(` 收敛，合并的是同一失败路径的多份同构断言（如 13 条平台 fail 腿收敛为参数表），不是删分支；后续若要加断言，优先扩表而不是新增独立 `it`。③ **单一读取入口是行数门的副产品而非目的**：`readBytes` 派生 `readText` / `readJson` 后，新增读取不再各写一份 `readFileSync`，也不会出现「部分读取绕过 helper」的漂移。④ 本文件仍是 `verify-release-gate` 门禁的唯一落点（矩阵 21 项未变），单跑 17.9s 仍是最重的纯单测门。
+
+- 历史（上一轮）：`wi_intake_5907ad21fa9994e5`（verify-release 终局门判定抽成纯函数 `judgeReleaseGate` + 压缩 gate 测试；`deliveryIntent: local merge`，`needSelfTest=false`，基线 HEAD `15a6313`）
 - 日期：2026-11-02
 - 结果：`code_gates` attempt 001 **21 gates** 全 exit 0（`.munk/runs/run_intake_5907ad21fa9994e5/code-gates/attempts/001`）；`pnpm test` 114 files / 1776 passed + 1 skipped（1777）、32.74s；`verify-release-gate` 单跑 1 file / **71 tests**、17.86s；`lint` / `typecheck` / `build` / `build-web` 全 passed。
 - 实测压缩数字（改前 → 改后，均命令实测）：`src/verify-release-gate.test.ts` 1,352 → **599** 行；`toContain` 28 → **0**；`readFileSync` 13 → **3**；`describe(` 15 → **12**；执行用例 B=**63**（改前 `--reporter=json` 实测）→ A=**71**（阈值 `ceil(0.95×63)=60`）；`scripts/verify-release.mjs` 行覆盖 78.70%（743/944）→ **78.78%**（750/952，`@vitest/coverage-v8@5.0.5`）；全仓测试文件 47,367 行、非测试 `src`+`scripts` 31,848 行。
