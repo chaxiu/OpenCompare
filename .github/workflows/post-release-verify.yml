@@ -1,0 +1,123 @@
+name: post-release-verify
+
+# Read-only verification of an already published release. It drives the same
+# `scripts/verify-release.mjs` the maintainer runs locally, one job per
+# platform, and archives every per-step JSON, log and the fail-closed summary.
+#
+# It never holds a signing key and never writes a tag, a release, an asset or a
+# release body: `contents: read` is the whole permission set, `gh` is used for
+# `gh api` / `gh release download` only.
+#
+# Ordering: `verify` needs `spike`, so a runner that cannot boot Electron and
+# expose a DevTools page stops the matrix before any platform leg runs.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify (vX.Y.Z)
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  spike:
+    name: spike (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Boot Electron and connect over CDP (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/verify-release.mjs --tag="$TAG" --layer=ci --spike --out=verify-out
+      - name: Boot Electron and connect over CDP (macOS)
+        if: runner.os == 'macOS'
+        run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --spike --out=verify-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spike-${{ env.TAG }}-${{ github.run_id }}-${{ matrix.os }}
+          path: verify-out
+          if-no-files-found: warn
+          retention-days: 30
+
+  verify:
+    name: verify (${{ matrix.platform }})
+    needs: spike
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            os: macos-latest
+          - platform: linux
+            os: ubuntu-latest
+          - platform: windows
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Verify the published artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --platform=${{ matrix.platform }} --out=verify-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: post-release-verify-${{ env.TAG }}-${{ github.run_id }}-${{ matrix.platform }}
+          path: verify-out
+          if-no-files-found: warn
+          retention-days: 30
+
+  aggregate:
+    name: aggregate
+    needs: verify
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: post-release-verify-${{ env.TAG }}-${{ github.run_id }}-*
+          path: parts
+      - name: Merge every job into one fail-closed summary
+        run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --aggregate=parts --out=verify-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: post-release-verify-${{ env.TAG }}-${{ github.run_id }}-aggregate
+          path: verify-out
+          if-no-files-found: warn
+          retention-days: 30
