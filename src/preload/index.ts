@@ -8,6 +8,7 @@ import type {
   DirectoryEntry,
   DirectoryListing,
   PlatformPort,
+  TextFileProbe,
   UserSettings
 } from '@shared/platform/types'
 
@@ -34,6 +35,8 @@ const platform: PlatformPort = {
     >,
   readTextFile: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
+  probeTextFile: (path) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.probeTextFile, path) as Promise<TextFileProbe>,
   readFileBytes: (path) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
   writeFileBytes: (path, content, modifiedMs) =>

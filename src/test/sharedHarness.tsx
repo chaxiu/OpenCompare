@@ -8,12 +8,23 @@
  * so the same file imports safely in both environments.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { expect } from 'vitest'
 import { lutimes, mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { PlatformPort } from '@shared/platform/types'
+import { PLATFORM_CHANNELS } from '@shared/platform/channels'
+import type {
+  DigestFilesResult,
+  DirectoryEntry,
+  DirectoryListing,
+  PathProbeKind,
+  PlatformPort,
+  TextFileProbe,
+  UserSettings
+} from '@shared/platform/types'
 import type { SyncPlan } from '@core/directory/sync'
+import type { EncodingLabel, NewlineKind } from '@core/text/probe'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from '@renderer/workbench/Workbench'
 
@@ -276,4 +287,104 @@ export function settle(promise: Promise<unknown>): Promise<unknown> {
 /** The relative paths of a plan's mirror deletions. */
 export function deletePathsOf(plan: Pick<SyncPlan, 'delete'>): string[] {
   return plan.delete.items.map((item) => item.relativePath)
+}
+
+/** In-process IPC port and the raw-byte text-probe fixtures both legs share. */
+
+/** Renderer-side PlatformPort over an in-process IPC dispatcher. */
+export function ipcPort(
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+): PlatformPort {
+  return {
+    kind: 'electron',
+    homeDirectory: () => invoke(PLATFORM_CHANNELS.homeDirectory) as Promise<string>,
+    workingDirectory: () => invoke(PLATFORM_CHANNELS.workingDirectory) as Promise<string>,
+    selectDirectory: () => invoke(PLATFORM_CHANNELS.selectDirectory) as Promise<string | null>,
+    selectFile: (options) => invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
+    resolveDroppedPath: async () => '',
+    saveFile: (options) => invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
+    listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
+    listDirectories: (paths, options) => invoke(PLATFORM_CHANNELS.listDirectories, paths, options) as Promise<readonly DirectoryListing[]>,
+    readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
+    readFileBytes: (path) => invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
+    probeTextFile: (path) => invoke(PLATFORM_CHANNELS.probeTextFile, path) as Promise<TextFileProbe>,
+    writeFileBytes: (path, content, modifiedMs) => invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
+    setSymbolicLinkModifiedMs: (path, modifiedMs) => invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
+    readSymbolicLink: (path) => invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
+    createSymbolicLink: (target, path) => invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
+    digestFiles: (paths, options) => invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
+    cancelOperation: (operationId) => invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
+    writeTextFile: (path, content, modifiedMs) => invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
+    exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
+    statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
+    checkWritable: (path) => invoke(PLATFORM_CHANNELS.checkWritable, path) as Promise<void>,
+    ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
+    deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
+    removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
+    temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
+    realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
+    readUserSettings: () => invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
+    writeUserSettings: (settings) => invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+    systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>
+  }
+}
+
+/** One raw-byte text probe case, shared by the Electron and web legs. */
+export interface TextProbeCase {
+  readonly name: string
+  /** Plain text the web memory runtime stores; `null` when it cannot hold the bytes. */
+  readonly text: string | null
+  /** Raw bytes the Electron probe reads from disk. */
+  readonly bytes: Uint8Array
+  readonly encoding: EncodingLabel
+  readonly newline: NewlineKind
+  readonly decoded: string
+}
+
+const textEncoder = new TextEncoder()
+
+function hexBytes(hex: string): Uint8Array {
+  return Uint8Array.from(hex.trim().split(/\s+/).map((byte) => Number.parseInt(byte, 16)))
+}
+
+function utf16Bytes(text: string, endianness: 'le' | 'be'): Uint8Array {
+  const bytes: number[] = []
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index)
+    if (endianness === 'le') bytes.push(code & 0xff, (code >> 8) & 0xff)
+    else bytes.push((code >> 8) & 0xff, code & 0xff)
+  }
+  return Uint8Array.from(bytes)
+}
+
+function joinBytes(...parts: readonly Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    bytes.set(part, offset)
+    offset += part.length
+  }
+  return bytes
+}
+
+/** The encodings / newline styles the probe pins on both runtime legs. */
+export const TEXT_PROBE_CASES: readonly TextProbeCase[] = [
+  { name: 'utf8-crlf.txt', text: 'alpha\r\nbeta\r\n', bytes: textEncoder.encode('alpha\r\nbeta\r\n'), encoding: 'UTF-8', newline: 'CRLF', decoded: 'alpha\r\nbeta\r\n' },
+  { name: 'utf8-bom-lf.txt', text: '\ufeffalpha\nbeta\n', bytes: joinBytes(hexBytes('EF BB BF'), textEncoder.encode('alpha\nbeta\n')), encoding: 'UTF-8 BOM', newline: 'LF', decoded: 'alpha\nbeta\n' },
+  { name: 'utf16le-crlf.txt', text: null, bytes: joinBytes(hexBytes('FF FE'), utf16Bytes('alpha\r\nbeta\r\n', 'le')), encoding: 'UTF-16LE', newline: 'CRLF', decoded: 'alpha\r\nbeta\r\n' },
+  { name: 'gbk-lf.txt', text: null, bytes: hexBytes('D6 D0 CE C4 0A'), encoding: 'GBK', newline: 'LF', decoded: '中文\n' }
+]
+
+/** Asserts every probe fact of one shared case against its own raw bytes. */
+export function expectTextProbeFacts(
+  probe: TextFileProbe,
+  expected: TextProbeCase,
+  path: string
+): void {
+  expect(probe.path).toBe(path)
+  expect(probe.encoding).toBe(expected.encoding)
+  expect(probe.newline).toBe(expected.newline)
+  expect(probe.text).toBe(expected.decoded)
+  expect(probe.bytes).toBe(expected.bytes.length)
+  expect(probe.sha256).toBe(sha256Hex(expected.bytes))
 }

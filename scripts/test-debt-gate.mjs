@@ -31,6 +31,8 @@ const TEST_ROOT = 'src'
 const LITERAL_ROOTS = ['src', 'scripts', 'docs']
 const HARNESS_PER_FILE_MAX_LINES = 400
 const HARNESS_TOTAL_MAX_LINES = 400
+/** A declared growth entry may add at most this many lines, from the previous baseline. */
+const GROWTH_MAX_LINES = 400
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', 'coverage', '.git'])
 
 const failures = []
@@ -346,74 +348,123 @@ function checkDocAssertions() {
   }
 }
 
-function committedBaselines() {
-  let shas
+/** The last committed version of the baseline file, or `null` on first landing. */
+function previousBaseline() {
+  let sha
   try {
-    shas = execFileSync('git', ['log', '--format=%H', '--', BASELINE_PATH], {
+    sha = execFileSync('git', ['log', '-1', '--format=%H', '--', BASELINE_PATH], {
       cwd: ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
-    })
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
+    }).trim()
   } catch {
     return null
   }
-  const versions = []
-  for (const sha of shas) {
-    try {
-      const raw = execFileSync('git', ['show', `${sha}:${BASELINE_PATH}`], {
+  if (sha.length === 0) return null
+  try {
+    return JSON.parse(
+      execFileSync('git', ['show', `${sha}:${BASELINE_PATH}`], {
         cwd: ROOT,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore']
       })
-      versions.push(JSON.parse(raw))
-    } catch {
-      // A commit that deleted or mangled the file carries no anchor value.
-    }
+    )
+  } catch {
+    return null
   }
-  return versions
 }
 
-/** The committed baseline is a ratchet too: ceilings down, floors up. */
+/**
+ * Parses the baseline `growth` declarations. A declaration is the only way a
+ * ceiling may rise above the **previous committed** value, and it must state
+ * where the rise starts, where it ends, why, and how many cases it added.
+ */
+function parseGrowth(baseline) {
+  const entries = Array.isArray(baseline.growth) ? baseline.growth : []
+  const byMetric = new Map()
+  for (const entry of entries) {
+    const valid =
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof entry.metric === 'string' &&
+      entry.metric.length > 0 &&
+      Number.isInteger(entry.from) &&
+      Number.isInteger(entry.to) &&
+      typeof entry.reason === 'string' &&
+      entry.reason.trim().length > 0 &&
+      Number.isInteger(entry.addedCases) &&
+      entry.addedCases > 0
+    if (!valid) {
+      fail(`growth entry malformed: ${JSON.stringify(entry)}`)
+      continue
+    }
+    if (byMetric.has(entry.metric)) {
+      fail(`growth entry duplicated: ${entry.metric}`)
+      continue
+    }
+    byMetric.set(entry.metric, entry)
+  }
+  return byMetric
+}
+
+/**
+ * The baseline is a ratchet against the **previous committed** version:
+ * ceilings only go down, floors only go up. A ceiling that rises needs a
+ * matching `growth` entry bounded by {@link GROWTH_MAX_LINES}, and every
+ * allowed rise is printed so it can never pass silently.
+ */
 function checkBaselineTightenOnly(baseline) {
-  const history = committedBaselines()
-  if (history === null || history.length === 0) {
+  const previous = previousBaseline()
+  if (previous === null) {
     ok('baseline tighten-only: first landing (no committed history yet)')
     return
   }
-  const tightestCeiling = {}
-  const tightestFloor = {}
-  for (const version of history) {
-    for (const [metric, value] of Object.entries(version.ceilings ?? {})) {
-      if (!Number.isInteger(value)) continue
-      tightestCeiling[metric] = Math.min(tightestCeiling[metric] ?? value, value)
-    }
-    for (const [metric, value] of Object.entries(version.floors ?? {})) {
-      if (!Number.isInteger(value)) continue
-      tightestFloor[metric] = Math.max(tightestFloor[metric] ?? value, value)
-    }
-  }
+  const growth = parseGrowth(baseline)
+
   for (const [metric, ceiling] of Object.entries(baseline.ceilings ?? {})) {
-    const anchor = tightestCeiling[metric]
-    if (anchor === undefined) continue
-    if (ceiling > anchor) {
+    const anchor = previous.ceilings?.[metric]
+    if (!Number.isInteger(anchor)) continue
+    if (ceiling <= anchor) {
+      ok(`baseline ceiling ${metric}: ${anchor} -> ${ceiling} (tightened or unchanged)`)
+      continue
+    }
+    const entry = growth.get(metric)
+    if (entry === undefined) {
       fail(
-        `baseline only tighten: ceiling ${metric} raised to ${ceiling}, committed tightest value ${anchor}`
+        `baseline only tighten: ceiling ${metric} raised to ${ceiling}, previous committed value ${anchor}`
+      )
+      continue
+    }
+    if (entry.from !== anchor) {
+      fail(`growth ${metric}: from ${entry.from} must equal previous committed ceiling ${anchor}`)
+    } else if (entry.to !== ceiling) {
+      fail(`growth ${metric}: to ${entry.to} must equal the new ceiling ${ceiling}`)
+    } else if (entry.to - entry.from > GROWTH_MAX_LINES) {
+      fail(
+        `growth ${metric}: +${entry.to - entry.from} lines exceeds the ${GROWTH_MAX_LINES}-line allowance`
+      )
+    } else {
+      ok(
+        `ALLOWED growth: ${metric} ${entry.from}->${entry.to} (+${entry.to - entry.from} lines, +${entry.addedCases} cases, ${entry.reason})`
       )
     }
   }
+
+  for (const metric of growth.keys()) {
+    if (!(metric in (baseline.ceilings ?? {}))) {
+      fail(`growth entry ${metric}: no matching ceiling`)
+    }
+  }
+
   for (const [metric, floor] of Object.entries(baseline.floors ?? {})) {
-    const anchor = tightestFloor[metric]
-    if (anchor === undefined) continue
+    const anchor = previous.floors?.[metric]
+    if (!Number.isInteger(anchor)) continue
     if (floor < anchor) {
-      fail(
-        `baseline only tighten: floor ${metric} lowered to ${floor}, committed tightest value ${anchor}`
-      )
+      fail(`baseline only tighten: floor ${metric} lowered to ${floor}, previous committed value ${anchor}`)
+    } else {
+      ok(`baseline floor ${metric}: ${anchor} -> ${floor} (raised or unchanged)`)
     }
   }
-  ok(`baseline tighten-only: ${history.length} committed baseline version(s) checked`)
 }
 
 function main() {

@@ -20,6 +20,7 @@
 - **链接读链 / 建链能力（`PlatformPort.readSymbolicLink` / `createSymbolicLink`，横切契约归 `directory` / `symlink-semantics` 域）**：`readSymbolicLink(path)` 返回链接**自身**的字面 target 串（`readlink` 级，不解析、不跟随——悬空链接照常返回字符串，非链接 / 缺失按可读错误拒绝），`createSymbolicLink(target, path)` 以**原样字符串**建链（相对、悬空、指向目录均不 resolve、不读取、不物化目标）。Electron 实现分别走 `node:fs/promises` 的 `readlink`（经 `readableFailure` 转中文可读句子）与 `symlink`（`assertWritable` 守 `/samples/**` 只读，失败经 `readableWriteFailure`）；通道 `platform:read-symbolic-link` / `platform:create-symbolic-link` 只登记在 `PLATFORM_CHANNELS` 单一来源，preload 仅白名单转发并同步桥接表面清单测试。Web 内存运行时没有链接：两者保持**同一签名**并**直接拒绝**（`Web 运行时没有符号链接：<path>` / `Web 运行时暂不支持创建符号链接`），**不得**伪造链接节点让它在目录列表里出现。链接的四态 / 计数 / 写盘口径归 `directory` 与 `symlink-semantics` 域，本域只承载平台表面与两套实现的一致性。
 - **列举与读文件的不可读项容错（`listDirectory` / `readTextFile`，横切契约归 `io-tolerance` 域）**：`lstat` 因 ENOENT / ELOOP / EACCES / ENOTDIR 失败时条目保留并标注 `broken` + 非空 `skippedReason`（`DirectoryEntry` 仅增可选字段）；根目录 `readdir` 失败仍 reject 但给出「无法读取目录 <path>：…」中文可读错误。`read-text-file` 对真实路径（含悬空链接 / 不可读文件）返回「无法读取文件 <path>：…」，经 IPC 不含 `Error invoking remote method` 前缀。该容错改造未新增 `PlatformPort` 方法、未改既有 channel。
 - **用户设置与系统语言能力（`PlatformPort.readUserSettings` / `writeUserSettings` / `systemLocale`，词典与首启解析归 `i18n` 域）**：`UserSettings` 只有 `language: 'zh' | 'en'` 一个字段（`Language` 同类型文件导出）；三个方法只新增这三项，通道名只登记在 `PLATFORM_CHANNELS`（`platform:read-user-settings` / `platform:write-user-settings` / `platform:system-locale`），preload 仅白名单转发并同步 bridge surface 清单测试。Electron：设置写入 `app.getPath('userData')` 下单个 JSON 文件，目录缺失先创建，**原子写**（同目录临时文件 + rename）；读取时文件缺失 / 损坏 JSON / 非对象 / 非法语言值一律解析为 `null` 且不 reject（启动不能因设置文件失败）；`systemLocale()` 原样返回 `app.getLocale()`（不改写、不截断）。Web：`localStorage` 单键 `opencompare.userSettings` 读写，`localStorage` 不可用 / 抛错时退化为**模块级内存**（同一运行期读回）；非法 JSON / 非法语言值读为 `null`；`systemLocale()` 取 `navigator.language`（缺失 `''`）。`src/shared/platform/settings.ts` 为两平台共享的解析单点（`isLanguage` / `parseUserSettings` / `parseUserSettingsJson` / `USER_SETTINGS_STORAGE_KEY`）。
+- **文本探测能力（`PlatformPort.probeTextFile(path)`，语义归 `text-probe` 域）**：一次读取原始字节后由 core 纯函数导出一致结果 `{ path, text, encoding, newline, bytes, sha256 }`（`TextFileProbe`），内置样本按 UTF-8 编码参与探测；通道 `platform:probe-text-file` 只登记在 `PLATFORM_CHANNELS` 单一来源，preload 仅白名单转发并同步表面清单测试；Web 内存实现同签名。`readTextFile` / `readFileBytes` 语义与返回值不变。探测判定顺序与阈值口径归 `text-probe` 域，本域只承载平台表面与两套实现一致性。
 - 预装核心运行时依赖（diff / node-diff3 / papaparse / @tanstack/react-virtual / yaml / jsonc-parser / lucide-react）与开发测试依赖（vitest / @testing-library/react / eslint / typescript）。
 - 配齐单命令质量门禁：`install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `cancel-gate` / `perf-gate`（各自单条 argv；`cancel-gate` 对应 `pnpm test:cancel`，`perf-gate` 对应 `pnpm perf:gate`）。
 
@@ -89,6 +90,13 @@
 - **测试只走既有模式**：沿用 `electron-platform.test.ts` 的 `vi.mock('electron')` + `dialogs.save.mockResolvedValueOnce` + `scratchRoot()` + node 真实文件系统，经 `platform.saveFile`（IPC handler）驱动；「保存前后 `readdir` 集合」用专门子目录比较；不可写路径用真实文件系统条件制造（`/samples/**` 只读哨兵；`rename` 失败用「目标为已存在的非空目录」），不新增生产代码测试 seam；不锁定平台相关的 rename 错误码（POSIX `EISDIR`/`ENOTEMPTY`，Windows `EPERM`/`EACCES`/`EEXIST`）。
 
 ## 最近交付证明
+
+- WI：`wi_ws_51573dd10dcee210`（平台缝：新增 `probeTextFile`；`kind: feature`）
+- 日期：2026-11-02
+- 结果：code_gates passed（22 gates，attempt 002，`.munk/runs/run_ws_86525261fb4af0ab/code-gates/attempts/002`；`pnpm test` 116 files / 1842 passed + 1 skipped；`needSelfTest=false`）。探测语义与 AC 归 `domains/text-probe`，本域只承载平台表面与两套实现一致性。
+- 覆盖摘要：`PlatformPort` 新增且仅新增 `probeTextFile(path): Promise<TextFileProbe>`（`TextFileProbe` 在 core 探测结果上补 `path`）；`PLATFORM_CHANNELS` 加 `platform:probe-text-file`，preload 白名单转发（`src/preload/index.test.ts` 表面清单 +1）；Electron handler 一次读取原始字节后调用 `@core/text/probe` 的同一纯函数（`/samples/**` 按样本 UTF-8 编码，字节读取器可注入以断言单次读取），Web 内存实现按内存文本 UTF-8 编码后走同一纯函数；`src/main/platform/electron-platform.test.ts` 的测试 port 同步补该方法。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy；`qa/text-encoding-newline-probe.md` 落在 `domains/text-probe`。
+- 后续注意：`probeTextFile` 只回答探测事实，**不缓存、不归一化、不转码**；任何「顺手按探测结果重写文件」的改动都会越出本缝语义（转码写回明确非目标）。
 
 - WI：`wi_intake_b95f668b89a1770d`（平台缝：链接读链 / 建链两项能力，横切契约归 `directory` / `symlink-semantics`；`kind: fix`）
 - 日期：2026-11-01

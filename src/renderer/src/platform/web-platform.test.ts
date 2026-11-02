@@ -6,6 +6,7 @@ import { CSV_SCENE } from '@shared/fixtures'
 import { sha256Hex } from '@core/directory/hash'
 import { OperationCancelledError } from '@core/io'
 import { digestFilesForComparison, unwrapDigestResult } from './index'
+import { TEXT_PROBE_CASES, expectTextProbeFacts } from '../../../test/sharedHarness'
 import { createWebPlatformPort } from './web-platform'
 
 /** The hidden `<input type="file">` the web picker appends while it is open. */
@@ -345,5 +346,46 @@ describe('web user settings', () => {
 
     await expect(platform.readUserSettings()).resolves.toEqual({ language: 'zh', theme: 'system' })
     await expect(platform.systemLocale()).resolves.toBe(navigator.language)
+  })
+})
+
+describe('web text file probe', () => {
+  it.each(TEXT_PROBE_CASES.filter((item) => item.text !== null))(
+    'probes $name through its UTF-8 bytes',
+    async (item) => {
+      const platform = createWebPlatformPort()
+      const path = `/memory/${item.name}`
+      await platform.writeTextFile(path, item.text as string)
+
+      const probe = await platform.probeTextFile(path)
+
+      expect(Object.keys(probe).sort()).toEqual([
+        'bytes',
+        'encoding',
+        'newline',
+        'path',
+        'sha256',
+        'text'
+      ])
+      expectTextProbeFacts(probe, item, path)
+    }
+  )
+
+  it('probes a mounted sample through its UTF-8 bytes', async () => {
+    const platform = createWebPlatformPort()
+    const sample = CSV_SCENE.left
+
+    const probe = await platform.probeTextFile(sample.path)
+
+    expect(probe.text).toBe(sample.text)
+    expect(probe.text).toBe(await platform.readTextFile(sample.path))
+    expect(probe.encoding).toBe('UTF-8')
+    expect(probe.bytes).toBe(new TextEncoder().encode(sample.text).length)
+    expect(probe.sha256).toBe(sha256Hex(sample.text))
+  })
+
+  it('rejects a missing path instead of inventing probe facts', async () => {
+    const platform = createWebPlatformPort()
+    await expect(platform.probeTextFile('/memory/missing.txt')).rejects.toThrow('No such virtual path')
   })
 })
