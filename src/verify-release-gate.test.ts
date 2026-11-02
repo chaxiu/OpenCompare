@@ -1151,6 +1151,67 @@ describe('pure judgments', () => {
   })
 })
 
+describe('extracted pure fail-closed judgments', () => {
+  const ciIds = expectedCheckIds({ layer: 'ci' })
+  const validSummary = (): Summary =>
+    buildSummary({
+      tag: TAG,
+      layer: 'ci',
+      steps: ciIds.map((id) => fakeStep(id)),
+      environment: ENVIRONMENT,
+      evidenceDir: '/tmp',
+      expectedIds: ciIds
+    })
+
+  it('fails closed when the evidence file is missing', () => {
+    const verdict = validateSummary(validSummary(), { expectedIds: ciIds, exists: () => false })
+    expect(verdict.ok).toBe(false)
+    expect(verdict.problems.join('\n')).toContain('evidence 不存在')
+  })
+
+  it('fails closed when a required summary section is missing', () => {
+    const broken = { ...validSummary() } as Record<string, unknown>
+    delete broken.environment
+    const verdict = validateSummary(broken as unknown as Summary, {
+      expectedIds: ciIds,
+      exists: () => true
+    })
+    expect(verdict.ok).toBe(false)
+    expect(verdict.problems.join('\n')).toContain('summary 缺字段 environment')
+  })
+
+  it('fails closed when the expected check count does not match the registry', () => {
+    const summary = validSummary()
+    const broken = { ...summary, counts: { ...summary.counts, expected: 3 } }
+    const verdict = validateSummary(broken, { expectedIds: ciIds, exists: () => true })
+    expect(verdict.ok).toBe(false)
+    expect(verdict.problems.join('\n')).toContain('≠ 期望 15')
+  })
+
+  it('labels every fail-closed verdict with a Chinese marker', () => {
+    const verdict = validateSummary({} as Summary, { expectedIds: ciIds, exists: () => false })
+    expect(verdict.ok).toBe(false)
+    expect(verdict.problems.join('\n')).toMatch(/缺字段|缺失|不存在|不得|≠/)
+  })
+
+  it('fails closed when an artifact version does not equal the tag', () => {
+    expect(versionEqualsTag(VERSION, TAG)).toBe(true)
+    expect(versionEqualsTag('0.2.16-1', TAG)).toBe(true)
+    expect(versionEqualsTag('0.2.15', TAG)).toBe(false)
+  })
+
+  it('pins the fixed counts the pure registry owns', () => {
+    expect(ciIds).toHaveLength(15)
+    expect(expectedCheckIds({ layer: 'local' })).toEqual([
+      'local-fixture',
+      'local-rounds-4state',
+      'local-retained-heap'
+    ])
+    expect(LOCAL_CHECKS).toHaveLength(3)
+    expect(RETENTION_THRESHOLD_BYTES).toBe(16 * 1024 * 1024)
+  })
+})
+
 /* ------------------------------------------------------------------ */
 /* Post-release workflow                                               */
 /* ------------------------------------------------------------------ */
