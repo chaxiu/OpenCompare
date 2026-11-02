@@ -777,6 +777,24 @@ export function validateSummary(summary, { expectedIds = [], exists = existsSync
   return { ok: problems.length === 0, problems }
 }
 
+/**
+ * Final fail-closed release verdict. Pure: no disk, env, network or clock —
+ * `exists` is injected by the caller. `ok` is true only when every summary
+ * rule holds AND the summary itself declares `status=pass`.
+ */
+export function judgeReleaseGate(summary, { expectedIds = [], exists = existsSync } = {}) {
+  const validation = validateSummary(summary, { expectedIds, exists })
+  if (summary === null || typeof summary !== 'object') {
+    return { ok: false, status: 'fail', problems: validation.problems }
+  }
+  const passed = validation.ok && summary.status === 'pass'
+  const problems = [...validation.problems]
+  if (validation.ok && !passed) {
+    problems.push(`summary.status=${summary.status} 不是 pass`)
+  }
+  return { ok: passed, status: passed ? 'pass' : 'fail', problems }
+}
+
 /* ------------------------------------------------------------------ */
 /* Evidence writing                                                    */
 /* ------------------------------------------------------------------ */
@@ -2082,10 +2100,10 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
       startedAt,
       finishedAt: nowIso(now)
     })
-    const validation = validateSummary(summary, { expectedIds })
-    if (!validation.ok) {
+    const verdict = judgeReleaseGate(summary, { expectedIds })
+    if (!verdict.ok) {
       summary.status = 'fail'
-      summary.problems = validation.problems
+      summary.problems = verdict.problems
     }
     writeJsonAtomic(join(outDir, 'summary.json'), summary)
     stdout(
@@ -2094,7 +2112,7 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
     )
     for (const id of summary.missing) stderr(`::error:: 缺少检查项 ${id}`)
     for (const id of summary.unexpected) stderr(`::error:: 多余检查项 ${id}`)
-    return summary.status === 'pass' ? 0 : 1
+    return verdict.ok ? 0 : 1
   }
 
   const workRoot = mkdtempSync(join(tmpdir(), 'opencompare-verify-'))
@@ -2126,10 +2144,10 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
     startedAt,
     finishedAt: nowIso(now)
   })
-  const validation = validateSummary(summary, { expectedIds })
-  if (!validation.ok) {
+  const verdict = judgeReleaseGate(summary, { expectedIds })
+  if (!verdict.ok) {
     summary.status = 'fail'
-    summary.problems = validation.problems
+    summary.problems = verdict.problems
   }
   writeJsonAtomic(join(outDir, 'summary.json'), summary)
   stdout(
@@ -2140,7 +2158,7 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
   for (const id of summary.unexpected) stderr(`::error:: 多余检查项 ${id}`)
   for (const id of summary.skipped) stderr(`::error:: 检查项 skip 不允许: ${id}`)
   for (const problem of summary.problems ?? []) stderr(`::error:: ${problem}`)
-  return summary.status === 'pass' ? 0 : 1
+  return verdict.ok ? 0 : 1
 }
 
 const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1])
