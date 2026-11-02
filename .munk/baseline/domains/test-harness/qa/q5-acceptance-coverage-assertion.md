@@ -1,0 +1,11 @@
+covers: ac-coverage-cold-run-both-sides, ac-coverage-provider-raw, ac-coverage-same-scope, ac-assertion-per-case-table, ac-assertion-outside-and-text-change, ac-helper-delta-ledger, ac-evidence-only-scope, ac-coverage-evidence, ac-code-gates-green
+标题: Q5 签收补证——覆盖率冷跑同口径前后对比与 127 个用例的逐条 expect 映射，两条证据均可机械复现
+步骤: `git worktree add --detach` 建 `97a18f3` / `120f06d` 两个独立 worktree → 各自 `pnpm install --frozen-lockfile` → 删 `coverage/` 与 `node_modules/.vite`（用 `node -e` 而非 `rm -rf`）→ 同跑 `/usr/bin/time -p pnpm exec vitest run --coverage`，留 `raw/baseline-97a18f3.txt` / `raw/current-120f06d.txt` 与两侧 `.meta.txt` → `node tools/coverage-compare.mjs --baseline=… --current=…`（读两侧 `coverage-final.json` 按 istanbul 同规则重算共有文件 / 剔除 `src/test/**` / 指定模块）→ `node tools/assertion-map.mjs --baseline=97a18f3 --current=120f06d`（逐用例条数 + 用例外聚合 + 文本变化 + helper 台账）→ 对照 `git status --porcelain` / `git diff --name-only` 核实范围零 diff → 21 道门禁逐条过
+期望: 两侧 `vitest run --coverage` 退出码均 0，日志含 `Coverage enabled with v8`，`Test Files` 均 115、`Tests` 均 `1796 passed | 1 skipped`；全仓 90.54 / 83.29 / 89.6 / 93.1 → 90.63 / 83.29 / 89.82 / 93.17，**共有 158 文件与再剔除 `src/test/**` 的 157 文件两种口径下 lines / branches delta 均 `+0.00pp`**；`App.tsx` 94.11 / 75 / 100 / 100 与 `sync.ts` 94.27 / 83.07 / 98.07 / 96.87 两侧相同；唯一单侧文件 `src/test/sharedHarness.tsx`（279 行、100 / 85 / 100 / 100）解释全仓抬升；127 个用例块（94 + 33，含 1 个 `it.skipIf`）expect 条数逐条一致、0 减少、0 缺失标题；`537 = 534 + 3`、`387 = 370 + 17`、`924 = 904 + 20` 对账成立；230 条文本变化（App 132 = 37 formatting-only + 95 helper-substitution；sync 98 = 89 + 9）无第三类；24 个移出 helper 原函数体 expect 均为 0，保留 helper（含 `cycle` 18 → 18）条数不变；`git status --porcelain` 仅 `?? .munk/changes/wi_intake_71c3baa903a19078/`、`git diff --name-only` 空，测试 / 产品源码 / `package.json` / `pnpm-lock.yaml` / 门禁 / `scripts/**` / `.github/**` 零 diff；21 道门禁全 passed（attempt 002）
+
+## Recent execution
+
+- workItemId: wi_intake_71c3baa903a19078
+- at: 2026-11-02T08:51:23.915Z
+- status: pass
+- note: code_gates 21 gates passed（attempt 002；attempt 001 仅因两个只读脚本缺 `/* global console, process */` 被 `lint` no-undef 拦下，修复后重跑全绿）；冷跑 36.85s / 38.36s、exit 0，共有 158 文件与剔除 `src/test/**` 157 文件两种口径 lines / branches 均 +0.00pp；127 个用例逐条一致、expect 924 对账成立、230 条文本变化两类分完；范围仅 change pack。

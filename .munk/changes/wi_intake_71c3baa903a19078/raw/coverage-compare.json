@@ -1,0 +1,154 @@
+{
+  "baseline": {
+    "root": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-97a18f3",
+    "coverageFile": "/private/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-97a18f3/coverage/coverage-final.json"
+  },
+  "current": {
+    "root": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-120f06d",
+    "coverageFile": "/private/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-120f06d/coverage/coverage-final.json"
+  },
+  "fileCount": {
+    "baseline": 158,
+    "current": 159,
+    "shared": 158
+  },
+  "baselineOnly": [],
+  "currentOnly": [
+    "src/test/sharedHarness.tsx"
+  ],
+  "wholeRepo": {
+    "baseline": {
+      "statements": 90.54,
+      "branches": 83.29,
+      "functions": 89.6,
+      "lines": 93.1,
+      "raw": {
+        "statements": "7883/8706",
+        "branches": "4521/5428",
+        "functions": "1698/1895",
+        "lines": "7080/7604"
+      }
+    },
+    "current": {
+      "statements": 90.63,
+      "branches": 83.29,
+      "functions": 89.82,
+      "lines": 93.17,
+      "raw": {
+        "statements": "7962/8785",
+        "branches": "4538/5448",
+        "functions": "1739/1936",
+        "lines": "7153/7677"
+      }
+    }
+  },
+  "sameScope": {
+    "baseline": {
+      "statements": 90.54,
+      "branches": 83.29,
+      "functions": 89.6,
+      "lines": 93.1,
+      "raw": {
+        "statements": "7883/8706",
+        "branches": "4521/5428",
+        "functions": "1698/1895",
+        "lines": "7080/7604"
+      }
+    },
+    "current": {
+      "statements": 90.54,
+      "branches": 83.29,
+      "functions": 89.6,
+      "lines": 93.1,
+      "raw": {
+        "statements": "7883/8706",
+        "branches": "4521/5428",
+        "functions": "1698/1895",
+        "lines": "7080/7604"
+      }
+    }
+  },
+  "sameScopeWithoutTestSupport": {
+    "keys": 157,
+    "baseline": {
+      "statements": 90.57,
+      "branches": 83.42,
+      "functions": 89.59,
+      "lines": 93.12,
+      "raw": {
+        "statements": "7853/8670",
+        "branches": "4514/5411",
+        "functions": "1696/1893",
+        "lines": "7054/7575"
+      }
+    },
+    "current": {
+      "statements": 90.57,
+      "branches": 83.42,
+      "functions": 89.59,
+      "lines": 93.12,
+      "raw": {
+        "statements": "7853/8670",
+        "branches": "4514/5411",
+        "functions": "1696/1893",
+        "lines": "7054/7575"
+      }
+    }
+  },
+  "modules": [
+    {
+      "module": "src/renderer/src/App.tsx",
+      "baseline": {
+        "statements": 94.11,
+        "branches": 75,
+        "functions": 100,
+        "lines": 100,
+        "raw": {
+          "statements": "16/17",
+          "branches": "6/8",
+          "functions": "7/7",
+          "lines": "14/14"
+        }
+      },
+      "current": {
+        "statements": 94.11,
+        "branches": 75,
+        "functions": 100,
+        "lines": 100,
+        "raw": {
+          "statements": "16/17",
+          "branches": "6/8",
+          "functions": "7/7",
+          "lines": "14/14"
+        }
+      }
+    },
+    {
+      "module": "src/core/directory/sync.ts",
+      "baseline": {
+        "statements": 94.27,
+        "branches": 83.07,
+        "functions": 98.07,
+        "lines": 96.87,
+        "raw": {
+          "statements": "247/262",
+          "branches": "108/130",
+          "functions": "51/52",
+          "lines": "217/224"
+        }
+      },
+      "current": {
+        "statements": 94.27,
+        "branches": 83.07,
+        "functions": 98.07,
+        "lines": 96.87,
+        "raw": {
+          "statements": "247/262",
+          "branches": "108/130",
+          "functions": "51/52",
+          "lines": "217/224"
+        }
+      }
+    }
+  ]
+}

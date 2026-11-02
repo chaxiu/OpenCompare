@@ -1,0 +1,41 @@
+# Coverage comparison
+
+- baseline: /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-97a18f3
+- current : /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-120f06d
+- files: baseline 158, current 159, shared 158
+- baseline-only files: 0
+- current-only files: 1 -> src/test/sharedHarness.tsx
+
+## Whole repo
+
+- baseline: statements 90.54% (7883/8706) | branches 83.29% (4521/5428) | functions 89.6% (1698/1895) | lines 93.1% (7080/7604)
+- current : statements 90.63% (7962/8785) | branches 83.29% (4538/5448) | functions 89.82% (1739/1936) | lines 93.17% (7153/7677)
+- delta   : statements +0.09pp | branches +0.00pp | functions +0.22pp | lines +0.07pp
+
+## Same scope (files present on both sides)
+
+- baseline: statements 90.54% (7883/8706) | branches 83.29% (4521/5428) | functions 89.6% (1698/1895) | lines 93.1% (7080/7604)
+- current : statements 90.54% (7883/8706) | branches 83.29% (4521/5428) | functions 89.6% (1698/1895) | lines 93.1% (7080/7604)
+- delta   : statements +0.00pp | branches +0.00pp | functions +0.00pp | lines +0.00pp
+
+## Same scope without src/test/**
+
+- files: 157
+- baseline: statements 90.57% (7853/8670) | branches 83.42% (4514/5411) | functions 89.59% (1696/1893) | lines 93.12% (7054/7575)
+- current : statements 90.57% (7853/8670) | branches 83.42% (4514/5411) | functions 89.59% (1696/1893) | lines 93.12% (7054/7575)
+- delta   : statements +0.00pp | branches +0.00pp | functions +0.00pp | lines +0.00pp
+
+## Named modules
+
+### src/renderer/src/App.tsx
+
+- baseline: statements 94.11% (16/17) | branches 75% (6/8) | functions 100% (7/7) | lines 100% (14/14)
+- current : statements 94.11% (16/17) | branches 75% (6/8) | functions 100% (7/7) | lines 100% (14/14)
+- delta   : statements +0.00pp | branches +0.00pp | functions +0.00pp | lines +0.00pp
+
+### src/core/directory/sync.ts
+
+- baseline: statements 94.27% (247/262) | branches 83.07% (108/130) | functions 98.07% (51/52) | lines 96.87% (217/224)
+- current : statements 94.27% (247/262) | branches 83.07% (108/130) | functions 98.07% (51/52) | lines 96.87% (217/224)
+- delta   : statements +0.00pp | branches +0.00pp | functions +0.00pp | lines +0.00pp
+
