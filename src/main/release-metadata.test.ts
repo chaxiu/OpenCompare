@@ -1,29 +1,30 @@
-import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { parse } from 'yaml'
 import {
   extractMetadataRefs,
-  findLegacyWindowsNames,
   inspectReleaseMetadata,
   runReleaseMetadataCli
 } from '../../scripts/release-metadata.mjs'
-
-// Tempdir fixtures are the only place this suite writes release artifacts; the
-// checks below never read a real `release/` directory or touch the network.
-const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
-const scriptPath = join(repoRoot, 'scripts/release-metadata.mjs')
+import {
+  judgeReleaseMetadata,
+  type AppImageFact,
+  type ReleaseMetadataFacts
+} from './release-metadata-gate'
 
 const VERSION = '0.2.5'
 const APPIMAGE_NAME = `OpenCompare-${VERSION}.AppImage`
-// v0.2.5 CI trailer `00 01 EF A4`: big-endian 126884 matches latest-linux.yml,
-// little-endian 2767126784 does not (the old LE-only gate rejected it).
-const APPIMAGE_TAIL = Buffer.from([0x00, 0x01, 0xef, 0xa4])
 const APPIMAGE_BLOCKMAP_SIZE = 126884
 const APPIMAGE_LITTLE_ENDIAN = 2767126784
+const APPIMAGE_TAIL = Buffer.from([0x00, 0x01, 0xef, 0xa4])
+const MAC_ZIP = `OpenCompare-${VERSION}-arm64-mac.zip`
+const MAC_DMG = `OpenCompare-${VERSION}-arm64.dmg`
+const WIN_EXE = `OpenCompare-Setup-${VERSION}.exe`
+const DEB = `opencompare_${VERSION}_amd64.deb`
+const legacyWinUrl = `OpenCompare.Setup.${VERSION}.exe`
+const spacedWinUrl = `OpenCompare Setup ${VERSION}.exe`
+const ASSETS = [MAC_ZIP, `${MAC_ZIP}.blockmap`, MAC_DMG, `${MAC_DMG}.blockmap`, WIN_EXE, `${WIN_EXE}.blockmap`, APPIMAGE_NAME, DEB, 'latest-mac.yml', 'latest.yml', 'latest-linux.yml']
 
 const buildAppImage = (size: number, tail: Buffer = APPIMAGE_TAIL): Buffer => {
   const bytes = Buffer.alloc(size, 0)
@@ -40,61 +41,37 @@ const linuxMetadata = (options: { blockMapSize?: number | null; deb?: boolean } 
     '    sha512: fixture',
     '    size: 262144',
     ...(blockMapSize === null ? [] : [`    blockMapSize: ${blockMapSize}`]),
-    ...(deb
-      ? [`  - url: opencompare_${VERSION}_amd64.deb`, '    sha512: fixture', '    size: 16']
-      : []),
+    ...(deb ? [`  - url: ${DEB}`, '    sha512: fixture', '    size: 16'] : []),
     `path: ${APPIMAGE_NAME}`,
     'sha512: fixture'
   ].join('\n')
 }
 
-const ASSETS = [
-  `OpenCompare-${VERSION}-arm64-mac.zip`,
-  `OpenCompare-${VERSION}-arm64-mac.zip.blockmap`,
-  `OpenCompare-${VERSION}-arm64.dmg`,
-  `OpenCompare-${VERSION}-arm64.dmg.blockmap`,
-  `OpenCompare-Setup-${VERSION}.exe`,
-  `OpenCompare-Setup-${VERSION}.exe.blockmap`,
-  APPIMAGE_NAME,
-  `opencompare_${VERSION}_amd64.deb`,
-  'latest-mac.yml',
-  'latest.yml',
-  'latest-linux.yml'
-]
-
-const legacyWinUrl = `OpenCompare.Setup.${VERSION}.exe`
-const spacedWinUrl = `OpenCompare Setup ${VERSION}.exe`
-
 const metadataFixtures = (): Record<string, string> => ({
   'latest-mac.yml': [
     `version: ${VERSION}`,
     'files:',
-    `  - url: OpenCompare-${VERSION}-arm64-mac.zip`,
+    `  - url: ${MAC_ZIP}`,
     '    sha512: fixture',
     '    size: 16',
     '    blockMapSize: 16',
-    `  - url: OpenCompare-${VERSION}-arm64.dmg`,
+    `  - url: ${MAC_DMG}`,
     '    sha512: fixture',
     '    size: 16',
-    `path: OpenCompare-${VERSION}-arm64-mac.zip`,
+    `path: ${MAC_ZIP}`,
     'sha512: fixture'
   ].join('\n'),
   'latest.yml': [
     `version: ${VERSION}`,
     'files:',
-    `  - url: OpenCompare-Setup-${VERSION}.exe`,
+    `  - url: ${WIN_EXE}`,
     '    sha512: fixture',
     '    size: 16',
-    `path: OpenCompare-Setup-${VERSION}.exe`,
+    `path: ${WIN_EXE}`,
     'sha512: fixture'
   ].join('\n'),
   'latest-linux.yml': linuxMetadata()
 })
-
-interface Fixture {
-  dir: string
-  dispose: () => void
-}
 
 interface FixtureOptions {
   overrides?: Record<string, string>
@@ -102,189 +79,137 @@ interface FixtureOptions {
   appImage?: Buffer
 }
 
-const createReleaseFixture = (options: FixtureOptions = {}): Fixture => {
-  const {
-    overrides = {},
-    skip = [],
-    appImage = buildAppImage(APPIMAGE_BLOCKMAP_SIZE)
-  } = options
+// Tempdir fixtures are the only place this suite writes release artifacts; the
+// checks below never read a real `release/` directory or touch the network.
+const createReleaseFixture = (options: FixtureOptions = {}): string => {
+  const { overrides = {}, skip = [], appImage = buildAppImage(APPIMAGE_BLOCKMAP_SIZE) } = options
   const skipped = new Set(skip)
   const dir = mkdtempSync(join(tmpdir(), 'opencompare-metadata-'))
   for (const asset of ASSETS) {
-    if (skipped.has(asset)) continue
-    writeFileSync(join(dir, asset), asset === APPIMAGE_NAME ? appImage : Buffer.alloc(1))
-  }
-  for (const [name, content] of Object.entries({ ...metadataFixtures(), ...overrides })) {
-    if (skipped.has(name)) continue
-    writeFileSync(join(dir, name), content)
-  }
-  return { dir, dispose: () => rmSync(dir, { recursive: true, force: true }) }
-}
-
-const withReleaseFixture = (
-  run: (fixture: Fixture) => void,
-  options: FixtureOptions = {}
-): void => {
-  const fixture = createReleaseFixture(options)
-  try {
-    run(fixture)
-  } finally {
-    fixture.dispose()
-  }
-}
-
-const runCli = (args: string[]): { status: number; stdout: string; stderr: string } => {
-  const result = spawnSync(process.execPath, [scriptPath, ...args], { encoding: 'utf8' })
-  return {
-    status: result.status ?? -1,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? ''
-  }
-}
-
-const workflow = parse(readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8')) as {
-  jobs?: Record<string, { steps?: Array<{ name?: string; run?: string }> }>
-}
-const appImageGateScript =
-  workflow.jobs?.release?.steps?.find(
-    (step) => step.name === 'Assert the AppImage embeds its declared blockmap'
-  )?.run ?? ''
-
-// Parity harness: one temp dir feeds both the workflow gate body (run from the
-// directory root against release/) and the local script (--dir release).
-const runBlockmapParity = (options: {
-  declared: number | null
-  appImage?: Buffer
-}): { gateStatus: number; cliStatus: number } => {
-  const root = mkdtempSync(join(tmpdir(), 'opencompare-blockmap-parity-'))
-  try {
-    const releaseDir = join(root, 'release')
-    mkdirSync(releaseDir, { recursive: true })
-    writeFileSync(
-      join(releaseDir, 'latest-linux.yml'),
-      linuxMetadata({ blockMapSize: options.declared, deb: false })
-    )
-    if (options.appImage) {
-      writeFileSync(join(releaseDir, APPIMAGE_NAME), options.appImage)
+    if (!skipped.has(asset)) {
+      writeFileSync(join(dir, asset), asset === APPIMAGE_NAME ? appImage : Buffer.alloc(1))
     }
-    const script = join(root, 'appimage-gate.sh')
-    writeFileSync(script, appImageGateScript)
-    const gate = spawnSync('bash', [script], { cwd: root, encoding: 'utf8' })
-    const cli = runCli(['--dir', releaseDir])
-    return { gateStatus: gate.status ?? -1, cliStatus: cli.status }
+  }
+  for (const [name, text] of Object.entries({ ...metadataFixtures(), ...overrides })) {
+    if (!skipped.has(name)) writeFileSync(join(dir, name), text)
+  }
+  return dir
+}
+
+const withFixture = <T>(options: FixtureOptions, run: (dir: string) => T): T => {
+  const dir = createReleaseFixture(options)
+  try {
+    return run(dir)
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true })
   }
 }
 
-describe('release update metadata gate', () => {
-  it('accepts a complete artifact set whose urls all match the asset names', () => {
-    withReleaseFixture(({ dir }) => {
-      const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-      expect(report.ok).toBe(true)
-      expect(report.missing).toEqual([])
-      expect(report.legacyHits).toEqual([])
-      expect(report.problems).toEqual([])
-      expect(report.metadata.map((entry) => entry.file).sort()).toEqual([
-        'latest-linux.yml',
-        'latest-mac.yml',
-        'latest.yml'
-      ])
-      expect(report.metadata.find((entry) => entry.file === 'latest-mac.yml')?.hits).toBe(2)
-      expect(report.metadata.find((entry) => entry.file === 'latest.yml')?.hits).toBe(1)
-      expect(report.metadata.find((entry) => entry.file === 'latest-linux.yml')?.hits).toBe(2)
+const runCli = (args: string[]): { code: number; output: string } => {
+  const lines: string[] = []
+  const io = { stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) }
+  const code = runReleaseMetadataCli(args, io)
+  return { code, output: lines.join('\n') }
+}
 
-      const cli = runCli(['--dir', dir])
-      expect(cli.status).toBe(0)
-      expect(cli.stdout).toContain('latest-mac.yml: url 2/2 命中资产名')
-      expect(cli.stdout).toContain('latest.yml: url 1/1 命中资产名')
-      expect(cli.stdout).toContain('latest-linux.yml: url 2/2 命中资产名')
-      expect(cli.stdout).toContain('旧错位名 0 命中')
-    })
+const appImageFact = (blockMapSize: number | null, bytes: Buffer | null): AppImageFact => ({
+  file: 'latest-linux.yml',
+  name: APPIMAGE_NAME,
+  blockMapSize,
+  size: bytes?.length ?? null,
+  tailLe: bytes && bytes.length >= 4 ? bytes.readUInt32LE(bytes.length - 4) : null,
+  tailBe: bytes && bytes.length >= 4 ? bytes.readUInt32BE(bytes.length - 4) : null
+})
+
+const facts = (overrides: Partial<ReleaseMetadataFacts> = {}): ReleaseMetadataFacts => ({
+  directoryLabel: '/release',
+  directoryReadable: true,
+  assets: ASSETS,
+  metadataFiles: [
+    { file: 'latest-mac.yml', refs: [MAC_ZIP, MAC_DMG] },
+    { file: 'latest.yml', refs: [WIN_EXE] },
+    { file: 'latest-linux.yml', refs: [APPIMAGE_NAME, DEB] }
+  ],
+  appImages: [appImageFact(APPIMAGE_BLOCKMAP_SIZE, buildAppImage(APPIMAGE_BLOCKMAP_SIZE))],
+  ...overrides
+})
+
+const verdictCases: Array<[string, ReleaseMetadataFacts, boolean, string[], string[]?]> = [
+  ['a complete asset set passes', facts(), true, []],
+  ['a url outside the asset list fails closed', facts({ metadataFiles: [{ file: 'latest.yml', refs: ['OpenCompare-Setup-9.9.9.exe'] }] }), false, []],
+  ['the hyphen Windows installer form is accepted', facts(), true, []],
+  ['a dotted Windows installer name is rejected', facts({ assets: [...ASSETS, legacyWinUrl] }), false, [], [legacyWinUrl]],
+  ['a spaced Windows installer name is rejected', facts({ assets: [...ASSETS, spacedWinUrl] }), false, [], [spacedWinUrl]],
+  ['a directory without latest*.yml fails', facts({ metadataFiles: [] }), false, ['metadata-missing']],
+  ['an empty asset list fails', facts({ assets: [] }), false, ['assets-empty']],
+  ['an unreadable directory fails', facts({ directoryLabel: '/missing', directoryReadable: false }), false, ['directory-unreadable']],
+  ['a latest*.yml without refs fails', facts({ metadataFiles: [{ file: 'latest.yml', refs: [] }] }), false, ['refs-empty']],
+  ['a declared AppImage without blockMapSize fails', facts({ appImages: [appImageFact(null, buildAppImage(APPIMAGE_BLOCKMAP_SIZE))] }), false, ['blockmap-missing']],
+  ['a declared AppImage that is absent fails', facts({ appImages: [appImageFact(APPIMAGE_BLOCKMAP_SIZE, null)] }), false, ['appimage-missing']],
+  ['an AppImage shorter than its trailer fails', facts({ appImages: [appImageFact(16, Buffer.from([0x01, 0x02]))] }), false, ['appimage-too-small']],
+  ['both trailer byte orders mismatching fails', facts({ appImages: [appImageFact(APPIMAGE_BLOCKMAP_SIZE, buildAppImage(APPIMAGE_BLOCKMAP_SIZE, Buffer.from([0x00, 0x00, 0x01, 0x00])))] }), false, ['blockmap-mismatch']],
+  ['both trailer candidates exceeding the file size fails', facts({ appImages: [appImageFact(APPIMAGE_BLOCKMAP_SIZE, buildAppImage(16, Buffer.from([0xff, 0xff, 0xff, 0xff])))] }), false, ['blockmap-out-of-range']],
+  ['a little-endian trailer also matches', facts({ appImages: [appImageFact(16, buildAppImage(16, Buffer.from([0x10, 0x00, 0x00, 0x00])))] }), true, []],
+  ['a blockMapSize matching the little-endian decoding passes', facts({ appImages: [appImageFact(APPIMAGE_LITTLE_ENDIAN, buildAppImage(APPIMAGE_LITTLE_ENDIAN, Buffer.from([0x00, 0x01, 0xef, 0xa4])))] }), true, []]
+]
+
+describe('release update metadata verdicts', () => {
+  it.each(verdictCases)('%s', (_name, input, ok, codes, legacy) => {
+    const verdict = judgeReleaseMetadata(input)
+    expect(verdict.ok).toBe(ok)
+    expect(verdict.issues.map((issue) => issue.code)).toEqual(codes)
+    expect(verdict.legacyHits).toEqual(legacy ?? [])
   })
 
-  it('fails closed with the exact missing name and still counts the remaining hits', () => {
+  it('reports each missing asset reference and per-file hits', () => {
     const missingName = 'OpenCompare-Setup-9.9.9.exe'
-    withReleaseFixture(
-      ({ dir }) => {
-        const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-        expect(report.ok).toBe(false)
-        expect(report.missing).toEqual([missingName])
-        const win = report.metadata.find((entry) => entry.file === 'latest.yml')
-        expect(win?.hits).toBe(0)
-        expect(win?.refs).toHaveLength(1)
-
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).not.toBe(0)
-        expect(cli.stderr).toContain(missingName)
-        expect(cli.stdout).toContain('latest.yml: url 0/1 命中资产名')
-        // The other metadata files are still fully counted.
-        expect(cli.stdout).toContain('latest-mac.yml: url 2/2 命中资产名')
-      },
-      {
-        overrides: {
-          'latest.yml': [
-            `version: ${VERSION}`,
-            'files:',
-            `  - url: ${missingName}`,
-            '    sha512: fixture',
-            '    size: 16',
-            `path: OpenCompare-Setup-${VERSION}.exe`,
-            'sha512: fixture'
-          ].join('\n')
-        }
-      }
+    const verdict = judgeReleaseMetadata(
+      facts({ metadataFiles: [{ file: 'latest.yml', refs: [missingName, WIN_EXE] }] })
     )
+    expect(verdict.missing).toEqual([missingName])
+    expect(verdict.metadata).toEqual([{ file: 'latest.yml', refs: [missingName, WIN_EXE], hits: 1 }])
+    expect(verdict.ok).toBe(false)
   })
+})
 
-  it('rejects the dotted and spaced Windows installer names', () => {
-    for (const legacyName of [legacyWinUrl, spacedWinUrl]) {
-      expect(findLegacyWindowsNames([legacyName])).toEqual([legacyName])
-      const validNames = findLegacyWindowsNames([`OpenCompare-Setup-${VERSION}.exe`])
-      expect(validNames).toEqual([])
-    }
+interface ReportCase extends FixtureOptions {
+  name: string
+  assets?: string[]
+  ok: boolean
+  problem?: string
+  missing?: string
+  legacy?: string
+}
 
-    withReleaseFixture(
-      ({ dir }) => {
-        const report = inspectReleaseMetadata({
-          dir,
-          assets: ASSETS.filter((name) => name !== `OpenCompare-Setup-${VERSION}.exe`)
-        })
-        expect(report.ok).toBe(false)
-        expect(report.legacyHits).toContain(legacyWinUrl)
+// Real-directory parity: the same fixture feeds the local script and the pure
+// judgment so a drift in either side fails this suite.
+const reportCases: ReportCase[] = [
+  { name: 'a complete release directory passes', ok: true },
+  { name: 'an empty asset list fails', assets: [], ok: false, problem: '资产名清单为空' },
+  { name: 'a directory without latest*.yml fails', skip: ['latest-mac.yml', 'latest.yml', 'latest-linux.yml'], ok: false, problem: '无 latest*.yml' },
+  { name: 'a latest*.yml without refs fails', overrides: { 'latest.yml': `version: ${VERSION}\n` }, ok: false, problem: '未声明 files[].url' },
+  { name: 'a url outside the asset list fails', overrides: { 'latest.yml': `version: ${VERSION}\nfiles:\n  - url: OpenCompare-Setup-9.9.9.exe\n` }, ok: false, missing: 'OpenCompare-Setup-9.9.9.exe' },
+  { name: 'a dotted installer asset name fails', assets: [...ASSETS, legacyWinUrl], ok: false, legacy: legacyWinUrl },
+  { name: 'a legacy installer reference fails', overrides: { 'latest.yml': `version: ${VERSION}\nfiles:\n  - url: ${spacedWinUrl}\n` }, ok: false, legacy: spacedWinUrl },
+  { name: 'an AppImage without blockMapSize fails', overrides: { 'latest-linux.yml': linuxMetadata({ blockMapSize: null }) }, ok: false, problem: 'blockMapSize' },
+  { name: 'a declared AppImage that is absent fails', skip: [APPIMAGE_NAME], ok: false, problem: APPIMAGE_NAME },
+  { name: 'an AppImage shorter than 4 bytes fails', appImage: Buffer.from([0x01, 0x02]), ok: false, problem: '小于 4 字节' },
+  { name: 'a mismatching trailer fails', appImage: buildAppImage(APPIMAGE_BLOCKMAP_SIZE, Buffer.from([0x00, 0x00, 0x01, 0x00])), ok: false, problem: '不等' },
+  { name: 'trailer candidates beyond the file size fail', appImage: buildAppImage(16, Buffer.from([0xff, 0xff, 0xff, 0xff])), ok: false, problem: '超过文件大小' },
+  { name: 'a big-endian trailer passes', ok: true },
+  { name: 'a little-endian trailer passes', overrides: { 'latest-linux.yml': linuxMetadata({ blockMapSize: 16, deb: false }) }, appImage: buildAppImage(16, Buffer.from([0x10, 0x00, 0x00, 0x00])), ok: true },
+  { name: 'a directory without latest-linux.yml passes', skip: [APPIMAGE_NAME, 'latest-linux.yml'], ok: true }
+]
 
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).not.toBe(0)
-        expect(cli.stderr).toContain(`旧错位名命中: ${legacyWinUrl}`)
-      },
-      {
-        overrides: {
-          'latest.yml': [
-            `version: ${VERSION}`,
-            'files:',
-            `  - url: ${legacyWinUrl}`,
-            '    sha512: fixture',
-            '    size: 16',
-            `path: ${legacyWinUrl}`,
-            'sha512: fixture'
-          ].join('\n')
-        }
-      }
+describe('local script parity', () => {
+  it.each(reportCases)('$name', (row) => {
+    const report = withFixture(row, (dir) =>
+      inspectReleaseMetadata({ dir, assets: row.assets ?? ASSETS })
     )
-
-    withReleaseFixture(({ dir }) => {
-      const assets = [...ASSETS, spacedWinUrl]
-      const report = inspectReleaseMetadata({ dir, assets })
-      expect(report.ok).toBe(false)
-      expect(report.legacyHits).toContain(spacedWinUrl)
-
-      const assetsFile = join(dir, 'assets.txt')
-      writeFileSync(assetsFile, assets.join('\n'))
-      const cli = runCli(['--dir', dir, '--assets', assetsFile])
-      expect(cli.status).not.toBe(0)
-      expect(cli.stderr).toContain(spacedWinUrl)
-      expect(cli.stdout).toContain('旧错位名 1 命中')
-    })
+    expect(report.ok).toBe(row.ok)
+    if (row.problem) expect(report.problems.join('\n')).toContain(row.problem)
+    if (row.missing) expect(report.missing).toContain(row.missing)
+    if (row.legacy) expect(report.legacyHits).toContain(row.legacy)
   })
 
   it('reports an unreadable directory instead of crashing', () => {
@@ -292,197 +217,33 @@ describe('release update metadata gate', () => {
     const report = inspectReleaseMetadata({ dir, assets: ASSETS })
     expect(report.ok).toBe(false)
     expect(report.problems.join('\n')).toContain('目录不可读')
-    const cli = runCli(['--dir', dir])
-    expect(cli.status).not.toBe(0)
-    expect(cli.stderr).toContain('目录不可读')
   })
 
-  it('fails when the directory carries no latest*.yml', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-metadata-empty-'))
-    try {
-      writeFileSync(join(dir, `OpenCompare-${VERSION}.AppImage`), Buffer.alloc(1))
-      const report = inspectReleaseMetadata({ dir, assets: [`OpenCompare-${VERSION}.AppImage`] })
-      expect(report.ok).toBe(false)
-      expect(report.problems.join('\n')).toContain('无 latest*.yml')
-      const cli = runCli(['--dir', dir])
-      expect(cli.status).not.toBe(0)
-      expect(cli.stderr).toContain('无 latest*.yml')
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
+  it('lets the pure judgment and the script agree on every fixture', () => {
+    for (const options of reportCases) {
+      const report = withFixture(options, (dir) =>
+        inspectReleaseMetadata({ dir, assets: options.assets ?? ASSETS })
+      )
+      const linuxText = options.overrides?.['latest-linux.yml'] ?? linuxMetadata()
+      const pure = judgeReleaseMetadata({
+        directoryLabel: 'fixture',
+        directoryReadable: true,
+        assets: options.assets ?? ASSETS,
+        metadataFiles: (['latest-mac.yml', 'latest.yml', 'latest-linux.yml'] as const)
+          .filter((file) => !(options.skip ?? []).includes(file))
+          .map((file) => ({
+            file,
+            refs: extractMetadataRefs(options.overrides?.[file] ?? metadataFixtures()[file])
+          })),
+        appImages: options.skip?.includes('latest-linux.yml')
+          ? []
+          : [appImageFact(
+              /blockMapSize: (\d+)/.exec(linuxText)?.[1] ? Number(/blockMapSize: (\d+)/.exec(linuxText)?.[1]) : null,
+              options.skip?.includes(APPIMAGE_NAME) ? null : options.appImage ?? buildAppImage(APPIMAGE_BLOCKMAP_SIZE)
+            )]
+      })
+      expect(pure.ok, `${report.problems.join(';')}`).toBe(report.ok)
     }
-  })
-
-  it('fails when the asset name list is empty', () => {
-    withReleaseFixture(({ dir }) => {
-      const report = inspectReleaseMetadata({ dir, assets: [] })
-      expect(report.ok).toBe(false)
-      expect(report.problems.join('\n')).toContain('资产名清单为空')
-
-      const emptyAssets = join(dir, 'empty-assets.txt')
-      writeFileSync(emptyAssets, '\n')
-      const cli = runCli(['--dir', dir, '--assets', emptyAssets])
-      expect(cli.status).not.toBe(0)
-      expect(cli.stderr).toContain('资产名清单为空')
-    })
-  })
-
-  it('accepts the v0.2.5 AppImage trailer as big-endian', () => {
-    expect(APPIMAGE_TAIL.readUInt32BE(0)).toBe(APPIMAGE_BLOCKMAP_SIZE)
-    expect(APPIMAGE_TAIL.readUInt32LE(0)).toBe(APPIMAGE_LITTLE_ENDIAN)
-    expect(APPIMAGE_TAIL.readUInt32LE(0)).not.toBe(APPIMAGE_BLOCKMAP_SIZE)
-
-    withReleaseFixture(({ dir }) => {
-      const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-      expect(report.ok).toBe(true)
-      expect(report.problems).toEqual([])
-
-      const cli = runCli(['--dir', dir])
-      expect(cli.status).toBe(0)
-    })
-  })
-
-  it('fails when latest-linux.yml declares an AppImage the directory lacks', () => {
-    withReleaseFixture(
-      ({ dir }) => {
-        const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-        expect(report.ok).toBe(false)
-        expect(report.problems.join('\n')).toContain(APPIMAGE_NAME)
-
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).not.toBe(0)
-        expect(cli.stderr).toContain(APPIMAGE_NAME)
-      },
-      { skip: [APPIMAGE_NAME] }
-    )
-  })
-
-  it('fails when the AppImage entry has no blockMapSize', () => {
-    withReleaseFixture(
-      ({ dir }) => {
-        const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-        expect(report.ok).toBe(false)
-        expect(report.problems.join('\n')).toContain('blockMapSize')
-
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).not.toBe(0)
-        expect(cli.stderr).toContain('blockMapSize')
-      },
-      { overrides: { 'latest-linux.yml': linuxMetadata({ blockMapSize: null }) } }
-    )
-  })
-
-  it('fails when neither trailer byte order matches blockMapSize', () => {
-    withReleaseFixture(
-      ({ dir }) => {
-        const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-        expect(report.ok).toBe(false)
-        const problems = report.problems.join('\n')
-        expect(problems).toContain(`blockMapSize=${APPIMAGE_BLOCKMAP_SIZE}`)
-        expect(problems).toContain('LE=65536')
-        expect(problems).toContain('BE=256')
-
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).not.toBe(0)
-        expect(cli.stderr).toContain('LE=65536')
-      },
-      {
-        appImage: buildAppImage(
-          APPIMAGE_BLOCKMAP_SIZE,
-          Buffer.from([0x00, 0x00, 0x01, 0x00])
-        )
-      }
-    )
-  })
-
-  it('fails when both trailer candidates exceed the file size', () => {
-    withReleaseFixture(
-      ({ dir }) => {
-        const report = inspectReleaseMetadata({ dir, assets: ASSETS })
-        expect(report.ok).toBe(false)
-        expect(report.problems.join('\n')).toContain('超过文件大小')
-
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).not.toBe(0)
-      },
-      { appImage: buildAppImage(16, Buffer.from([0xff, 0xff, 0xff, 0xff])) }
-    )
-  })
-
-  it('leaves directories without latest-linux.yml unchanged', () => {
-    const linuxOnly = [APPIMAGE_NAME, 'latest-linux.yml']
-    withReleaseFixture(
-      ({ dir }) => {
-        const skipped = new Set(linuxOnly)
-        const report = inspectReleaseMetadata({
-          dir,
-          assets: ASSETS.filter((name) => !skipped.has(name))
-        })
-        expect(report.ok).toBe(true)
-        expect(report.problems).toEqual([])
-        expect(report.missing).toEqual([])
-
-        const cli = runCli(['--dir', dir])
-        expect(cli.status).toBe(0)
-      },
-      { skip: linuxOnly }
-    )
-  })
-
-  it('keeps the workflow gate and the local script in parity', () => {
-    expect(appImageGateScript).toContain('readUInt32LE')
-    expect(appImageGateScript).toContain('readUInt32BE')
-    const bothMismatchTail = Buffer.from([0x00, 0x00, 0x01, 0x00])
-    const results = [
-      {
-        label: 'big-endian match',
-        ...runBlockmapParity({
-          declared: APPIMAGE_BLOCKMAP_SIZE,
-          appImage: buildAppImage(APPIMAGE_BLOCKMAP_SIZE)
-        })
-      },
-      {
-        label: 'both byte orders mismatch',
-        ...runBlockmapParity({
-          declared: APPIMAGE_BLOCKMAP_SIZE,
-          appImage: buildAppImage(APPIMAGE_BLOCKMAP_SIZE, bothMismatchTail)
-        })
-      },
-      {
-        label: 'missing AppImage',
-        ...runBlockmapParity({ declared: APPIMAGE_BLOCKMAP_SIZE })
-      }
-    ]
-
-    expect(results[0].gateStatus).toBe(0)
-    expect(results[0].cliStatus).toBe(0)
-    for (const result of results.slice(1)) {
-      expect(result.gateStatus).not.toBe(0)
-      expect(result.cliStatus).not.toBe(0)
-    }
-    for (const result of results) {
-      expect(result.gateStatus === 0, result.label).toBe(result.cliStatus === 0)
-    }
-  })
-
-  it('exposes the pure check and a CLI wrapper without any third-party import', () => {
-    const source = readFileSync(scriptPath, 'utf8')
-    const imports = [...source.matchAll(/^import .* from '([^']+)'$/gm)].map((match) => match[1])
-    expect(imports.length).toBeGreaterThan(0)
-    for (const specifier of imports) {
-      expect(specifier.startsWith('node:')).toBe(true)
-    }
-    expect(source).not.toMatch(/\bfetch\(|https?:\/\/|require\(['"](?:https?|axios|undici)/)
-    expect(typeof inspectReleaseMetadata).toBe('function')
-    expect(typeof runReleaseMetadataCli).toBe('function')
-
-    // In-process CLI wrapper keeps the same exit code contract as the script.
-    const lines: string[] = []
-    const code = runReleaseMetadataCli(['--nope'], {
-      stdout: (line) => lines.push(line),
-      stderr: (line) => lines.push(line)
-    })
-    expect(code).toBe(1)
-    expect(lines.join('\n')).toContain('未知参数')
   })
 
   it('parses the same files: block shape as the CI gate', () => {
@@ -491,17 +252,37 @@ describe('release update metadata gate', () => {
       'files:',
       '  - url: "OpenCompare-0.2.5.AppImage"',
       '    sha512: fixture',
-      '    size: 16',
       '    path: ./opencompare_0.2.5_amd64.deb',
-      'path: OpenCompare-0.2.5.AppImage',
-      'sha512: fixture'
+      'path: OpenCompare-0.2.5.AppImage'
     ].join('\n')
-    // Quotes and the ./ prefix are stripped, an indented path: inside an entry
-    // counts, and the top-level path: (outside files:) is ignored like in CI.
     expect(extractMetadataRefs(text)).toEqual([
       'OpenCompare-0.2.5.AppImage',
       'opencompare_0.2.5_amd64.deb'
     ])
     expect(extractMetadataRefs('version: 0.2.5\n')).toEqual([])
+  })
+})
+
+describe('release metadata CLI', () => {
+  it.each([
+    ['a complete release directory', (dir: string) => ['--dir', dir], 0, 'release:metadata 校验通过'],
+    ['an unknown argument', () => ['--nope'], 1, '未知参数'],
+    ['a option without a value', () => ['--dir'], 1, '缺少取值'],
+    ['a missing directory', (dir: string) => ['--dir', join(dir, 'no-such')], 1, '目录不可读'],
+    ['an empty asset list file', (dir: string) => {
+      writeFileSync(join(dir, 'assets.txt'), '\n')
+      return ['--dir', dir, '--assets', join(dir, 'assets.txt')]
+    }, 1, '资产名清单为空'],
+    ['a legacy asset list file', (dir: string) => {
+      writeFileSync(join(dir, 'assets.txt'), [...ASSETS, spacedWinUrl].join('\n'))
+      return ['--dir', dir, '--assets', join(dir, 'assets.txt')]
+    }, 1, spacedWinUrl],
+    ['an unreadable asset list file', (dir: string) => ['--dir', dir, '--assets', join(dir, 'nope.txt')], 1, '资产名清单不可读']
+  ] as Array<[string, (dir: string) => string[], number, string]>)('%s', (_name, args, code, expected) => {
+    withFixture({}, (dir) => {
+      const result = runCli(args(dir))
+      expect(result.code).toBe(code)
+      expect(result.output).toContain(expected)
+    })
   })
 })

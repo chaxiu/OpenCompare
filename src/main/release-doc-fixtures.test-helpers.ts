@@ -18,56 +18,7 @@ export const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8
 }
 export const currentVersion = pkg.version ?? ''
 export const currentTag = `v${currentVersion}`
-
-export const ghostTag = ['v0.2', '3'].join('.')
-export const ghostNotesPath = `docs/release-notes/${ghostTag}.md`
-export const ghostReleaseLink = `releases/tag/${ghostTag}`
-export const ghostEvidencePath = `docs/release-evidence/${ghostTag}.md`
-export const foldedTag = ['v0.2', '13'].join('.')
-export const foldedNotesPath = `docs/release-notes/${foldedTag}.md`
-export const foldedBilingualNotesPath = `docs/release-notes/${foldedTag}.zh-CN.md`
-export const foldedReleaseLink = `releases/tag/${foldedTag}`
-export const foldedEvidencePath = `docs/release-evidence/${foldedTag}.md`
-export const pendingWord = ['待', '发布'].join('')
-export const latestPublishedTag = 'v0.2.16'
 export const lastShippedTag = 'v0.2.15'
-export const priorPublishedTag = 'v0.2.14'
-export const previousPublishedTag = 'v0.2.8'
-export const publishedTags = [
-  'v0.2.0',
-  'v0.2.1',
-  'v0.2.2',
-  'v0.2.4',
-  'v0.2.5',
-  'v0.2.6',
-  'v0.2.7',
-  'v0.2.8',
-  'v0.2.9',
-  'v0.2.11',
-  'v0.2.12',
-  priorPublishedTag,
-  lastShippedTag,
-  latestPublishedTag
-]
-export const releaseTagLink = /releases\/tag\/(v\d+\.\d+\.\d+)/g
-export const isTagBefore = (older: string, newer: string): boolean => {
-  const parts = (tag: string): number[] => tag.replace(/^v/, '').split('.').map(Number)
-  const left = parts(older)
-  const right = parts(newer)
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] < right[index]
-  }
-  return false
-}
-
-export const documentPaths = (): string[] => {
-  const docsRoot = join(repoRoot, 'docs')
-  const docs = readdirSync(docsRoot, { recursive: true })
-    .map((entry) => String(entry))
-    .filter((entry) => entry.endsWith('.md'))
-    .map((entry) => join(docsRoot, entry))
-  return [join(repoRoot, 'README.md'), join(repoRoot, 'README.zh-CN.md'), join(repoRoot, 'CHANGELOG.md'), ...docs]
-}
 
 export const builder = parse(readFileSync(join(repoRoot, 'electron-builder.yml'), 'utf8')) as {
   appId?: string
@@ -127,7 +78,6 @@ export const signingDoc = readFileSync(join(repoRoot, 'docs/release-signing.md')
 export const releaseProcessDoc = readFileSync(join(repoRoot, 'docs/release-process.md'), 'utf8')
 export const readmeEn = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 export const readmeZh = readFileSync(join(repoRoot, 'README.zh-CN.md'), 'utf8')
-export const symlinkDoc = readFileSync(join(repoRoot, 'docs/symlink-no-follow.md'), 'utf8')
 export const changelog = readFileSync(join(repoRoot, 'CHANGELOG.md'), 'utf8')
 
 const readNotes = (tag: string): string => {
@@ -135,28 +85,9 @@ const readNotes = (tag: string): string => {
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
-export const releaseNotesPath = join(repoRoot, `docs/release-notes/${currentTag}.md`)
 export const releaseNotes = readNotes(currentTag)
-export const bilingualNotesPath = join(repoRoot, `docs/release-notes/${currentTag}.zh-CN.md`)
+const bilingualNotesPath = join(repoRoot, `docs/release-notes/${currentTag}.zh-CN.md`)
 export const bilingualNotes = existsSync(bilingualNotesPath) ? readFileSync(bilingualNotesPath, 'utf8') : ''
-export const historicalNotesV024 = readNotes('v0.2.4')
-export const historicalNotesV022 = readNotes('v0.2.2')
-export const lastReleasedNotesPath = join(repoRoot, `docs/release-notes/${latestPublishedTag}.md`)
-export const lastReleasedNotes = readNotes(latestPublishedTag)
-
-export const firstHeading = (markdown: string): string =>
-  markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
-
-export const driftFacts = [
-  /7ea2cc6/,
-  /c4a6a95/,
-  /annotated/,
-  /祖先/,
-  /13 个提交/,
-  /公开/,
-  /非预发布/,
-  /11 个资产/
-]
 
 export const signingSecrets = [
   'CSC_LINK',
@@ -167,22 +98,42 @@ export const signingSecrets = [
   'APPLE_API_ISSUER'
 ]
 
-export const readmeLines = (markdown: string): string[] => markdown.split(/\r?\n/)
-export const readmeStatusLine = (markdown: string): string => readmeLines(markdown)[4] ?? ''
-export const stripLanguageSwitch = (markdown: string): string =>
-  readmeLines(markdown)
-    .filter((line) => !line.includes('README.zh-CN.md') && !line.includes('[English](./README.md)'))
-    .join('\n')
-export const h2Headings = (markdown: string): string[] =>
-  readmeLines(markdown)
-    .filter((line) => line.startsWith('## '))
-    .map((line) => line.slice(3))
-export const wordCount = (markdown: string): number => {
-  let text = markdown.replace(/```[\s\S]*?```/g, ' ')
-  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-  text = text.replace(/https?:\/\/\S+/g, ' ')
-  text = text.replace(/`[^`]*`/g, ' ')
-  text = text.replace(/<[^>]+>/g, ' ')
-  return (text.match(/[A-Za-z][A-Za-z0-9'’-]*/g) ?? []).length
+const tagIn = (text: string): string => /v\d+\.\d+\.\d+/.exec(text)?.[0] ?? ''
+const firstHeading = (markdown: string): string =>
+  markdown.split(/\r?\n/).find((line) => line.startsWith('# ')) ?? ''
+const statusLine = (markdown: string): string => markdown.split(/\r?\n/)[4] ?? ''
+const evidenceDir = join(repoRoot, 'docs/release-evidence')
+const evidenceFacts = readdirSync(evidenceDir)
+  .filter((file) => file.endsWith('.md'))
+  .sort()
+  .map((file) => ({
+    tag: file.slice(0, -'.md'.length),
+    status: /^status:\s*(\w+)$/m.exec(readFileSync(join(evidenceDir, file), 'utf8'))?.[1] ?? ''
+  }))
+
+// The single read of the real repository facts. Pure assertions consume this
+// object; no `expect` may live in this module.
+export const releaseFacts = {
+  versionSources: {
+    pkgVersion: currentVersion,
+    changelogTopTag: /^## (.+)$/m.exec(changelog)?.[1] ?? '',
+    notesHeadingTag: tagIn(firstHeading(releaseNotes)),
+    readmeLine5Tag: tagIn(statusLine(readmeEn)),
+    workflowDispatchDefault: /default:\s*'([^']+)'/.exec(releaseWorkflow)?.[1] ?? '',
+    processDocDefault: /default:\s*'([^']+)'/.exec(releaseProcessDoc)?.[1] ?? ''
+  },
+  notes: {
+    tag: currentTag,
+    notesHeadingTag: tagIn(firstHeading(releaseNotes)),
+    englishExists: releaseNotes !== '',
+    chineseExists: bilingualNotes !== '',
+    evidenceExists: existsSync(join(evidenceDir, `${currentTag}.md`)),
+    englishLines: releaseNotes.split(/\r?\n/),
+    chineseLines: bilingualNotes.split(/\r?\n/)
+  },
+  history: {
+    currentTag,
+    headings: [...changelog.matchAll(/^## (.+)$/gm)].map((match) => match[1]),
+    evidence: evidenceFacts
+  }
 }
