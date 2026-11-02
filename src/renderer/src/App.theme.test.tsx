@@ -6,6 +6,7 @@ import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { Language, PlatformPort, Theme, UserSettings } from '@shared/platform/types'
 import { App } from './App'
 import { I18nProvider } from './i18n/I18nProvider'
+import { localeText } from './i18n/localeTable'
 import { createWebPlatformPort } from './platform/web-platform'
 import { LIGHT_SCHEME_QUERY } from './theme/theme'
 import { ThemeProvider } from './theme/ThemeProvider'
@@ -384,7 +385,9 @@ describe('theme switching', () => {
     fireEvent.click(themeTabs('en')[0])
 
     const alert = await within(panel).findByRole('alert')
-    expect(alert.textContent).toBe('Could not save settings: EACCES: permission denied')
+    expect(alert.textContent).toBe(
+      localeText('en', 'settings.saveError', { reason: 'EACCES: permission denied' })
+    )
     expect(appliedTheme()).toBe('light')
     expect(themeTabs('en')[0].getAttribute('aria-selected')).toBe('true')
   })
