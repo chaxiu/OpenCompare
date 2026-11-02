@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 43200
+    "repoTestLines": 43599
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1373
+    "repoTestCases": 1419
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -29,10 +29,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 42930,
-      "to": 43200,
-      "reason": "I#9 diff-normalize: default-on ignoreNewline / ignoreEncoding comparison switches, strict newline and byte-difference signals over the probe facts",
-      "addedCases": 33
+      "from": 43329,
+      "to": 43599,
+      "reason": "I#9 probe-status: file-pair open/drilldown probe facts + four-value status bar L1/L2 coverage (main's diff-normalize growth already landed in the merged tip)",
+      "addedCases": 34
     }
   ]
 }

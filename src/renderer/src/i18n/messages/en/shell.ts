@@ -108,6 +108,10 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'To keep your changes, choose "Continue editing" first and save the left / right file to disk from that session before closing it.',
   'shell.status.session': 'Session',
   'shell.status.platform': 'Platform',
+  'shell.status.leftNewline': 'Left newline',
+  'shell.status.leftEncoding': 'Left encoding',
+  'shell.status.rightNewline': 'Right newline',
+  'shell.status.rightEncoding': 'Right encoding',
   'shell.session.sample.directory.title': 'Directory comparison',
   'shell.session.sample.directory.subtitle':
     'Nested directory trees with a scattered cross-level tree B',

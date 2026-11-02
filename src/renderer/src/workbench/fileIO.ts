@@ -5,7 +5,7 @@
  * read and exposes the filter presets the views share. It behaves identically
  * in the Electron and web runtimes.
  */
-import type { FileDialogFilter, PlatformPort } from '@shared/platform/types'
+import type { FileDialogFilter, PlatformPort, TextFileFacts } from '@shared/platform/types'
 
 /** Code / plain-text bodies for the two-column diff and the merge panes. */
 const TEXT_FILE_EXTENSIONS = [
@@ -60,6 +60,8 @@ export const STRUCTURED_FILE_FILTER: FileDialogFilter = {
 export interface PickedTextFile {
   readonly path: string
   readonly text: string
+  /** Original probe facts, present when the file was read through the probe seam. */
+  readonly facts?: TextFileFacts
 }
 
 /** Opens a picker and reads the chosen file; resolves `null` when cancelled. */
@@ -71,4 +73,19 @@ export async function pickTextFile(
   const path = await platform.selectFile({ title, filters })
   if (path === null) return null
   return { path, text: await platform.readTextFile(path) }
+}
+
+/**
+ * Opens a picker and probes the chosen code file once, so the view can swap one
+ * side with the body and the original facts from the same read.
+ */
+export async function pickProbedTextFile(
+  platform: PlatformPort,
+  title: string,
+  filters: readonly FileDialogFilter[]
+): Promise<PickedTextFile | null> {
+  const path = await platform.selectFile({ title, filters })
+  if (path === null) return null
+  const { text, ...facts } = await platform.probeTextFile(path)
+  return { path, text, facts }
 }

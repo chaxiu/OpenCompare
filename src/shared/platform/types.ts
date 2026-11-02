@@ -151,6 +151,13 @@ export interface TextFileProbe extends TextBytesProbe {
   readonly path: string
 }
 
+/**
+ * The original facts of one probed file **without** its decoded body, so a
+ * session can keep the encoding / newline / size / digest without holding a
+ * second copy of a multi-megabyte body.
+ */
+export type TextFileFacts = Omit<TextFileProbe, 'text'>
+
 export interface DigestFilesOptions {
   /** In-flight streaming reads; defaults to the platform's bounded window. */
   readonly concurrency?: number

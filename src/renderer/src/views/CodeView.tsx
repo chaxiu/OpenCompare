@@ -26,7 +26,7 @@ import { SplitPane } from '@renderer/components/SplitPane'
 import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
-import { pickTextFile, textFileFilter } from '@renderer/workbench/fileIO'
+import { pickProbedTextFile, pickTextFile, textFileFilter } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import {
   controlPresentation,
@@ -243,7 +243,7 @@ function CodeDiffView({
   /** Opens a local file on one side and re-runs the comparison over it. */
   async function open(side: 'left' | 'right'): Promise<void> {
     try {
-      const picked = await pickTextFile(
+      const picked = await pickProbedTextFile(
         platform,
         t(side === 'left' ? 'files.code.openLeftTitle' : 'files.code.openRightTitle'),
         [textFileFilter(t('common.fileKind.code'))]
@@ -793,6 +793,8 @@ function CodeMergeView({
 export function CodeView({
   fixture,
   defaultMode = 'merge',
+  mode: controlledMode,
+  onModeChange,
   pair,
   buffer,
   platform,
@@ -805,6 +807,10 @@ export function CodeView({
   readonly fixture?: CodeSceneFixture
   /** Three-column merge is the default for a session declared with three panes. */
   readonly defaultMode?: CodeMode
+  /** Mode kept by the shell per session; omitted for a standalone view. */
+  readonly mode?: CodeMode
+  /** Reports the mode on screen, so the status bar only shows diff-only facts. */
+  readonly onModeChange?: (mode: CodeMode) => void
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
   /** Working copies kept on the session, used when the view remounts. */
@@ -821,10 +827,17 @@ export function CodeView({
   readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
-  const [mode, setMode] = useState<CodeMode>(defaultMode)
+  const [localMode, setLocalMode] = useState<CodeMode>(defaultMode)
   const adhoc = pair !== undefined
-  const effectiveMode: CodeMode = adhoc ? 'diff' : mode
+  const selectedMode = controlledMode ?? localMode
+  const effectiveMode: CodeMode = adhoc ? 'diff' : selectedMode
   const diffPair = pair ?? fixture?.diff
+
+  /** One mode mutation for both the local fallback and the shell's per-session record. */
+  function switchMode(next: CodeMode): void {
+    setLocalMode(next)
+    onModeChange?.(next)
+  }
 
   // The merge inputs are editable: opening a local file replaces one side and
   // the model (conflicts included) is rebuilt from the new bodies.
@@ -874,11 +887,11 @@ export function CodeView({
               value: option.value,
               label: t(option.key)
             }))}
-            value={mode}
-            onChange={setMode}
+            value={selectedMode}
+            onChange={switchMode}
           />
           <span className="shrink-0 text-2xs text-content-muted">
-            {mode === 'diff' ? t('files.code.modeHint.diff') : t('files.code.modeHint.merge')}
+            {selectedMode === 'diff' ? t('files.code.modeHint.diff') : t('files.code.modeHint.merge')}
           </span>
           <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         </>

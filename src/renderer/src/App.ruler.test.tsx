@@ -40,6 +40,7 @@ afterEach(() => {
 /** The seven platform channels the ruler guards must never touch. */
 const IO_CHANNELS = [
   'readTextFile',
+  'probeTextFile',
   'selectFile',
   'selectDirectory',
   'listDirectory',
@@ -83,6 +84,10 @@ function countingPort(script: {
     readTextFile: async (path) => {
       calls.readTextFile += 1
       return base.readTextFile(path)
+    },
+    probeTextFile: async (path) => {
+      calls.probeTextFile += 1
+      return base.probeTextFile(path)
     },
     listDirectory: async (path) => {
       calls.listDirectory += 1
@@ -214,7 +219,7 @@ describe('session tabs keep their own diff ruler', () => {
     const { counter } = await openThreeSessions()
     expect(sessionTabs()).toHaveLength(3)
     const before = { ...counter.calls }
-    expect(before.readTextFile).toBeGreaterThan(0)
+    expect(before.probeTextFile).toBeGreaterThan(0)
     expect(before.listDirectories).toBeGreaterThan(0)
 
     for (let round = 0; round < 2; round += 1) {

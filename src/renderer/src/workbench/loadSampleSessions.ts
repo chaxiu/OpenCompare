@@ -5,10 +5,11 @@ import {
   STRUCTURED_SCENE,
   buildSampleSessions
 } from '@shared/fixtures'
-import type { SceneId } from '@shared/fixtures'
-import type { PlatformPort } from '@shared/platform/types'
+import type { SceneId, TextSample } from '@shared/fixtures'
+import type { PlatformPort, TextFileFacts } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
 import type { ComparisonCache } from '@core/directory/compare'
+import { probeTextString } from '@core/text/probe'
 import { createDirectorySession } from './directoryCompare'
 import type { WorkbenchSession } from './session'
 import { parseCsvTable } from './session'
@@ -45,6 +46,21 @@ export class SampleLibraryError extends Error {
   constructor(readonly code: 'read-failed') {
     super('The built-in sample library could not be read.')
     this.name = 'SampleLibraryError'
+  }
+}
+
+/**
+ * Sample bodies have no disk bytes; they are probed once as in-memory UTF-8
+ * text when the session is built, never again at render time.
+ */
+function sampleProbe(sample: TextSample): TextFileFacts {
+  const probe = probeTextString(sample.text)
+  return {
+    path: sample.path,
+    encoding: probe.encoding,
+    newline: probe.newline,
+    bytes: probe.bytes,
+    sha256: probe.sha256
   }
 }
 
@@ -101,7 +117,14 @@ export async function loadSampleSessions(
               }
             }
           case 'code':
-            return { ...session, composition: CODE_SCENE.composition }
+            return {
+              ...session,
+              composition: CODE_SCENE.composition,
+              probes: {
+                left: sampleProbe(CODE_SCENE.diff.left),
+                right: sampleProbe(CODE_SCENE.diff.right)
+              }
+            }
           case 'structured':
             return { ...session, composition: STRUCTURED_SCENE.composition }
         }

@@ -28,7 +28,7 @@ import { useI18n } from '@renderer/i18n/context'
 import type { Translate } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
 import { CodeView } from '@renderer/views/CodeView'
-import type { CodeMergeState } from '@renderer/views/CodeView'
+import type { CodeMergeState, CodeMode } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
@@ -37,9 +37,9 @@ import { StructuredView } from '@renderer/views/StructuredView'
 import type { StructuredScroll } from '@renderer/views/StructuredView'
 import {
   createDirectorySession,
-  createDrilldownSession,
   directoryViewKey,
   FilePairError,
+  openDrilldownSession,
   openFilePairSession,
   releaseSessionTree,
   replaceFilePairSide,
@@ -61,6 +61,7 @@ import type {
   TemplateRoots
 } from './directoryOps'
 import { classifyFile } from './fileKinds'
+import type { PickedTextFile } from './fileIO'
 import {
   buildDirectoryReportForComparisonAsync,
   createReportProgressThrottle,
@@ -74,6 +75,7 @@ import {
   fileKindMessageKey,
   renderSessionText
 } from './sessionDisplay'
+import { codeProbeStatusEntries } from './probeStatus'
 import { NewCompareDialog } from './NewCompareDialog'
 import { SettingsDialog } from './SettingsDialog'
 import type { CompareOpenOutcome } from './NewCompareDialog'
@@ -84,7 +86,6 @@ import {
   exportSideSnapshot,
   parseSnapshotText,
   readFileText,
-  readSideFile,
   remoteSnapshotSides,
   snapshotFileFilter,
   snapshotFileName,
@@ -319,6 +320,8 @@ export function Workbench({
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<Notice | null>(null)
   const [codeMerge, setCodeMerge] = useState<Record<string, CodeMergeState>>({})
+  /** Mode of each code session's view, so the status bar knows what is on screen. */
+  const [codeModes, setCodeModes] = useState<Record<string, CodeMode>>({})
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   /**
@@ -420,6 +423,9 @@ export function Workbench({
       return { ...current, [id]: state }
     })
   }, [])
+  const handleCodeMode = useCallback((id: string, mode: CodeMode) => {
+    setCodeModes((current) => (current[id] === mode ? current : { ...current, [id]: mode }))
+  }, [])
   const handleCsvAlign = useCallback((state: CsvAlignState) => setCsvAlign(state), [])
   const closeCompareDialog = useCallback(() => setCompareDialogOpen(false), [])
 
@@ -452,7 +458,7 @@ export function Workbench({
    * rewrites the list from an older snapshot.
    */
   const handleSessionFileOpen = useCallback(
-    (id: string, side: SidePosition, file: { readonly path: string; readonly text: string }) => {
+    (id: string, side: SidePosition, file: PickedTextFile) => {
       setSessions((current) =>
         current.map((session) =>
           session.id === id ? replaceFilePairSide(session, side, file) : session
@@ -490,6 +496,7 @@ export function Workbench({
     setStructuredStates((current) => withoutKey(current, id))
     setStructuredScroll((current) => withoutKey(current, id))
     setCodeMerge((current) => withoutKey(current, id))
+    setCodeModes((current) => withoutKey(current, id))
     setCsvAlign((current) => (current?.sessionId === id ? null : current))
     setCloseTarget(null)
     if (remaining.length === 0) setStatus('empty')
@@ -544,6 +551,19 @@ export function Workbench({
     }
     return base
   }, [active, directoryCounts, activeMerge, csvAlign])
+
+  /**
+   * Mode of the code view actually mounted: the shell keeps it per session, so
+   * a remounted tab never shows a stale diff/merge status-bar state.
+   */
+  const activeCodeMode: CodeMode | null =
+    active?.scene === 'code'
+      ? (codeModes[active.id] ?? (active.columns === 3 ? 'merge' : 'diff'))
+      : null
+  const probeEntries = useMemo(
+    () => codeProbeStatusEntries(active?.probes, activeCodeMode === 'diff'),
+    [active?.probes, activeCodeMode]
+  )
 
   /** Applies one patch on top of a directory session's kept view state. */
   function patchDirectoryState(id: string, patch: Partial<DirectoryViewState>): void {
@@ -969,11 +989,7 @@ export function Workbench({
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      const [leftText, rightText] = await Promise.all([
-        node.leftPath ? readSideFile(platform, current, node.leftPath) : Promise.resolve(''),
-        node.rightPath ? readSideFile(platform, current, node.rightPath) : Promise.resolve('')
-      ])
-      upsertSession(createDrilldownSession(source.id, node, target, leftText, rightText))
+      upsertSession(await openDrilldownSession(platform, source.id, node, target, current))
     } catch (cause) {
       report(snapshotContentNotice(cause, node.relativePath))
     } finally {
@@ -1386,6 +1402,8 @@ export function Workbench({
             key={session.id}
             pair={session.adhoc.pair}
             buffer={session.codeBuffer}
+            mode={codeModes[session.id] ?? 'diff'}
+            onModeChange={(mode) => handleCodeMode(session.id, mode)}
             platform={platform}
             toolbarLeading={toolbarLeading}
             onDirtyChange={(dirty) => handleSessionDirty(session.id, dirty)}
@@ -1396,7 +1414,8 @@ export function Workbench({
           <CodeView
             key={session.id}
             fixture={CODE_SCENE}
-            defaultMode={session.columns === 3 ? 'merge' : 'diff'}
+            mode={codeModes[session.id] ?? (session.columns === 3 ? 'merge' : 'diff')}
+            onModeChange={(mode) => handleCodeMode(session.id, mode)}
             platform={platform}
             toolbarLeading={toolbarLeading}
             onMergeStateChange={(state) => handleMergeState(session.id, state)}
@@ -1782,6 +1801,14 @@ export function Workbench({
         <StatusEntry label={t('shell.status.session')} value={active ? active.id : '—'} />
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <StatusEntry label={t('shell.status.platform')} value={platform.kind} />
+        {probeEntries.length > 0 ? (
+          <>
+            <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+            {probeEntries.map((entry) => (
+              <StatusEntry key={entry.key} label={t(entry.key)} value={entry.value} />
+            ))}
+          </>
+        ) : null}
         {legend ? (
           <>
             <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
