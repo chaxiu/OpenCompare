@@ -17,8 +17,8 @@ import {
   LARGE_SIDE_FILES_PER_DIRECTORY,
   createLargeDirectoryComparison
 } from '../../../test/largeDirectory'
-import { DIFF_LABEL_KEYS } from './diffSemantics'
 import { zh } from '@renderer/i18n/messages'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import { TreeView } from './TreeView'
 
 /**
@@ -230,7 +230,7 @@ describe('TreeView beyond the browser height cap', () => {
     expect(row).toBeDefined()
     expect(row?.getAttribute('aria-level')).toBe(String((last?.depth ?? 0) + 1))
     expect(row?.textContent).toContain(last?.node.name)
-    expect(row?.textContent).toContain(zh[DIFF_LABEL_KEYS[last?.node.status ?? 'same']])
+    expect(row?.textContent).toContain(zh[DIRECTORY_STATUS_LABEL_KEYS[last?.node.status ?? 'same']])
   })
 
   it('reaches every sampled row through its mapped offset', () => {
@@ -262,7 +262,7 @@ describe('TreeView beyond the browser height cap', () => {
       expect(rendered, `row ${index} is not in the window`).toBeDefined()
       expect(Number(rendered?.getAttribute('aria-level')) - 1).toBe(expected?.depth)
       expect(rendered?.textContent).toContain(expected?.node.name)
-      expect(rendered?.textContent).toContain(zh[DIFF_LABEL_KEYS[expected?.node.status ?? 'same']])
+      expect(rendered?.textContent).toContain(zh[DIRECTORY_STATUS_LABEL_KEYS[expected?.node.status ?? 'same']])
     }
 
     expect(map.offsetForIndex(rowCount - 1)).toBeLessThanOrEqual(map.maxScrollOffset)

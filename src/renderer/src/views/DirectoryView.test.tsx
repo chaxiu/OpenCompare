@@ -24,11 +24,10 @@ import {
 } from '@core/directory/rows'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import type { DirectoryReportProgress } from '@core/directory/report'
-import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { zh } from '@renderer/i18n/messages'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DirectoryView } from './DirectoryView'
-import { FILTER_LABEL_KEYS } from './directoryCopy'
+import { DIRECTORY_STATUS_LABEL_KEYS, FILTER_LABEL_KEYS } from './directoryCopy'
 
 vi.mock('@core/directory/filter', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@core/directory/filter')>()
@@ -468,7 +467,9 @@ describe('DirectoryView windowed tree', () => {
       expect(modelRow).toBeDefined()
       indices.push(index ?? -1)
       expect(row.textContent).toContain(modelRow?.node.name)
-      expect(row.textContent).toContain(zh[DIFF_LABEL_KEYS[modelRow?.node.status ?? 'same']])
+      expect(row.textContent).toContain(
+        zh[DIRECTORY_STATUS_LABEL_KEYS[modelRow?.node.status ?? 'same']]
+      )
       expect(Number(row.getAttribute('aria-level')) - 1).toBe(modelRow?.depth)
     }
 

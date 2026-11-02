@@ -32,6 +32,7 @@ import type { CodeMergeState } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import { StructuredView } from '@renderer/views/StructuredView'
 import type { StructuredScroll } from '@renderer/views/StructuredView'
 import {
@@ -1784,7 +1785,10 @@ export function Workbench({
         {legend ? (
           <>
             <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-            <CompositionLegend composition={legend} />
+            <CompositionLegend
+              composition={legend}
+              labelKeys={active?.scene === 'directory' ? DIRECTORY_STATUS_LABEL_KEYS : undefined}
+            />
           </>
         ) : null}
         {active ? (

@@ -331,6 +331,23 @@
 - **ac-template-e2e-no-regression**（prd `ac-no-regression`，与既有同名 AC 区分改名）：`pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm build:web` 与 `.munk/code-gates.json` 全部门禁（16 项）通过；`src/template-real-gate.test.ts`、`src/renderer/src/views/TemplateDialog.test.tsx`、`src/renderer/src/workbench/templateOps.test.ts` 既有断言，以及目录对比四态 / 同步 / 快照 / 报告 / i18n 既有用例零回归。
 - **ac-no-prod-semantics-change**：除门禁暴露出的最小缺陷修复外，`matchTemplate` / `createTemplatePlan` / `resolveTemplatePlan` / `executeTemplatePlan` / `verifyTemplateExtraction` 的字段与语义不变，不新增 `PlatformPort` 方法、不新增 npm 依赖、不改 i18n 与样本数据；本项实际零生产代码改动（`src/core/**` / `src/main/**` / `src/renderer/**` / `package.json` 零 diff）。
 
+### 目录四态展示词对齐（2026-11-02）
+
+目录界面四个状态一律复用过滤页签词表（`same` = 相同、`added` = 右独有、`removed` = 左独有、`modified` = 修改），不再把文件级「新增 / 删除」直接搬到目录行与图例；该映射只有**一个**来源，行徽标与两处图例共用。文本 / 代码 diff 词表不动。
+
+- **ac-right-only-row-badge**：构造「左目录无、右目录有 `探针.txt`」的目录对比（jsdom）：右上树中该行的徽标 en 恰为 `Right only`、zh 恰为 `右独有`，行文本不含 `Added` / `新增`；左树不渲染该行。
+- **ac-left-only-row-badge**：对称用例（左独有文件）：左树该行徽标 en 为 `Left only`、zh 为 `左独有`，不含 `Removed` / `删除`；右树不渲染该行。
+- **ac-directory-toolbar-legend**：目录视图内图例四个状态各自呈现 `Same` / `Right only` / `Left only` / `Modified`（en）与 `相同` / `右独有` / `左独有` / `修改`（zh），数值与该视图 `visibleCounts` 相等（按状态断言，不绑定横向顺序），图例内不出现 `Added` / `Removed` / `新增` / `删除`。
+- **ac-directory-legend-under-filter**：切到 `right-only` 过滤后图例 `added` 项标签为 `Right only` / `右独有`、数值为 1 且全文无 `Added` / `新增`；切到 `left-only` 后 `removed` 项标签为 `Left only` / `左独有`、数值为 1 且无 `Removed` / `删除`（钉死 L3 实机「Right only 过滤下图例仍是 1Added」）。
+- **ac-shell-statusbar-legend**：以 directory 会话渲染完整 `Workbench`：底部状态栏图例同样使用目录词表（`Right only` / `Left only` 与 zh 对应词），不出现 `Added` / `Removed`，数值与工具栏图例一致；断言必须覆盖壳层状态栏而非只测 `DirectoryView` 内部图例。
+- **ac-text-diff-labels-untouched**：文本 / 代码 diff 路径保持原词——默认徽标仍显示 `Added` / `Removed` / `Modified`（zh `新增` / `删除` / `修改`），`CodeView`、`DiffRuler`、`StructuredView`、`CsvView` 的语义标签与指示条不变；`components/sharedI18n.test.tsx` 原断言不改且通过，作为通用词表未被污染的守卫。
+- **ac-generic-components-default**：`DiffBadge` 与 `CompositionLegend` 不传目录词表时行为与改动前完全一致（默认解析 `DIFF_LABEL_KEYS`）；目录词表为可选注入，不得全局改写 `DIFF_LABEL_KEYS`。
+- **ac-filter-counts-and-state-unchanged**：`matchesFilter`、`visibleDirectoryCounts`、`countTreeFiles` 的语义与数值不变（既有单测逐条不改且通过）：`right-only` 下 `{same:0, added:1, removed:0, modified:0}`，`left-only` 下 `{same:0, added:0, removed:1, modified:0}`，`differences` 仍为非 `same` 汇总；目录状态仍为 `added` = 右侧独有、`removed` = 左侧独有。
+- **ac-no-domain-side-effects**：改动不触碰目录领域与通道源码：`src/core/directory/**`、`src/shared/fixtures/**`、`workbench/directoryReport.ts`、`workbench/directoryOps.ts` 及 snapshot / sync / template / export 相关模块零改动（可用 `git diff --name-only` 与基线核对）。
+- **ac-i18n-pairing**：en / zh 字典键集合仍完全一致（既有键同步测试通过）；本次不新增状态标签键，四个标签均由既有键解析；`pnpm typecheck` 通过。
+- **ac-code-gates**：`.munk/code-gates.json` 全部 gate 退出码 0，无放宽、无跳过、无删除断言；改动合入 main。
+- **ac-stale-assertions-updated**：原先断言目录界面旧 `Added` / `Removed` 标签的 jsdom 断言同批改判据为 `Right only` / `Left only`（zh 对应词），并在提交说明或测试注释写明原因（目录四态展示词按产品口径调整）；`sharedI18n.test.tsx` 的通用标签断言保持原样。
+
 ## 非目标
 
 - **不做文件级差异算法本体**：行级 / 行内字符级 inline diff、3-way merge 冲突求解与点选合并、CSV 主键列对齐、JSON/YAML 语义归一化 diff 一律不在本域。下钻只把内容带进对应视图并只读呈现，视图增强留给对应子项。
@@ -427,6 +444,13 @@
 - **证据文件只由显式运行生成**：提交版清单由一次显式运行生成（`OPENCOMPARE_TEMPLATE_E2E_EVIDENCE_DIR` 指向本域 `qa/`，生成后改名为 `template-e2e-manifest.json`），默认 `pnpm test` 运行只写系统临时目录、不得写仓库；`rows` 按 slot 稳定排序以便 sha256 复现。
 
 ## 最近交付证明
+
+- WI：`wi_intake_f20bdcae70d41c61`（目录对比四态展示词改为「左独有 / 右独有」，`kind: fix`）
+- 日期：2026-11-02
+- 结果：code_gates passed（16 gates，attempt 001，`.munk/runs/run_intake_f20bdcae70d41c61/code-gates/attempts/001/manifest.json`；`pnpm test` 107 files / 1551 passed + 1 skipped（1552）、34.79s；未新增 / 未改 `.munk/code-gates.json` 矩阵项；`needSelfTest=false`，不做实机 GUI 验收）。
+- 覆盖摘要：① **单一词表源（`ac-right-only-row-badge` / `ac-left-only-row-badge` / `ac-directory-toolbar-legend` / `ac-shell-statusbar-legend`）**——`views/directoryCopy.ts` 新增 `DIRECTORY_STATUS_LABEL_KEYS`（`same` → `directory.filter.same`、`added` → `directory.filter.rightOnly`、`removed` → `directory.filter.leftOnly`、`modified` → `common.diff.modified`），`TreeView` 行徽标、`DirectoryView` 工具栏图例、`Workbench` 壳层状态栏图例（仅 `active.scene === 'directory'`）三处共用；行徽标 en / zh 为 `Right only` / `右独有` 与 `Left only` / `左独有`，图例按状态断言四词且数值与 `visibleCounts` 一致，全文不再出现 `Added` / `Removed` / `新增` / `删除`。② **可选注入不污染通用词表（`ac-text-diff-labels-untouched` / `ac-generic-components-default`）**——`DiffBadge` / `CompositionLegend` 仅增可选 `labelKeys`，默认仍解析 `DIFF_LABEL_KEYS`；`DIFF_LABEL_KEYS` / `DIFF_STATUSES` / `DIFF_BADGE_CLASSES` / `DIFF_DOT_CLASSES` 零改动，文本 / 代码 diff 与 `CodeView` / `DiffRuler` / `StructuredView` / `CsvView` 标签不变，`sharedI18n.test.tsx` 原断言未改且通过。③ **语义与数值不变（`ac-filter-counts-and-state-unchanged` / `ac-no-domain-side-effects` / `ac-i18n-pairing` / `ac-code-gates`）**——`matchesFilter` / `visibleDirectoryCounts` / `countTreeFiles` 及四态口径零改动，`src/core/directory/**`、样本、`directoryReport.ts`、`directoryOps.ts` 与 snapshot / sync / template / export 模块零 diff；en / zh 键集合一致、未新增状态标签键，16 条门禁全绿。④ **旧断言同批改判据（`ac-stale-assertions-updated`）**——`directoryI18n.test.tsx`、`TreeView.test.tsx`、`directorySyncRetry.test.tsx`、`directorySyncRefresh.test.tsx`、`DirectoryReportExport.test.tsx`、`shellLayout.dom.test.tsx`、`App.test.tsx` / `App.snapshot.test.tsx` 中按目录界面旧词取标签 / 取数的 helper 改为 `Right only` / `Left only`（zh 对应词），新增 `workbench/directoryStatusLegend.test.tsx` 覆盖壳层状态栏图例与工具栏图例同源同数；未删除 / 跳过 / 放宽任何断言。
+- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 落档为本域新增的 `qa/directory-status-vocabulary.md`（非 change-pack 用例）。本轮只换展示用字，未新增 i18n 词条（复用既有 `directory.filter.*` 与 `common.diff.*`），故 `domains/i18n` 无折叠；无新平台缝，`domains/foundation` 无折叠。
+- 后续注意：① **目录四态词表只有 `DIRECTORY_STATUS_LABEL_KEYS` 一个来源**——任何新增目录界面标签（行徽标、图例、筛选摘要、导出对话框）都必须从这里取词；在组件里另写 `added → 'Added'` 映射会立刻把 L3 的「Right only 过滤下仍显示 1Added」带回来。② **`DiffBadge` / `CompositionLegend` 的 `labelKeys` 是可选注入**——默认值必须继续是 `DIFF_LABEL_KEYS`，不要为了目录需求改写共享常量，否则文本 / 代码 diff 会一起被改词。③ **壳层状态栏的图例属于 `Workbench` 而非 `DirectoryView`**——只测视图内部图例的用例抓不到这类缺陷；新增目录场景展示断言要覆盖完整 `Workbench` 底部状态栏。④ HTML 报告仍走通用词表（本次明确边界）——若后续要统一报告文案，需另开 WI 并同时改报告 AC 与导出测试。
 
 - WI：`wi_ws_28d8a6fcc28a21dc`（真实外部目录 e2e、逐条证据与四条模板门禁，`kind: feature`）
 - 日期：2026-11-01

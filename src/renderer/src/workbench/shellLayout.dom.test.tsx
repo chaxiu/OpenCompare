@@ -294,8 +294,9 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     const filterGroup = screen.getByRole('tablist', { name: zh('directory.filter.group') })
     expect(within(filterGroup).getAllByRole('tab').length).toBeGreaterThan(1)
     const firstRowText = rows[0].textContent ?? ''
-    expect(firstRowText).toContain(zh('common.diff.same'))
-    expect(firstRowText).toContain(zh('common.diff.added'))
+    // The directory legend reuses the filter vocabulary, not the text-diff words.
+    expect(firstRowText).toContain(zh('directory.filter.same'))
+    expect(firstRowText).toContain(zh('directory.filter.rightOnly'))
     for (const key of ['directory.toolbar.pickLeft', 'directory.toolbar.pickRight'] as const) {
       const buttons = screen.getAllByRole('button', { name: zh(key) })
       expect(buttons.length).toBe(1)

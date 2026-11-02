@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from 'react'
 import type { DiffStatus, SampleComposition } from '@shared/fixtures'
 import { useI18n } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 import { DiffDot } from './DiffBadge'
 import { DIFF_LABEL_KEYS, DIFF_STATUSES } from './diffSemantics'
@@ -41,9 +42,12 @@ export function StatusEntry({
 
 /** Diff-semantic answer-key counts of the active sample session. */
 export function CompositionLegend({
-  composition
+  composition,
+  labelKeys = DIFF_LABEL_KEYS
 }: {
   readonly composition: SampleComposition
+  /** Optional vocabulary override; defaults to the shared text-diff words. */
+  readonly labelKeys?: Record<DiffStatus, MessageKey>
 }): JSX.Element {
   const { t } = useI18n()
   return (
@@ -53,7 +57,7 @@ export function CompositionLegend({
           <span key={status} className="flex items-center gap-1 whitespace-nowrap">
             <DiffDot status={status} />
             <span className="tabular font-mono text-content-secondary">{composition[status]}</span>
-            <span>{t(DIFF_LABEL_KEYS[status])}</span>
+            <span>{t(labelKeys[status])}</span>
           </span>
         )
       )}

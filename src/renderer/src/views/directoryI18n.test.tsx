@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import type { DirectoryFilter } from '@core/directory/filter'
+import { visibleDirectoryCounts } from '@core/directory/rows'
 import type {
   SyncDirection,
   SyncMode,
@@ -21,7 +22,12 @@ import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import type { SyncPreview, TemplateApplyOutcome, TemplatePreview } from '@renderer/workbench/directoryOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { DirectoryView } from './DirectoryView'
-import { FILTER_LABEL_KEYS, SYNC_DIRECTION_KEYS, SYNC_MODE_KEYS } from './directoryCopy'
+import {
+  DIRECTORY_STATUS_LABEL_KEYS,
+  FILTER_LABEL_KEYS,
+  SYNC_DIRECTION_KEYS,
+  SYNC_MODE_KEYS
+} from './directoryCopy'
 import { TemplateDialog } from './TemplateDialog'
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
@@ -146,6 +152,42 @@ function leftOnlyComparison(): DirectoryComparison {
     leftPath: '/tmp/left',
     children: [
       makeFile('left-only.txt', 'removed', '/tmp/left/left-only.txt', undefined)
+    ]
+  }
+  return {
+    leftRoot: '/tmp/left',
+    rightRoot: '/tmp/right',
+    leftName: 'left',
+    rightName: 'right',
+    root,
+    counts,
+    fileCount: 1,
+    leftSkipped: 0,
+    rightSkipped: 0,
+    skipped: 0
+  }
+}
+
+/** Comparison holding one right-only (`added`) or left-only (`removed`) probe file. */
+function probeComparison(status: 'added' | 'removed'): DirectoryComparison {
+  const counts = {
+    same: 0,
+    added: status === 'added' ? 1 : 0,
+    removed: status === 'removed' ? 1 : 0,
+    modified: 0
+  }
+  const root: DirectoryDiffNode = {
+    name: 'left',
+    relativePath: '',
+    kind: 'directory',
+    status,
+    counts,
+    leftPath: '/tmp/left',
+    rightPath: '/tmp/right',
+    children: [
+      status === 'added'
+        ? makeFile('探针.txt', 'added', undefined, '/tmp/right/探针.txt')
+        : makeFile('探针.txt', 'removed', '/tmp/left/探针.txt', undefined)
     ]
   }
   return {
@@ -335,7 +377,7 @@ function ViewHarness({
       }}
       scrollTops={{ left: 0, right: 0 }}
       onScrollTopChange={() => undefined}
-      visibleCounts={{ ...comparison.counts, conflict: 0 }}
+      visibleCounts={{ ...visibleDirectoryCounts(comparison.root, filter), conflict: 0 }}
       pickerAvailable={pickerAvailable}
       busy={false}
       onPick={() => undefined}
@@ -391,6 +433,37 @@ function expectNoHan(values: readonly (string | null | undefined)[]): void {
   for (const value of values) {
     expect(value ?? '', value ?? '').not.toMatch(HAN)
   }
+}
+
+/** Statuses the directory legend renders, in the legend's display order. */
+const LEGEND_STATUSES = ['same', 'added', 'removed', 'modified'] as const
+
+/** The toolbar legend root, located by its four directory status labels. */
+function directoryLegend(dictionary: typeof en | typeof zh): HTMLElement {
+  const labels = LEGEND_STATUSES.map((status) => dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]])
+  const legend = Array.from(document.querySelectorAll<HTMLElement>('span')).find((span) => {
+    const cells = Array.from(span.children)
+    return (
+      cells.length === labels.length &&
+      labels.every((label, index) => cells[index]?.textContent?.includes(label) === true)
+    )
+  })
+  if (!legend) throw new Error('no directory legend found')
+  return legend
+}
+
+/** Legend counts keyed by status, independent of the horizontal cell order. */
+function legendCounts(dictionary: typeof en | typeof zh): Record<FileDiffStatus, number> {
+  const counts: Record<FileDiffStatus, number> = { same: 0, added: 0, removed: 0, modified: 0 }
+  for (const cell of Array.from(directoryLegend(dictionary).children)) {
+    const text = cell.textContent ?? ''
+    const status = LEGEND_STATUSES.find((candidate) =>
+      text.includes(dictionary[DIRECTORY_STATUS_LABEL_KEYS[candidate]])
+    )
+    if (!status) throw new Error(`legend cell has no directory status label: ${text}`)
+    counts[status] = Number(cell.querySelector('.tabular')?.textContent)
+  }
+  return counts
 }
 
 /* ------------------------------------------------------------------ */
@@ -609,17 +682,87 @@ describe('DirectoryView bilingual copy', () => {
     expect(screen.getByText(zh['directory.drilldownHint'])).toBeDefined()
   })
 
-  it('renders the shared legend in the active language', () => {
-    renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'en')
-    for (const label of ['Same', 'Added', 'Removed', 'Modified']) {
-      expect(screen.getAllByText(label).length).toBeGreaterThan(0)
-    }
-    cleanup()
+  it('renders the directory legend in the active language', () => {
+    // Directory statuses are product-labelled left-only / right-only; the old
+    // Added / Removed text-diff words must not reach this legend.
+    const enView = renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'en')
+    expect(legendCounts(en)).toEqual({ same: 1, added: 1, removed: 1, modified: 1 })
+    expect(directoryLegend(en).textContent).not.toMatch(/Added|Removed/)
+    enView.unmount()
 
     renderWithI18n(<ViewHarness comparison={buildComparison()} />, 'zh')
-    for (const label of ['相同', '新增', '删除', '修改']) {
-      expect(screen.getAllByText(label).length).toBeGreaterThan(0)
+    expect(legendCounts(zh)).toEqual({ same: 1, added: 1, removed: 1, modified: 1 })
+    expect(directoryLegend(zh).textContent).not.toMatch(/新增|删除/)
+  })
+
+  it('keeps the right-only and left-only legend wording under each filter', () => {
+    const cases = [
+      { language: 'en', dictionary: en, rightOnly: 'Right only', leftOnly: 'Left only' },
+      { language: 'zh', dictionary: zh, rightOnly: '右独有', leftOnly: '左独有' }
+    ] as const
+
+    for (const { language, dictionary, rightOnly, leftOnly } of cases) {
+      const view = renderWithI18n(
+        <ViewHarness comparison={buildComparison()} />,
+        language
+      )
+
+      fireEvent.click(
+        screen.getByRole('tab', { name: dictionary[FILTER_LABEL_KEYS['right-only']] })
+      )
+      expect(legendCounts(dictionary)).toEqual({ same: 0, added: 1, removed: 0, modified: 0 })
+      expect(directoryLegend(dictionary).textContent).toContain(rightOnly)
+      expect(directoryLegend(dictionary).textContent).not.toMatch(/Added|Removed|新增|删除/)
+
+      fireEvent.click(
+        screen.getByRole('tab', { name: dictionary[FILTER_LABEL_KEYS['left-only']] })
+      )
+      expect(legendCounts(dictionary)).toEqual({ same: 0, added: 0, removed: 1, modified: 0 })
+      expect(directoryLegend(dictionary).textContent).toContain(leftOnly)
+      expect(directoryLegend(dictionary).textContent).not.toMatch(/Added|Removed|新增|删除/)
+
+      view.unmount()
     }
+  })
+
+  it('labels a right-only row with the right-only badge on the right tree only', () => {
+    const comparison = probeComparison('added')
+    const enView = renderWithI18n(<ViewHarness comparison={comparison} />, 'en')
+    const [enLeft, enRight] = trees()
+    const enRow = renderedRows(enRight).find((row) => row.textContent?.includes('探针.txt'))
+    expect(enRow).toBeDefined()
+    expect(within(enRow as HTMLElement).getByText('Right only').textContent).toBe('Right only')
+    expect(enRow?.textContent).not.toContain('Added')
+    expect(renderedRows(enLeft).some((row) => row.textContent?.includes('探针.txt'))).toBe(false)
+    enView.unmount()
+
+    renderWithI18n(<ViewHarness comparison={comparison} />, 'zh')
+    const [zhLeft, zhRight] = trees()
+    const zhRow = renderedRows(zhRight).find((row) => row.textContent?.includes('探针.txt'))
+    expect(zhRow).toBeDefined()
+    expect(within(zhRow as HTMLElement).getByText('右独有').textContent).toBe('右独有')
+    expect(zhRow?.textContent).not.toMatch(/新增/)
+    expect(renderedRows(zhLeft).some((row) => row.textContent?.includes('探针.txt'))).toBe(false)
+  })
+
+  it('labels a left-only row with the left-only badge on the left tree only', () => {
+    const comparison = probeComparison('removed')
+    const enView = renderWithI18n(<ViewHarness comparison={comparison} />, 'en')
+    const [enLeft, enRight] = trees()
+    const enRow = renderedRows(enLeft).find((row) => row.textContent?.includes('探针.txt'))
+    expect(enRow).toBeDefined()
+    expect(within(enRow as HTMLElement).getByText('Left only').textContent).toBe('Left only')
+    expect(enRow?.textContent).not.toContain('Removed')
+    expect(renderedRows(enRight).some((row) => row.textContent?.includes('探针.txt'))).toBe(false)
+    enView.unmount()
+
+    renderWithI18n(<ViewHarness comparison={comparison} />, 'zh')
+    const [zhLeft, zhRight] = trees()
+    const zhRow = renderedRows(zhLeft).find((row) => row.textContent?.includes('探针.txt'))
+    expect(zhRow).toBeDefined()
+    expect(within(zhRow as HTMLElement).getByText('左独有').textContent).toBe('左独有')
+    expect(zhRow?.textContent).not.toMatch(/删除/)
+    expect(renderedRows(zhRight).some((row) => row.textContent?.includes('探针.txt'))).toBe(false)
   })
 
   it('localizes the expand/collapse toggle without changing selection', () => {
@@ -727,9 +870,11 @@ describe('DirectoryView bilingual copy', () => {
       screen.getByLabelText('Choose left snapshot file').getAttribute('aria-label'),
       screen.getByLabelText('Choose right snapshot file').getAttribute('aria-label')
     )
-    for (const label of ['Same', 'Added', 'Removed', 'Modified']) {
+    for (const status of LEGEND_STATUSES) {
+      const label = en[DIRECTORY_STATUS_LABEL_KEYS[status]]
       covered.push(...screen.getAllByText(label).map((element) => element.textContent))
     }
+    expect(directoryLegend(en).textContent).not.toMatch(/Added|Removed/)
     expectNoHan(covered)
     view.unmount()
 
