@@ -3,845 +3,409 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  bilingualNotes,
-  builder,
-  builderConfig,
-  currentTag,
-  currentVersion,
-  finalizeStep,
-  gateStep,
-  lastShippedTag,
-  macEntitlements,
-  packageStep,
-  pkg,
-  releaseNotes,
-  releaseWorkflow,
-  repoRoot,
-  signingSecrets
-} from './release-doc-fixtures.test-helpers'
+import { builder, currentTag, currentVersion, finalizeStep, gateStep, macEntitlements, packageStep, pkg, releaseWorkflow, repoRoot } from './release-doc-fixtures.test-helpers'
+
+// Table-driven contract for the release package metadata, the body / link / metadata /
+// AppImage gates and the release-evidence ledger. Expected data:
+// src/main/__fixtures__/release-packaging.json (product files stay under test).
+
+type Strings = string[]
+interface ValueRow { id: string; path: string; value?: unknown; present?: boolean; nonEmpty?: boolean; tokens?: Strings }
+interface StepRow { id: string; job: 'gates' | 'release' | 'finalize'; name: string; if?: string; tokens: Strings; absent: Strings; patterns: Strings; absentPatterns: Strings }
+interface StepOrderRow { id: string; names: Strings; mustBeLast: boolean }
+interface DocsRow { id: string; path: string; tokens: Strings; absent: Strings; absentPatterns: Strings }
+interface CheckRow { id: string; tokens: Strings; absent: Strings; patterns: Strings; absentPatterns: Strings }
+interface GuardRow { id: string; marker: string; message: string }
+interface CaseRow { id: string; mode: string; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings }
+interface AppImageCase { id: string; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings; declared?: number; size?: number; tailHex?: string; images?: number; metadataMode?: 'declared' | 'blockmap-missing' | 'file-missing' }
+interface LedgerRow { id: string; version: string; status: string; assets?: number }
+type MetadataTemplate = Record<'versionLine' | 'filesLine' | 'urlLine' | 'shaLine' | 'sizeLine' | 'blockMapLine' | 'pathLine' | 'sha512Line' | 'appImageUrl' | 'debUrl', string>
+interface Fixture {
+  schemaVersion: number
+  packageRows: ValueRow[]; builderRows: ValueRow[]; entitlements: Array<{ id: string; key: string }>
+  docs: DocsRow[]; steps: StepRow[]; stepOrder: StepOrderRow[]; workflowChecks: CheckRow[]
+  releaseBody: {
+    id: string; name: string; makePublicName: string; versionDerivation: string
+    notesPath: string; bilingualPath: string; bodyFile: string; notesFileFlag: string; notesFileWrites: number
+    bodyReads: { english: string; chinese: string }; guards: GuardRow[]
+    create: string; edit: string; draftProbe: string; previousRelease: string; previousSelector: string
+    changelog: string; changelogLine: string; publicNote: string; separator: string
+    foldOpen: string; foldClose: string; foldCounts: { open: number; close: number }; finalizeBodyFree: string
+    previousLookup: string; exitToken: string; detailsTag: string; detailsCloseTag: string
+  }
+  notesLinks: { baseTemplate: string; rows: Array<{ id: string; doc: string; thirdLineTemplate: string; absent: Strings; linkCount: number }> }
+  bodyAssembly: { separator: string; foldOpen: string; foldClose: string; changelog: string; previous: { bodyGate: string; linkGate: string } }
+  bodyGate: { name: string; cases: CaseRow[] }
+  linkGate: { name: string; cases: CaseRow[] }
+  appImage: { gateName: string; fixtureVersion: string; declared: number; tailHex: string; littleEndianDecoded: number; metadata: MetadataTemplate; cases: AppImageCase[] }
+  signing: { secrets: Strings; token: string; secretPattern: string; apiKeyRefPattern: string }
+  evidence: { root: string; assetFamilyPattern: string; ledger: LedgerRow[] }
+}
+
+const readBytes = (path: string): Buffer => readFileSync(path)
+const readText = (relative: string): string => readBytes(join(repoRoot, relative)).toString('utf8')
+const fixture = JSON.parse(readText('src/main/__fixtures__/release-packaging.json')) as Fixture
+const fill = (template: string, extra: Record<string, string> = {}): string =>
+  template.replace(/\$\{(\w+)\}/g, (match, key: string) => extra[key] ?? match)
+const pick = (source: unknown, path: string): unknown => {
+  let value: unknown = source
+  for (const key of path.split('.')) {
+    if (value === null || typeof value !== 'object') return undefined
+    value = (value as Record<string, unknown>)[key]
+  }
+  return value
+}
+
+// The only toContain / not.toContain helpers in this file.
+const expectTokens = (text: string, tokens: readonly string[], label: string): void => {
+  for (const token of tokens) expect(text, `${label}: ${token}`).toContain(token)
+}
+const expectAbsent = (text: string, tokens: readonly string[], label: string): void => {
+  for (const token of tokens) expect(text, `${label}: ${token}`).not.toContain(token)
+}
+const expectPatterns = (text: string, patterns: readonly string[], label: string): void => {
+  for (const pattern of patterns) expect(text, `${label}: ${pattern}`).toMatch(new RegExp(pattern))
+}
+const expectNoPattern = (text: string, patterns: readonly string[], label: string): void => {
+  for (const pattern of patterns) expect(text, `${label}: ${pattern}`).not.toMatch(new RegExp(pattern))
+}
+
+const referencedIds = new Set<string>()
+const useRow = (id: string): void => { referencedIds.add(id) }
+const fixtureRowIds = [
+  ...fixture.packageRows, ...fixture.builderRows, ...fixture.entitlements, ...fixture.docs,
+  ...fixture.steps, ...fixture.stepOrder, ...fixture.workflowChecks, ...fixture.releaseBody.guards,
+  ...fixture.notesLinks.rows, ...fixture.bodyGate.cases, ...fixture.linkGate.cases,
+  ...fixture.appImage.cases, ...fixture.evidence.ledger, fixture.releaseBody.id
+].map((row) => (typeof row === 'string' ? row : row.id))
+
+const stepOf = (row: StepRow): { if?: string; run?: string } | undefined =>
+  row.job === 'gates' ? gateStep(row.name) : row.job === 'release' ? packageStep(row.name) : finalizeStep(row.name)
+const runInTemp = (run: (dir: string) => ReturnType<typeof spawnSync>): { status: number; output: string } => {
+  const dir = mkdtempSync(join(tmpdir(), 'opencompare-release-gate-'))
+  try {
+    const result = run(dir)
+    return { status: result.status ?? -1, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 describe('release package metadata', () => {
-  it('declares an author with a non-empty email (required by Linux .deb)', () => {
-    expect(typeof pkg.author).toBe('object')
-    expect(pkg.author?.email?.trim()).toBeTruthy()
+  it.each(fixture.packageRows)('$id pins $path', (row) => {
+    useRow(row.id)
+    const actual = pick(pkg as unknown, row.path)
+    if (row.present) expect(actual, row.id).toBeTruthy()
+    if (row.nonEmpty) expect(String(actual ?? '').trim(), row.id).not.toBe('')
+    if (row.value !== undefined) expect(actual, row.id).toEqual(row.value)
   })
 
-  it('declares the repository license and homepage', () => {
-    expect(pkg.license).toBe('MIT')
-    expect(pkg.homepage).toBe('https://github.com/chaxiu/OpenCompare')
-  })
-})
-
-describe('linux packaging targets', () => {
-  it('sets an explicit deb maintainer containing an email', () => {
-    const maintainer = builder.linux?.maintainer ?? ''
-    expect(maintainer.trim()).toBeTruthy()
-    expect(maintainer).toContain('@')
+  it.each(fixture.builderRows)('$id pins $path', (row) => {
+    useRow(row.id)
+    const actual = pick(builder as unknown, row.path)
+    if (row.value !== undefined) expect(actual, row.id).toEqual(row.value)
+    if (row.nonEmpty) expect(String(actual ?? '').trim(), row.id).not.toBe('')
+    if (row.tokens) expectTokens(String(actual ?? ''), row.tokens, row.id)
   })
 
-  it('keeps both AppImage and deb targets', () => {
-    expect(builder.linux?.target).toContain('AppImage')
-    expect(builder.linux?.target).toContain('deb')
+  it.each(fixture.entitlements)('$id is declared for the signed bundle', (row) => {
+    useRow(row.id)
+    expectTokens(macEntitlements, [row.key], row.id)
   })
 })
 
-describe('github release publishing', () => {
-  it('publishes a real (non-draft) release', () => {
-    expect(builder.publish?.provider).toBe('github')
-    expect(builder.publish?.releaseType).toBe('release')
+describe('release workflow contracts', () => {
+  it.each(fixture.steps)('$id satisfies $name', (row) => {
+    useRow(row.id)
+    const step = stepOf(row)
+    expect(step, `${row.name}: present`).toBeDefined()
+    if (row.if !== undefined) expect(step?.if, `${row.name}: if`).toBe(row.if)
+    const body = step?.run ?? ''
+    expect(body.length, `${row.name}: run`).toBeGreaterThan(0)
+    expectTokens(body, row.tokens, row.name)
+    expectAbsent(body, row.absent, row.name)
+    expectPatterns(body, row.patterns, row.name)
+    expectNoPattern(body, row.absentPatterns, row.name)
   })
 
-  it('keeps the tag-triggered gates-first cross-platform workflow', () => {
-    expect(releaseWorkflow).toMatch(/tags:\s*\n\s*-\s*'v\*'/)
-    expect(releaseWorkflow).toMatch(/name: Quality gates/)
-    expect(releaseWorkflow).toMatch(/needs: gates/)
-    expect(releaseWorkflow).toMatch(/target: mac/)
-    expect(releaseWorkflow).toMatch(/target: win/)
-    expect(releaseWorkflow).toMatch(/target: linux/)
+  it.each(fixture.workflowChecks)('$id holds on the whole workflow', (row) => {
+    useRow(row.id)
+    expectTokens(releaseWorkflow, row.tokens, row.id)
+    expectAbsent(releaseWorkflow, row.absent, row.id)
+    expectPatterns(releaseWorkflow, row.patterns, row.id)
+    expectNoPattern(releaseWorkflow, row.absentPatterns, row.id)
   })
 
-  it('pre-creates a single draft release before the matrix packages', () => {
-    // One release per tag: create it once in `gates`, targeting the repo
-    // explicitly so no checkout / git context is required.
-    expect(releaseWorkflow).toMatch(/GH_REPO: \$\{\{ github\.repository \}\}/)
-    // The body is the repository's own notes for the tag (scoped to this step),
-    // not GitHub-generated notes.
-    const preCreate = gateStep("Pre-create the tag's release")?.run ?? ''
-    expect(preCreate).toMatch(
-      /gh release create\s+"\$\{RELEASE_TAG\}"[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"[\s\S]*?--draft[\s\S]*?--notes-file/
-    )
-    expect(preCreate).not.toContain('--generate-notes')
-    expect(preCreate).toContain('**Full Changelog**')
-    expect(preCreate).toContain('compare/')
-    // Duplicates left behind by an earlier race are pruned, keeping one.
-    expect(releaseWorkflow).toMatch(/gh api --method DELETE/)
+  it.each(fixture.stepOrder)('$id keeps the workflow order', (row) => {
+    useRow(row.id)
+    const indexes = row.names.map((name) => {
+      const index = releaseWorkflow.indexOf(`name: ${name}`)
+      expect(index, name).toBeGreaterThan(-1)
+      return index
+    })
+    for (let index = 1; index < indexes.length; index += 1) {
+      expect(indexes[index], row.names[index]).toBeGreaterThan(indexes[index - 1])
+    }
+    if (row.mustBeLast) {
+      const last = row.names[row.names.length - 1]
+      expect(releaseWorkflow.slice(indexes[indexes.length - 1] + last.length)).not.toMatch(/\n {6}- name:/)
+    }
   })
 
-  it('packages locally without letting the matrix create releases', () => {
-    expect(releaseWorkflow).toMatch(/electron-builder --\$\{\{ matrix\.target \}\} --publish never/)
-    expect(releaseWorkflow).not.toMatch(/--publish always/)
+  it.each(fixture.docs)('$id keeps the repository free of private key material', (row) => {
+    useRow(row.id)
+    const text = readText(row.path)
+    expectTokens(text, row.tokens, row.id)
+    expectAbsent(text, row.absent, row.id)
+    expectNoPattern(text, row.absentPatterns, row.id)
   })
 
-  it('uploads each platform artifacts into the single release with --clobber', () => {
-    expect(releaseWorkflow).toMatch(
-      /gh release upload\s+"\$\{RELEASE_TAG\}"[\s\S]*?--clobber[\s\S]*?--repo\s+"\$\{GITHUB_REPOSITORY\}"/
-    )
+  it.each(fixture.signing.secrets)('%s is wired into the mac matrix build', (secret) => {
+    expect(releaseWorkflow, secret).toMatch(new RegExp(fixture.signing.secretPattern.replaceAll('${secret}', secret)))
   })
 
-  it('promotes the tag release to public with an explicit --repo', () => {
-    expect(releaseWorkflow).toMatch(
-      /gh release edit\s+"\$\{RELEASE_TAG\}"\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--draft=false\s+--latest/
-    )
+  it('wires only the fixture secrets plus the workflow token', () => {
+    const refs = [...releaseWorkflow.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1])
+    expect(new Set(refs), 'secret set').toEqual(new Set([...fixture.signing.secrets, fixture.signing.token]))
+    expect(releaseWorkflow, 'api-key path').toMatch(new RegExp(fixture.signing.apiKeyRefPattern))
   })
 })
 
-// The Release body is no longer generated by GitHub: it comes from the
-// repository's own notes for the checked-out tag, with a Full Changelog line
-// appended, and a missing or blank file must fail the run instead of publishing
-// an empty body. Every assertion is scoped to the pre-create step's `run` text.
 describe('release body from repository notes', () => {
-  const preCreate = gateStep("Pre-create the tag's release")?.run ?? ''
-  const notesPathStatement = 'notes_file="docs/release-notes/v${version}.md"'
+  const spec = fixture.releaseBody
+  const script = gateStep(spec.name)?.run ?? ''
 
-  it('derives the notes version from package.json instead of a pinned tag', () => {
-    expect(preCreate).toContain(
-      'version="$(node -p "require(\'./package.json\').version")"'
-    )
-    expect(preCreate).toContain(notesPathStatement)
-    // No inline version literal may leak into the body path or the changelog
-    // base; only the derived `${version}` and `${RELEASE_TAG}` are allowed.
-    expect(preCreate).not.toContain('v0.2.9')
-    expect(preCreate).not.toContain('v0.2.10')
+  it('derives both notes paths from package.json and reads each language once', () => {
+    useRow(spec.id)
+    const derive = script.indexOf(spec.versionDerivation)
+    expect(derive, spec.id).toBeGreaterThan(-1)
+    for (const path of [spec.notesPath, spec.bilingualPath]) {
+      expect(script.indexOf(path), `${spec.id}: ${path}`).toBeGreaterThan(derive)
+    }
+    expectTokens(script, [spec.bodyFile], spec.id)
+    expectTokens(script, [spec.bodyReads.english, spec.bodyReads.chinese], spec.id)
+    expect(script.split(spec.notesFileFlag).length - 1, `${spec.id}: body writes`).toBe(spec.notesFileWrites)
   })
 
-  it('reads the release body from docs/release-notes/v<version>.md', () => {
-    const derive = preCreate.indexOf(notesPathStatement)
-    const read = preCreate.indexOf('cat "${notes_file}"')
-    expect(derive).toBeGreaterThan(-1)
-    expect(read).toBeGreaterThan(derive)
-    expect(preCreate).toContain('${RUNNER_TEMP}/release-body-${RELEASE_TAG}.md')
+  it.each(spec.guards)('$id fails closed before any release write', (guard) => {
+    useRow(guard.id)
+    const marker = script.indexOf(guard.marker)
+    expect(marker, guard.id).toBeGreaterThan(-1)
+    expectTokens(script, [guard.message], guard.id)
+    expectTokens(script.slice(marker, script.indexOf(spec.create)), [spec.exitToken], guard.id)
   })
 
-  it('fails closed when the notes file is missing or blank', () => {
-    const missingGuard = preCreate.indexOf('if [ ! -f "${notes_file}" ]; then')
-    const blankGuard = preCreate.indexOf('if [ -z "$(tr -d \'[:space:]\' < "${notes_file}")" ]; then')
-    const create = preCreate.indexOf('gh release create')
-    const edit = preCreate.indexOf('gh release edit')
-    expect(missingGuard).toBeGreaterThan(-1)
-    expect(preCreate).toContain('::error::Missing release notes ${notes_file}')
-    expect(blankGuard).toBeGreaterThan(missingGuard)
-    expect(preCreate).toContain('::error::Release notes ${notes_file} are empty')
-    // Both guards run before any release is created or edited, and each exits.
-    expect(create).toBeGreaterThan(blankGuard)
-    expect(edit).toBeGreaterThan(blankGuard)
-    expect(preCreate.slice(missingGuard, blankGuard)).toContain('exit 1')
-    expect(preCreate.slice(blankGuard, create)).toContain('exit 1')
-    // No silent fallback to GitHub-generated notes.
-    expect(preCreate).not.toContain('--generate-notes')
+  it('folds the zh-CN notes into one details block in body order', () => {
+    const offsets = [
+      spec.bodyReads.english, spec.separator, spec.foldOpen, spec.bodyReads.chinese, spec.foldClose, spec.changelog
+    ].map((token) => {
+      const index = script.indexOf(token)
+      expect(index, token).toBeGreaterThan(-1)
+      return index
+    })
+    for (let index = 1; index < offsets.length; index += 1) {
+      expect(offsets[index], `order ${index}`).toBeGreaterThan(offsets[index - 1])
+    }
+    expect(script.split(spec.detailsTag).length - 1, 'fold open').toBe(spec.foldCounts.open)
+    expect(script.split(spec.detailsCloseTag).length - 1, 'fold close').toBe(spec.foldCounts.close)
   })
 
-  it('appends a Full Changelog line based on the previous published release', () => {
-    const resolveLast = preCreate.indexOf('gh release list --exclude-drafts')
-    const fullChangelog = preCreate.indexOf('**Full Changelog**')
+  it('resolves the previous release and appends the changelog line', () => {
+    const resolveLast = script.indexOf(spec.previousLookup)
+    expectTokens(script, [spec.previousSelector, spec.changelogLine], spec.id)
     expect(resolveLast).toBeGreaterThan(-1)
-    expect(preCreate).toContain('select(.tagName != \\"${RELEASE_TAG}\\")')
-    expect(preCreate).toContain(
-      'echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${last}...${RELEASE_TAG}"'
-    )
-    expect(resolveLast).toBeLessThan(fullChangelog)
-    // An unresolvable previous release fails closed instead of inventing a base.
-    const missingLast = preCreate.indexOf('Could not resolve the previous published release')
+    expect(resolveLast).toBeLessThan(script.indexOf(spec.changelog))
+    const missingLast = script.indexOf(spec.previousRelease)
     expect(missingLast).toBeGreaterThan(resolveLast)
-    expect(preCreate.indexOf('exit 1', missingLast)).toBeGreaterThan(missingLast)
-    expect(preCreate.indexOf('gh release create')).toBeGreaterThan(missingLast)
+    expect(script.indexOf(spec.exitToken, missingLast)).toBeGreaterThan(missingLast)
+    expect(script.indexOf(spec.create)).toBeGreaterThan(missingLast)
   })
 
-  it('only writes the body into a draft release, never rewriting a public one', () => {
-    const create = preCreate.indexOf('gh release create')
-    const draftCheck = preCreate.indexOf("--jq '.draft'")
-    const edit = preCreate.indexOf('gh release edit')
-    expect(preCreate.slice(create, draftCheck)).toContain('--notes-file "${body_file}"')
-    expect(draftCheck).toBeGreaterThan(create)
-    expect(edit).toBeGreaterThan(draftCheck)
-    expect(preCreate.slice(edit)).toContain('--notes-file "${body_file}"')
-    expect(preCreate).toContain('already public; leaving its body untouched')
-    // Exactly two body writes: the create and the draft-only edit.
-    expect(preCreate.match(/--notes-file/g)?.length).toBe(2)
+  it('writes the body only into the draft create and the draft-only edit', () => {
+    const create = script.indexOf(spec.create)
+    const draft = script.indexOf(spec.draftProbe)
+    const edit = script.indexOf(spec.edit)
+    expectTokens(script.slice(create, draft), [spec.notesFileFlag], spec.id)
+    expect(draft).toBeGreaterThan(create)
+    expect(edit).toBeGreaterThan(draft)
+    expectTokens(script.slice(edit), [spec.notesFileFlag, spec.publicNote], spec.id)
   })
 
-  const bilingualNotesPathStatement = 'notes_zh_file="docs/release-notes/v${version}.zh-CN.md"'
-
-  it('reads the English and the zh-CN notes from package.json derived paths', () => {
-    const derive = preCreate.indexOf(
-      'version="$(node -p "require(\'./package.json\').version")"'
-    )
-    expect(derive).toBeGreaterThan(-1)
-    expect(preCreate).toContain(notesPathStatement)
-    expect(preCreate).toContain(bilingualNotesPathStatement)
-    expect(preCreate.indexOf(notesPathStatement)).toBeGreaterThan(derive)
-    expect(preCreate.indexOf(bilingualNotesPathStatement)).toBeGreaterThan(derive)
-    // Neither path may be pinned to a literal version.
-    expect(preCreate).not.toMatch(/docs\/release-notes\/v\d+\.\d+\.\d+/)
-  })
-
-  it('fails closed when either the English or the zh-CN notes file is missing', () => {
-    const missingEnglish = preCreate.indexOf('if [ ! -f "${notes_file}" ]; then')
-    const missingChinese = preCreate.indexOf('if [ ! -f "${notes_zh_file}" ]; then')
-    const create = preCreate.indexOf('gh release create')
-    const edit = preCreate.indexOf('gh release edit')
-    expect(missingEnglish).toBeGreaterThan(-1)
-    expect(missingChinese).toBeGreaterThan(missingEnglish)
-    expect(preCreate).toContain('::error::Missing release notes ${notes_file}')
-    expect(preCreate).toContain('::error::Missing release notes ${notes_zh_file}')
-    // Both missing guards exit before any draft is created or edited.
-    expect(preCreate.slice(missingEnglish, missingChinese)).toContain('exit 1')
-    expect(preCreate.slice(missingChinese, create)).toContain('exit 1')
-    expect(missingChinese).toBeLessThan(create)
-    expect(missingChinese).toBeLessThan(edit)
-  })
-
-  it('fails closed when either the English or the zh-CN notes file is blank', () => {
-    const blankEnglish = preCreate.indexOf(
-      'if [ -z "$(tr -d \'[:space:]\' < "${notes_file}")" ]; then'
-    )
-    const blankChinese = preCreate.indexOf(
-      'if [ -z "$(tr -d \'[:space:]\' < "${notes_zh_file}")" ]; then'
-    )
-    const create = preCreate.indexOf('gh release create')
-    const edit = preCreate.indexOf('gh release edit')
-    expect(blankEnglish).toBeGreaterThan(-1)
-    expect(blankChinese).toBeGreaterThan(blankEnglish)
-    // Each language names its own file so the failing side is identifiable.
-    expect(preCreate).toContain('::error::Release notes ${notes_file} are empty (English)')
-    expect(preCreate).toContain(
-      '::error::Release notes ${notes_zh_file} are empty (Simplified Chinese)'
-    )
-    // Neither blank guard can fall through to a draft write.
-    expect(preCreate.slice(blankEnglish, blankChinese)).toContain('exit 1')
-    expect(preCreate.slice(blankChinese, create)).toContain('exit 1')
-    expect(blankChinese).toBeLessThan(create)
-    expect(blankChinese).toBeLessThan(edit)
-  })
-
-  it('folds the zh-CN notes into a details block in body order', () => {
-    const english = preCreate.indexOf('cat "${notes_file}"')
-    const separator = preCreate.indexOf("echo '---'")
-    const open = preCreate.indexOf("echo '<details><summary>简体中文</summary>'")
-    const chinese = preCreate.indexOf('cat "${notes_zh_file}"')
-    const close = preCreate.indexOf("echo '</details>'")
-    const changelog = preCreate.indexOf('**Full Changelog**')
-    for (const offset of [english, separator, open, chinese, close, changelog]) {
-      expect(offset).toBeGreaterThan(-1)
-    }
-    expect(english).toBeLessThan(separator)
-    expect(separator).toBeLessThan(open)
-    expect(open).toBeLessThan(chinese)
-    expect(chinese).toBeLessThan(close)
-    expect(close).toBeLessThan(changelog)
-    // One fold block: the markers are neither duplicated nor nested.
-    expect(preCreate.match(/<details>/g) ?? []).toHaveLength(1)
-    expect(preCreate.match(/<\/details>/g) ?? []).toHaveLength(1)
-  })
-
-  it('has no single-language fallback path', () => {
-    expect(preCreate).not.toContain('--generate-notes')
-    // One body file is written from both languages, and it is written only into
-    // the draft create / draft-only edit.
-    expect(preCreate.match(/--notes-file/g) ?? []).toHaveLength(2)
-    expect(preCreate.match(/cat "\$\{notes_file\}"/g) ?? []).toHaveLength(1)
-    expect(preCreate.match(/cat "\$\{notes_zh_file\}"/g) ?? []).toHaveLength(1)
-    expect(preCreate).toContain('already public; leaving its body untouched')
-  })
-
-  it('keeps the finalize step body-free', () => {
-    expect(finalizeStep("Make the tag's release public")?.run).toBe(
-      'gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest'
-    )
+  it('keeps the finalize publish step body-free', () => {
+    expect(finalizeStep(spec.makePublicName)?.run, spec.makePublicName).toBe(spec.finalizeBodyFree)
   })
 })
 
-// The published Release is the artifact consumers read, so finalize re-reads the
-// public body and fails when the zh-CN fold block or either language segment's
-// version is missing. The script is also executed against fixture bodies with a
-// stub `gh` on PATH, so the three fail-closed branches are proven, not just
-// spelled out.
 describe('published release body gate', () => {
-  const bodyGateName = 'Assert the published release body is bilingual'
-  const bodyGate = finalizeStep(bodyGateName)?.run ?? ''
+  const assembly = fixture.bodyAssembly
+  const publishedBody = (english: string, chinese: string, previous: string): string =>
+    [english, '', assembly.separator, '', assembly.foldOpen, '', chinese, '', assembly.foldClose, '',
+      fill(assembly.changelog, { previous, tag: currentTag })].join('\n')
 
-  it('runs in finalize after the release is made public and keeps the step order', () => {
-    const publish = releaseWorkflow.indexOf("name: Make the tag's release public")
-    const bodyGateIndex = releaseWorkflow.indexOf(`name: ${bodyGateName}`)
-    const unique = releaseWorkflow.indexOf('name: Verify the tag has exactly one public release')
-    const assets = releaseWorkflow.indexOf(
-      'name: Assert the public release has every platform asset'
-    )
-    const urls = releaseWorkflow.indexOf('name: Assert latest*.yml urls match the release assets')
-    const latest = releaseWorkflow.indexOf('name: Assert the tag is the latest published release')
-    expect(finalizeStep(bodyGateName)).toBeDefined()
-    expect(publish).toBeGreaterThan(-1)
-    expect(bodyGateIndex).toBeGreaterThan(publish)
-    expect(unique).toBeGreaterThan(publish)
-    expect(assets).toBeGreaterThan(unique)
-    expect(urls).toBeGreaterThan(assets)
-    expect(latest).toBeGreaterThan(urls)
-  })
-
-  it('re-reads the published body with a read-only gh release view', () => {
-    expect(bodyGate).toContain('set -euo pipefail')
-    expect(bodyGate).toContain('gh release view "${RELEASE_TAG}"')
-    expect(bodyGate).toContain('--json body')
-    expect(bodyGate).not.toMatch(/gh release (upload|edit|create|delete)/)
-    expect(bodyGate).not.toMatch(/--method\s+(POST|PATCH|PUT|DELETE)/)
-    // The published artifact is read, never the checked-out notes.
-    expect(bodyGate).not.toContain('docs/release-notes/')
-  })
-
-  it('asserts the zh-CN fold marker and both language segment versions', () => {
-    for (const marker of ['<details>', '简体中文', '</details>']) {
-      expect(bodyGate).toContain(marker)
-    }
-    expect(bodyGate).toContain('exit 1')
-    // Three locatable fail-closed branches: no fold block, English segment
-    // version mismatch, Chinese segment version mismatch.
-    expect(bodyGate).toContain('::error::')
-    expect(bodyGate).toMatch(/body is missing the zh-CN/)
-    expect(bodyGate).toMatch(/English segment does not carry the version/)
-    expect(bodyGate).toMatch(/Chinese segment does not carry the version/)
-    // The segments come from cutting the body at the fold block, so the Full
-    // Changelog line (which always carries the tag) cannot satisfy them.
-    expect(bodyGate).toContain('head -n "$((details_line - 1))"')
-    expect(bodyGate).toContain('zh_body')
-  })
-
-  // Tempdir fixtures are the only place this suite runs the gate script; `gh` is
-  // a local stub that echoes a fixture body, so no network or real release is
-  // ever touched.
-  const runBodyGate = (body: string): { status: number; output: string } => {
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-body-gate-'))
-    try {
-      const fixture = join(dir, 'fixture-body.md')
-      writeFileSync(fixture, body)
-      const fakeGh = join(dir, 'gh')
-      writeFileSync(fakeGh, '#!/usr/bin/env bash\ncat "${FAKE_RELEASE_BODY}"\n', { mode: 0o755 })
+  const runBodyGate = (body: string): { status: number; output: string } =>
+    runInTemp((dir) => {
+      const fixturePath = join(dir, 'fixture-body.md')
+      writeFileSync(fixturePath, body)
+      writeFileSync(join(dir, 'gh'), '#!/usr/bin/env bash\ncat "${FAKE_RELEASE_BODY}"\n', { mode: 0o755 })
       const script = join(dir, 'body-gate.sh')
-      writeFileSync(script, bodyGate)
-      const result = spawnSync('bash', [script], {
-        cwd: dir,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          PATH: `${dir}:${process.env.PATH ?? ''}`,
-          RUNNER_TEMP: dir,
-          RELEASE_TAG: currentTag,
-          GITHUB_REPOSITORY: 'chaxiu/OpenCompare',
-          FAKE_RELEASE_BODY: fixture
-        }
+      writeFileSync(script, finalizeStep(fixture.bodyGate.name)?.run ?? '')
+      return spawnSync('bash', [script], {
+        cwd: dir, encoding: 'utf8',
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag,
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare', FAKE_RELEASE_BODY: fixturePath }
       })
-      return {
-        status: result.status ?? -1,
-        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  }
+    })
 
-  // The changelog line always names the tag, so a gate that only greps the whole
-  // body would pass on it; every fixture keeps it to prove per-segment parity.
-  const publishedBody = (english: string, chinese: string): string =>
-    [
-      english,
-      '',
-      '---',
-      '',
-      '<details><summary>简体中文</summary>',
-      '',
-      chinese,
-      '',
-      '</details>',
-      '',
-      `**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/v0.2.12...${currentTag}`
-    ].join('\n')
-
-  it('passes a bilingual body whose segments both carry the tag version', () => {
-    const { status, output } = runBodyGate(
-      publishedBody(`# OpenCompare ${currentTag} release notes`, `# OpenCompare ${currentTag} 发布说明`)
-    )
-    expect(output).toContain(`Verified the published ${currentTag} body`)
-    expect(status).toBe(0)
+  it('runs in finalize after the release is made public', () => {
+    const publish = releaseWorkflow.indexOf(`name: ${fixture.releaseBody.makePublicName}`)
+    expect(finalizeStep(fixture.bodyGate.name)).toBeDefined()
+    expect(releaseWorkflow.indexOf(`name: ${fixture.bodyGate.name}`), fixture.bodyGate.name).toBeGreaterThan(publish)
   })
 
-  it('fails closed when the published body has no zh-CN fold block', () => {
-    const { status, output } = runBodyGate(
-      `# OpenCompare ${currentTag} release notes\n\n**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/v0.2.12...${currentTag}\n`
-    )
-    expect(status).not.toBe(0)
-    expect(output).toContain('::error::')
-    expect(output).toContain('body is missing the zh-CN')
-  })
-
-  it('fails closed when the English segment misses the tag version', () => {
-    const { status, output } = runBodyGate(
-      publishedBody('# OpenCompare release notes', `# OpenCompare ${currentTag} 发布说明`)
-    )
-    expect(status).not.toBe(0)
-    expect(output).toContain('English segment does not carry the version')
-  })
-
-  it('fails closed when the Chinese segment misses the tag version', () => {
-    const { status, output } = runBodyGate(
-      publishedBody(`# OpenCompare ${currentTag} release notes`, '# OpenCompare 发布说明')
-    )
-    expect(status).not.toBe(0)
-    expect(output).toContain('Chinese segment does not carry the version')
+  it.each(fixture.bodyGate.cases)('$id runs the body gate', (row) => {
+    useRow(row.id)
+    const english = `# OpenCompare ${currentTag} release notes`
+    const chinese = `# OpenCompare ${currentTag} 发布说明`
+    const previous = assembly.previous.bodyGate
+    const body = row.mode === 'no-fold'
+      ? `${english}\n\n${fill(assembly.changelog, { previous, tag: currentTag })}\n`
+      : publishedBody(
+          row.mode === 'missing-en' ? '# OpenCompare release notes' : english,
+          row.mode === 'missing-zh' ? '# OpenCompare 发布说明' : chinese,
+          previous
+        )
+    const result = runBodyGate(body)
+    if (row.status === 'zero') expect(result.status, row.id).toBe(0)
+    else expect(result.status, row.id).not.toBe(0)
+    expectTokens(result.output, row.tokens.map((token) => fill(token, { tag: currentTag })), row.id)
+    expectAbsent(result.output, row.absent, row.id)
   })
 })
 
-// A published body renders on the tag page, so a notes link kept relative
-// (`./<tag>.zh-CN.md`) resolves against the repository root and 404s. The
-// current notes pair carries tag-fixed absolute links and finalize re-reads the
-// public body to refuse any relative link or a missing absolute switch URL. The
-// step's own `run` is executed here against a simulated body assembled in the
-// release job's exact order, with a stub `gh` and no network access.
 describe('published release body link gate', () => {
-  const linkGateName = 'Assert the published release body links are absolute'
-  const linkGate = finalizeStep(linkGateName)?.run ?? ''
-  const baseUrl = `https://github.com/chaxiu/OpenCompare/blob/${currentTag}/docs/release-notes`
-  const enSwitch = `${baseUrl}/${currentTag}.zh-CN.md`
-  const zhSwitch = `${baseUrl}/${currentTag}.md`
-  const thirdLine = (doc: string): string => doc.split('\n')[2] ?? ''
+  const spec = fixture.linkGate
+  const script = finalizeStep(spec.name)?.run ?? ''
+  const base = fill(fixture.notesLinks.baseTemplate, { tag: currentTag })
+  const enSwitch = `${base}/${currentTag}.zh-CN.md`
+  const zhSwitch = `${base}/${currentTag}.md`
+  const releaseNotes = readText(fill(fixture.notesLinks.rows[0].doc, { tag: currentTag }))
+  const bilingualNotes = readText(fill(fixture.notesLinks.rows[1].doc, { tag: currentTag }))
+  const assembly = fixture.bodyAssembly
 
-  it('pins both current notes language switches to tag-fixed absolute URLs', () => {
-    expect(thirdLine(releaseNotes)).toBe(`English | [简体中文](${enSwitch})`)
-    expect(thirdLine(bilingualNotes)).toBe(`[English](${zhSwitch}) | 简体中文`)
-    for (const doc of [releaseNotes, bilingualNotes]) {
-      expect(thirdLine(doc)).not.toContain('](./')
-      expect(thirdLine(doc)).not.toContain(`](${currentTag}`)
-      // The switch line is the only markdown link in either notes file, so no
-      // other body line can reintroduce a tag-page relative link.
-      expect(doc.match(/\]\([^)]*\)/g) ?? []).toHaveLength(1)
-    }
+  it.each(fixture.notesLinks.rows)('$id pins the tag-fixed absolute switch link', (row) => {
+    useRow(row.id)
+    const text = readText(fill(row.doc, { tag: currentTag }))
+    const third = text.split('\n')[2] ?? ''
+    expect(third, row.id).toBe(fill(row.thirdLineTemplate, { tag: currentTag, base }))
+    expectAbsent(third, row.absent.map((token) => fill(token, { tag: currentTag })), row.id)
+    expect(text.match(/\]\([^)]*\)/g)?.length ?? 0, `${row.id}: markdown links`).toBe(row.linkCount)
   })
 
-  it('runs the read-only link gate in finalize after the release is made public', () => {
-    const publish = releaseWorkflow.indexOf("name: Make the tag's release public")
-    const gateIndex = releaseWorkflow.indexOf(`name: ${linkGateName}`)
-    expect(finalizeStep(linkGateName)).toBeDefined()
-    expect(publish).toBeGreaterThan(-1)
-    expect(gateIndex).toBeGreaterThan(publish)
-    expect(linkGate).toContain('gh release view "${RELEASE_TAG}"')
-    expect(linkGate).toContain('--json body')
-    expect(linkGate).toContain('link: ')
-    expect(linkGate).not.toMatch(/gh release (upload|edit|create|delete)/)
-    expect(linkGate).not.toMatch(/--method\s+(POST|PATCH|PUT|DELETE)/)
+  it('runs the read-only link gate in finalize after the release is public', () => {
+    const publish = releaseWorkflow.indexOf(`name: ${fixture.releaseBody.makePublicName}`)
+    expect(finalizeStep(spec.name)).toBeDefined()
+    expect(releaseWorkflow.indexOf(`name: ${spec.name}`), spec.name).toBeGreaterThan(publish)
   })
 
-  it('names the relative-link and missing-absolute-URL fail-closed branches', () => {
-    expect(linkGate).toContain('must be an absolute URL')
-    expect(linkGate).toContain('is missing the absolute language switch link')
-    expect(linkGate).toContain('exit 1')
-    expect(linkGate).toContain('en_switch=')
-    expect(linkGate).toContain('zh_switch=')
-  })
-
-  // The simulated body follows the release job's assembly order: English notes,
-  // `---`, the zh-CN details block, then the Full Changelog line.
-  const simulateBody = (english: string, chinese: string): string =>
-    [
-      english.trimEnd(),
-      '',
-      '---',
-      '',
-      '<details><summary>简体中文</summary>',
-      '',
-      chinese.trimEnd(),
-      '',
-      '</details>',
-      '',
-      `**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/${lastShippedTag}...${currentTag}`
-    ].join('\n')
-
-  // The only place this suite runs the link gate; `gh` is a local stub echoing
-  // the fixture body, so no real release or network is ever touched.
-  const runLinkGate = (body: string): { status: number; output: string } => {
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-link-gate-'))
-    try {
-      const fixture = join(dir, 'fixture-body.md')
-      writeFileSync(fixture, body)
-      const fakeGh = join(dir, 'gh')
-      writeFileSync(fakeGh, '#!/usr/bin/env bash\ncat "${FAKE_RELEASE_BODY}"\n', { mode: 0o755 })
-      const script = join(dir, 'link-gate.sh')
-      writeFileSync(script, linkGate)
-      const result = spawnSync('bash', [script], {
-        cwd: dir,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          PATH: `${dir}:${process.env.PATH ?? ''}`,
-          RUNNER_TEMP: dir,
-          RELEASE_TAG: currentTag,
-          GITHUB_REPOSITORY: 'chaxiu/OpenCompare',
-          FAKE_RELEASE_BODY: fixture
-        }
-      })
-      return {
-        status: result.status ?? -1,
-        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  }
-
-  it('passes the simulated body with exactly the two absolute switch links', () => {
-    const { status, output } = runLinkGate(simulateBody(releaseNotes, bilingualNotes))
-    expect(output).toContain('link: ' + enSwitch)
-    expect(output).toContain('link: ' + zhSwitch)
-    expect(output).toContain('links: 2')
-    expect(output).toContain('0 relative')
-    expect(output).not.toContain('::error::')
-    expect(status).toBe(0)
-  })
-
-  it('fails closed when the simulated body keeps a relative switch link', () => {
-    const { status, output } = runLinkGate(
-      simulateBody(releaseNotes.replace(enSwitch, `./${currentTag}.zh-CN.md`), bilingualNotes)
-    )
-    expect(status).not.toBe(0)
-    expect(output).toContain('::error::')
-    expect(output).toContain(`./${currentTag}.zh-CN.md`)
-    expect(output).toContain('must be an absolute URL')
-  })
-
-  it('fails closed when either or both absolute switch URLs are missing', () => {
+  it.each(fixture.linkGate.cases)('$id runs the link gate', (row) => {
+    useRow(row.id)
     const dropped = (url: string): string => url.replace('/blob/', '/blobs/')
-    const cases: Array<[string, string]> = [
-      [releaseNotes.replace(enSwitch, dropped(enSwitch)), bilingualNotes],
-      [releaseNotes, bilingualNotes.replace(zhSwitch, dropped(zhSwitch))],
-      [releaseNotes.replace(enSwitch, dropped(enSwitch)), bilingualNotes.replace(zhSwitch, dropped(zhSwitch))]
-    ]
-    for (const [english, chinese] of cases) {
-      const { status, output } = runLinkGate(simulateBody(english, chinese))
-      expect(status).not.toBe(0)
-      expect(output).toContain('::error::')
-      expect(output).toContain('is missing the absolute language switch link')
-    }
+    const english = row.mode === 'relative' ? releaseNotes.replace(enSwitch, `./${currentTag}.zh-CN.md`)
+      : row.mode === 'drop-en' || row.mode === 'drop-both' ? releaseNotes.replace(enSwitch, dropped(enSwitch))
+        : releaseNotes
+    const chinese = row.mode === 'drop-zh' || row.mode === 'drop-both'
+      ? bilingualNotes.replace(zhSwitch, dropped(zhSwitch)) : bilingualNotes
+    const body = [english.trimEnd(), '', assembly.separator, '', assembly.foldOpen, '', chinese.trimEnd(), '',
+      assembly.foldClose, '', fill(assembly.changelog, { previous: assembly.previous.linkGate, tag: currentTag })].join('\n')
+    const result = runInTemp((dir) => {
+      const fixturePath = join(dir, 'fixture-body.md')
+      writeFileSync(fixturePath, body)
+      writeFileSync(join(dir, 'gh'), '#!/usr/bin/env bash\ncat "${FAKE_RELEASE_BODY}"\n', { mode: 0o755 })
+      const scriptPath = join(dir, 'link-gate.sh')
+      writeFileSync(scriptPath, script)
+      return spawnSync('bash', [scriptPath], {
+        cwd: dir, encoding: 'utf8',
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag,
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare', FAKE_RELEASE_BODY: fixturePath }
+      })
+    })
+    if (row.status === 'zero') expect(result.status, row.id).toBe(0)
+    else expect(result.status, row.id).not.toBe(0)
+    expectTokens(result.output, row.tokens.map((token) => fill(token, { tag: currentTag, enSwitch, zhSwitch })), row.id)
+    expectAbsent(result.output, row.absent, row.id)
   })
 })
 
-describe('update metadata consistency', () => {
-  it('pins a space-free nsis artifact name that matches the latest.yml url template', () => {
-    const artifactName = builder.nsis?.artifactName ?? ''
-    expect(artifactName).toBe('${productName}-Setup-${version}.${ext}')
-    expect(artifactName).not.toContain(' ')
-    expect(builder.productName).toBe('OpenCompare')
-    const rendered = artifactName
-      .replace('${productName}', builder.productName ?? '')
-      .replace('${version}', currentVersion)
-      .replace('${ext}', 'exe')
-    // The on-disk installer name is exactly what latest.yml writes as files[].url.
-    expect(rendered).toBe(`OpenCompare-Setup-${currentVersion}.exe`)
-    expect(rendered).toMatch(/^[\w.-]+-Setup-\d+\.\d+\.\d+\.exe$/)
-    expect(rendered).not.toMatch(/\s/)
-    // No divergence with the dotted default (`OpenCompare.Setup.<ver>.exe`).
-    expect(rendered).not.toBe(`OpenCompare.Setup.${currentVersion}.exe`)
+describe('AppImage embedded blockmap gate', () => {
+  const spec = fixture.appImage
+  const script = packageStep(spec.gateName)?.run ?? ''
+  const meta = spec.metadata
+  const imageUrl = fill(meta.appImageUrl, { version: spec.fixtureVersion })
+  const debUrl = fill(meta.debUrl, { version: spec.fixtureVersion })
+  const buildMetadata = (declared: number | null): string =>
+    [fill(meta.versionLine, { version: spec.fixtureVersion }), meta.filesLine, fill(meta.urlLine, { url: imageUrl }),
+      meta.shaLine, meta.sizeLine, ...(declared === null ? [] : [fill(meta.blockMapLine, { declared: String(declared) })]),
+      fill(meta.urlLine, { url: debUrl }), meta.shaLine, meta.sizeLine,
+      fill(meta.pathLine, { appImageUrl: imageUrl }), meta.sha512Line].join('\n')
+
+  it('reads the historical trailer as big-endian, not little-endian', () => {
+    const tail = Buffer.from(spec.tailHex, 'hex')
+    expect(tail.readUInt32BE(0)).toBe(spec.declared)
+    expect(tail.readUInt32LE(0)).toBe(spec.littleEndianDecoded)
+    expect(tail.readUInt32LE(0)).not.toBe(spec.declared)
   })
 
-  const metadataGateScript = finalizeStep('Assert latest*.yml urls match the release assets')?.run ?? ''
-
-  it('gates latest*.yml urls against the release asset names before the latest-release gate', () => {
-    const assetGate = releaseWorkflow.indexOf(
-      'name: Assert the public release has every platform asset'
-    )
-    const urlGate = releaseWorkflow.indexOf(
-      'name: Assert latest*.yml urls match the release assets'
-    )
-    const latestGate = releaseWorkflow.indexOf('name: Assert the tag is the latest published release')
-    expect(assetGate).toBeGreaterThan(-1)
-    expect(urlGate).toBeGreaterThan(assetGate)
-    expect(latestGate).toBeGreaterThan(urlGate)
-
-    expect(metadataGateScript).toContain('files[].url')
-    // Asset name set comes from the published release, not from the build.
-    expect(metadataGateScript).toContain('--json assets')
-    expect(metadataGateScript).toContain('.assets[].name')
-    expect(metadataGateScript).toContain('latest*.yml')
-    expect(metadataGateScript).toContain('exit 1')
-    // The finalize job has no checkout, so no repository modules / yaml package.
-    expect(metadataGateScript).not.toMatch(/require\(\s*["']yaml["']\s*\)/)
-  })
-
-  it('keeps the latest*.yml url gate read-only', () => {
-    expect(metadataGateScript).not.toMatch(/gh release (upload|edit|create|delete)/)
-    expect(metadataGateScript).not.toMatch(/--method\s+(POST|PATCH|PUT|DELETE)/)
-  })
-
-  const appImageGateStep = packageStep('Assert the AppImage embeds its declared blockmap')
-  const appImageGateScript = appImageGateStep?.run ?? ''
-
-  // v0.2.5 CI trailer `00 01 EF A4`: big-endian 126884 is what latest-linux.yml
-  // declares, little-endian is 2767126784. The old LE-only gate rejected it.
-  const v025Trailer = Buffer.from([0x00, 0x01, 0xef, 0xa4])
-  const v025BlockMapSize = 126884
-  const v025LittleEndian = 2767126784
-
-  it('verifies the embedded AppImage blockmap inside the linux packaging job', () => {
-    expect(appImageGateStep).toBeDefined()
-    expect(appImageGateStep?.if).toBe("matrix.target == 'linux'")
-    expect(appImageGateScript).toContain('release/*.AppImage')
-    expect(appImageGateScript).toContain('latest-linux.yml')
-    expect(appImageGateScript).toContain('blockMapSize')
-    // Both byte orders are read and matched; the old LE-only wording is gone.
-    expect(appImageGateScript).toMatch(/readUInt32LE/)
-    expect(appImageGateScript).toMatch(/readUInt32BE/)
-    expect(appImageGateScript).not.toContain('little-endian uint32')
-    expect(appImageGateScript).toContain('exit 1')
-    // No separate *.AppImage.blockmap artifact is required or expected.
-    expect(appImageGateScript).not.toContain('AppImage.blockmap')
-  })
-
-  interface AppImageGateOptions {
-    declared?: number
-    tail?: Buffer
-    size?: number
-    images?: number
-    metadata?: string | null
-  }
-
-  const appImageMetadata = (declared: number | null): string =>
-    [
-      'version: 0.2.5',
-      'files:',
-      '  - url: OpenCompare-0.2.5.AppImage',
-      '    sha512: fixture',
-      '    size: 262144',
-      ...(declared === null ? [] : [`    blockMapSize: ${declared}`]),
-      '  - url: opencompare_0.2.5_amd64.deb',
-      '    sha512: fixture',
-      '    size: 262144',
-      'path: OpenCompare-0.2.5.AppImage',
-      'sha512: fixture'
-    ].join('\n')
-
-  // Tempdir fixtures are the only place this suite writes AppImage bytes.
-  const runAppImageGate = (
-    options: AppImageGateOptions = {}
-  ): { status: number; output: string } => {
-    const {
-      declared = v025BlockMapSize,
-      tail = v025Trailer,
-      size = v025BlockMapSize,
-      images = 1,
-      metadata = appImageMetadata(declared)
-    } = options
-    const dir = mkdtempSync(join(tmpdir(), 'opencompare-appimage-'))
-    try {
+  it.each(spec.cases)('$id runs the AppImage gate', (row) => {
+    useRow(row.id)
+    const declared = row.declared ?? spec.declared
+    const tail = Buffer.from(row.tailHex ?? spec.tailHex, 'hex')
+    const size = row.size ?? spec.declared
+    const images = row.images ?? 1
+    const metadataMode = row.metadataMode ?? 'declared'
+    const result = runInTemp((dir) => {
       const releaseDir = join(dir, 'release')
       mkdirSync(releaseDir, { recursive: true })
       const bytes = Buffer.alloc(size, 0)
       tail.copy(bytes, size - tail.length)
       for (let index = 0; index < images; index += 1) {
-        const suffix = index === 0 ? '' : `-${index}`
-        writeFileSync(join(releaseDir, `OpenCompare-0.2.5${suffix}.AppImage`), bytes)
+        const base = imageUrl.replace(/\.AppImage$/, '')
+        writeFileSync(join(releaseDir, `${base}${index === 0 ? '' : `-${index}`}.AppImage`), bytes)
       }
-      if (metadata !== null) {
-        writeFileSync(join(releaseDir, 'latest-linux.yml'), metadata)
+      if (metadataMode !== 'file-missing') {
+        writeFileSync(join(releaseDir, 'latest-linux.yml'), buildMetadata(metadataMode === 'blockmap-missing' ? null : declared))
       }
-      const script = join(dir, 'appimage-gate.sh')
-      writeFileSync(script, appImageGateScript)
-      const result = spawnSync('bash', [script], { cwd: dir, encoding: 'utf8' })
-      return {
-        status: result.status ?? -1,
-        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  }
-
-  it('passes the v0.2.5 fixture as big-endian while LE single-order would fail', () => {
-    // Negative control on the same fixture: the old LE-only rule cannot pass.
-    expect(v025Trailer.readUInt32BE(0)).toBe(v025BlockMapSize)
-    expect(v025Trailer.readUInt32LE(0)).toBe(v025LittleEndian)
-    expect(v025Trailer.readUInt32LE(0)).not.toBe(v025BlockMapSize)
-
-    const { status, output } = runAppImageGate()
-    expect(output).toContain('embedded blockMapSize=126884')
-    expect(status).toBe(0)
-  })
-
-  it('fails closed when neither trailer byte order matches blockMapSize', () => {
-    // Trailer `00 00 01 00`: BE 256 and LE 65536 are both in range but wrong.
-    const { status, output } = runAppImageGate({ tail: Buffer.from([0x00, 0x00, 0x01, 0x00]) })
-    expect(status).not.toBe(0)
-    expect(output).toContain('::error::')
-    expect(output).toContain(`blockMapSize=${v025BlockMapSize}`)
-    expect(output).toContain('LE=65536')
-    expect(output).toContain('BE=256')
-  })
-
-  it('fails closed when both trailer candidates exceed the file size', () => {
-    const { status, output } = runAppImageGate({
-      declared: 4294967295,
-      size: 16,
-      tail: Buffer.from([0xff, 0xff, 0xff, 0xff])
+      const scriptPath = join(dir, 'appimage-gate.sh')
+      writeFileSync(scriptPath, script)
+      return spawnSync('bash', [scriptPath], { cwd: dir, encoding: 'utf8' })
     })
-    expect(status).not.toBe(0)
-    expect(output).toContain('::error::')
-    expect(output).toContain('exceed the file size 16')
-  })
-
-  it('fails closed when latest-linux.yml has no blockMapSize for the AppImage', () => {
-    const { status, output } = runAppImageGate({ metadata: appImageMetadata(null) })
-    expect(status).not.toBe(0)
-    expect(output).toContain('::error::')
-    expect(output).toContain('blockMapSize')
-  })
-
-  it('fails closed when the metadata file or the single AppImage is missing', () => {
-    const missingMetadata = runAppImageGate({ metadata: null })
-    expect(missingMetadata.status).not.toBe(0)
-    expect(missingMetadata.output).toContain('Missing release/latest-linux.yml')
-
-    const noImage = runAppImageGate({ images: 0 })
-    expect(noImage.status).not.toBe(0)
-    expect(noImage.output).toContain('Expected exactly one .AppImage')
-
-    const twoImages = runAppImageGate({ images: 2 })
-    expect(twoImages.status).not.toBe(0)
-    expect(twoImages.output).toContain('found 2')
+    if (row.status === 'zero') expect(result.status, row.id).toBe(0)
+    else expect(result.status, row.id).not.toBe(0)
+    expectTokens(result.output, row.tokens, row.id)
+    expectAbsent(result.output, row.absent, row.id)
   })
 })
-
-describe('macOS signing and notarization', () => {
-  it('enables the hardened runtime with the shipped entitlements files', () => {
-    expect(builder.mac?.hardenedRuntime).toBe(true)
-    expect(builder.mac?.entitlements).toBe('build/entitlements.mac.plist')
-    expect(builder.mac?.entitlementsInherit).toBe('build/entitlements.mac.plist')
-  })
-
-  it('declares the entitlements Electron needs to launch after signing', () => {
-    for (const key of [
-      'com.apple.security.cs.allow-jit',
-      'com.apple.security.cs.allow-unsigned-executable-memory',
-      'com.apple.security.cs.disable-library-validation'
-    ]) {
-      expect(macEntitlements).toContain(key)
-    }
-  })
-
-  it('enables notarization of the Developer ID bundle', () => {
-    expect(builder.mac?.notarize).toBe(true)
-  })
-
-  it('pins the Developer ID identity and keeps the OpenCompare appId', () => {
-    expect(builder.mac?.identity).toBe('Tao Zhu (3X4J53U6RY)')
-    expect(builder.appId).toBe('com.opencompare.app')
-  })
-
-  it('keeps the macOS dmg and zip targets', () => {
-    expect(builder.mac?.target).toContain('dmg')
-    expect(builder.mac?.target).toContain('zip')
-  })
-
-  it('keeps certificate material out of the repository config', () => {
-    expect(builderConfig).not.toMatch(/BEGIN (RSA |EC )?PRIVATE KEY/)
-    expect(releaseWorkflow).not.toMatch(/BEGIN (RSA |EC )?PRIVATE KEY/)
-  })
-})
-
-describe('release signing secrets wiring', () => {
-  it('wires every signing/notarization secret into the mac matrix build', () => {
-    for (const secret of signingSecrets) {
-      expect(releaseWorkflow).toMatch(
-        new RegExp(`${secret}:\\s*\\$\\{\\{ secrets\\.${secret} \\}\\}`)
-      )
-    }
-    // The packaging step receives the decoded .p8 path, not the base64 secret.
-    expect(releaseWorkflow).toMatch(
-      /APPLE_API_KEY:\s*\$\{\{\s*steps\.api-key\.outputs\.key-path\s*\}\}/
-    )
-  })
-
-  it('wires only the six mac signing secrets plus the workflow token', () => {
-    const secretRefs = [...releaseWorkflow.matchAll(/secrets\.([A-Z0-9_]+)/g)].map(
-      (match) => match[1]
-    )
-    expect(new Set(secretRefs)).toEqual(new Set([...signingSecrets, 'GITHUB_TOKEN']))
-  })
-
-  it('fails closed when the mac credentials are missing', () => {
-    expect(releaseWorkflow).toMatch(/Require macOS signing and notarization credentials/)
-    expect(releaseWorkflow).toMatch(/matrix\.target == 'mac'/)
-    expect(releaseWorkflow).toMatch(/Missing macOS signing\/notarization secrets/)
-    expect(releaseWorkflow).toMatch(
-      /for name in CSC_LINK CSC_KEY_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do/
-    )
-    expect(releaseWorkflow).toMatch(/exit 1/)
-  })
-
-  it('decodes the API key to a 0600 file outside the checkout without logging it', () => {
-    expect(releaseWorkflow).toMatch(/base64 --decode/)
-    expect(releaseWorkflow).toMatch(/\$\{RUNNER_TEMP\}\/opencompare-appstoreconnect\.p8/)
-    expect(releaseWorkflow).toMatch(/chmod 600/)
-    expect(releaseWorkflow).toMatch(/key-path=\$\{key_path\}/)
-    expect(releaseWorkflow).toMatch(/Remove the temporary App Store Connect API key/)
-    expect(releaseWorkflow).not.toMatch(/echo[^\n]*\$\{APPLE_API_KEY\}/)
-  })
-
-  it('no longer reads the legacy Apple ID credentials', () => {
-    expect(releaseWorkflow).not.toMatch(/\bAPPLE_ID\b/)
-    expect(releaseWorkflow).not.toMatch(/APPLE_APP_SPECIFIC_PASSWORD/)
-  })
-})
-
 
 // --- Release evidence ledger: one table-driven traversal over docs/release-evidence ---
-const evidenceRoot = join(repoRoot, 'docs/release-evidence')
-const evidenceFiles = readdirSync(evidenceRoot)
-  .filter((file) => file.endsWith('.md'))
-  .sort()
-const ASSET_NAME =
-  /(OpenCompare[.-][\w.-]*\.(?:blockmap|dmg|zip|exe|AppImage|deb)|opencompare_[\w.-]*\.deb|latest(?:-mac|-linux)?\.yml)/
-const ASSET_FAMILY =
-  /^(?:OpenCompare[.-][^\s/]*\.(?:blockmap|dmg|zip|exe|AppImage|deb)|opencompare_[^\s/]*\.deb|latest(?:-mac|-linux)?\.yml)$/
+const evidenceFiles = readdirSync(join(repoRoot, fixture.evidence.root)).filter((file) => file.endsWith('.md')).sort()
+const ASSET_NAME = /(OpenCompare[.-][\w.-]*\.(?:blockmap|dmg|zip|exe|AppImage|deb)|opencompare_[\w.-]*\.deb|latest(?:-mac|-linux)?\.yml)/
+const ASSET_FAMILY = new RegExp(fixture.evidence.assetFamilyPattern)
 const SHA256 = /(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/
-const semver = (tag: string): number[] => tag.replace(/^v/, '').split('.').map(Number)
-const compareTags = (left: string, right: string): number => {
-  const a = semver(left)
-  const b = semver(right)
-  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index] - b[index]
-  return 0
-}
 const parseEvidence = (file: string) => {
-  const text = readFileSync(join(evidenceRoot, file), 'utf8')
+  const text = readText(join(fixture.evidence.root, file))
   const version = file.slice(0, -'.md'.length)
-  const assets = [
-    ...new Set(
-      text.split(/\r?\n/).flatMap((line) => {
-        const row = /^([^\t|]+)\t\d+\tsha256:[0-9a-f]{64}$/.exec(line)
-        if (row) return [row[1]]
-        const match = line.startsWith('| ') ? ASSET_NAME.exec(line) : null
-        return match ? [match[1]] : []
-      })
-    )
-  ]
-  const commitLine =
-    text.split(/\r?\n/).find((line) => /`[0-9a-f]{7,40}`/.test(line) && /tag\s*→\s*commit|提交|构建检出|本地 HEAD/.test(line)) ?? ''
+  const assets = [...new Set(text.split(/\r?\n/).flatMap((line) => {
+    const row = /^([^\t|]+)\t\d+\tsha256:[0-9a-f]{64}$/.exec(line)
+    if (row) return [row[1]]
+    const match = line.startsWith('| ') ? ASSET_NAME.exec(line) : null
+    return match ? [match[1]] : []
+  }))]
+  const commitLine = text.split(/\r?\n/)
+    .find((line) => /`[0-9a-f]{7,40}`/.test(line) && /tag\s*→\s*commit|提交|构建检出|本地 HEAD/.test(line)) ?? ''
   return {
-    version,
-    text,
+    version, text, assets,
     status: /^status:\s*(\w+)$/m.exec(text)?.[1] ?? '',
-    assets,
-    declared: Number(
-      (/^\| 资产数 \| *([0-9]+)/m.exec(text) ?? /（([0-9]+) 个资产）/.exec(text))?.[1] ?? NaN
-    ),
-    tag:
-      (/^"tagName":"([^"]+)"/m.exec(text) ??
-        /^\| tag_name \| *`([^`]+)`/m.exec(text) ??
-        /^\| tag \| *`([^`]+)`/m.exec(text))?.[1] ?? '',
+    declared: Number((/^\| 资产数 \| *([0-9]+)/m.exec(text) ?? /（([0-9]+) 个资产）/.exec(text))?.[1] ?? NaN),
+    tag: (/^"tagName":"([^"]+)"/m.exec(text) ?? /^\| tag_name \| *`([^`]+)`/m.exec(text) ?? /^\| tag \| *`([^`]+)`/m.exec(text))?.[1] ?? '',
     commit: /`([0-9a-f]{7,40})`/.exec(commitLine)?.[1] ?? '',
     digests: text.match(new RegExp(SHA256.source, 'g')) ?? [],
     malformed: (text.match(/\b[0-9A-Za-z]{64}\b/g) ?? []).filter((token) => !SHA256.test(token))
@@ -849,37 +413,52 @@ const parseEvidence = (file: string) => {
 }
 const evidenceRecords = evidenceFiles.map(parseEvidence)
 const verifiedEvidence = evidenceRecords.filter((record) => record.status === 'verified')
-const expectedAssetCount = (version: string): number => (compareTags(version, 'v0.2.15') >= 0 ? 12 : 11)
-const evidenceAssets = verifiedEvidence.flatMap((r) => r.assets.map((name) => ({ version: r.version, name })))
+const evidenceAssets = verifiedEvidence.flatMap((record) => record.assets.map((name) => ({ version: record.version, name })))
+const ledgerRow = (version: string): LedgerRow | undefined => fixture.evidence.ledger.find((row) => row.version === version)
 
 describe('release evidence ledger (table-driven)', () => {
-  it('traverses the whole evidence directory once', () => {
-    expect(evidenceFiles.length).toBeGreaterThanOrEqual(15)
+  it.each(fixture.evidence.ledger)('$id maps to its status and asset count', (row) => {
+    useRow(row.id)
+    const record = evidenceRecords.find((entry) => entry.version === row.version)
+    expect(record, `${row.version}: evidence file`).toBeDefined()
+    expect(record?.status, `${row.version}: status`).toBe(row.status)
+    if (row.assets !== undefined) expect(record?.declared, `${row.version}: 资产数`).toBe(row.assets)
+  })
+
+  it('covers every evidence file once and keeps the ledger family', () => {
     expect(new Set(evidenceFiles).size).toBe(evidenceFiles.length)
+    expect(fixture.evidence.ledger.map((row) => row.version).sort())
+      .toEqual(evidenceFiles.map((file) => file.slice(0, -'.md'.length)).sort())
     expect(evidenceRecords.every((record) => /^v\d+\.\d+\.\d+$/.test(record.version))).toBe(true)
+    const current = evidenceRecords.find((record) => record.version === currentTag)
+    const currentRow = ledgerRow(currentTag)
+    expect(currentRow, `${currentTag}: fixture row`).toBeDefined()
+    expect(current?.assets.length, `${currentTag}: assets`).toBe(currentRow?.assets)
+    expect(current?.assets.some((name) => name.endsWith('win-x64.zip'))).toBe(true)
   })
 
   it.each(evidenceRecords)('$version declares status, tag and commit identity', (record) => {
-    expect(['verified', 'partial', 'blocked']).toContain(record.status)
-    expect(record.text.match(/^status:/gm) ?? []).toHaveLength(1)
-    expect(record.text.split(/\r?\n/)[0]).toContain(record.version)
+    expect(fixture.evidence.ledger.map((row) => row.status).includes(record.status), record.status).toBe(true)
+    expect(record.text.match(/^status:/gm) ?? [], `${record.version}: status lines`).toHaveLength(1)
+    expectTokens(record.text.split(/\r?\n/)[0], [record.version], `${record.version}: heading`)
     expect(record.text.split(/\r?\n/)[0], `${record.version}: Chinese heading`).toMatch(/\p{Script=Han}/u)
     if (record.tag) expect(record.tag.replace(/\s*（.*$/, '')).toBe(record.version)
     if (record.status === 'verified') {
       expect(record.commit, `${record.version}: commit`).toMatch(/^[0-9a-f]{7,40}$/)
-      expect(record.text, `${record.version}: tag link`).toContain(`releases/tag/${record.version}`)
+      expectTokens(record.text, [`releases/tag/${record.version}`], `${record.version}: tag link`)
     }
   })
 
   it.each(verifiedEvidence)('$version asset rows satisfy the declared count', (record) => {
-    expect(record.declared, `${record.version}: 资产数`).toBe(expectedAssetCount(record.version))
+    const expected = ledgerRow(record.version)?.assets ?? -1
+    expect(record.declared, `${record.version}: 资产数`).toBe(expected)
     expect(record.assets.length, `${record.version}: rows`).toBe(record.declared)
     expect(new Set(record.assets).size, `${record.version}: unique names`).toBe(record.assets.length)
   })
 
   it.each(evidenceAssets)('$version asset $name stays inside the family', ({ version, name }) => {
     expect(ASSET_FAMILY.test(name), `${version}: ${name}`).toBe(true)
-    if (!name.startsWith('latest')) expect(name, `${version}: ${name}`).toContain(version.slice(1))
+    if (!name.startsWith('latest')) expectTokens(name, [version.slice(1)], `${version}: ${name}`)
   })
 
   it.each(verifiedEvidence)('$version digests are well-formed with one measured value', (record) => {
@@ -893,23 +472,13 @@ describe('release evidence ledger (table-driven)', () => {
       expect(record.declared, `${record.version}: 资产数 must stay absent`).toBeNaN()
     }
   )
+})
 
-  it('matches the release workflow asset family and the current 12-row ledger', () => {
-    for (const token of [
-      '.dmg',
-      '.zip',
-      '.exe',
-      '.AppImage',
-      '.deb',
-      '.blockmap',
-      'latest-mac.yml',
-      'latest-linux.yml'
-    ]) {
-      expect(releaseWorkflow, `release.yml: ${token}`).toContain(token)
-    }
-    const current = evidenceRecords.find((record) => record.version === currentTag)
-    expect(current, `${currentTag} evidence`).toBeDefined()
-    expect(current?.assets).toHaveLength(12)
-    expect(current?.assets.some((name) => name.endsWith('win-x64.zip'))).toBe(true)
+describe('fixture ledger coverage', () => {
+  it('consumes every fixture row exactly once by id', () => {
+    expect(new Set(fixtureRowIds).size, 'duplicate fixture ids').toBe(fixtureRowIds.length)
+    expect([...referencedIds].sort(), 'unused fixture rows').toEqual([...fixtureRowIds].sort())
+    expect(fixture.schemaVersion, 'schemaVersion').toBe(1)
+    expect(currentVersion, 'current version').toBe(pkg.version)
   })
 })

@@ -1,0 +1,786 @@
+{
+  "schemaVersion": 1,
+  "packageRows": [
+    {
+      "id": "pkg-author",
+      "path": "author",
+      "present": true
+    },
+    {
+      "id": "pkg-author-email",
+      "path": "author.email",
+      "nonEmpty": true
+    },
+    {
+      "id": "pkg-license",
+      "path": "license",
+      "value": "MIT"
+    },
+    {
+      "id": "pkg-homepage",
+      "path": "homepage",
+      "value": "https://github.com/chaxiu/OpenCompare"
+    },
+    {
+      "id": "pkg-version",
+      "path": "version",
+      "nonEmpty": true
+    }
+  ],
+  "builderRows": [
+    {
+      "id": "bld-app-id",
+      "path": "appId",
+      "value": "com.opencompare.app"
+    },
+    {
+      "id": "bld-product-name",
+      "path": "productName",
+      "value": "OpenCompare"
+    },
+    {
+      "id": "bld-linux-maintainer",
+      "path": "linux.maintainer",
+      "nonEmpty": true,
+      "tokens": [
+        "@"
+      ]
+    },
+    {
+      "id": "bld-linux-target",
+      "path": "linux.target",
+      "value": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    {
+      "id": "bld-publish-provider",
+      "path": "publish.provider",
+      "value": "github"
+    },
+    {
+      "id": "bld-publish-release-type",
+      "path": "publish.releaseType",
+      "value": "release"
+    },
+    {
+      "id": "bld-mac-hardened-runtime",
+      "path": "mac.hardenedRuntime",
+      "value": true
+    },
+    {
+      "id": "bld-mac-entitlements",
+      "path": "mac.entitlements",
+      "value": "build/entitlements.mac.plist"
+    },
+    {
+      "id": "bld-mac-entitlements-inherit",
+      "path": "mac.entitlementsInherit",
+      "value": "build/entitlements.mac.plist"
+    },
+    {
+      "id": "bld-mac-notarize",
+      "path": "mac.notarize",
+      "value": true
+    },
+    {
+      "id": "bld-mac-identity",
+      "path": "mac.identity",
+      "value": "Tao Zhu (3X4J53U6RY)"
+    },
+    {
+      "id": "bld-mac-target",
+      "path": "mac.target",
+      "value": [
+        "dmg",
+        "zip"
+      ]
+    },
+    {
+      "id": "bld-nsis-artifact",
+      "path": "nsis.artifactName",
+      "value": "${productName}-Setup-${version}.${ext}"
+    }
+  ],
+  "entitlements": [
+    {
+      "id": "entitlement-allow-jit",
+      "key": "com.apple.security.cs.allow-jit"
+    },
+    {
+      "id": "entitlement-unsigned-memory",
+      "key": "com.apple.security.cs.allow-unsigned-executable-memory"
+    },
+    {
+      "id": "entitlement-disable-library-validation",
+      "key": "com.apple.security.cs.disable-library-validation"
+    }
+  ],
+  "docs": [
+    {
+      "id": "builder-config-safety",
+      "path": "electron-builder.yml",
+      "tokens": [],
+      "absent": [],
+      "absentPatterns": [
+        "BEGIN (?:RSA |EC )?PRIVATE KEY"
+      ]
+    },
+    {
+      "id": "release-workflow-safety",
+      "path": ".github/workflows/release.yml",
+      "tokens": [],
+      "absent": [],
+      "absentPatterns": [
+        "BEGIN (?:RSA |EC )?PRIVATE KEY"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "pre-create-release",
+      "job": "gates",
+      "name": "Pre-create the tag's release",
+      "tokens": [
+        "version=\"$(node -p \"require('./package.json').version\")\"",
+        "notes_file=\"docs/release-notes/v${version}.md\"",
+        "notes_zh_file=\"docs/release-notes/v${version}.zh-CN.md\"",
+        "${RUNNER_TEMP}/release-body-${RELEASE_TAG}.md",
+        "if [ ! -f \"${notes_file}\" ]; then",
+        "if [ -z \"$(tr -d '[:space:]' < \"${notes_file}\")\" ]; then",
+        "if [ ! -f \"${notes_zh_file}\" ]; then",
+        "if [ -z \"$(tr -d '[:space:]' < \"${notes_zh_file}\")\" ]; then",
+        "::error::Missing release notes ${notes_file}",
+        "::error::Release notes ${notes_file} are empty",
+        "::error::Missing release notes ${notes_zh_file}",
+        "::error::Release notes ${notes_zh_file} are empty (Simplified Chinese)",
+        "gh release list --exclude-drafts",
+        "select(.tagName != \\\"${RELEASE_TAG}\\\")",
+        "echo \"**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${last}...${RELEASE_TAG}\"",
+        "Could not resolve the previous published release",
+        "--notes-file \"${body_file}\"",
+        "already public; leaving its body untouched",
+        "echo '---'",
+        "echo '<details><summary>简体中文</summary>'",
+        "echo '</details>'",
+        "gh api --method DELETE",
+        "gh release create",
+        "gh release edit"
+      ],
+      "absent": [
+        "--generate-notes",
+        "v0.2.9",
+        "v0.2.10"
+      ],
+      "patterns": [],
+      "absentPatterns": [
+        "docs\\/release-notes\\/v\\d+\\.\\d+\\.\\d+"
+      ]
+    },
+    {
+      "id": "published-body-gate",
+      "job": "finalize",
+      "name": "Assert the published release body is bilingual",
+      "tokens": [
+        "set -euo pipefail",
+        "gh release view \"${RELEASE_TAG}\"",
+        "--json body",
+        "<details>",
+        "简体中文",
+        "</details>",
+        "exit 1",
+        "::error::",
+        "head -n \"$((details_line - 1))\"",
+        "zh_body"
+      ],
+      "absent": [
+        "docs/release-notes/"
+      ],
+      "patterns": [
+        "body is missing the zh-CN",
+        "English segment does not carry the version",
+        "Chinese segment does not carry the version"
+      ],
+      "absentPatterns": [
+        "gh release (upload|edit|create|delete)",
+        "--method\\s+(POST|PATCH|PUT|DELETE)"
+      ]
+    },
+    {
+      "id": "published-links-gate",
+      "job": "finalize",
+      "name": "Assert the published release body links are absolute",
+      "tokens": [
+        "gh release view \"${RELEASE_TAG}\"",
+        "--json body",
+        "link: ",
+        "must be an absolute URL",
+        "is missing the absolute language switch link",
+        "exit 1",
+        "en_switch=",
+        "zh_switch="
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "gh release (upload|edit|create|delete)",
+        "--method\\s+(POST|PATCH|PUT|DELETE)"
+      ]
+    },
+    {
+      "id": "latest-yml-url-gate",
+      "job": "finalize",
+      "name": "Assert latest*.yml urls match the release assets",
+      "tokens": [
+        "files[].url",
+        "--json assets",
+        ".assets[].name",
+        "latest*.yml",
+        "exit 1"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "gh release (upload|edit|create|delete)",
+        "--method\\s+(POST|PATCH|PUT|DELETE)",
+        "require\\(\\s*[\"']yaml[\"']\\s*\\)"
+      ]
+    },
+    {
+      "id": "appimage-blockmap-gate",
+      "job": "release",
+      "name": "Assert the AppImage embeds its declared blockmap",
+      "if": "matrix.target == 'linux'",
+      "tokens": [
+        "release/*.AppImage",
+        "latest-linux.yml",
+        "blockMapSize",
+        "exit 1"
+      ],
+      "absent": [
+        "little-endian uint32",
+        "AppImage.blockmap"
+      ],
+      "patterns": [
+        "readUInt32LE",
+        "readUInt32BE"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "mac-credentials-gate",
+      "job": "release",
+      "name": "Require macOS signing and notarization credentials",
+      "if": "matrix.target == 'mac'",
+      "tokens": [
+        "Missing macOS signing/notarization secrets",
+        "for name in CSC_LINK CSC_KEY_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do",
+        "exit 1"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "materialize-api-key",
+      "job": "release",
+      "name": "Materialize the App Store Connect API key",
+      "if": "matrix.target == 'mac'",
+      "tokens": [
+        "base64 --decode",
+        "${RUNNER_TEMP}/opencompare-appstoreconnect.p8",
+        "chmod 600",
+        "key-path=${key_path}"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "echo[^\\n]*\\$\\{APPLE_API_KEY\\}"
+      ]
+    },
+    {
+      "id": "remove-api-key",
+      "job": "release",
+      "name": "Remove the temporary App Store Connect API key",
+      "if": "matrix.target == 'mac' && always()",
+      "tokens": [
+        "rm -f"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": []
+    }
+  ],
+  "stepOrder": [
+    {
+      "id": "finalize-order",
+      "names": [
+        "Make the tag's release public",
+        "Assert the published release body is bilingual",
+        "Assert the published release body links are absolute",
+        "Verify the tag has exactly one public release",
+        "Assert the public release has every platform asset",
+        "Assert latest*.yml urls match the release assets",
+        "Assert the tag is the latest published release"
+      ],
+      "mustBeLast": true
+    },
+    {
+      "id": "metadata-gate-position",
+      "names": [
+        "Assert the public release has every platform asset",
+        "Assert latest*.yml urls match the release assets",
+        "Assert the tag is the latest published release"
+      ],
+      "mustBeLast": false
+    }
+  ],
+  "workflowChecks": [
+    {
+      "id": "workflow-trigger-and-single-release",
+      "tokens": [],
+      "absent": [
+        "--publish always"
+      ],
+      "patterns": [
+        "tags:\\s*\\n\\s*-\\s*'v\\*'",
+        "name: Quality gates",
+        "needs: gates",
+        "target: mac",
+        "target: win",
+        "target: linux",
+        "GH_REPO: \\$\\{\\{ github\\.repository \\}\\}",
+        "electron-builder --\\$\\{\\{ matrix\\.target \\}\\} --publish never",
+        "gh api --method DELETE"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "workflow-single-release-commands",
+      "tokens": [],
+      "absent": [],
+      "patterns": [
+        "gh release create\\s+\"\\$\\{RELEASE_TAG\\}\"[\\s\\S]*?--repo\\s+\"\\$\\{GITHUB_REPOSITORY\\}\"[\\s\\S]*?--draft[\\s\\S]*?--notes-file",
+        "gh release upload\\s+\"\\$\\{RELEASE_TAG\\}\"[\\s\\S]*?--clobber[\\s\\S]*?--repo\\s+\"\\$\\{GITHUB_REPOSITORY\\}\"",
+        "gh release edit\\s+\"\\$\\{RELEASE_TAG\\}\"\\s+--repo\\s+\"\\$\\{GITHUB_REPOSITORY\\}\"\\s+--draft=false\\s+--latest"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "workflow-asset-family",
+      "tokens": [
+        ".dmg",
+        ".zip",
+        ".exe",
+        ".AppImage",
+        ".deb",
+        ".blockmap",
+        "latest-mac.yml",
+        "latest-linux.yml"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "workflow-legacy-apple-id",
+      "tokens": [],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "\\bAPPLE_ID\\b",
+        "APPLE_APP_SPECIFIC_PASSWORD"
+      ]
+    }
+  ],
+  "releaseBody": {
+    "id": "release-body-contract",
+    "name": "Pre-create the tag's release",
+    "makePublicName": "Make the tag's release public",
+    "versionDerivation": "version=\"$(node -p \"require('./package.json').version\")\"",
+    "notesPath": "notes_file=\"docs/release-notes/v${version}.md\"",
+    "bilingualPath": "notes_zh_file=\"docs/release-notes/v${version}.zh-CN.md\"",
+    "bodyFile": "${RUNNER_TEMP}/release-body-${RELEASE_TAG}.md",
+    "notesFileFlag": "--notes-file \"${body_file}\"",
+    "notesFileWrites": 2,
+    "bodyReads": {
+      "english": "cat \"${notes_file}\"",
+      "chinese": "cat \"${notes_zh_file}\""
+    },
+    "guards": [
+      {
+        "id": "guard-missing-en",
+        "marker": "if [ ! -f \"${notes_file}\" ]; then",
+        "message": "::error::Missing release notes ${notes_file}"
+      },
+      {
+        "id": "guard-blank-en",
+        "marker": "if [ -z \"$(tr -d '[:space:]' < \"${notes_file}\")\" ]; then",
+        "message": "::error::Release notes ${notes_file} are empty (English)"
+      },
+      {
+        "id": "guard-missing-zh",
+        "marker": "if [ ! -f \"${notes_zh_file}\" ]; then",
+        "message": "::error::Missing release notes ${notes_zh_file}"
+      },
+      {
+        "id": "guard-blank-zh",
+        "marker": "if [ -z \"$(tr -d '[:space:]' < \"${notes_zh_file}\")\" ]; then",
+        "message": "::error::Release notes ${notes_zh_file} are empty (Simplified Chinese)"
+      }
+    ],
+    "create": "gh release create",
+    "edit": "gh release edit",
+    "draftProbe": "--jq '.draft'",
+    "previousRelease": "Could not resolve the previous published release",
+    "previousSelector": "select(.tagName != \\\"${RELEASE_TAG}\\\")",
+    "changelog": "**Full Changelog**",
+    "changelogLine": "echo \"**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${last}...${RELEASE_TAG}\"",
+    "publicNote": "already public; leaving its body untouched",
+    "separator": "echo '---'",
+    "foldOpen": "echo '<details><summary>简体中文</summary>'",
+    "foldClose": "echo '</details>'",
+    "foldCounts": {
+      "open": 1,
+      "close": 1
+    },
+    "finalizeBodyFree": "gh release edit \"${RELEASE_TAG}\" --repo \"${GITHUB_REPOSITORY}\" --draft=false --latest",
+    "previousLookup": "gh release list --exclude-drafts",
+    "exitToken": "exit 1",
+    "detailsTag": "<details>",
+    "detailsCloseTag": "</details>"
+  },
+  "notesLinks": {
+    "baseTemplate": "https://github.com/chaxiu/OpenCompare/blob/${tag}/docs/release-notes",
+    "rows": [
+      {
+        "id": "notes-en-switch",
+        "doc": "docs/release-notes/${tag}.md",
+        "thirdLineTemplate": "English | [简体中文](${base}/${tag}.zh-CN.md)",
+        "absent": [
+          "./(",
+          "](${tag}"
+        ],
+        "linkCount": 1
+      },
+      {
+        "id": "notes-zh-switch",
+        "doc": "docs/release-notes/${tag}.zh-CN.md",
+        "thirdLineTemplate": "[English](${base}/${tag}.md) | 简体中文",
+        "absent": [
+          "./(",
+          "](${tag}"
+        ],
+        "linkCount": 1
+      }
+    ]
+  },
+  "bodyAssembly": {
+    "separator": "---",
+    "foldOpen": "<details><summary>简体中文</summary>",
+    "foldClose": "</details>",
+    "changelog": "**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/${previous}...${tag}",
+    "previous": {
+      "bodyGate": "v0.2.12",
+      "linkGate": "v0.2.15"
+    }
+  },
+  "bodyGate": {
+    "name": "Assert the published release body is bilingual",
+    "cases": [
+      {
+        "id": "body-pass",
+        "mode": "pass",
+        "status": "zero",
+        "tokens": [
+          "Verified the published ${tag} body"
+        ],
+        "absent": []
+      },
+      {
+        "id": "body-no-fold",
+        "mode": "no-fold",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "body is missing the zh-CN"
+        ],
+        "absent": []
+      },
+      {
+        "id": "body-missing-en",
+        "mode": "missing-en",
+        "status": "nonzero",
+        "tokens": [
+          "English segment does not carry the version"
+        ],
+        "absent": []
+      },
+      {
+        "id": "body-missing-zh",
+        "mode": "missing-zh",
+        "status": "nonzero",
+        "tokens": [
+          "Chinese segment does not carry the version"
+        ],
+        "absent": []
+      }
+    ]
+  },
+  "linkGate": {
+    "name": "Assert the published release body links are absolute",
+    "cases": [
+      {
+        "id": "link-pass",
+        "mode": "pass",
+        "status": "zero",
+        "tokens": [
+          "link: ${enSwitch}",
+          "link: ${zhSwitch}",
+          "links: 2",
+          "0 relative"
+        ],
+        "absent": [
+          "::error::"
+        ]
+      },
+      {
+        "id": "link-relative",
+        "mode": "relative",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "./${tag}.zh-CN.md",
+          "must be an absolute URL"
+        ],
+        "absent": []
+      },
+      {
+        "id": "link-missing-en",
+        "mode": "drop-en",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "is missing the absolute language switch link"
+        ],
+        "absent": []
+      },
+      {
+        "id": "link-missing-zh",
+        "mode": "drop-zh",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "is missing the absolute language switch link"
+        ],
+        "absent": []
+      },
+      {
+        "id": "link-missing-both",
+        "mode": "drop-both",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "is missing the absolute language switch link"
+        ],
+        "absent": []
+      }
+    ]
+  },
+  "appImage": {
+    "gateName": "Assert the AppImage embeds its declared blockmap",
+    "fixtureVersion": "0.2.5",
+    "declared": 126884,
+    "tailHex": "0001efa4",
+    "littleEndianDecoded": 2767126784,
+    "metadata": {
+      "versionLine": "version: ${version}",
+      "filesLine": "files:",
+      "urlLine": "  - url: ${url}",
+      "shaLine": "    sha512: fixture",
+      "sizeLine": "    size: 262144",
+      "blockMapLine": "    blockMapSize: ${declared}",
+      "pathLine": "path: ${appImageUrl}",
+      "sha512Line": "sha512: fixture",
+      "appImageUrl": "OpenCompare-${version}.AppImage",
+      "debUrl": "opencompare_${version}_amd64.deb"
+    },
+    "cases": [
+      {
+        "id": "appimage-pass",
+        "status": "zero",
+        "tokens": [
+          "embedded blockMapSize=126884"
+        ],
+        "absent": []
+      },
+      {
+        "id": "appimage-wrong-tail",
+        "tailHex": "00000100",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "blockMapSize=126884",
+          "LE=65536",
+          "BE=256"
+        ],
+        "absent": []
+      },
+      {
+        "id": "appimage-tail-exceeds-size",
+        "declared": 4294967295,
+        "size": 16,
+        "tailHex": "ffffffff",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "exceed the file size 16"
+        ],
+        "absent": []
+      },
+      {
+        "id": "appimage-no-blockmap",
+        "metadataMode": "blockmap-missing",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "blockMapSize"
+        ],
+        "absent": []
+      },
+      {
+        "id": "appimage-missing-metadata",
+        "metadataMode": "file-missing",
+        "status": "nonzero",
+        "tokens": [
+          "Missing release/latest-linux.yml"
+        ],
+        "absent": []
+      },
+      {
+        "id": "appimage-no-image",
+        "images": 0,
+        "status": "nonzero",
+        "tokens": [
+          "Expected exactly one .AppImage"
+        ],
+        "absent": []
+      },
+      {
+        "id": "appimage-two-images",
+        "images": 2,
+        "status": "nonzero",
+        "tokens": [
+          "found 2"
+        ],
+        "absent": []
+      }
+    ]
+  },
+  "signing": {
+    "secrets": [
+      "CSC_LINK",
+      "CSC_KEY_PASSWORD",
+      "APPLE_TEAM_ID",
+      "APPLE_API_KEY",
+      "APPLE_API_KEY_ID",
+      "APPLE_API_ISSUER"
+    ],
+    "token": "GITHUB_TOKEN",
+    "secretPattern": "${secret}:\\s*\\$\\{\\{ secrets\\.${secret} \\}\\}",
+    "apiKeyRefPattern": "APPLE_API_KEY:\\s*\\$\\{\\{\\s*steps\\.api-key\\.outputs\\.key-path\\s*\\}\\}"
+  },
+  "evidence": {
+    "root": "docs/release-evidence",
+    "assetFamilyPattern": "^(?:OpenCompare[.-][^\\s/]*\\.(?:blockmap|dmg|zip|exe|AppImage|deb)|opencompare_[^\\s/]*\\.deb|latest(?:-mac|-linux)?\\.yml)$",
+    "ledger": [
+      {
+        "id": "evidence-v0.2.0",
+        "version": "v0.2.0",
+        "status": "blocked"
+      },
+      {
+        "id": "evidence-v0.2.1",
+        "version": "v0.2.1",
+        "status": "blocked"
+      },
+      {
+        "id": "evidence-v0.2.2",
+        "version": "v0.2.2",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.4",
+        "version": "v0.2.4",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.5",
+        "version": "v0.2.5",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.6",
+        "version": "v0.2.6",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.7",
+        "version": "v0.2.7",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.8",
+        "version": "v0.2.8",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.9",
+        "version": "v0.2.9",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.10",
+        "version": "v0.2.10",
+        "status": "partial"
+      },
+      {
+        "id": "evidence-v0.2.11",
+        "version": "v0.2.11",
+        "status": "partial"
+      },
+      {
+        "id": "evidence-v0.2.12",
+        "version": "v0.2.12",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.14",
+        "version": "v0.2.14",
+        "status": "verified",
+        "assets": 11
+      },
+      {
+        "id": "evidence-v0.2.15",
+        "version": "v0.2.15",
+        "status": "verified",
+        "assets": 12
+      },
+      {
+        "id": "evidence-v0.2.16",
+        "version": "v0.2.16",
+        "status": "verified",
+        "assets": 12
+      }
+    ]
+  }
+}
