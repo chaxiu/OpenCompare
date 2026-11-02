@@ -138,12 +138,14 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.reject.conflictCandidateOutsideSet':
     'the chosen source is not one of the candidates',
   'directory.template.reject.targetOccupiedByDirectory': 'a folder occupies the target',
+  'directory.template.reject.pathEscape': 'the target path escapes the output root',
   'directory.template.reject.duplicateSource': 'an earlier slot already uses this source',
   'directory.template.error.applyRefused': 'Cannot write to the output root {path}: {reason}',
   'directory.template.error.applyFailed':
     'Placement failed; check the output root and try again.',
   'directory.template.failure.sourceDrift': 'the source changed after planning',
   'directory.template.failure.sourceUnreadable': 'the source cannot be read',
+  'directory.template.failure.pathEscape': 'the target path escapes the output root',
   'directory.template.failure.writeFailed': 'the write failed',
   'directory.template.failure.withCode': '{reason} (code {code})',
   'directory.template.result.title': 'Template placement result',

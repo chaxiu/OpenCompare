@@ -8,6 +8,11 @@
  * over B plus a content-hash memo — so no pair-wise body comparison happens and
  * each file is read and hashed at most once.
  *
+ * Name matching is exact first, then a *unique* case-fold fallback: macOS APFS
+ * is case-insensitive by default, so `logo.png` and `Logo.png` are one file.
+ * A case-only hit with the same hash is `matched`; a different hash is
+ * `content-mismatch`; several case variants are `ambiguous`.
+ *
  * Outcomes per template slot:
  *  - `matched`  — exactly one same-name candidate whose hash equals the slot's,
  *  - `missing`  — no same-name candidate at all,
@@ -20,6 +25,43 @@ import { OperationCancelledError, isOperationCancelled } from '../io'
 import type { ScannedNode, ScannedTree } from './compare'
 import { sha256Hex } from './hash'
 import { joinRelativePath } from './sync'
+
+/**
+ * Case fold used **only for comparison**: the output root may hold `logo.png`
+ * while a template slot says `Logo.png` (macOS APFS is case-insensitive). It is
+ * never used to build a path that is written to disk.
+ */
+export function foldCase(value: string): string {
+  return value.toLowerCase()
+}
+
+/** Stable reason of a relative slot path that is absolute or escapes its root. */
+export type TemplatePathIssue = 'path-escape'
+
+/**
+ * Pure relative-path safety check shared by the plan, the resolver, the
+ * executor and the gates. Only string handling is used (`\` → `/`, segment
+ * split, drive / UNC / absolute detection), so the renderer and vitest can
+ * import it without `node:path`.
+ *
+ * A path is refused when it is empty, absolute (POSIX `/`, Windows `C:`, UNC
+ * `\\server\share`), contains a `..` segment after normalization, or resolves
+ * to the root itself instead of a file below it.
+ */
+export function templatePathIssue(relativePath: string): TemplatePathIssue | undefined {
+  if (relativePath === '') return 'path-escape'
+  const normalized = relativePath.replace(/\\/g, '/')
+  if (normalized.startsWith('/')) return 'path-escape'
+  if (/^[A-Za-z]:/.test(normalized)) return 'path-escape'
+
+  let depth = 0
+  for (const segment of normalized.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') return 'path-escape'
+    depth += 1
+  }
+  return depth === 0 ? 'path-escape' : undefined
+}
 
 export interface TemplateMatch {
   /** Template slot, i.e. the relative path the file is restored to. */
@@ -103,11 +145,16 @@ export async function matchTemplate(
   }
 
   const incomingByName = new Map<string, ScannedNode[]>()
+  const incomingByFoldedName = new Map<string, ScannedNode[]>()
   for (const node of incoming.index.values()) {
     if (node.kind !== 'file') continue
-    const bucket = incomingByName.get(node.name)
-    if (bucket === undefined) incomingByName.set(node.name, [node])
-    else bucket.push(node)
+    const exactBucket = incomingByName.get(node.name)
+    if (exactBucket === undefined) incomingByName.set(node.name, [node])
+    else exactBucket.push(node)
+    const folded = foldCase(node.name)
+    const foldedBucket = incomingByFoldedName.get(folded)
+    if (foldedBucket === undefined) incomingByFoldedName.set(folded, [node])
+    else foldedBucket.push(node)
   }
 
   const templateFiles = [...template.index.entries()]
@@ -120,7 +167,13 @@ export async function matchTemplate(
   const consumed = new Set<string>()
 
   for (const [relativePath, slot] of templateFiles) {
-    const candidates = incomingByName.get(slot.name) ?? []
+    // Exact spelling always wins; the case-fold bucket is only a fallback when
+    // no candidate carries the slot's own spelling.
+    const exact = incomingByName.get(slot.name) ?? []
+    const caseFold = exact.length === 0
+    const candidates = caseFold
+      ? (incomingByFoldedName.get(foldCase(slot.name)) ?? [])
+      : exact
     if (candidates.length === 0) {
       missing.push({ relativePath, templatePath: slot.path, size: slot.size })
       continue
@@ -139,6 +192,9 @@ export async function matchTemplate(
           modifiedMs: candidate.modifiedMs
         })
       }
+      // A case-only variant is a conflict candidate, never an "unused" file:
+      // leaving it listed there would repeat the original missing + unused bug.
+      if (caseFold) for (const candidate of candidates) consumed.add(candidate.path)
       conflicts.push({
         relativePath,
         templatePath: slot.path,
@@ -162,6 +218,7 @@ export async function matchTemplate(
         text: candidateContent.text
       })
     } else {
+      if (caseFold) consumed.add(candidate.path)
       conflicts.push({
         relativePath,
         templatePath: slot.path,
@@ -257,6 +314,21 @@ function parentPathOf(path: string): string {
 function nameOfPath(path: string): string {
   const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return index === -1 ? path : path.slice(index + 1)
+}
+
+/**
+ * Exact spelling first; otherwise the only case-only variant. Several case
+ * variants are never guessed, so an ambiguous listing reads as not found.
+ */
+function entryForName(
+  entries: readonly DirectoryEntry[],
+  name: string
+): DirectoryEntry | undefined {
+  const exact = entries.find((entry) => entry.name === name)
+  if (exact !== undefined) return exact
+  const folded = foldCase(name)
+  const variants = entries.filter((entry) => foldCase(entry.name) === folded)
+  return variants.length === 1 ? variants[0] : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +429,11 @@ interface SourceInput {
  * source is `placed`: it is neither an overwrite nor a conflict, it never
  * starts checked and it can never be executed. Only a digest equality counts;
  * mtime is ignored and a directory on the slot keeps `occupiedByDirectory`.
+ *
+ * The target lookup is exact first, then a unique case-fold hit (APFS is
+ * case-insensitive): a case-only file with different content is an explicit
+ * overwrite, one with the same content is `placed`, and several case variants
+ * are never guessed — they stay unchecked and are never `placed`.
  */
 export function createTemplatePlan(
   result: TemplateMatchResult,
@@ -366,9 +443,53 @@ export function createTemplatePlan(
   const existingDirectories = new Set(options.existingDirectories ?? [])
   const existingFileHashes = options.existingFileHashes ?? {}
 
-  function isPlaced(relativePath: string, sourceHashes: readonly string[]): boolean {
-    if (!existingFiles.has(relativePath) || existingDirectories.has(relativePath)) return false
-    const targetHash = existingFileHashes[relativePath]
+  function byFoldedPath(paths: readonly string[]): Map<string, string[]> {
+    const index = new Map<string, string[]>()
+    for (const path of paths) {
+      const folded = foldCase(path)
+      const bucket = index.get(folded)
+      if (bucket === undefined) index.set(folded, [path])
+      else bucket.push(path)
+    }
+    return index
+  }
+
+  const filesByFoldedPath = byFoldedPath([...existingFiles])
+  const directoriesByFoldedPath = byFoldedPath([...existingDirectories])
+
+  interface TargetState {
+    /** A directory holds the target (exact or the only case-only variant). */
+    readonly occupiedByDirectory: boolean
+    /** The actual output path, when exactly one file holds the target. */
+    readonly existingPath: string | null
+    /** Several case-only file variants: never `placed`, always an overwrite. */
+    readonly ambiguousCase: boolean
+  }
+
+  function targetStateOf(relativePath: string): TargetState {
+    if (existingDirectories.has(relativePath)) {
+      return { occupiedByDirectory: true, existingPath: null, ambiguousCase: false }
+    }
+    if (existingFiles.has(relativePath)) {
+      return { occupiedByDirectory: false, existingPath: relativePath, ambiguousCase: false }
+    }
+
+    const folded = foldCase(relativePath)
+    if ((directoriesByFoldedPath.get(folded) ?? []).length > 0) {
+      return { occupiedByDirectory: true, existingPath: null, ambiguousCase: false }
+    }
+    const files = filesByFoldedPath.get(folded) ?? []
+    if (files.length > 1) {
+      return { occupiedByDirectory: false, existingPath: null, ambiguousCase: true }
+    }
+    return { occupiedByDirectory: false, existingPath: files[0] ?? null, ambiguousCase: false }
+  }
+
+  function isPlaced(state: TargetState, sourceHashes: readonly string[]): boolean {
+    if (state.occupiedByDirectory || state.ambiguousCase || state.existingPath === null) {
+      return false
+    }
+    const targetHash = existingFileHashes[state.existingPath]
     return targetHash !== undefined && sourceHashes.includes(targetHash)
   }
 
@@ -379,8 +500,12 @@ export function createTemplatePlan(
     candidates: readonly TemplateConflictCandidate[] = [],
     conflictReason?: TemplateConflict['reason']
   ): TemplatePlanEntry {
-    const occupiedByDirectory = existingDirectories.has(slot.relativePath)
-    const overwrite = outcome !== 'placed' && existingFiles.has(slot.relativePath)
+    const state = targetStateOf(slot.relativePath)
+    const unsafe = templatePathIssue(slot.relativePath) !== undefined
+    const overwrite =
+      outcome !== 'placed' &&
+      !state.occupiedByDirectory &&
+      (state.existingPath !== null || state.ambiguousCase)
     return {
       relativePath: slot.relativePath,
       outcome,
@@ -391,8 +516,9 @@ export function createTemplatePlan(
       sourceHash: source?.sourceHash ?? null,
       sourceModifiedMs: source?.modifiedMs ?? null,
       overwrite,
-      occupiedByDirectory,
-      defaultChecked: outcome === 'matched' && !overwrite && !occupiedByDirectory,
+      occupiedByDirectory: state.occupiedByDirectory,
+      defaultChecked:
+        outcome === 'matched' && !unsafe && !overwrite && !state.occupiedByDirectory,
       conflictReason,
       candidates
     }
@@ -406,7 +532,7 @@ export function createTemplatePlan(
       sourceHash: item.hash,
       modifiedMs: item.modifiedMs
     }
-    if (isPlaced(item.relativePath, [item.hash])) {
+    if (isPlaced(targetStateOf(item.relativePath), [item.hash])) {
       placed.push(toEntry('placed', item, source))
       continue
     }
@@ -415,7 +541,12 @@ export function createTemplatePlan(
   const missing = result.missing.map((item) => toEntry('missing', item, null))
   const conflicts: TemplatePlanEntry[] = []
   for (const item of result.conflicts) {
-    if (isPlaced(item.relativePath, item.candidates.map((candidate) => candidate.hash))) {
+    if (
+      isPlaced(
+        targetStateOf(item.relativePath),
+        item.candidates.map((candidate) => candidate.hash)
+      )
+    ) {
       placed.push(toEntry('placed', item, null, item.candidates, item.reason))
       continue
     }
@@ -469,6 +600,8 @@ export type TemplateRejectionReason =
   | 'conflict-candidate-outside-set'
   /** A directory already occupies the destination. */
   | 'target-occupied-by-directory'
+  /** The slot path is absolute, empty or escapes the output root. */
+  | 'path-escape'
   /** Another slot with a lower `relativePath` already claims the same source. */
   | 'duplicate-source'
 
@@ -522,6 +655,12 @@ export function resolveTemplatePlan(
   for (const entry of slots) {
     if (entry.outcome === 'placed') continue
     if (!checked.has(entry.relativePath)) continue
+    // Defense in depth: the plan never default-checks such a row, but an
+    // explicit check must still be refused before it reaches the executor.
+    if (templatePathIssue(entry.relativePath) !== undefined) {
+      reject(entry.relativePath, 'path-escape')
+      continue
+    }
     if (entry.occupiedByDirectory) {
       reject(entry.relativePath, 'target-occupied-by-directory')
       continue
@@ -628,6 +767,8 @@ export type TemplateWriteFailureReason =
   | 'source-drift'
   /** The source could not be read back at all. */
   | 'source-unreadable'
+  /** The slot path is absolute, empty or escapes the output root; nothing was written. */
+  | 'path-escape'
   /** The filesystem refused the directory or the write itself. */
   | 'write-failed'
 
@@ -693,6 +834,12 @@ export async function executeTemplatePlan(
     if (isAborted(signal)) {
       cancelled = true
       break
+    }
+    // A crafted manifest may still carry an escaping slot: refuse it before the
+    // source is read, so the row writes zero bytes while the rest continues.
+    if (templatePathIssue(entry.relativePath) !== undefined) {
+      fail(entry, 'path-escape')
+      continue
     }
 
     let text: string
@@ -817,7 +964,7 @@ export async function verifyTemplateExtraction(
     } catch {
       listing = undefined
     }
-    const entry = listing?.find((candidate) => candidate.name === name)
+    const entry = listing === undefined ? undefined : entryForName(listing, name)
 
     if (entry === undefined) {
       entries.push({
@@ -849,7 +996,9 @@ export async function verifyTemplateExtraction(
     const actualMtimeSec = Math.floor(entry.modifiedMs / 1000)
     let actualHash: string | null
     try {
-      actualHash = hashOf(await io.readTextFile(item.targetPath))
+      // The listing carries the entry's real spelling, so a case-only target is
+      // read by its actual path instead of the planned spelling.
+      actualHash = hashOf(await io.readTextFile(entry.path))
     } catch {
       actualHash = null
     }

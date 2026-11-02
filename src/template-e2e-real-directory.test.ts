@@ -643,4 +643,76 @@ describe('template placement e2e on a real external directory', () => {
       )
     }
   }, 120_000)
+
+  it('protects a case-only target on a case-insensitive volume', async (context) => {
+    const root = await scratchRoot('opencompare-template-casefold-')
+    await writeFile(join(root, 'probe.txt'), 'probe\n', 'utf8')
+    if (!existsSync(join(root, 'PROBE.TXT'))) {
+      console.warn(
+        'template e2e: the scratch volume is case-sensitive; skipping the APFS case-only e2e'
+      )
+      context.skip()
+      return
+    }
+
+    const templateRoot = join(root, '模板 A')
+    const incomingRoot = join(root, '散乱 树 B')
+    const outputRoot = join(root, '输出 根')
+    const slot = 'Logo.png'
+    const sourceSec = BASE_SEC + 500
+    await writeText(templateRoot, slot, 'new logo body\n')
+    await writeText(incomingRoot, 'bucket/logo.png', 'new logo body\n', sourceSec)
+    await writeText(outputRoot, 'logo.png', 'old logo body\n', BASE_SEC)
+
+    const before = await snapshotTree(outputRoot)
+    const preview = await previewTemplate(platform, { templateRoot, incomingRoot, outputRoot })
+    const row = planRows(preview.plan).find((entry) => entry.relativePath === slot)
+    expect(row?.outcome, 'template e2e: case-only row is matched').toBe('matched')
+    expect(row?.overwrite, 'template e2e: case-only target overwrites').toBe(true)
+    expect(row?.defaultChecked, 'template e2e: case-only target unchecked').toBe(false)
+
+    // Default run: nothing checked, so no write and no directory creation.
+    const defaults = resolveTemplatePlan(preview.plan, {})
+    expect(defaults.executableCount, 'template e2e: default run is empty').toBe(0)
+    const skippedIo = recordIo(platform)
+    const skipped = await applyTemplatePlan(skippedIo.port, defaults)
+    expect(skipped.execution.writtenCount, 'template e2e: default run writes nothing').toBe(0)
+    expect(skippedIo.writes, 'template e2e: default run has zero writes').toEqual([])
+    expect(skippedIo.directories, 'template e2e: default run creates nothing').toEqual([])
+    expect(await snapshotTree(outputRoot), 'template e2e: default run leaves the tree').toEqual(
+      before
+    )
+
+    // Explicit check: the only write overwrites the lowercase target, and the
+    // post-write check accepts the case-only spelling.
+    const explicit = resolveTemplatePlan(preview.plan, { checkedPaths: [slot] })
+    expect(explicit.executable.map((entry) => entry.relativePath)).toEqual([slot])
+    const writeIo = recordIo(platform)
+    const outcome = await applyTemplatePlan(writeIo.port, explicit)
+    expect(outcome.execution.writtenCount, 'template e2e: explicit write count').toBe(1)
+    expect(outcome.execution.failedCount, 'template e2e: explicit write failures').toBe(0)
+    expect(outcome.verification.verified, 'template e2e: case-only row verified').toBe(1)
+    expect(outcome.verification.failed, 'template e2e: case-only row not failed').toBe(0)
+
+    const sourcePath = diskPath(incomingRoot, 'bucket/logo.png')
+    const targetPath = diskPath(outputRoot, slot)
+    expect(await fileSha256(targetPath), 'template e2e: case-only target sha256').toBe(
+      await fileSha256(sourcePath)
+    )
+    expect(
+      Math.floor((await stat(targetPath)).mtimeMs / 1000),
+      'template e2e: case-only target mtimeSec'
+    ).toBe(sourceSec)
+
+    // A rescan reads the same file as already placed, so nothing is pending.
+    const rescanned = await previewTemplate(platform, { templateRoot, incomingRoot, outputRoot })
+    const placed = planRows(rescanned.plan).find((entry) => entry.relativePath === slot)
+    expect(placed?.outcome, 'template e2e: case-only rescan placed').toBe('placed')
+    expect(placed?.overwrite, 'template e2e: case-only rescan not an overwrite').toBe(false)
+    expect(placed?.defaultChecked, 'template e2e: case-only rescan unchecked').toBe(false)
+    expect(
+      resolveTemplatePlan(rescanned.plan, { checkedPaths: [slot] }).executableCount,
+      'template e2e: placed row is never executable'
+    ).toBe(0)
+  }, 60_000)
 })
