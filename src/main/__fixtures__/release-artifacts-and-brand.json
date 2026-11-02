@@ -1,0 +1,814 @@
+{
+  "schemaVersion": 1,
+  "brandAssets": [
+    {
+      "id": "svg-source",
+      "path": "build/icons/icon.svg",
+      "kind": "svg",
+      "headerHex": "3c737667",
+      "minBytes": 0
+    },
+    {
+      "id": "png-main",
+      "path": "build/icon.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "id": "png-16",
+      "path": "build/icons/icon-16.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 16,
+      "height": 16
+    },
+    {
+      "id": "png-32",
+      "path": "build/icons/icon-32.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 32,
+      "height": 32
+    },
+    {
+      "id": "png-64",
+      "path": "build/icons/icon-64.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 64,
+      "height": 64
+    },
+    {
+      "id": "png-128",
+      "path": "build/icons/icon-128.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 128,
+      "height": 128
+    },
+    {
+      "id": "png-256",
+      "path": "build/icons/icon-256.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "id": "png-512",
+      "path": "build/icons/icon-512.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "id": "png-1024",
+      "path": "build/icons/icon-1024.png",
+      "kind": "png",
+      "headerHex": "89504e47",
+      "minBytes": 0,
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "id": "mac-icns",
+      "path": "build/icon.icns",
+      "kind": "icns",
+      "headerHex": "69636e73",
+      "minBytes": 8
+    },
+    {
+      "id": "win-ico",
+      "path": "build/icon.ico",
+      "kind": "ico",
+      "headerHex": "000001000100",
+      "minBytes": 22
+    }
+  ],
+  "builderRows": [
+    {
+      "id": "builder-app-id",
+      "path": "appId",
+      "value": "com.opencompare.app"
+    },
+    {
+      "id": "builder-product-name",
+      "path": "productName",
+      "value": "OpenCompare"
+    },
+    {
+      "id": "builder-mac-icon",
+      "path": "mac.icon",
+      "value": "build/icon.icns",
+      "mustExist": true
+    },
+    {
+      "id": "builder-win-icon",
+      "path": "win.icon",
+      "value": "build/icon.ico",
+      "mustExist": true
+    },
+    {
+      "id": "builder-linux-icon",
+      "path": "linux.icon",
+      "value": "build/icon.png",
+      "mustExist": true
+    },
+    {
+      "id": "builder-mac-target",
+      "path": "mac.target",
+      "value": [
+        "dmg",
+        "zip"
+      ]
+    },
+    {
+      "id": "builder-win-target",
+      "path": "win.target",
+      "value": [
+        "nsis",
+        "zip"
+      ]
+    },
+    {
+      "id": "builder-linux-target",
+      "path": "linux.target",
+      "value": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    {
+      "id": "builder-nsis-artifact",
+      "path": "nsis.artifactName",
+      "value": "${productName}-Setup-${version}.${ext}"
+    },
+    {
+      "id": "builder-win-artifact",
+      "path": "win.artifactName",
+      "value": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    {
+      "id": "builder-extra-resources",
+      "path": "extraResources",
+      "value": [
+        {
+          "from": "build/icon.png",
+          "to": "icon.png"
+        }
+      ]
+    },
+    {
+      "id": "builder-protocols",
+      "path": "protocols",
+      "value": [
+        {
+          "name": "OpenCompare Compare Link",
+          "schemes": [
+            "opencompare"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "builder-linux-mime",
+      "path": "linux.desktop.entry.MimeType",
+      "value": "x-scheme-handler/opencompare"
+    }
+  ],
+  "iconPolicy": {
+    "id": "builder-icon-policy",
+    "requiredPrefix": "build/",
+    "forbiddenPattern": "electron\\.(icns|ico|png)",
+    "electronCandidates": [
+      "node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns",
+      "node_modules/electron/dist/resources/electron.icns"
+    ]
+  },
+  "sources": [
+    {
+      "id": "main-window-icon",
+      "path": "src/main/index.ts",
+      "patterns": [
+        "resolveBrandIconPath\\(",
+        "icon:\\s*iconPath",
+        "app\\.dock\\?\\.setIcon\\(iconPath\\)"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "main-about-panel",
+      "path": "src/main/index.ts",
+      "patterns": [
+        "app\\.setAboutPanelOptions\\(",
+        "app\\.getVersion\\(\\)"
+      ],
+      "absentPatterns": [
+        "\\b\\d+\\.\\d+\\.\\d+\\b",
+        "Electron"
+      ]
+    },
+    {
+      "id": "brand-module-version-free",
+      "path": "src/shared/brand.ts",
+      "patterns": [
+        "export const BRAND_NAME"
+      ],
+      "absentPatterns": [
+        "\\b\\d+\\.\\d+\\.\\d+\\b"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "mac-app-identity",
+      "job": "release",
+      "name": "Locate the packaged app and assert its icon and version",
+      "if": "matrix.target == 'mac'",
+      "tokens": [
+        "find release -maxdepth 2 -name 'OpenCompare.app'",
+        "No OpenCompare.app found",
+        "::error::",
+        "exit 1",
+        "CFBundleIconFile",
+        "electron.icns",
+        "PlistBuddy -c 'Print :CFBundleIconFile'",
+        "Contents/Resources/",
+        "head -c 4",
+        "icns",
+        "node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns",
+        "shasum -a 256",
+        "skipping the SHA-256 default-icon comparison",
+        "Contents/Resources/icon.png",
+        "build/icon.png",
+        "does not match build/icon.png",
+        "CFBundleIdentifier",
+        "com.opencompare.app",
+        "CFBundleShortVersionString",
+        "${RELEASE_TAG#v}"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "mac-arm64",
+        "mac-x64"
+      ]
+    },
+    {
+      "id": "mac-signature",
+      "job": "release",
+      "name": "Verify the app signature, notarization and Gatekeeper acceptance",
+      "if": "matrix.target == 'mac'",
+      "tokens": [
+        "codesign --verify --deep --strict --verbose=2",
+        "codesign --verify --deep --strict failed",
+        "::error::",
+        "exit 1",
+        "codesign -dv --verbose=4",
+        "Authority=Developer ID Application",
+        "TeamIdentifier=3X4J53U6RY",
+        "Signature=adhoc",
+        "(runtime)",
+        "xcrun stapler validate",
+        "hdiutil attach -nobrowse -readonly",
+        "hdiutil detach",
+        "trap detach_dmg EXIT",
+        "find release -maxdepth 1 -name '*.dmg'",
+        "spctl -a -vv --type execute",
+        "accepted",
+        "Notarized Developer ID"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "version-artifacts",
+      "job": "release",
+      "name": "Assert packaged version matches the tag",
+      "tokens": [
+        "case \"${{ matrix.target }}\" in",
+        "mac) required_exts=(dmg zip)",
+        "win) required_exts=(exe zip)",
+        "linux) required_exts=(AppImage deb)",
+        "[0-9]+\\.[0-9]+\\.[0-9]+",
+        "does not match tag",
+        "files=(release/latest*.yml)",
+        "No latest*.yml update metadata found",
+        "String(metadata.version) !== tag",
+        "files[].url",
+        "files[].path",
+        "path ${metadata.path}",
+        "update metadata does not match tag",
+        "files[].url ${url} does not match tag"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "windows-feed",
+      "job": "release",
+      "name": "Assert the Windows update feed points at the NSIS installer",
+      "if": "matrix.target == 'win'",
+      "tokens": [
+        "release/latest*.yml",
+        "files[].url",
+        "endsWith(\".zip\")",
+        "exit 1"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "gh release (upload|edit|create|delete)"
+      ]
+    },
+    {
+      "id": "build-installers",
+      "job": "release",
+      "name": "Build installers",
+      "tokens": [
+        "electron-builder --${{ matrix.target }} --publish never"
+      ],
+      "absent": [
+        "zip"
+      ],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "upload-installers",
+      "job": "release",
+      "name": "Upload installers to the tag's release",
+      "tokens": [
+        "release/*.zip",
+        "release/*.exe"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "if:\\s*always\\(\\)"
+      ]
+    },
+    {
+      "id": "single-public-release",
+      "job": "finalize",
+      "name": "Verify the tag has exactly one public release",
+      "tokens": [
+        "gh api \"repos/${GITHUB_REPOSITORY}/releases\" --paginate | jq -s",
+        ".[][]",
+        "select(.draft)",
+        "select(.prerelease)",
+        "[ \"${count}\" -ne 1 ]",
+        "[ \"${drafts}\" -ne 0 ]",
+        "[ \"${prereleases}\" -ne 0 ]",
+        "for value in \"${count}\" \"${drafts}\" \"${prereleases}\"",
+        "^[0-9]+$",
+        "::error::Could not count the releases",
+        "exit 1"
+      ],
+      "absent": [
+        "--slurp"
+      ],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "platform-assets",
+      "job": "finalize",
+      "name": "Assert the public release has every platform asset",
+      "tokens": [
+        "has_exact_asset",
+        "for asset in \"OpenCompare-Setup-${tag}.exe\" \"OpenCompare-${tag}-win-x64.zip\"; do",
+        "if [ \"${name}\" = \"${wanted}\" ]; then return 0; fi",
+        "is missing the Windows asset ${asset}",
+        "! has_exact_asset \"${asset}\"",
+        "latest-mac.yml latest.yml latest-linux.yml",
+        "gh api \"repos/${GITHUB_REPOSITORY}/releases\" --paginate | jq -s -r",
+        "gh api \"repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets\" --paginate | jq -s -r",
+        "if [ -z \"${release_id}\" ]",
+        "while checking its assets",
+        "if [ -z \"${assets}\" ]",
+        "has no assets",
+        "releases/${release_id}/assets",
+        ".dmg",
+        ".zip",
+        ".exe",
+        ".AppImage",
+        ".deb",
+        "latest-mac.yml",
+        "latest.yml",
+        "latest-linux.yml",
+        "has_asset",
+        "does not carry the tag version"
+      ],
+      "absent": [
+        "--slurp"
+      ],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "latest-published-release",
+      "job": "finalize",
+      "name": "Assert the tag is the latest published release",
+      "tokens": [
+        "gh release list --limit 1 --json tagName",
+        "jq -r '.[0].tagName // empty'",
+        "${RELEASE_TAG}",
+        "[ -z \"${latest}\" ]",
+        "::error::",
+        "exit 1"
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "gh release (?:create|edit|delete|upload)",
+        "--method\\s+(?:POST|PATCH|PUT|DELETE)"
+      ]
+    }
+  ],
+  "stepOrder": [
+    {
+      "id": "release-hardening-order",
+      "names": [
+        "Require macOS signing and notarization credentials",
+        "Build installers",
+        "Locate the packaged app and assert its icon and version",
+        "Verify the app signature, notarization and Gatekeeper acceptance",
+        "Assert packaged version matches the tag",
+        "Upload installers to the tag's release"
+      ],
+      "mustBeLast": false
+    },
+    {
+      "id": "windows-feed-position",
+      "names": [
+        "Assert packaged version matches the tag",
+        "Assert the Windows update feed points at the NSIS installer",
+        "Upload installers to the tag's release"
+      ],
+      "mustBeLast": false
+    },
+    {
+      "id": "finalize-latest-last",
+      "names": [
+        "Make the tag's release public",
+        "Assert the published release body is bilingual",
+        "Assert the published release body links are absolute",
+        "Verify the tag has exactly one public release",
+        "Assert the public release has every platform asset",
+        "Assert latest*.yml urls match the release assets",
+        "Assert the tag is the latest published release"
+      ],
+      "mustBeLast": true
+    }
+  ],
+  "finalizeGates": [
+    "Assert the published release body is bilingual",
+    "Verify the tag has exactly one public release",
+    "Assert the public release has every platform asset",
+    "Assert latest*.yml urls match the release assets",
+    "Assert the tag is the latest published release"
+  ],
+  "docs": [
+    {
+      "id": "brand-doc",
+      "path": "docs/brand-assets.md",
+      "recursive": false,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [
+        "自制",
+        "可替换",
+        "build/icons/icon.svg",
+        "build/icon.png",
+        "build/icon.icns",
+        "build/icon.ico",
+        "node build/icons/generate-icons.mjs"
+      ],
+      "absent": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "signing-doc",
+      "path": "docs/release-signing.md",
+      "recursive": false,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [
+        "打包后硬校验",
+        "codesign --verify --deep --strict",
+        "xcrun stapler validate",
+        "spctl -a -vv",
+        "失败即终止",
+        "不上传",
+        "唯一公开"
+      ],
+      "absent": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "release-process-doc",
+      "path": "docs/release-process.md",
+      "recursive": false,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [
+        ".github/workflows/release.yml",
+        "workflow_dispatch",
+        "v*",
+        "install → lint → typecheck → test → build",
+        "v0.1.2",
+        "latest*.yml",
+        "release:metadata",
+        "codesign --verify --deep --strict",
+        "xcrun stapler validate",
+        "spctl -a -vv",
+        "唯一公开 Release",
+        "- **Windows**：NSIS `.exe` 安装包 + 免安装 `.zip`（解压即用，无安装步骤）"
+      ],
+      "absent": [
+        "Windows**：NSIS `.exe` 安装包。"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "release-process-perf",
+      "path": "docs/release-process.md",
+      "recursive": false,
+      "anchor": "Release-time performance evidence",
+      "normalizeEnDash": true,
+      "tokens": [
+        "1.9-2.0 GiB",
+        "1.6-1.9 GiB",
+        "2.15-2.5 GiB",
+        "1.3M",
+        "3 会话",
+        "原始证据归档在仓库外",
+        "archived outside the repository"
+      ],
+      "absent": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "readme-en",
+      "path": "README.md",
+      "recursive": false,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [
+        "docs/release-process.md"
+      ],
+      "absent": [
+        "codesign --verify",
+        "xcrun stapler validate",
+        "spctl -a -vv",
+        "1.24"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "readme-zh",
+      "path": "README.zh-CN.md",
+      "recursive": false,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [
+        "docs/release-process.md"
+      ],
+      "absent": [
+        "codesign --verify",
+        "xcrun stapler validate",
+        "spctl -a -vv",
+        "1.24"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "perf-archive",
+      "path": "docs/perf",
+      "recursive": true,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [
+        "76,604",
+        "11,105,870,346",
+        "21.6",
+        "22.5",
+        "694",
+        "706",
+        "8.5",
+        "10.0",
+        "1.68",
+        "1.81",
+        "1.28",
+        "+20 s",
+        "1.25–1.28"
+      ],
+      "absent": [],
+      "absentPatterns": []
+    },
+    {
+      "id": "release-workflow-escapes",
+      "path": ".github/workflows/release.yml",
+      "recursive": false,
+      "anchor": null,
+      "normalizeEnDash": false,
+      "tokens": [],
+      "absent": [
+        "continue-on-error",
+        "|| true",
+        "--no-verify"
+      ],
+      "absentPatterns": []
+    }
+  ],
+  "notesSections": [
+    {
+      "id": "notes-en-portable",
+      "doc": "docs/release-notes/${tag}.md",
+      "heading": "Windows portable download",
+      "sentences": 2,
+      "sentenceSeparator": "(?<=\\.)\\s+",
+      "tokens": [
+        "Windows ships both the NSIS installer and a portable `.zip` (extract and run, no installation step).",
+        "Auto-update keeps resolving to the NSIS installer, so the portable zip is a download only."
+      ],
+      "absent": []
+    },
+    {
+      "id": "notes-zh-portable",
+      "doc": "docs/release-notes/${tag}.zh-CN.md",
+      "heading": "Windows 免安装包",
+      "sentences": 2,
+      "sentenceSeparator": "(?<=。)",
+      "tokens": [
+        "Windows 同时提供 NSIS 安装包与免安装 `.zip`（解压即用，无安装步骤）。",
+        "自动更新仍指向 NSIS 安装包，免安装 zip 只作为下载。"
+      ],
+      "absent": []
+    }
+  ],
+  "ghApiCompatibility": {
+    "id": "gh-api-options",
+    "slurp": "--slurp",
+    "forbidden": [
+      "--jq",
+      "--template"
+    ]
+  },
+  "packageBans": {
+    "id": "package-no-zip-tools",
+    "scriptNamesAbsent": [
+      "zip"
+    ],
+    "scriptCommandsAbsent": [
+      "zip "
+    ],
+    "bannedDependencies": [
+      "archiver",
+      "adm-zip",
+      "jszip",
+      "yazl"
+    ]
+  },
+  "windowsPackaging": {
+    "render": [
+      {
+        "id": "win-installer-name",
+        "builderPath": "nsis.artifactName",
+        "arch": "x64",
+        "ext": "exe",
+        "expected": "OpenCompare-Setup-${version}.exe"
+      },
+      {
+        "id": "win-portable-name",
+        "builderPath": "win.artifactName",
+        "arch": "x64",
+        "ext": "zip",
+        "expected": "OpenCompare-${version}-win-x64.zip"
+      }
+    ],
+    "latestYml": {
+      "versionLine": "version: ${version}",
+      "filesLine": "files:",
+      "setupUrl": "  - url: ${setupAsset}",
+      "portableUrl": "  - url: ${portableAsset}",
+      "shaLine": "    sha512: fixture",
+      "sizeLine": "    size: 1",
+      "pathLine": "path: ${setupAsset}",
+      "sha512Line": "sha512: fixture"
+    },
+    "publishedAssets": [
+      "OpenCompare-${version}.dmg",
+      "OpenCompare-${version}-mac.zip",
+      "${setupAsset}",
+      "${portableAsset}",
+      "OpenCompare-${version}.AppImage",
+      "opencompare_${version}_amd64.deb",
+      "latest-mac.yml",
+      "latest.yml",
+      "latest-linux.yml"
+    ],
+    "cases": [
+      {
+        "id": "win-version-pass",
+        "script": "version",
+        "artifacts": "both",
+        "latest": "installer-only",
+        "status": "zero",
+        "tokens": [
+          "release/latest.yml version=${version}"
+        ],
+        "absent": []
+      },
+      {
+        "id": "win-version-missing-exe",
+        "script": "version",
+        "artifacts": "zip-only",
+        "latest": "installer-only",
+        "status": "nonzero",
+        "tokens": [
+          "::error::No .exe artifact found"
+        ],
+        "absent": []
+      },
+      {
+        "id": "win-version-missing-zip",
+        "script": "version",
+        "artifacts": "exe-only",
+        "latest": "installer-only",
+        "status": "nonzero",
+        "tokens": [
+          "::error::No .zip artifact found"
+        ],
+        "absent": []
+      },
+      {
+        "id": "win-feed-pass",
+        "script": "feed",
+        "artifacts": "none",
+        "latest": "installer-only",
+        "status": "zero",
+        "tokens": [
+          "files[] carries no zip entry"
+        ],
+        "absent": []
+      },
+      {
+        "id": "win-feed-rejects-zip",
+        "script": "feed",
+        "artifacts": "none",
+        "latest": "with-zip",
+        "status": "nonzero",
+        "tokens": [
+          "::error::",
+          "must use the NSIS installer",
+          "refusing a Windows update feed"
+        ],
+        "absent": []
+      },
+      {
+        "id": "win-assets-pass",
+        "script": "assets",
+        "omit": "none",
+        "status": "zero",
+        "tokens": [],
+        "absent": [
+          "is missing the Windows asset"
+        ]
+      },
+      {
+        "id": "win-assets-missing-zip",
+        "script": "assets",
+        "omit": "zip",
+        "status": "nonzero",
+        "tokens": [
+          "is missing the Windows asset ${portableAsset}"
+        ],
+        "absent": []
+      },
+      {
+        "id": "win-assets-missing-exe",
+        "script": "assets",
+        "omit": "exe",
+        "status": "nonzero",
+        "tokens": [
+          "is missing the Windows asset ${setupAsset}"
+        ],
+        "absent": []
+      }
+    ]
+  }
+}
