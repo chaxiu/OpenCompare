@@ -1,0 +1,272 @@
+{
+  "versions": [
+    {
+      "version": "v0.2.1",
+      "status": "blocked",
+      "assets": [],
+      "extraDigests": []
+    },
+    {
+      "version": "v0.2.2",
+      "status": "verified",
+      "assets": [
+        {
+          "name": "latest-linux.yml",
+          "bytes": 531,
+          "sha256": "2655308dccd4df88ff08d4a500fa4ec997ef1938aa3c641947619ea9f2cfb6fc"
+        },
+        {
+          "name": "latest-mac.yml",
+          "bytes": 517,
+          "sha256": "2e9ae33ece936f504036bb24c35457b2b986d303f0098c3e279f350fc6fabb86"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 351,
+          "sha256": "287d234ac90c649ab7c58c21ed32bab7fcdea3d5da786bd44bb44e676731b9fc"
+        },
+        {
+          "name": "OpenCompare-0.2.2-arm64-mac.zip",
+          "bytes": 109218728,
+          "sha256": "2f0a2e0fb00cacaa442ffa4796c47afc3e438555a8641dc8234aa3f608b12f34"
+        },
+        {
+          "name": "OpenCompare-0.2.2-arm64-mac.zip.blockmap",
+          "bytes": 115853,
+          "sha256": "5e08763486f24ae0a23883362808fb70d2e5bc59787c2a14e4b335ec0f529f2c"
+        },
+        {
+          "name": "OpenCompare-0.2.2-arm64.dmg",
+          "bytes": 113423927,
+          "sha256": "7c7232b9c02431c36d98a6b367436697ab379e9ef8c97e30c59b29e57eaa6ae8"
+        },
+        {
+          "name": "OpenCompare-0.2.2-arm64.dmg.blockmap",
+          "bytes": 119080,
+          "sha256": "f85c6dd5db5d9d9d5df1974533356e46d5f1f40a4b863bf0875dfda85b6e9af7"
+        },
+        {
+          "name": "OpenCompare-0.2.2.AppImage",
+          "bytes": 120221661,
+          "sha256": "7ce36d41706199aca655a1439d11577e93716e76d42a39fc761b1ab50a5651b3"
+        },
+        {
+          "name": "OpenCompare.Setup.0.2.2.exe",
+          "bytes": 102926328,
+          "sha256": "4dbbe5354715e748a0c5fda89434386e8aa877c32e3f358393db0d805b664524"
+        },
+        {
+          "name": "OpenCompare.Setup.0.2.2.exe.blockmap",
+          "bytes": 108332,
+          "sha256": "47663287a7a564e74553394d82d47644b3999a3ab2fb45f386643297ec616b6f"
+        },
+        {
+          "name": "opencompare_0.2.2_amd64.deb",
+          "bytes": 93014212,
+          "sha256": "83b7ed343b150ab1f72ad17e3276219cb4376738db3f1db032f7eda0a619496d"
+        }
+      ],
+      "extraDigests": [
+        {
+          "label": "包内 icon.icns",
+          "sha256": "a099851e7c8888e244410a5490800e837920d337c2588fb9e70ce577c2fc0f8f"
+        },
+        {
+          "label": "CandidateCDHashFull",
+          "sha256": "3133dd35f54e920c7bf865baef13436edd6b95d93fbbad35661564d27ade48ae"
+        }
+      ]
+    },
+    {
+      "version": "v0.2.4",
+      "status": "verified",
+      "assets": [
+        {
+          "name": "latest-linux.yml",
+          "bytes": 531,
+          "sha256": "f1a51b5d107b942b49258773f9cf52bf3a47c7dfd72aa86f8d2772d899285e72"
+        },
+        {
+          "name": "latest-mac.yml",
+          "bytes": 517,
+          "sha256": "1b47bfa931f32ee1398dcef13f937bbff02c1ec6d8d3e874dff34c2f4d5bf0ba"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 351,
+          "sha256": "8e5c05e69dd9334009089a44e1962538413c5ecbd995b018b0f3624792e6eaca"
+        },
+        {
+          "name": "opencompare_0.2.4_amd64.deb",
+          "bytes": 93021012,
+          "sha256": "4ddd85c57444746eded750d87b25583de82166d3dc5dc3f663b8db257671c972"
+        },
+        {
+          "name": "OpenCompare-0.2.4-arm64-mac.zip",
+          "bytes": 109229341,
+          "sha256": "8f8ff17af1e8439fa8a2c4a3ee1819c4a8e4e2ec6c1235e390fbc047674ddca4"
+        },
+        {
+          "name": "OpenCompare-0.2.4-arm64-mac.zip.blockmap",
+          "bytes": 115706,
+          "sha256": "855090700f75c0a2577f8ed3631f650c5dad0a498531af48ddba4e2a516df716"
+        },
+        {
+          "name": "OpenCompare-0.2.4-arm64.dmg",
+          "bytes": 113431497,
+          "sha256": "ae0dc1081db73e0b2f9148fee8cdee8110cc1a12189246a2a5f60f22e566d6f3"
+        },
+        {
+          "name": "OpenCompare-0.2.4-arm64.dmg.blockmap",
+          "bytes": 119660,
+          "sha256": "2bc656ab743cc90b1c260622a9af4962ead1f6ef05a301fda20805ae90d63d73"
+        },
+        {
+          "name": "OpenCompare-0.2.4.AppImage",
+          "bytes": 120233874,
+          "sha256": "fcb6c2c95cac7db51747d5238cdcdc4d8fef0c2bfe62c6f1f111f6ec66a4f896"
+        },
+        {
+          "name": "OpenCompare.Setup.0.2.4.exe",
+          "bytes": 102934640,
+          "sha256": "d7e39acb8dead8a2adca9e7a016f7b5ff0f3c99445333fcae7b45916a7195ede"
+        },
+        {
+          "name": "OpenCompare.Setup.0.2.4.exe.blockmap",
+          "bytes": 108189,
+          "sha256": "fa26cbb8915371acc2626f90afdd0e793e84e663326e892e80678533fc9843d9"
+        }
+      ],
+      "extraDigests": []
+    },
+    {
+      "version": "v0.2.5",
+      "status": "verified",
+      "assets": [
+        {
+          "name": "latest-linux.yml",
+          "bytes": 531,
+          "sha256": "1da4010a6aadca05009d8f66be60943b3e494e82b36b39f6a4828adc0fe9706b"
+        },
+        {
+          "name": "latest-mac.yml",
+          "bytes": 517,
+          "sha256": "576e08f85d3d2698866bab6475c3d0c3fe157f203c50aae3d8380e357945ce37"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 351,
+          "sha256": "00d8f97455e0e8b319d46b9c870f17ca8ed45dcbf66780b9c899b93903010f29"
+        },
+        {
+          "name": "opencompare_0.2.5_amd64.deb",
+          "bytes": 93032908,
+          "sha256": "4d126dd1d35e64fbaeca67e512b70a590485382695c7daa6398aede7c50c68ba"
+        },
+        {
+          "name": "OpenCompare-0.2.5-arm64-mac.zip",
+          "bytes": 109239518,
+          "sha256": "81cda3cc14413b15a5ad2f75256b562efcdfc9fef2bde480c344e0503663f121"
+        },
+        {
+          "name": "OpenCompare-0.2.5-arm64-mac.zip.blockmap",
+          "bytes": 115929,
+          "sha256": "b5a2a66f5f2f5faceabdb46d2cf2115f32f8ea85c2f49e740038fbd8657eaf4e"
+        },
+        {
+          "name": "OpenCompare-0.2.5-arm64.dmg",
+          "bytes": 113412419,
+          "sha256": "2068667f22bd92e38927732128443127e18f06c0fc1fe7da8ec1442d6142c527"
+        },
+        {
+          "name": "OpenCompare-0.2.5-arm64.dmg.blockmap",
+          "bytes": 119474,
+          "sha256": "ba74335cd738c14e5b12a7140909b1131b097592eebca53b775c5b5f103fd1a4"
+        },
+        {
+          "name": "OpenCompare-0.2.5.AppImage",
+          "bytes": 120242086,
+          "sha256": "e0be93f63363b7ce93afb2d9be1886ff8dcf692642a56d010b19ecd0d29883b6"
+        },
+        {
+          "name": "OpenCompare-Setup-0.2.5.exe",
+          "bytes": 102943880,
+          "sha256": "6fbf4698c284cf55109c07994cb65c145c5612685c249e7e6922a04cc8c62402"
+        },
+        {
+          "name": "OpenCompare-Setup-0.2.5.exe.blockmap",
+          "bytes": 108490,
+          "sha256": "272867f6e7655c1cdba52b5bdff424c3e53e3d1ef7b446ea365bf279bb606442"
+        }
+      ],
+      "extraDigests": [
+        {
+          "label": "CandidateCDHashFull",
+          "sha256": "3a46aec75cdbf188cade0bcc04bb297f5fe91c4298b3efcc7dc5a19c21f56adb"
+        }
+      ]
+    },
+    {
+      "version": "v0.2.7",
+      "status": "verified",
+      "assets": [
+        {
+          "name": "OpenCompare-0.2.7-arm64.dmg",
+          "bytes": 113469160,
+          "sha256": "4375fe95f5048195e1bcf46513da6291a8363585ed01f6f636ec18845a24e8f5"
+        },
+        {
+          "name": "OpenCompare-0.2.7-arm64.dmg.blockmap",
+          "bytes": 119771,
+          "sha256": "d5c8ff7e0efba2ddf59c9502c1b0d14f397e00918189ac93b3228274c7b2a554"
+        },
+        {
+          "name": "OpenCompare-0.2.7-arm64-mac.zip",
+          "bytes": 109263235,
+          "sha256": "24a047c1364bc2621f1de6a6091815c27533a63d4906d96dfdd344b6b828e98e"
+        },
+        {
+          "name": "OpenCompare-0.2.7-arm64-mac.zip.blockmap",
+          "bytes": 115864,
+          "sha256": "09252378a3afcf41a13758c79e5ca628c293b12cb1143b387d4645a4bc59cc6b"
+        },
+        {
+          "name": "OpenCompare-Setup-0.2.7.exe",
+          "bytes": 102964024,
+          "sha256": "bc3563ecd98fd13903fd2ab829a997d337779474ed17c0373aa15f2ef0d59806"
+        },
+        {
+          "name": "OpenCompare-Setup-0.2.7.exe.blockmap",
+          "bytes": 108581,
+          "sha256": "ad84d71bdd0d33d17e739930695b6f241a695158feec76e81b755b368489564b"
+        },
+        {
+          "name": "OpenCompare-0.2.7.AppImage",
+          "bytes": 120270762,
+          "sha256": "406f61840383b0b10899456ac682360b115a9d0c558a2b9620a7576e26d05aa8"
+        },
+        {
+          "name": "opencompare_0.2.7_amd64.deb",
+          "bytes": 92999612,
+          "sha256": "13c0a4d0441633a462111ce0d74e07b95e3f1b811605594fff816068b1610ea8"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 351,
+          "sha256": "2e902100c9f85e5434e01d9fa59f28bed675ec3c78e050b02f7e4d662cbd2902"
+        },
+        {
+          "name": "latest-mac.yml",
+          "bytes": 517,
+          "sha256": "a5ba8a740f5bf501431200d26ed62b52f6de156547899a5f1f2905593ae85e5b"
+        },
+        {
+          "name": "latest-linux.yml",
+          "bytes": 531,
+          "sha256": "5a954755eb2e36ff4a954b34dc689503e8b57c95a371776bf81a99e63e35ed68"
+        }
+      ],
+      "extraDigests": []
+    }
+  ]
+}
