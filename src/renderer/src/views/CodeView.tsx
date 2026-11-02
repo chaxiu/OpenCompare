@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX, ReactNode } from 'react'
+import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
-import { diffLineTexts, overwriteBlock } from '@core/text/diff'
+import { diffLineTexts, diffLineTextsWithFacts, overwriteBlock } from '@core/text/diff'
 import type { OverwriteDirection } from '@core/text/diff'
+import { resolveComparisonSwitches } from '@core/text/normalize'
+import type { ComparisonSwitches, TextFacts } from '@core/text/normalize'
 import { splitLines } from '@core/text/lines'
 import {
   buildMergeModel,
@@ -34,7 +36,7 @@ import {
   levelRowClasses
 } from '@renderer/workbench/shellLayout'
 import { useWidthTier } from '@renderer/workbench/useWidthTier'
-import type { CodeFileBuffer, FilePair } from '@renderer/workbench/session'
+import type { CodeFileBuffer, FilePair, FilePairProbes } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
 
@@ -75,9 +77,74 @@ function offsetTop(range: MergeRange): number {
 /* Two-column line + inline character diff                             */
 /* ------------------------------------------------------------------ */
 
+/** One native, keyboard-operable comparison switch of the diff toolbar. */
+function CodeSwitch({
+  id,
+  checked,
+  label,
+  showLabel,
+  onToggle
+}: {
+  readonly id: 'ignore-newline' | 'ignore-encoding'
+  readonly checked: boolean
+  readonly label: string
+  /** The copy is dropped on the compact tier; the switch stays operable. */
+  readonly showLabel: boolean
+  readonly onToggle: () => void
+}): JSX.Element {
+  /**
+   * Space / Enter both activate a native button; preventing the default action
+   * keeps the synthetic click from toggling a second time.
+   */
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>): void {
+    if (event.key !== ' ' && event.key !== 'Enter') return
+    event.preventDefault()
+    onToggle()
+  }
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      data-code-switch={id}
+      onClick={onToggle}
+      onKeyDown={handleKeyDown}
+      className={cx(
+        'focus-ring transition-ui inline-flex h-6 shrink-0 items-center rounded-sm border text-2xs',
+        checked
+          ? 'border-accent/60 bg-accent-soft text-accent'
+          : 'border-line-subtle bg-surface-raised text-content-muted hover:border-line-strong',
+        showLabel ? 'gap-1.5 px-2' : 'w-6 justify-center'
+      )}
+    >
+      <span
+        aria-hidden
+        className={cx(
+          'relative inline-flex h-3 w-5 shrink-0 items-center rounded-full',
+          checked ? 'bg-accent' : 'bg-line-strong'
+        )}
+      >
+        <span
+          className={cx(
+            'absolute size-2 rounded-full bg-surface-base',
+            checked ? 'right-0.5' : 'left-0.5'
+          )}
+        />
+      </span>
+      {showLabel ? label : null}
+    </button>
+  )
+}
+
 function CodeDiffView({
   pair,
   buffer,
+  probes,
+  switches,
+  onSwitchesChange,
   platform,
   toolbarLeading,
   onDirtyChange,
@@ -89,6 +156,11 @@ function CodeDiffView({
   readonly toolbarLeading?: ReactNode
   /** Working copies kept on the session, used when the view remounts. */
   readonly buffer?: CodeFileBuffer
+  /** Probe facts fixed when each side was loaded; never re-derived from edits. */
+  readonly probes?: FilePairProbes
+  /** The two comparison switches, owned once by the shell (or this view alone). */
+  readonly switches: ComparisonSwitches
+  readonly onSwitchesChange: (switches: ComparisonSwitches) => void
   readonly platform: PlatformPort
   /** Reports whether any side now differs from its loaded disk content. */
   readonly onDirtyChange?: (dirty: boolean) => void
@@ -98,6 +170,10 @@ function CodeDiffView({
   readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
+  const tier = useWidthTier()
+  const newlineLabelShown = controlPresentation('code-switch-newline', tier) === 'label'
+  const encodingLabelShown = controlPresentation('code-switch-encoding', tier) === 'label'
+  const bytesLabelShown = controlPresentation('code-diff-bytes', tier) === 'label'
   const initial = {
     leftPath: buffer?.leftPath ?? pair.left.path,
     rightPath: buffer?.rightPath ?? pair.right.path,
@@ -149,7 +225,37 @@ function CodeDiffView({
     })
   }, [leftPath, rightPath, leftSource, rightSource, leftText, rightText])
 
-  const diff = useMemo(() => diffLineTexts(leftText, rightText), [leftText, rightText])
+  const diff = useMemo(() => {
+    // A side's fixed probe facts may only speak for the loaded body: an edited
+    // working copy (or a newly opened path) never borrows the stored sha256.
+    const leftFacts =
+      leftText === leftSource && probes?.left !== undefined && probes.left.path === leftPath
+        ? probes.left
+        : null
+    const rightFacts =
+      rightText === rightSource && probes?.right !== undefined && probes.right.path === rightPath
+        ? probes.right
+        : null
+    if (leftFacts && rightFacts) {
+      const left: TextFacts = {
+        text: leftText,
+        encoding: leftFacts.encoding,
+        sha256: leftFacts.sha256
+      }
+      const right: TextFacts = {
+        text: rightText,
+        encoding: rightFacts.encoding,
+        sha256: rightFacts.sha256
+      }
+      return diffLineTextsWithFacts(left, right, switches)
+    }
+    return diffLineTexts(leftText, rightText, switches)
+  }, [leftText, rightText, leftSource, rightSource, leftPath, rightPath, probes, switches])
+
+  /** One mutation for both clicks and keys; the effective value comes from `diff`. */
+  function toggleSwitch(key: 'ignoreNewline' | 'ignoreEncoding'): void {
+    onSwitchesChange({ ...switches, [key]: !switches[key] })
+  }
 
   const blockCount = diff.blocks.length
   const activeIndex = blockCount === 0 ? -1 : Math.min(active, blockCount - 1)
@@ -304,6 +410,38 @@ function CodeDiffView({
           </span>
           {activeBlock ? <DiffBadge status={activeBlock.status} /> : null}
         </span>
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        <CodeSwitch
+          id="ignore-newline"
+          checked={switches.ignoreNewline}
+          label={t('files.code.ignoreNewline')}
+          showLabel={newlineLabelShown}
+          onToggle={() => toggleSwitch('ignoreNewline')}
+        />
+        <CodeSwitch
+          id="ignore-encoding"
+          checked={switches.ignoreEncoding}
+          label={t('files.code.ignoreEncoding')}
+          showLabel={encodingLabelShown}
+          onToggle={() => toggleSwitch('ignoreEncoding')}
+        />
+        <span className="flex shrink-0 items-center gap-1.5 text-2xs text-content-muted">
+          {t('files.code.differenceCount')}
+          <span data-code-diff-count className="tabular font-mono text-content-secondary">
+            {diff.differenceCount}
+          </span>
+        </span>
+        {diff.normalization.encoding.byteDifference ? (
+          <span
+            data-code-diff-bytes
+            aria-label={t('files.code.byteDifference')}
+            title={t('files.code.byteDifference')}
+            className="flex shrink-0 items-center gap-1 text-2xs text-danger"
+          >
+            <Icon name={UI_ICON_ACTIONS.warning} />
+            {bytesLabelShown ? t('files.code.byteDifference') : null}
+          </span>
+        ) : null}
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <span data-shell-entry="override" className="flex shrink-0 items-center gap-1.5">
           <ToolbarButton
@@ -797,6 +935,9 @@ export function CodeView({
   onModeChange,
   pair,
   buffer,
+  probes,
+  switches: controlledSwitches,
+  onSwitchesChange,
   platform,
   toolbarLeading,
   onMergeStateChange,
@@ -815,6 +956,11 @@ export function CodeView({
   readonly pair?: FilePair
   /** Working copies kept on the session, used when the view remounts. */
   readonly buffer?: CodeFileBuffer
+  /** Probe facts of both sides fixed when they were loaded. */
+  readonly probes?: FilePairProbes
+  /** Comparison switches kept by the shell; a standalone view keeps its own. */
+  readonly switches?: ComparisonSwitches
+  readonly onSwitchesChange?: (switches: ComparisonSwitches) => void
   readonly platform: PlatformPort
   /** Drilldown back row handed down by the shell; first row of the level. */
   readonly toolbarLeading?: ReactNode
@@ -828,6 +974,12 @@ export function CodeView({
 }): JSX.Element {
   const { t } = useI18n()
   const [localMode, setLocalMode] = useState<CodeMode>(defaultMode)
+  // Standalone rendering has no shell to own the preference, so it keeps the
+  // same default-on switches here. The default rule still lives in core only.
+  const [localSwitches, setLocalSwitches] = useState<ComparisonSwitches>(() =>
+    resolveComparisonSwitches({})
+  )
+  const switches = controlledSwitches ?? localSwitches
   const adhoc = pair !== undefined
   const selectedMode = controlledMode ?? localMode
   const effectiveMode: CodeMode = adhoc ? 'diff' : selectedMode
@@ -837,6 +989,12 @@ export function CodeView({
   function switchMode(next: CodeMode): void {
     setLocalMode(next)
     onModeChange?.(next)
+  }
+
+  /** One switch mutation for the standalone fallback and the shell's preference. */
+  function changeSwitches(next: ComparisonSwitches): void {
+    setLocalSwitches(next)
+    onSwitchesChange?.(next)
   }
 
   // The merge inputs are editable: opening a local file replaces one side and
@@ -905,6 +1063,9 @@ export function CodeView({
         <CodeDiffView
           pair={diffPair}
           buffer={buffer}
+          probes={probes}
+          switches={switches}
+          onSwitchesChange={changeSwitches}
           platform={platform}
           toolbarLeading={modeRow}
           onDirtyChange={onDirtyChange}

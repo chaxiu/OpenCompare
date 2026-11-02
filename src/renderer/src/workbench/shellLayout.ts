@@ -469,6 +469,10 @@ export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
     entries: ['prev-diff', 'next-diff', 'override', 'save'],
     controls: [
       control('block-counter', 96),
+      collapsible('code-switch-newline', 132, 26),
+      collapsible('code-switch-encoding', 132, 26),
+      control('code-diff-count', 60),
+      collapsible('code-diff-bytes', 88, 26),
       control('reset', 60),
       control('open-left', 91),
       control('open-right', 91)

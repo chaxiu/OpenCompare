@@ -9,12 +9,15 @@ import { DiffRuler } from '@renderer/components/DiffRuler'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
 
-// The 350k model is pre-built; the view must never run the real diff engine.
+// The 350k model is pre-built; the view only ever runs the mocked comparison.
 const diffModel = vi.hoisted(() => ({ current: null as LineDiffResult | null }))
 
 vi.mock('@core/text/diff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@core/text/diff')>()
-  return { ...actual, diffLineTexts: vi.fn(() => diffModel.current ?? { rows: [], blocks: [] }) }
+  const empty = actual.diffLineTexts('', '')
+  const withFacts = (model: LineDiffResult | null) =>
+    model === null ? empty : { ...empty, ...model, differenceCount: model.blocks.length }
+  return { ...actual, diffLineTexts: vi.fn(() => withFacts(diffModel.current)) }
 })
 
 // Pass-through spy: the projection must run once per measured track height.

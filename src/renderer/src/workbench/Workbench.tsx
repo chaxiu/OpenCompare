@@ -16,6 +16,8 @@ import type { StructuredFilter } from '@core/structured/diff'
 import { SyncRefreshError, SyncVerificationError } from '@core/directory/sync'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import type { TemplateResolvedPlan } from '@core/directory/template'
+import { resolveComparisonSwitches } from '@core/text/normalize'
+import type { ComparisonSwitches } from '@core/text/normalize'
 import { isOperationCancelled } from '@core/io'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
@@ -322,6 +324,14 @@ export function Workbench({
   const [codeMerge, setCodeMerge] = useState<Record<string, CodeMergeState>>({})
   /** Mode of each code session's view, so the status bar knows what is on screen. */
   const [codeModes, setCodeModes] = useState<Record<string, CodeMode>>({})
+  /**
+   * The two comparison switches of the code diff. One runtime preference for the
+   * whole shell — never stored on a session (a drilldown return replaces it) and
+   * never persisted (a restart goes back to the default-on values).
+   */
+  const [comparisonSwitches, setComparisonSwitches] = useState<ComparisonSwitches>(() =>
+    resolveComparisonSwitches({})
+  )
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   /**
@@ -1402,6 +1412,9 @@ export function Workbench({
             key={session.id}
             pair={session.adhoc.pair}
             buffer={session.codeBuffer}
+            probes={session.probes}
+            switches={comparisonSwitches}
+            onSwitchesChange={setComparisonSwitches}
             mode={codeModes[session.id] ?? 'diff'}
             onModeChange={(mode) => handleCodeMode(session.id, mode)}
             platform={platform}
@@ -1414,6 +1427,9 @@ export function Workbench({
           <CodeView
             key={session.id}
             fixture={CODE_SCENE}
+            probes={session.probes}
+            switches={comparisonSwitches}
+            onSwitchesChange={setComparisonSwitches}
             mode={codeModes[session.id] ?? (session.columns === 3 ? 'merge' : 'diff')}
             onModeChange={(mode) => handleCodeMode(session.id, mode)}
             platform={platform}

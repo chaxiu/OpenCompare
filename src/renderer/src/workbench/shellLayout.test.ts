@@ -24,6 +24,7 @@ import {
   measureToolbar,
   resolveWidthTier,
   toolbarBandHeightPx,
+  viewToolbarRows,
   visibleRowCount
 } from './shellLayout'
 import type { ShellLevel, ToolbarView, WidthTier } from './shellLayout'
@@ -313,6 +314,44 @@ describe('toolbar width budgets', () => {
     expect(compact.required).toBeLessThan(wide.required)
     // The collapse never hides an entry: the row keeps its budget, it shrinks.
     expect(compact.rows.length).toBe(wide.rows.length)
+  })
+
+  it('registers the four code-diff switch controls inside the existing row', () => {
+    const row = TOOLBAR_ROWS.find((item) => item.id === 'code-diff')
+    expect(row?.controls.map((item) => item.id)).toEqual([
+      'block-counter',
+      'code-switch-newline',
+      'code-switch-encoding',
+      'code-diff-count',
+      'code-diff-bytes',
+      'reset',
+      'open-left',
+      'open-right'
+    ])
+    for (const tier of TIERS) {
+      expect(measureToolbar(tier, 'view-toolbar', 'code-diff').fits).toBe(true)
+      for (const control of row?.controls ?? []) {
+        expect(control.width[controlPresentation(control.id, tier)]).toBeGreaterThan(0)
+      }
+      const compact = tier === 'compact' ? 'icon-only' : 'label'
+      expect(controlPresentation('code-switch-newline', tier)).toBe(compact)
+      expect(controlPresentation('code-switch-encoding', tier)).toBe(compact)
+      expect(controlPresentation('code-diff-bytes', tier)).toBe(compact)
+      expect(controlPresentation('code-diff-count', tier)).toBe('label')
+    }
+  })
+
+  it('keeps the accepted app and code-diff entry sets with two code rows', () => {
+    expect(SHELL_ENTRY_IDS.length).toBe(18)
+    expect(entriesFor('app')).toEqual(['new-compare', 'open-file', 'open-folder', 'settings'])
+    expect(entriesFor('view-toolbar', 'code-diff')).toEqual([
+      'drilldown-back',
+      'prev-diff',
+      'next-diff',
+      'override',
+      'save'
+    ])
+    expect(viewToolbarRows('code-diff')).toBe(2)
   })
 })
 
