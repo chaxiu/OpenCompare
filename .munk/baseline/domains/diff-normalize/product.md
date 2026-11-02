@@ -14,6 +14,7 @@
   - `differenceCount = blocks.length + (byteDifference ? 1 : 0)`；`identical = differenceCount === 0`。
 - **真差异不可吞**：字符替换、空白（行尾空格 / 缩进）、大小写、行顺序在四种开关组合下都必须报告差异（差异块 ≥ 1、`differenceCount ≥ 1`、至少一行非 `same`）。
 - **可回归门**：`.munk/code-gates.json` 新增且仅新增一条 `diff-normalize` 门，命令为单 argv `pnpm test src/core/text/normalize.test.ts src/core/text/diff.test.ts src/core/text/merge.test.ts`。
+- **真实外部文件证据门（2026-11-02，`wi_ws_2e24bfab81f0fb32`）**：判定语义不重做，只把已发布的探测 / 归一 / 视图链路钉在**真实磁盘字节**上。固定绝对根 `join(os.tmpdir(), 'opencompare-diff-normalize-evidence')` 每次先清空再生成两组（`thousand` 恰 1000 逻辑行、无尾随空行；`five-megabyte` 的 `utf8-*` ≥ 5 MiB 且 ≥ 1000 行），每组同一份逻辑文本落成六个 `.txt` 变体：`utf8-lf` / `utf8-crlf` / `utf8bom-lf` / `utf16le-crlf` / `gbk-lf` / `utf8-crlf-mutated`（仅改一行一个字符）。生成确定性（禁 `Math.random()` / 时间戳 / 网络），GBK 来自固定字符→字节表且写盘后用 `decodeText` 回读逐字相等，运行时不支持 GBK 解码即失败。门以 `createWebPlatformPort()` 为底、只覆写 `probeTextFile` / `readTextFile` / `statPath`，探测一律 `probeTextBytes(readFileSync(path))`（与 Electron / Web 同一纯函数）；`thousand` 组走真实 `Workbench` / `CodeView` DOM 全链路，`five-megabyte` 组只经 `diffLineTextsWithFacts` 核心级比较、不渲染进 jsdom。门在 stdout 打印 `OPENCOMPARE_DIFF_NORMALIZE_EVIDENCE <JSON>`，仅在显式设置 `OPENCOMPARE_EVIDENCE_OUT` 时落盘；提交 `docs/evidence/diff-normalize-real-files.json` / `.md` 作为机器可读与人读证据。门清单只加一条 `diff-normalize-real`（插在既有 `diff-normalize` 之后，总数 23 → 24），`src/munk-gates.test.ts` 同步 24 条面量与邻位断言。
 
 ## 验收
 
@@ -33,10 +34,35 @@
 - **ac-gate-added**：`.munk/code-gates.json` 新增且仅新增一条 `diff-normalize` 门（单 argv `pnpm test src/core/text/normalize.test.ts src/core/text/diff.test.ts src/core/text/merge.test.ts`），门内断言覆盖默认开启、关闭严格、仅换行不同、仅编码不同、真实差异不漏；test-debt 门绿（新增测试行按既有 `growth[]` 机制声明，不手改 floors / 不手改口径）。
 - **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 全绿；无新增依赖、无网络。
 
+### 真实外部文件证据门（2026-11-02，`wi_ws_2e24bfab81f0fb32`）
+
+- **ac-gate-single-entry**：`.munk/code-gates.json` 恰好新增一条 gate `diff-normalize-real`，紧跟既有 `diff-normalize`（`index(diff-normalize-real) === index(diff-normalize) + 1`），`cwd === "."`、命令逐字为 `pnpm test src/diff-normalize-real-gate.test.tsx` 且不含 `&&` / `||` / `|` / `;`；总条数 24，其余 23 条的 id 与命令逐字不变（仅 `description` 追加一条覆盖说明）。
+- **ac-gate-manifest-pin**：`src/munk-gates.test.ts` 的 `EXPECTED_GATES` 反映 24 条且含新门与邻位断言；原有「九条模板门禁切片位于 `verify-release-gate` 之前」「末两项 = `verify-release-gate` / `test-debt-gate`」「禁 `perf-gate` / `perf:dir`」「单 argv」断言全部保留并通过。
+- **ac-real-fixtures-on-disk**：门运行时两组共 6 个变体文件真实落盘（`.txt`，走代码双栏）；每个文件用独立 `node:crypto` 对磁盘原始字节重算的 sha256 与探测结果 `sha256` 相等，`bytes === statSync().size` 且 > 0。
+- **ac-fixture-labels**：六个变体的探测标签逐一对上（`UTF-8` / `UTF-8` / `UTF-8 BOM` / `UTF-16LE` / `GBK`，换行 `LF` / `CRLF` / `LF` / `CRLF` / `LF`）；同组非变异变体解码文本折叠后逐字相等；GBK 变体回读逐字等于源文本且不降级成 `Unknown`。
+- **ac-thousand-scale**：`thousand` 组每个文件恰有 1000 个逻辑行（终止符计数 1000、解码文本无尾随空行），用于 DOM 两态与状态栏断言。
+- **ac-five-mb-scale**：`five-megabyte` 组 `utf8-*` 变体字节数 ≥ `5 * 1024 * 1024`、逻辑行数 ≥ 1000，只做核心级比较，不渲染进 DOM。
+- **ac-default-on-zero**：两组中每一对「同文本不同变体」在默认开关（`resolveComparisonSwitches({})`，两项均开）下 `differenceCount === 0`、`blocks.length === 0`、`identical === true`、无非 `same` 行。
+- **ac-strict-off-reports**：两项关闭后 `utf8-crlf` vs `utf8-lf` 有差异块且 `differenceCount ≥ 1`、`byteDifference === false`；`utf8bom-lf` vs `utf8-lf` 为 `blocks.length === 0` / `byteDifference === true` / `differenceCount === 1`；`utf16le-crlf` vs `gbk-lf` `differenceCount ≥ 1`。
+- **ac-toggle-roundtrip**：真实 `thousand` 组配对上连续「默认 → 关闭两项 → 重新开启」，`[data-code-diff-count]` 依次为 `0` / 大于 0 / `0` 且每次恒等于同一次 `LineDiffComparison.differenceCount`，`blocks.length` 同步为 `0` / 大于 0 / `0`。
+- **ac-status-raw-invariant**：真实 `thousand` 组 `utf8-crlf` ↔ `gbk-lf` 的状态栏四值按序为 `['CRLF','UTF-8','LF','GBK']`；两个开关各切换两次后四值文本逐字不变。
+- **ac-real-difference-visible**：`utf8-crlf-mutated` vs `utf8-lf` 在默认开与两项关闭两种状态下都 `differenceCount ≥ 1` 且存在非 `same` 行（真实字符差异任何组合都不得被归一吞掉）。
+- **ac-operability**：真实 `thousand` 组配对上两个开关均为可聚焦 `role="switch"`；单击与 `keydown` Space 各只翻转一次、`aria-checked` 与生效值一致；配对渲染出的两栏行数相等且 > 0。
+- **ac-elapsed-recorded-budget**：`five-megabyte` 组探测、默认比较、关闭后重算耗时均以 `performance.now()` 计量并写入证据；关闭后重算 `< 10_000 ms`（显式常量，与 vitest 超时分开）；`thousand` 组切换耗时也记录。耗时字段不参与回读比对。
+- **ac-evidence-artifact**：`docs/evidence/diff-normalize-real-files.json` 与同名 `.md` 已提交，含生成命令（`OPENCOMPARE_EVIDENCE_OUT=docs/evidence/diff-normalize-real-files.json pnpm test src/diff-normalize-real-gate.test.tsx`）、临时根绝对路径、每变体绝对路径 / 字节数 / sha256 / 行数 / 标签、两组各状态 `differenceCount` / `blocks` / 非 same 行数 / 行内片段数、状态栏四值、切换与重算耗时；数字来自一次真实运行。
+- **ac-evidence-pinned**：门回读该 JSON，断言变体 `bytes` / `sha256` 与各状态 `differenceCount` / `blocks.length` 与本轮现场运行逐项相等（耗时与绝对路径不参与比对），证据漂移即红。
+- **ac-no-prod-change**：门未暴露实现缺陷，故 `src/core/text/**`、`CodeView.tsx`、`workbench/**`、`main/platform/**`、`preload/**`、`shared/**` 相对基线零 diff；`package.json` 无新增依赖；无网络请求或外部服务。
+- **ac-test-debt-declared**：`.munk/baseline/test-debt.json` 仅通过 `growth[]` 声明 `repoTestLines` 43999 → 44398（增量 ≤ 400、`addedCases` = 新增用例数 11）；`floors` 未下调、`literalWhitelist` 未放宽；`node scripts/test-debt-gate.mjs` 绿。
+- **ac-no-sha-literal**：新增 `.ts` / `.tsx`（门、夹具辅助、`munk-gates` 测试）中无 64 位小写 hex sha256 字面量（全部运行时计算），`test-debt-gate` 的 sha 字面量扫描零命中。
+- **ac-all-gates-green**：`.munk/code-gates.json` 全部 24 条门通过（含 `install` / `lint` / `typecheck` / `build` / `build-web` / `test` 与新门），`pnpm test` 全量零失败、无跳过新增用例。
+
 ## 非目标
 
-- 不做两个开关的界面控件、`CodeView` 工具栏 / 状态栏、会话模型携带探测事实、差异提示渲染与 jsdom 交互断言（由后续视图 / 状态栏子项接线）。
-- 不做真实磁盘文件端到端证据、性能实测与窗口可操作性（由证据子项承担）。
+- 不做两个开关的界面控件、`CodeView` 工具栏 / 状态栏、会话模型携带探测事实（由 `code-diff-switches` 承担并已交付）；证据门只消费既有 DOM 契约与判定结果，不新增生产测试钩子。
+- 证据门只做 jsdom + 真实磁盘字节：不把 5 MB 组渲染进 DOM、不做真实窗口点击 / 截图 / 真机验收（`needSelfTest=false`），最终窗口可操作性归 Product Ops。
+- 不改既有 23 条门的 id / 命令 / `cwd`，不新增 `pnpm` script（复用 `pnpm test <file>`），不改 `vitest.config.mts`；门只插在 `diff-normalize` 之后保持模板门 tail 切片不变。
+- 不新增依赖（尤其不引 `iconv-lite`）、不下载夹具、无网络 / 外部服务；不 bump 版本，不改 README / CHANGELOG / release notes / tag。
+- 不为凑绿放宽 lint / typecheck / 测试断言，不改 `scripts/test-debt-gate.mjs` 判定口径，不动 `src/test/sharedHarness.tsx` 的 400 行预算。
 - 不改换行 / 编码探测函数、不新增阈值；不新增编码解码依赖；不碰 `probeTextBytes` / `probeTextFile` 语义。
 - 不改 `splitLines`（仍只折叠 CRLF，不处理孤立 CR）、不改三向合并、不把归一结果写回文件。
 - 不改导出 / 报告 / 快照 / 目录四态口径，不改内置样本 answer key，不改 `readTextFile` / `writeTextFile`。
@@ -54,12 +80,17 @@
 - 字节差异只由 `sha256` 判定，标签差异只作信号展示；严格信号仅在「两侧解码文本逐字相同且字节不同」时产生，避免重复计数与把已忽略的换行差重新报出。
 - 新测试放 `src/core/text/normalize.test.ts`，用例名与 `ac-*` 一一对应；字节输入用显式字节数组 + `probeTextBytes` 构造，保证 `pnpm test src/core/text/normalize.test.ts` 可复现。
 - 新增测试行数按 `.munk/baseline/test-debt.json` 既有 `growth[]` 声明登记，不得直接抬 `floors` 或删测试。
-- 允许改动：`src/core/text/**`、`.munk/code-gates.json`（仅新增一条门与对应 description 覆盖说明）、`.munk/baseline/test-debt.json`（仅 growth 声明）。
+- 证据门把夹具生成（六变体、GBK 表、写盘 / 清理、磁盘端口包装、证据组装与 pinned 字段）放到非 `.test.*` 辅助模块 `src/test/diffNormalizeRealFixture.ts`（不计入 `repoTestLines`，589 行），`src/diff-normalize-real-gate.test.tsx` 只留断言与 DOM 流程（383 行 / 10 个 `it`）；不动 `src/test/sharedHarness.tsx`。
+- 门内所有差异数字来自同一次 `diffLineTextsWithFacts` / `diffLineTexts` 的 `rows` / `blocks` / `normalization` / `differenceCount`；DOM 侧 `[data-code-diff-count]` 必须与该值逐字相等，禁止另写计数（`docs/lessons.md` §9）。
+- DOM 契约只用既有 `[data-code-switch="ignore-newline"|"ignore-encoding"]`、`[data-code-diff-count]`、`[data-code-diff-bytes]`、`[data-diff-row]`、`footer[data-shell-level="status"]` 与 `zh` 词典键，不为本项在生产代码新增测试钩子。
+- 阈值常量彼此命名并分开断言：`FIVE_MIB = 5 * 1024 * 1024`、`THOUSAND_LINES = 1000`、`STRICT_RECOMPUTE_BUDGET_MS = 10_000`、`TEST_TIMEOUT_MS`（vitest 超时）；不得用「实测通过」代替上限。
+- 时间与清理：`beforeAll` 建根、`afterAll` `rmSync(root, { recursive: true, force: true })`；不向仓库写临时文件，`OPENCOMPARE_EVIDENCE_OUT` 只在显式设置时写指定路径。证据重生成顺序为先产 JSON、再据其写 `.md`、最后跑全量门。
+- 允许改动：`src/core/text/**`、`src/test/diffNormalizeRealFixture.ts`、`src/diff-normalize-real-gate.test.tsx`、`docs/evidence/diff-normalize-real-files.{json,md}`、`.munk/code-gates.json`（仅新增一条门与对应 description 覆盖说明）、`src/munk-gates.test.ts`（门面量与邻位断言）、`.munk/baseline/test-debt.json`（仅 growth 声明）。
 
 ## 最近交付证明
 
-- WI：`wi_ws_de8928c40350cea2`（diff 归一判定：两开关默认开、关闭严格、真实差异不漏；`kind: feature`）
+- WI：`wi_ws_2e24bfab81f0fb32`（真实外部文件开 / 关两态证据门 + 千行 DOM / 5 MiB 核心级可复现数据；`kind: feature`）
 - 日期：2026-11-02
-- 结果：code_gates passed（23 gates，attempt 001，`.munk/runs/run_ws_fa287bbdcc948d1c/code-gates/attempts/001`；`pnpm test` 117 files / 1891 passed + 1 skipped（1892）；`needSelfTest=false`）。
-- 覆盖摘要：新增 `src/core/text/normalize.ts`（`ComparisonOptions` / `resolveComparisonSwitches` 默认开启、`foldNewlines` 折叠 CRLF 与孤立 CR、`describeNormalization` 由 `probe.ts` 的 `detectNewline` 与 `sha256` 产出换行 / 编码事实，`byteDifference` 仅在严格编码 + 两侧事实齐备 + 解码文本逐字相同 + `sha256` 不同时置真）；`diff.ts` 行切分改为「展示文本 + 原始终止符」双字段，行级比较从 `diffLines` 换成 `diffArrays`（比较键含终止符），严格换行可按终止符出块，展示行恒去终止符，`differenceCount = blocks.length + (byteDifference ? 1 : 0)` 与 `identical` 同源返回；`diffLineTextsWithFacts` 为带探测事实入口，两参 `diffLineTexts` 保持兼容。新增 `src/core/text/normalize.test.ts`（用例名与 14 条 `ac-*` 一一对应，覆盖默认开启同构、三风格折叠、结尾换行保留、严格换行三组、编码三组忽略与严格字节信号、换行字节不复活、无事实安全、16 组真差异、单源计数、标签词表、不变性）；`.munk/code-gates.json` 新增 `diff-normalize` 门并同步 `src/munk-gates.test.ts` 的 23 条面量断言；`test-debt.json` 仅逐级声明 growth（repoTestLines 42930 → 43200，addedCases 33）。
-- 后续注意：① 行级比较已由 `diffLines` 换为 `diffArrays` + 显式终止符，若后续要复用 jsdiff 的 `diffLines` 统计，必须以 `rows` / `blocks` 为准，不要再引入第二套切行口径；② `byteDifference` 刻意只在「文本完全相同」时产生，它是**信号**不是第二个差异块——UI 接线时不能把它当额外修改行渲染，否则会与 `fmt` 行对齐冲突；③ 严格换行模式下仅换行不同时 `leftSegments` 可为空，视图必须容忍空高亮而不是显示整行变化；④ 本域不含界面控件与状态栏，后续子项只消费 `normalization` 与 `differenceCount`，禁止另写可执行判定（`docs/lessons.md` §9）。
+- 结果：code_gates passed（24 gates，attempt 001，`.munk/runs/run_ws_d20db508638dbc3f/code-gates/attempts/001`；`pnpm test` 123 files / 1924 passed + 1 skipped（1925）、30.20 s；新门单跑 1 file / 10 tests、4.79 s；`diff-normalize` 门 3 files / 47 tests、101 ms；`test-debt-gate` ok（`repoTestLines` 44398 ≤ ceiling、`repoTestCases` 1441 ≥ floor 1419）；`needSelfTest=false`）。
+- 覆盖摘要：**新增 `src/test/diffNormalizeRealFixture.ts`（589 行，非 `.test.*` 故不计测试债）**——固定根 `join(os.tmpdir(), 'opencompare-diff-normalize-evidence')`，每次 `rmSync` 后重建 `thousand`（恰 1000 逻辑行）与 `five-megabyte`（UTF-8 侧 5,478,090 B、1200 行）两组、每组六变体（UTF-8 LF / UTF-8 CRLF / UTF-8 BOM LF / UTF-16LE CRLF / GBK LF / 单字符变异 CRLF），确定性生成、GBK 走固定字符→字节表且 `decodeText` 回读逐字相等；`createDiskPlatformPort()` 以 `createWebPlatformPort()` 为底只覆写 `probeTextFile` / `readTextFile` / `statPath`，探测一律 `probeTextBytes(readFileSync(path))`；证据组装与 `pinnedFields` 同在此模块。**新增 `src/diff-normalize-real-gate.test.tsx`（383 行 / 10 个 `it`）**——真实 `Workbench` 打开千行组 `utf8-crlf` ↔ `gbk-lf`，读数 `0 → 1 → 0` 且每次等于同一次比较的 `differenceCount` / `blocks.length`，状态栏四值 `['CRLF','UTF-8','LF','GBK']` 全程不变，两开关为可聚焦 `role="switch"`、单击与 Space 各翻转一次、两栏各 1000 行；核心级 5 MiB 组默认全 0、严格后换行/编码信号与真实字符差异均报出、关闭后重算最大 203.75 ms < 10 s 预算；print `OPENCOMPARE_DIFF_NORMALIZE_EVIDENCE <JSON>`，`OPENCOMPARE_EVIDENCE_OUT` 落 `docs/evidence/diff-normalize-real-files.json`，并提交人读 `.md`。**门清单**——`.munk/code-gates.json` 在 `diff-normalize` 之后插入一条 `diff-normalize-real`（`cwd: "."`、单 argv `pnpm test src/diff-normalize-real-gate.test.tsx`），总数 23 → 24，其余 23 条 id / 命令逐字未动，`description` 追加 4 条 marker 与文件路径；`src/munk-gates.test.ts` 同步 `EXPECTED_GATES` / 长度 24 / 新门邻位与 marker 断言，既有模板门 tail、末两项、单 argv、禁 perf 断言保留。`test-debt.json` 仅 growth（repoTestLines 43999 → 44398、addedCases 11）。六变体 sha256 全部运行时从磁盘字节重算（无字面量），门回读已提交 JSON 的 `bytes` / `sha256` / 各状态 `differenceCount` / `blocks.length` 与现场逐项相等。
+- 注：① 本 WI change pack 仅含 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 prd AC 落档为本域新增的 `qa/diff-normalize-real-files.md`（非 change-pack 用例）。② 门文件自身 383 行、辅助模块 589 行：把夹具与证据组装留在非测试模块是让 `addedCases` 只增 11 而 `repoTestLines` 增量 399 满足 ≤400 的关键，后续加断言先拆非测试模块而不是继续堆门文件。③ 证据 JSON 被门回读钉住：重生成必须先跑 `OPENCOMPARE_EVIDENCE_OUT=docs/evidence/diff-normalize-real-files.json pnpm test src/diff-normalize-real-gate.test.tsx` 再写 `.md`，且耗时 / 绝对路径不得进入 pinned 字段，否则换机器即假红。④ 新门 4.79 s（明显重于 `diff-normalize` 的 101 ms），仍是 jsdom + 真实小文件、不启 Electron，留在默认矩阵；若将来放大到分钟级应并入单文件 e2e 而不是再加矩阵项。⑤ **门禁插队先例**：本域连续两轮把门插在 `diff-normalize` 之后而非末尾，与 `domains/quality-gates` 仍写的「只在末尾追加 / 现行 22 项」口径冲突——该域尚未折叠 23 / 24 两轮，后续 Planner 需开一项把门禁清单域与 `tech/overview.md` 计数对齐，不要引用旧 22 项说法。

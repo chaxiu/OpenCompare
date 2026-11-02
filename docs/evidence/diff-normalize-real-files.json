@@ -1,0 +1,414 @@
+{
+  "version": 1,
+  "command": "OPENCOMPARE_EVIDENCE_OUT=docs/evidence/diff-normalize-real-files.json pnpm test src/diff-normalize-real-gate.test.tsx",
+  "root": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence",
+  "thresholds": {
+    "fiveMib": 5242880,
+    "thousandLines": 1000,
+    "strictRecomputeBudgetMs": 10000
+  },
+  "groups": {
+    "thousand": {
+      "logicalLines": 1000,
+      "probeMs": 10.999750999999947,
+      "variants": {
+        "utf8-lf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/thousand/utf8-lf.txt",
+          "bytes": 55890,
+          "sha256": "22cdddce4f0efe34cd76da54bec636ded0713580451e44264f2e1ac6e05ddddd",
+          "lines": 1000,
+          "encoding": "UTF-8",
+          "newline": "LF"
+        },
+        "utf8-crlf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/thousand/utf8-crlf.txt",
+          "bytes": 56890,
+          "sha256": "bd2e2db8543e23c40a05f91daa69056c6d86ac7f0f3269e87aba0323f8875ebb",
+          "lines": 1000,
+          "encoding": "UTF-8",
+          "newline": "CRLF"
+        },
+        "utf8bom-lf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/thousand/utf8bom-lf.txt",
+          "bytes": 55893,
+          "sha256": "e9f775284b2701a4acd58841f178574cee14606d263c9a0ba85ea56cd1b20eff",
+          "lines": 1000,
+          "encoding": "UTF-8 BOM",
+          "newline": "LF"
+        },
+        "utf16le-crlf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/thousand/utf16le-crlf.txt",
+          "bytes": 45782,
+          "sha256": "86631e07e54c12505fdbad66d7450901817d66803da7b45a8310275062ba3da7",
+          "lines": 1000,
+          "encoding": "UTF-16LE",
+          "newline": "CRLF"
+        },
+        "gbk-lf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/thousand/gbk-lf.txt",
+          "bytes": 38890,
+          "sha256": "abd37c5db4ea99e7ad939fe74b82959ad5a0cd742f4c95eeaa7be4260d17add9",
+          "lines": 1000,
+          "encoding": "GBK",
+          "newline": "LF"
+        },
+        "utf8-crlf-mutated": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/thousand/utf8-crlf-mutated.txt",
+          "bytes": 56890,
+          "sha256": "65969b16897988a5962d2529e5a556b473561362bb3f207da54d463ca3c2c95d",
+          "lines": 1000,
+          "encoding": "UTF-8",
+          "newline": "CRLF"
+        }
+      },
+      "pairs": [
+        {
+          "left": "utf8-crlf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1000,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 0.3907090000000153,
+          "strictElapsedMs": 87.37945800000011
+        },
+        {
+          "left": "utf16le-crlf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1000,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 0.3413749999999709,
+          "strictElapsedMs": 84.36008300000003
+        },
+        {
+          "left": "gbk-lf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 0.2711659999999938,
+          "strictElapsedMs": 0.3139169999999467
+        },
+        {
+          "left": "utf8-crlf",
+          "right": "gbk-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1000,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 0.2722079999998641,
+          "strictElapsedMs": 85.66487499999994
+        },
+        {
+          "left": "utf8bom-lf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 0.28079200000001947,
+          "strictElapsedMs": 0.254207999999835
+        },
+        {
+          "left": "utf16le-crlf",
+          "right": "gbk-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1000,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 0.2838749999996253,
+          "strictElapsedMs": 84.50516700000026
+        },
+        {
+          "left": "utf8-crlf-mutated",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1,
+            "inlineSegments": 2
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1000,
+            "inlineSegments": 2
+          },
+          "defaultElapsedMs": 0.44687500000009095,
+          "strictElapsedMs": 87.88495799999964
+        }
+      ],
+      "dom": {
+        "pair": [
+          "utf8-crlf",
+          "gbk-lf"
+        ],
+        "statusDefault": [
+          "CRLF",
+          "UTF-8",
+          "LF",
+          "GBK"
+        ],
+        "statusAfterClickCycle": [
+          "CRLF",
+          "UTF-8",
+          "LF",
+          "GBK"
+        ],
+        "statusAfterSpaceCycle": [
+          "CRLF",
+          "UTF-8",
+          "LF",
+          "GBK"
+        ],
+        "countDefault": 0,
+        "countClickOff": 1,
+        "countClickReopened": 0,
+        "countSpaceOff": 1,
+        "countSpaceOn": 0,
+        "blocksDefault": 0,
+        "blocksClickOff": 1,
+        "blocksClickReopened": 0,
+        "switchClickMs": 149.03825000000006,
+        "switchSpaceMs": 135.56658300000004,
+        "leftRows": 1000,
+        "rightRows": 1000
+      }
+    },
+    "five-megabyte": {
+      "logicalLines": 1200,
+      "probeMs": 260.26433399999985,
+      "variants": {
+        "utf8-lf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/five-megabyte/utf8-lf.txt",
+          "bytes": 5478090,
+          "sha256": "3ab8cf8148cdaa81c754a9cb7ee58fa97d11f33bcf6e23fcff4f3cac236f336a",
+          "lines": 1200,
+          "encoding": "UTF-8",
+          "newline": "LF"
+        },
+        "utf8-crlf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/five-megabyte/utf8-crlf.txt",
+          "bytes": 5479290,
+          "sha256": "fb84434d92b468a808a4ede1a219f2bc0b1dc1047c2da7285105eb8b01fd6928",
+          "lines": 1200,
+          "encoding": "UTF-8",
+          "newline": "CRLF"
+        },
+        "utf8bom-lf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/five-megabyte/utf8bom-lf.txt",
+          "bytes": 5478093,
+          "sha256": "991a06d1b2ce38b372f8f613c3f80cfa02364b1f12c5b979068dc3945c5011a0",
+          "lines": 1200,
+          "encoding": "UTF-8 BOM",
+          "newline": "LF"
+        },
+        "utf16le-crlf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/five-megabyte/utf16le-crlf.txt",
+          "bytes": 3662582,
+          "sha256": "a8bdfb44ebfed926772ee30862f1ccc672d2f65f1dfd5f24ccb507c657241947",
+          "lines": 1200,
+          "encoding": "UTF-16LE",
+          "newline": "CRLF"
+        },
+        "gbk-lf": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/five-megabyte/gbk-lf.txt",
+          "bytes": 3654090,
+          "sha256": "171aaf13de4fdbf9b9c4aa3dc7d13312d8f5973c45b67058127ba67d1be6a2c1",
+          "lines": 1200,
+          "encoding": "GBK",
+          "newline": "LF"
+        },
+        "utf8-crlf-mutated": {
+          "path": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencompare-diff-normalize-evidence/five-megabyte/utf8-crlf-mutated.txt",
+          "bytes": 5479290,
+          "sha256": "cb5e418d2df0bad851763513a3f4db9c48e63dfd600fee9d502b520599de9fed",
+          "lines": 1200,
+          "encoding": "UTF-8",
+          "newline": "CRLF"
+        }
+      },
+      "pairs": [
+        {
+          "left": "utf8-crlf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1200,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 12.979791999999634,
+          "strictElapsedMs": 195.5866249999999
+        },
+        {
+          "left": "utf16le-crlf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1200,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 12.116958000000068,
+          "strictElapsedMs": 198.51825000000008
+        },
+        {
+          "left": "gbk-lf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 11.833999999999833,
+          "strictElapsedMs": 10.652500000000146
+        },
+        {
+          "left": "utf8-crlf",
+          "right": "gbk-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1200,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 11.929290999999921,
+          "strictElapsedMs": 195.04883299999983
+        },
+        {
+          "left": "utf8bom-lf",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 10.998208000000432,
+          "strictElapsedMs": 10.841625000000022
+        },
+        {
+          "left": "utf16le-crlf",
+          "right": "gbk-lf",
+          "default": {
+            "differenceCount": 0,
+            "blocks": 0,
+            "nonSameRows": 0,
+            "inlineSegments": 0
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1200,
+            "inlineSegments": 0
+          },
+          "defaultElapsedMs": 11.62558399999989,
+          "strictElapsedMs": 200.50304099999994
+        },
+        {
+          "left": "utf8-crlf-mutated",
+          "right": "utf8-lf",
+          "default": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1,
+            "inlineSegments": 2
+          },
+          "strict": {
+            "differenceCount": 1,
+            "blocks": 1,
+            "nonSameRows": 1200,
+            "inlineSegments": 2
+          },
+          "defaultElapsedMs": 12.021250000000691,
+          "strictElapsedMs": 203.75166700000045
+        }
+      ],
+      "strictRecomputeMs": 203.75166700000045,
+      "operability": "core-only rows: compared through diffLineTextsWithFacts, not rendered into jsdom"
+    }
+  }
+}
