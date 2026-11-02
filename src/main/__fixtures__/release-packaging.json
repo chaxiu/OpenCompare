@@ -776,70 +776,76 @@
         "version": "v0.2.16",
         "status": "verified",
         "assets": 12
+      },
+      {
+        "id": "evidence-v0.2.17",
+        "version": "v0.2.17",
+        "status": "verified",
+        "assets": 12
       }
     ],
     "currentVersion": {
-      "version": "v0.2.16",
+      "version": "v0.2.17",
       "assets": [
         {
           "name": "latest-linux.yml",
           "bytes": 535,
-          "sha256": "2b313ae61c76f700fc6183b3f10c6994f3b8895c1840bcd4c916c1f353f83e8a"
+          "sha256": "14573bf5ff76a63fcf34220b83c735c6a6c2ce13cbd6602e829ddc35127f9f63"
         },
         {
           "name": "latest-mac.yml",
           "bytes": 521,
-          "sha256": "8ff0cfa49dc749271ceea392fbd8776d77b9a31cc63f49ef922243e19898ac76"
+          "sha256": "d2995e5df1b7a833b2e26c89eca264664d0d8f4d7bc368a29d6e040290cb6db1"
         },
         {
           "name": "latest.yml",
           "bytes": 354,
-          "sha256": "c4ef230d5d5c4644d4c07782d0bd042128dc26c523f803663fa2199d29333a38"
+          "sha256": "eb52b13cb2a9e192e99b54825d19c3a86b282363b69414837aee8b5abf275d9e"
         },
         {
-          "name": "opencompare_0.2.16_amd64.deb",
-          "bytes": 92234340,
-          "sha256": "2d5f77d4466c58a6cf6957b150e4aff171ae07848139d7e9dba5f8a1d7d66b9f"
+          "name": "opencompare_0.2.17_amd64.deb",
+          "bytes": 92237940,
+          "sha256": "68a44da47a4b19773b43261d01d4be0687a8f021930d1fc0962deb8695de0ca5"
         },
         {
-          "name": "OpenCompare-0.2.16-arm64-mac.zip",
-          "bytes": 107355131,
-          "sha256": "5bf180e7646831e2ac5fdd9587f8d2ba975694ee890b38de82b6edbda1e0c0dc"
+          "name": "OpenCompare-0.2.17-arm64-mac.zip",
+          "bytes": 107359470,
+          "sha256": "7b6b9e0bd3003bedf92105bf917e2d55fbca8d5fd0ca1a84cf2fbbde54b2a6dc"
         },
         {
-          "name": "OpenCompare-0.2.16-arm64-mac.zip.blockmap",
-          "bytes": 113686,
-          "sha256": "d46c98aecc0f16ba74eb6251ecd4c8672ff5b8b56dc8dced46ca9d9d397d9f45"
+          "name": "OpenCompare-0.2.17-arm64-mac.zip.blockmap",
+          "bytes": 113722,
+          "sha256": "0d6787768453cdb3a80be71308ec9dfd7e785da3e3601d1a74036d514b04a2a7"
         },
         {
-          "name": "OpenCompare-0.2.16-arm64.dmg",
-          "bytes": 111477257,
-          "sha256": "4036c3a3a8523362c42bac6f0256b724edb6c185117a2b2f6c63f4b6bb74690b"
+          "name": "OpenCompare-0.2.17-arm64.dmg",
+          "bytes": 111492261,
+          "sha256": "fd5dbafb71edb0f86931e7e0f888d646c680f5f2dff1151d0d87f32f3bb8798a"
         },
         {
-          "name": "OpenCompare-0.2.16-arm64.dmg.blockmap",
-          "bytes": 118259,
-          "sha256": "b3c2847545b29ec19a30a96fcb41f70d31abfb5e6e233720a2a25ed60214d809"
+          "name": "OpenCompare-0.2.17-arm64.dmg.blockmap",
+          "bytes": 118066,
+          "sha256": "1fd19b621403f82d561d6c7f95e621f100d857adec1e0c24efd0efc04a377da3"
         },
         {
-          "name": "OpenCompare-0.2.16-win-x64.zip",
-          "bytes": 131649968,
-          "sha256": "175403582b59fca4d1a0d2f6e1b97d1b393979b98e3463012279e1788fb6d0df"
+          "name": "OpenCompare-0.2.17-win-x64.zip",
+          "bytes": 131654348,
+          "sha256": "458a6612aef1fdbd70f7b7153c1ceda80272d0957c4dcd2fe99d25e0bdc53725"
         },
         {
-          "name": "OpenCompare-0.2.16.AppImage",
-          "bytes": 118158769,
-          "sha256": "d08519e28c132e1338ab2d285c43df3cf0dbf3465ecd543048ce3498b28841d4"
+          "name": "OpenCompare-0.2.17.AppImage",
+          "bytes": 118162855,
+          "sha256": "a115b66858835494679f3e2d8044f2c616a97fb1bdf5cb12b2bf05bea48941e5"
         },
         {
-          "name": "OpenCompare-Setup-0.2.16.exe",
-          "bytes": 101434344,
-          "sha256": "cb67421b65a26083b475bdfb8e939ebfe7dfe87df91315002f76abf353ed68a6"
+          "name": "OpenCompare-Setup-0.2.17.exe",
+          "bytes": 101437048,
+          "sha256": "695b7ef10215a5be7c744177ed5ef4850e726831838d11d21bcd717245313752"
         },
         {
-          "name": "OpenCompare-Setup-0.2.16.exe.blockmap",
-          "bytes": 106602,
-          "sha256": "78be1cf81464102ddc22c670a720382047bf157aa54c219295c7b06b747dd3a4"
+          "name": "OpenCompare-Setup-0.2.17.exe.blockmap",
+          "bytes": 106627,
+          "sha256": "19085c0f86fd16baf1a62c5e4e98c005ef7a62c96d6d53ee42dbfec06927fa40"
         }
       ]
     }

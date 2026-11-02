@@ -1199,6 +1199,22 @@
 - **ac-diff-scope-only**：`git diff --name-only` 仅含本项 7 个文件与 `.munk/changes/wi_intake_792a3d61cf3bfc73/**`；两版 `README.md` 第 5 行、`package.json#version`（仍 `0.2.17`）、`release.yml` 默认 tag、产品运行时代码与其他测试零 diff。
 - **ac-gates-22-green / ac-delivery-local-merge-only / ac-h3-comparison-reported**：22 门全绿（`repoTestLines` ≤ 42724、`repoTestCases` ≥ 1373，不放宽 baseline）；交付只走 `local_merge`，不打 tag、不 dispatch、不改已公开 tag / Release / 资产、不新建 `docs/release-evidence/v0.2.17.md`；交付说明逐条给出两版 v0.2.17 全部 H3 与 v0.2.16 的对照结果。
 
+### v0.2.17 发布收尾（发布证据回写与 README 状态行同步，WI `wi_intake_a5182cf0284c9b23`）
+
+> **姿态**：`v0.2.17` 已公开发布且 L1 已闭环，本项只做发布收尾文档回写（纯文档 + 台账数据，不改产品行为、不改任何断言判据）。证据源只读，所有数字必须取自发布期 / L1 证据文件，禁止推测或补写。
+
+- **ac-evidence-file**：`docs/release-evidence/v0.2.17.md` 存在且非空；首行含 `v0.2.17` 与中文；全文恰好一处以行首 `status: verified` 出现。
+- **ac-evidence-sections**：证据文档含八类分节并与 `v0.2.16.md` 同构——tag 与发布点、公开 Release、Release CI、12 件资产表、双语正文门、mac 签名与公证、L1 结论、未覆盖面。
+- **ac-evidence-identity**：记录发布点 `a2b05a602602bfa6f3a57b36695ed9bd49cc8eca`、tag 对象 `9e98552a8d7b9fece9935703e56b07f25e94681f`、`package.json#version` = `0.2.17`；存在同时含反引号 commit 与 `tag → commit` 语义的行，满足既有 commit 身份门。
+- **ac-evidence-release / ac-evidence-ci**：记录 Release URL、published（非 draft / 非 prerelease）、publishedAt `2026-11-02T12:25:34Z`、该 tag 恰好 1 个 Release；记录 run `41443763971` 五个 job 全 `success` 与 `Test Files 115 passed` / `Tests 1800 passed | 3 skipped (1803)`。
+- **ac-evidence-assets**：资产表恰好 12 行，每行 `| \`名称\` | 字节数 B | 口径 | \`sha256\` | 公开 URL |`；行名 / 字节数 / sha256 与发布期 `release-v0.2.17.json` 逐项相等；文档内不同 64 位小写 hex 恰为这 12 个资产 digest，无额外或残缺 token。
+- **ac-evidence-body / ac-evidence-mac**：记录双语正文 4,665 字符 / 92 行与「英文 → `---` → `<details><summary>简体中文</summary>` → 中文 → `</details>` → Full Changelog」结构、9 个中文分节标题；记录 `skipped macOS application code signing` 命中 0、`notarization successful`、`codesign` / `stapler` / `spctl` fail-closed 复核随 job 通过。
+- **ac-evidence-l1 / ac-evidence-uncovered**：记录 L1 全部已核结论（独立重下字节与 sha256 相等、干净副本版本 `0.2.17`、三轮四态 35 / 80 / 41 / 326,099 与算术自洽 0 回退、GC 保留堆 241,786,524 → 241,803,336 B / Δ16,812 B / 0.016 MiB ≤ 16 MiB、app 峰值 1.22 GiB / renderer 0.78 GiB / 零 OOM / 零重启、取消 35 ms 零残留、9 份日志 6 类关键词全 0）；如实写明 L2 四条计时腿不在本版 L1 且归 `task_e4434fa95548e4fb`、attempt 001 全量门证据目录缺口与同树 CI + `repoTestLines 42718/42724` 补偿。
+- **ac-evidence-paths**：证据引用一律绝对路径并标注根目录映射（产品目录 / 运行件目录 / 仓库根），不出现从仓库根无法解析的相对证据路径。
+- **ac-readme-en / ac-readme-zh**：`README.md` 与 `README.zh-CN.md` **仅第 5 行**的版本与链接改为 `v0.2.17`，措辞不变，其余行逐字不动；双语镜像与 9 节结构保持。
+- **ac-ledger-registration**：`src/main/__fixtures__/release-packaging.json` 的 `evidence.ledger` 增加 `v0.2.17` / `verified` / `assets: 12` 一行，`evidence.currentVersion` 切到 `v0.2.17` 的 12 件资产；既有台账遍历、README 已发布锚与 `repoTestLines` 门真过，且未修改任何断言判据。
+- **ac-code-gates-green / ac-no-product-change**：`.munk/code-gates.json` 全部 gate 退出码 0、无一跳过；`package.json#version` 保持 `0.2.17`，产品源码、测试判据、`CHANGELOG.md`、`docs/release-notes/v0.2.17*`、tag、已公开 Release 与资产均不变。
+
 ## 非目标
 
 - 祖先门语义修正与 dispatch 补发项**只改仓库源码、工作流与文档，不执行任何远端写操作**：不打 tag、不 push、不 publish、不创建 / 编辑 / 公开 / 上传 Release；远端 `v0.2.0` tag（annotated `f385521` → `285ee28`）保持原样，不删除、不移动、不重打；`v0.1.0` / `v0.1.1` / `v0.1.2` 的 tag 与资产同样不动。
@@ -1407,6 +1423,13 @@
 - **边界**：本改动只下沉判定与测试结构，不改产品行为、发版通道、发布脚本、文档与版本号；祖先门（v0.1.2 patch-equivalence）用例独立成 `src/main/release-ancestry-gate.test.ts`，不在这两套件的行数预算内。
 
 ## 最近交付证明
+- WI：`wi_intake_a5182cf0284c9b23`（**v0.2.17 发布收尾：发布证据回写与 README 状态行同步**，不是发版动作：`v0.2.17` 已公开且 L1 已闭环（发布点 `a2b05a602602bfa6f3a57b36695ed9bd49cc8eca`、tag 对象 `9e98552a8d7b9fece9935703e56b07f25e94681f`、Release published `2026-11-02T12:25:34Z`、CI run `41443763971` 五 job 全 success、12 件资产），仓库仍停在「v0.2.16 已发布 / v0.2.17 收敛待收尾」姿态。本项只做三件只读回写：新建 `docs/release-evidence/v0.2.17.md`（`status: verified`，八节，只写发布期与 L1 已核事实）、两版 README **仅第 5 行**前移、`src/main/__fixtures__/release-packaging.json` 的 `evidence.ledger` 增 `v0.2.17` / `verified` / `assets: 12` 一行并把 `evidence.currentVersion` 切到 v0.2.17 的 12 件资产；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-02
+- 结果：`code_gates` passed（**22 gates**，attempt 001 全 exit 0，`.munk/runs/run_intake_a5182cf0284c9b23/code-gates/attempts/001`，`latest.json` `ok: true` / `"code_gates passed (22 gates, attempt 001)"`、`failedGateIds: []`）；`test` 门 115 files / **1818 passed + 1 skipped**（1819），30.19s；`test-debt-gate` 实测 `repoTestLines` 42718 ≤ 42724、`repoTestCases` 1373 ≥ 1373、`.ts` / `.tsx` 版本字面量 0。
+- 改动面：3 个已跟踪路径 **+39 / −33**（`README.md` 1/1、`README.zh-CN.md` 1/1、`src/main/__fixtures__/release-packaging.json` 37/31），外加新增未跟踪 `docs/release-evidence/v0.2.17.md`（147 行）。零 diff：`package.json`（`version` 仍 `0.2.17`）、`CHANGELOG.md`、`docs/release-notes/**`（含 v0.2.17 双语两份）、`docs/release-signing.md`、`docs/release-process.md`、`.github/workflows/release.yml`、`electron-builder.yml`、`docs/release-evidence-ledger.json`、`pnpm-lock.yaml`、`.munk/code-gates.json`、既有各版 `docs/release-evidence/**`、`src/**` 除该 fixture JSON 外全部（含全部测试文件与断言判据）。
+- 验收落点：prd 的 16 条 AC 全条落档为 `domains/release/qa/v0217-release-finish-evidence-readme-ledger.md`。要点：证据文件首行含 `v0.2.17` + 中文、全文 `^status:` 恰 1 行 = `verified`、八个 `## ` 分节与 v0.2.16 同构、12 行资产名 / 字节 / sha256 与 `release-v0.2.17.json` 逐项一致、不同 64 位小写 hex 恰为 12 个 digest、commit / tag 对象 / publishedAt / run `41443763971` / 五 job / `Test Files 115 passed` / `Tests 1800 passed | 3 skipped (1803)` / 正文 4,665 字符 92 行 / 9 个中文分节 / mac 三项 / L1 五腿 / 六类日志全 0 逐项在位，L2 四条腿与证据缺口如实另列；两版 README `git diff -U0` 各只有一处 `@@ -5 +5 @@`、第 5 行 `releases/tag/` 各 1 次且指向 `v0.2.17`、9 个 H2 零 diff；台账 fixture 增 `evidence-v0.2.17` 一项 + `currentVersion` 切 `v0.2.17`（12 件资产，dmg `111,492,261 B` / sha256 `fd5dbafb…798a`），既有台账遍历 / README 已发布锚（`judgePublishedAnchor` 由 verified 目录 derive 到 `v0.2.17`）/ `repoTestLines` 门真过且零断言判据改动。
+- 注：① 本 WI change pack **只有 `prd.md`**（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；QA 档案由 Delivery 按 prd AC 逐条落档。② **被推翻的假设**：「补一个 verified 证据文件只是新增文档」不成立——`judgePublishedAnchor` 从「台账 ∪ 证据目录的 verified 最大值」**派生**已发布锚，新增 `docs/release-evidence/v0.2.17.md` 会立刻把 README 锚要求前移到 `v0.2.17`；证据文件与两版第 5 行必须**同提交**落地，只写证据不改 README 会当场判红。③ **收尾轮真正的新增面是台账数据而不是断言**：v0.2.17 起发布门已拆成「当前版本源 / 已发布锚」两函数，本轮无需按版本新增 describe 或改断言，只补 `evidence.ledger` 一行并把 `currentVersion` 的数据切到 12 件资产，`repoTestLines` 因此持平（42718）。④ **证据必须只读回写**：12 件资产中只有 dmg 是 L1 独立重下 + sha256 实测，其余 11 件如实标「发布期资产 size / digest」，不重算、不编造；L2 四条计时腿（180 s / 60 s / 3 s / 15 s）不在本版 L1 且不补跑，仍归 `task_e4434fa95548e4fb`。⑤ **发布通道全程只读**：未打 tag / 未 push 远端 tag / 未 dispatch / 未对已公开 Release 与 12 件资产做任何写操作；`package.json#version` 与 `CHANGELOG.md` / 发布说明 / 工作流 / 签名文档零 diff，收尾不触碰发布链路。
+
 - WI：`wi_intake_792a3d61cf3bfc73`（**v0.2.17 发布说明去重**：把已随 v0.2.16 公开发布的「同步失败提示随界面语言本地化」从 v0.2.17 双语 notes 与 `CHANGELOG.md` 顶部彻底移除，本版变化收敛为「模板归位逐条动作列 + 显式勾选移动」与「大小写不敏感碰撞折叠 + 路径越界拒绝」两项；`noteFacts` 三个 token 数组删 `EACCES`；`docs/release-signing.md` 补反引号；并把「notes 只写相对上一已发布版本新增的用户可见变化」写成长期约定；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-11-02
 - 结果：`code_gates` passed（**22 gates**，attempt 001 全 exit 0，`.munk/runs/run_intake_792a3d61cf3bfc73/code-gates/attempts/001`，`latest.json` `ok: true` / `"code_gates passed (22 gates, attempt 001)"`、`failedGateIds: []`）；`test` 门 115 files / **1802 passed + 1 skipped**（1803），30.20s；`test-debt-gate` 实测 `repoTestLines` 42718 ≤ 42724、`repoTestCases` 1373 ≥ 1373。
