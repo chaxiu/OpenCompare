@@ -197,3 +197,12 @@ v0.2.6 实测：
 - 结论：known issue 不得用于掩盖打穿验收条款的类型保真缺口：链接/二进制/权限等形态保真必须由真实落盘端到端断言钉住，且校验不得用内容 hash 代替形态
 - 落盘口径：计划项携带 `linkTarget`（源侧 `readlink` 字面串）分派写路径，建链/替换/删除一律先 unlink 链接本身、再 `symlink` + `lutimes` 级对齐；回滚按原形态恢复（链接重建链接 + 自身 mtime）。
 - 断言位置：`src/sync-real-gate.test.ts`（`real-disk sync symlink fidelity` 用例组，断言消息以 `symlink fidelity:` 开头），覆盖 A/B/C 与验收 1)~5)，并全部通过 `previewSync` → `canApplySyncPreview` → `applySyncPreview` 的 UI 同源路径。
+
+## 11. 2026-11-02 v0.2.16 L1 收敛：GC 保留堆口径与旧 `d1≥d2≥d3` 废止
+
+- 唯一实现：`scripts/verify-release.mjs`（本地与 CI 同一份）。`--layer=local` 保留 B 层：真实 6.43 GiB 目录对三轮四态、算术自洽、关闭会话后的 GC 保留堆判定；`--layer=ci` 只做 A 层：公开件可得性 / 字节 / sha256、macOS 挂载 + 版本 + 签名公证、Linux xvfb 启动 + 版本 + 合成树冒烟、Windows zip + 版本 + Authenticode、取消腿 + 日志零噪声、fail-closed JSON 与固定 15 项检查计数。**A 层不含内存腿**。
+- B 层内存判定口径（逐字）：每轮关闭会话（tab=0 / 树=0）→ `HeapProfiler.collectGarbage`×2 → 静置 1s → `Performance.getMetrics().JSHeapUsedSize`；第 3 轮保留堆 − 第 2 轮 ≤16 MiB（`16 * 1024 * 1024` 字节）；未 GC 的轮末堆只记录，不参与判定；阈值固定，脚本不提供放宽开关。
+- v0.2.16 证据：`projects/ops_df43e423451170fd/.munk/runs/trun_5d107ebc931e4ffe/evidence/32-heap-gc-probe.json`，保留堆 241.6 → 241.8 MB（第 3 轮 − 第 2 轮 = 0.2 MB，远低于 16 MiB）。
+- 旧口径 `d1≥d2≥d3` 废止理由：该口径把未 GC 的轮末瞬时堆当判定依据，实测被 V8 未回收垃圾与渲染帧抖动主导（同一进程连续三轮可任意排列），无法区分真实保留与待回收内存；v0.2.16 起改用「GC×2 + 静置 1s 后的保留堆」并只比较第 3 轮与第 2 轮，口径可复核、可复现，旧 `d1≥d2≥d3` 不再作为判定。
+- CI 不跑内存腿：A 层不做任何 heap / memory 采样，也不访问本机 6.4 GiB 夹具；三轮真实目录对长跑由 product-qa 任务 `task_0194dba8b812d08b` 在本机执行，本仓脚本只承载规则。
+- 断言位置：`src/verify-release-gate.test.ts`（`.munk/code-gates.json` 的 `verify-release-gate`）。

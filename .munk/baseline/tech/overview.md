@@ -31,12 +31,12 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 
 ## 质量门禁
 
-默认矩阵 20 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
+默认矩阵 21 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
 `test-compare-request` / `cancel-gate` / `memory-gate` / `structured-semantics` / `sync-real-gate` /
 `template-default-unchecked` / `template-single-source` / `template-sha-mtime` /
 `template-cancel-zero-write` / `template-e2e-real` / `template-case-collision` /
-`template-path-contained` / `template-move-actions` / `template-move-verify`（见 `.munk/code-gates.json`），全部为纯单测或构建门禁
-（`sync-real-gate` 与 `template-e2e-real` 只写 `mkdtemp` 系统临时目录并自带清理，后者约 1.8 s；两条模板安全门禁为纯函数 / 构造数据，毫秒级；两条模板移动门禁为纯函数 + 真实小夹具，11 ms / 89 ms）；矩阵扩容只做末尾追加，前序条目逐字逐序不变
+`template-path-contained` / `template-move-actions` / `template-move-verify` / `verify-release-gate`（见 `.munk/code-gates.json`），全部为纯单测或构建门禁
+（`sync-real-gate` 与 `template-e2e-real` 只写 `mkdtemp` 系统临时目录并自带清理，后者约 1.8 s；两条模板安全门禁为纯函数 / 构造数据，毫秒级；两条模板移动门禁为纯函数 + 真实小夹具，11 ms / 89 ms；`verify-release-gate` 用注入 fixture 跑发布验收驱动，不连网、不启 Electron、不访问本机 6.4 GiB 夹具）；矩阵扩容只做末尾追加，前序条目逐字逐序不变
 （`src/munk-gates.test.ts` 钉板同步长度断言）。门禁文件之间不共享 `beforeAll` 夹具、可各自单独冷启动通过，
 且不得引用内置样本（`@shared/fixtures` / `DIRECTORY_SAMPLE_PATHS` / 样本挂载路径），由钉板静态扫描钉住。重采样 `pnpm perf:gate` **不在默认矩阵**，只作为条件 profile 放在
 `.munk/code-gates.perf.json`（Host 不自动执行）：仅在 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染

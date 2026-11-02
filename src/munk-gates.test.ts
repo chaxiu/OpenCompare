@@ -63,7 +63,8 @@ const EXPECTED_GATES = [
   {
     id: 'template-move-verify',
     command: 'pnpm test src/template-gate-move-verify.test.ts'
-  }
+  },
+  { id: 'verify-release-gate', command: 'pnpm test src/verify-release-gate.test.ts' }
 ] as const
 
 /** The nine template placement gate files, mapped by gate id. */
@@ -133,16 +134,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly twenty pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty-one pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(20)
+    expect(defaultManifest.gates).toHaveLength(21)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the twenty commands verbatim with cwd "."', () => {
+  it('keeps the twenty-one commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
@@ -189,9 +190,10 @@ describe('default code-gates matrix', () => {
     }
   })
 
-  it('registers the nine template placement gates at the end of the matrix', () => {
-    const tail = defaultManifest.gates.slice(-TEMPLATE_GATES.length)
+  it('registers the nine template placement gates before the release driver gate', () => {
+    const tail = defaultManifest.gates.slice(-(TEMPLATE_GATES.length + 1), -1)
     expect(tail.map((gate) => gate.id)).toEqual(TEMPLATE_GATES.map((gate) => gate.id))
+    expect(defaultManifest.gates.at(-1)?.id).toBe('verify-release-gate')
     for (const expected of TEMPLATE_GATES) {
       const gate = gateById(defaultManifest, expected.id)
       expect(gate, `manifest: gate ${expected.id}`).toBeDefined()
