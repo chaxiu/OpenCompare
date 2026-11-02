@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "measuredAt": {
+    "commit": "120f06d560ad4cef9d43cd0826db86516c1d8f36",
+    "date": "2026-11-02"
+  },
+  "ceilings": {
+    "appTestLines": 2959,
+    "syncRealGateLines": 1991,
+    "pairLines": 4950,
+    "repoTestLines": 42724
+  },
+  "floors": {
+    "appTestCases": 94,
+    "syncRealGateCases": 32,
+    "repoTestCases": 1373
+  },
+  "harness": {
+    "perFileMaxLines": 400,
+    "totalMaxLines": 400,
+    "files": ["src/test/sharedHarness.tsx"]
+  },
+  "literalWhitelist": {
+    "sha256": [
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    ]
+  }
+}
