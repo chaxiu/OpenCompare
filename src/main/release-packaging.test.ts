@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { builder, currentTag, currentVersion, finalizeStep, gateStep, macEntitlements, packageStep, pkg, releaseWorkflow, repoRoot } from './release-doc-fixtures.test-helpers'
+import { parse } from 'yaml'
+import { builder, currentTag, currentVersion, finalizeStep, gateStep, gatesSteps, macEntitlements, packageStep, pkg, repoRoot, workflow, yamlScalars } from './release-doc-fixtures.test-helpers'
 
 // Table-driven contract for the release package metadata, the body / link / metadata /
 // AppImage gates and the release-evidence ledger. Expected data:
@@ -12,9 +13,9 @@ import { builder, currentTag, currentVersion, finalizeStep, gateStep, macEntitle
 type Strings = string[]
 interface ValueRow { id: string; path: string; value?: unknown; present?: boolean; nonEmpty?: boolean; tokens?: Strings }
 interface StepRow { id: string; job: 'gates' | 'release' | 'finalize'; name: string; if?: string; tokens: Strings; absent: Strings; patterns: Strings; absentPatterns: Strings }
-interface StepOrderRow { id: string; names: Strings; mustBeLast: boolean }
+interface StepOrderRow { id: string; job: 'gates' | 'release' | 'finalize'; names: Strings; mustBeLast: boolean }
 interface DocsRow { id: string; path: string; tokens: Strings; absent: Strings; absentPatterns: Strings }
-interface CheckRow { id: string; tokens: Strings; absent: Strings; patterns: Strings; absentPatterns: Strings }
+interface CheckRow { id: string; scope: 'runs' | 'yaml'; tokens: Strings; absent: Strings; patterns: Strings; absentPatterns: Strings }
 interface GuardRow { id: string; marker: string; message: string }
 interface CaseRow { id: string; mode: string; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings }
 interface AppImageCase { id: string; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings; declared?: number; size?: number; tailHex?: string; images?: number; metadataMode?: 'declared' | 'blockmap-missing' | 'file-missing' }
@@ -81,6 +82,12 @@ const fixtureRowIds = [
 
 const stepOf = (row: StepRow): { if?: string; run?: string } | undefined =>
   row.job === 'gates' ? gateStep(row.name) : row.job === 'release' ? packageStep(row.name) : finalizeStep(row.name)
+const stepsOf = (job: 'gates' | 'release' | 'finalize'): Array<{ name?: string; run?: string; uses?: string; env?: Record<string, string>; with?: Record<string, unknown> }> => workflow.jobs?.[job]?.steps ?? []
+const stepIndex = (job: 'gates' | 'release' | 'finalize', name: string): number => stepsOf(job).findIndex((step) => step.name === name)
+const allRunText = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? [])
+  .map((step) => step.run ?? '').join('\n')
+const allStepText = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? [])
+  .map((step) => [step.run, step.uses, ...Object.entries(step.env ?? {}).map(([key, value]) => `${key}: ${value}`), ...Object.entries(step.with ?? {}).map(([key, value]) => `${key}: ${String(value)}`)].join('\n')).join('\n')
 const runInTemp = (run: (dir: string) => ReturnType<typeof spawnSync>): { status: number; output: string } => {
   const dir = mkdtempSync(join(tmpdir(), 'opencompare-release-gate-'))
   try {
@@ -128,46 +135,59 @@ describe('release workflow contracts', () => {
     expectNoPattern(body, row.absentPatterns, row.name)
   })
 
-  it.each(fixture.workflowChecks)('$id holds on the whole workflow', (row) => {
+  it.each(fixture.workflowChecks)('$id holds on the parsed workflow', (row) => {
     useRow(row.id)
-    expectTokens(releaseWorkflow, row.tokens, row.id)
-    expectAbsent(releaseWorkflow, row.absent, row.id)
-    expectPatterns(releaseWorkflow, row.patterns, row.id)
-    expectNoPattern(releaseWorkflow, row.absentPatterns, row.id)
+    const text = row.scope === 'yaml' ? yamlScalars(workflow).join('\n') : allRunText
+    expectTokens(text, row.tokens, row.id)
+    expectAbsent(text, row.absent, row.id)
+    expectPatterns(text, row.patterns, row.id)
+    expectNoPattern(text, row.absentPatterns, row.id)
+  })
+
+  it('pins the trigger, gate job, release matrix and single-release wiring structurally', () => {
+    expect(workflow.on?.push?.tags).toEqual(['v*'])
+    expect(workflow.on?.workflow_dispatch?.inputs?.tag).toBeDefined()
+    expect(workflow.jobs?.gates?.name).toBe('Quality gates')
+    expect(workflow.jobs?.release?.needs).toBe('gates')
+    expect((workflow.jobs?.release?.strategy?.matrix?.include ?? []).map((entry) => entry.target)).toEqual(['mac', 'win', 'linux'])
+    expect(gatesSteps.some((step) => step.env?.GH_REPO === '${{ github.repository }}'), 'gates GH_REPO').toBe(true)
+    expect(allRunText, 'electron-builder publish never').toContain('electron-builder --${{ matrix.target }} --publish never')
+    expect(allRunText, 'duplicate release prune').toContain('gh api --method DELETE')
+  })
+
+  it('pins every gates job command in order', () => {
+    const pnpmRuns = gatesSteps.map((step) => (step.run ?? '').trim()).filter((run) => run.startsWith('pnpm '))
+    expect(pnpmRuns, 'gates job pnpm steps').toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm typecheck', 'pnpm test', 'pnpm build'])
   })
 
   it.each(fixture.stepOrder)('$id keeps the workflow order', (row) => {
     useRow(row.id)
+    const names = stepsOf(row.job).map((step) => step.name ?? '')
     const indexes = row.names.map((name) => {
-      const index = releaseWorkflow.indexOf(`name: ${name}`)
-      expect(index, name).toBeGreaterThan(-1)
+      const index = names.indexOf(name)
+      expect(index, `${row.job}: ${name}`).toBeGreaterThan(-1)
       return index
     })
-    for (let index = 1; index < indexes.length; index += 1) {
-      expect(indexes[index], row.names[index]).toBeGreaterThan(indexes[index - 1])
-    }
-    if (row.mustBeLast) {
-      const last = row.names[row.names.length - 1]
-      expect(releaseWorkflow.slice(indexes[indexes.length - 1] + last.length)).not.toMatch(/\n {6}- name:/)
-    }
+    for (let index = 1; index < indexes.length; index += 1) expect(indexes[index], row.names[index]).toBeGreaterThan(indexes[index - 1])
+    if (row.mustBeLast) expect(names[names.length - 1], `${row.job}: last step`).toBe(row.names[row.names.length - 1])
   })
 
   it.each(fixture.docs)('$id keeps the repository free of private key material', (row) => {
     useRow(row.id)
-    const text = readText(row.path)
+    const text = row.path.endsWith('.yml') ? yamlScalars(parse(readText(row.path))).join('\n') : readText(row.path)
     expectTokens(text, row.tokens, row.id)
     expectAbsent(text, row.absent, row.id)
     expectNoPattern(text, row.absentPatterns, row.id)
   })
 
   it.each(fixture.signing.secrets)('%s is wired into the mac matrix build', (secret) => {
-    expect(releaseWorkflow, secret).toMatch(new RegExp(fixture.signing.secretPattern.replaceAll('${secret}', secret)))
+    expect(allStepText, secret).toMatch(new RegExp(fixture.signing.secretPattern.replaceAll('${secret}', secret)))
   })
 
   it('wires only the fixture secrets plus the workflow token', () => {
-    const refs = [...releaseWorkflow.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1])
+    const refs = [...allStepText.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1])
     expect(new Set(refs), 'secret set').toEqual(new Set([...fixture.signing.secrets, fixture.signing.token]))
-    expect(releaseWorkflow, 'api-key path').toMatch(new RegExp(fixture.signing.apiKeyRefPattern))
+    expect(allStepText, 'api-key path').toMatch(new RegExp(fixture.signing.apiKeyRefPattern))
   })
 })
 
@@ -257,9 +277,9 @@ describe('published release body gate', () => {
     })
 
   it('runs in finalize after the release is made public', () => {
-    const publish = releaseWorkflow.indexOf(`name: ${fixture.releaseBody.makePublicName}`)
+    const publish = stepIndex('finalize', fixture.releaseBody.makePublicName)
     expect(finalizeStep(fixture.bodyGate.name)).toBeDefined()
-    expect(releaseWorkflow.indexOf(`name: ${fixture.bodyGate.name}`), fixture.bodyGate.name).toBeGreaterThan(publish)
+    expect(stepIndex('finalize', fixture.bodyGate.name), fixture.bodyGate.name).toBeGreaterThan(publish)
   })
 
   it.each(fixture.bodyGate.cases)('$id runs the body gate', (row) => {
@@ -302,9 +322,9 @@ describe('published release body link gate', () => {
   })
 
   it('runs the read-only link gate in finalize after the release is public', () => {
-    const publish = releaseWorkflow.indexOf(`name: ${fixture.releaseBody.makePublicName}`)
+    const publish = stepIndex('finalize', fixture.releaseBody.makePublicName)
     expect(finalizeStep(spec.name)).toBeDefined()
-    expect(releaseWorkflow.indexOf(`name: ${spec.name}`), spec.name).toBeGreaterThan(publish)
+    expect(stepIndex('finalize', spec.name), spec.name).toBeGreaterThan(publish)
   })
 
   it.each(fixture.linkGate.cases)('$id runs the link gate', (row) => {

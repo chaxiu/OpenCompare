@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { markdownSection, parseMarkdown } from './release-doc-fixtures.test-helpers'
 // Read-only assertions over docs/release-evidence/*.md and the ledger that pins
 // their historical asset rows. No download, unpack, mount, sign, notarize or git
 // write happens here; a missing or fabricated record fails `pnpm test`.
@@ -16,6 +17,14 @@ interface LedgerVersion { version: string; status: EvidenceStatus; assets: Ledge
 interface Ledger { versions: LedgerVersion[] }
 interface EvidenceReport { status: EvidenceStatus | null; problems: string[] }
 interface MarkerRule { marker: string; minimum: number }
+interface SectionFact {
+  heading: string
+  code?: string[]
+  items?: string[]
+  text?: string[]
+  codePatterns?: Array<[pattern: string, expected: string[]]>
+  minBlockedBullets?: number
+}
 interface VersionSpec {
   sections: string
   commands: string
@@ -24,8 +33,7 @@ interface VersionSpec {
   jobs: string[]
   finalize: boolean
   sourceLabels: string
-  facts: Array<[heading: string, text: string]>
-  minBlockedBullets?: number
+  facts: SectionFact[]
 }
 const HEX64 = /^[0-9a-f]{64}$/
 const PASSING_MARKERS = ['valid on disk', 'satisfies its Designated Requirement', 'The validate action worked!', 'source=Notarized Developer ID']
@@ -35,6 +43,11 @@ const list = (value: string): string[] => (value.trim() ? value.split(' | ') : [
 const ledgerSource = existsSync(ledgerPath) ? readFileSync(ledgerPath, 'utf8') : ''
 const ledger = JSON.parse(ledgerSource || '{"versions":[]}') as Ledger
 const versions = ledger.versions
+// The current release is newer than the historical ledger: its expected asset
+// rows live in the shared release fixture and are only read at runtime.
+const currentEvidence = (JSON.parse(readFileSync(join(repoRoot, 'src/main/__fixtures__/release-packaging.json'), 'utf8')) as {
+  evidence: { currentVersion: { version: string; assets: LedgerAsset[] } }
+}).evidence.currentVersion
 const docCache = new Map<string, string>()
 const readEvidence = (version: string): string => {
   const path = join(evidenceDir, `${version}.md`)
@@ -51,6 +64,9 @@ const parseStatus = (doc: string): string | null => /^\s*(?:-\s*)?status:\s*(\S+
 const parseAssetRows = (doc: string): LedgerAsset[] => {
   const rows: LedgerAsset[] = []
   for (const line of doc.split(/\r?\n/)) {
+    // The current release adds a measurement-source column between bytes and sha256.
+    const extended = /^\| `([^`]+)` \| ([\d,]+) B \| [^|]+ \| `([0-9a-f]{64})` \| .+ \|$/.exec(line)
+    if (extended) { rows.push({ name: extended[1], bytes: Number(extended[2].replaceAll(',', '')), sha256: extended[3] }); continue }
     const markdown = /^\| `([^`]+)` \| ([\d,]+) \| `([0-9a-f]{64})` \|(?: .+ \|)?$/.exec(line)
     if (markdown) {
       rows.push({ name: markdown[1], bytes: Number(markdown[2].replaceAll(',', '')), sha256: markdown[3] })
@@ -70,6 +86,12 @@ const sectionText = (doc: string, heading: string): string => {
 }
 const tableRows = (doc: string, heading: string): string[][] =>
   sectionText(doc, heading).split(/\r?\n/).filter((line) => line.startsWith('| ')).map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()))
+const headingText = (heading: string): string => heading.replace(/^#+\s*/, '')
+const atomsOf = (doc: string, heading?: string): string[] => {
+  const markdown = parseMarkdown(heading === undefined ? doc : markdownSection(doc, headingText(heading)))
+  return [...markdown.headings, ...markdown.codeSpans, ...markdown.tableCells, ...markdown.listItems, ...markdown.paragraphs,
+    ...markdown.links.flatMap((link) => [link.text, link.target])]
+}
 
 // Baseline pure inspector: status grammar, verified marker pairs and the blocked
 // branch. Fixture digests stay synthetic so no history is copied into this file.
@@ -156,7 +178,7 @@ const specs: Record<string, VersionSpec> = {
     identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4 | 39692988051 | 55d3af2db1632d05f94b3eca88020240714b21f6',
     markers: ['notarization successful', ...SIGNING_MARKERS.map(({ marker }) => marker), 'Authority=Developer ID Application: Tao Zhu (3X4J53U6RY)', 'TeamIdentifier=3X4J53U6RY', 'flags=0x10000(runtime)'].map((marker) => ({ marker, minimum: 1 })),
     jobs: JOBS, finalize: true, sourceLabels: 'CI 日志 | 本机复核',
-    facts: [['## 6. 更新元数据：AppImage blockmap 形态', 'blockMapSize'], ['## 6. 更新元数据：AppImage blockmap 形态', '*.AppImage.blockmap'], ['## 6. 更新元数据：AppImage blockmap 形态', '内嵌']]
+    facts: [{ heading: '## 6. 更新元数据：AppImage blockmap 形态', code: ['blockMapSize', '*.AppImage.blockmap'], items: ['内嵌'] }]
   },
   'v0.2.5': {
     sections: '## 1. 发布前就绪清单（发布前快照） | ## 2. 资产名 / 字节 / sha256 | ## 3. 发布标识、CI job 结论与唯一 Release / latest 门 | ## 4. macOS 两套产物的签名 / 公证 / Gatekeeper 原文 | ## 5. 本地元数据命中校验实测 | ## 6. product-qa 公开复验交接区',
@@ -164,10 +186,12 @@ const specs: Record<string, VersionSpec> = {
     identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5 | 39713762292 | 2eedc5de1ebfbc8e835d08d18e959b394fadceb4',
     markers: SIGNING_MARKERS, jobs: JOBS, finalize: true, sourceLabels: 'dmg 内 `.app` | zip 内 `.app`',
     facts: [
-      ['## 5. 本地元数据命中校验实测', '旧错位名 0 命中'], ['## 5. 本地元数据命中校验实测', 'OpenCompare-Setup-0.2.5.exe'],
-      ['## 5. 本地元数据命中校验实测', 'OpenCompare.Setup.0.2.5.exe'], ['## 5. 本地元数据命中校验实测', 'release:metadata 校验通过：3 份 latest*.yml、11 个资产名。'],
-      ['## 6. product-qa 公开复验交接区', 'product-qa'], ['## 6. product-qa 公开复验交接区', '干净环境'], ['## 6. product-qa 公开复验交接区', '3 轮'],
-      ['## 6. product-qa 公开复验交接区', '已跳过：左 X / 右 Y'], ['## 6. product-qa 公开复验交接区', '不跟随符号链接'], ['## 6. product-qa 公开复验交接区', '第 6 节']
+      { heading: '## 5. 本地元数据命中校验实测', code: ['旧错位名 0 命中', 'OpenCompare-Setup-0.2.5.exe', 'OpenCompare.Setup.0.2.5.exe'],
+        codePatterns: [
+          ['^latest-linux\\.yml: url (\\d+)/(\\d+) 命中资产名$', ['2', '2']],
+          ['^release:metadata 校验通过：(\\d+) 份 latest\\*\\.yml、(\\d+) 个资产名。$', ['3', '11']]
+        ] },
+      { heading: '## 6. product-qa 公开复验交接区', items: ['干净环境', '3 轮', '已跳过', '不跟随符号链接'], text: ['product-qa', '第 6 节'] }
     ]
   },
   'v0.2.7': {
@@ -175,7 +199,7 @@ const specs: Record<string, VersionSpec> = {
     commands: '',
     identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.7 | 422765578 | 40100596470 | adc6e1e50b84e211d1e1791a4ae61b6d6ba87d24 | e071f876da8cf502728e4d31b2699da8254629d5',
     markers: SIGNING_MARKERS, jobs: JOBS, finalize: true, sourceLabels: '',
-    facts: [['## 7. L1 公开包复验', 'ZenMind'], ['## 7. L1 公开包复验', 'Δ3=2.06 MB'], ['## 7. L1 公开包复验', '116 ms']], minBlockedBullets: 4
+    facts: [{ heading: '## 7. L1 公开包复验', items: ['ZenMind', 'Δ3=2.06 MB', '116 ms'], minBlockedBullets: 4 }]
   }
 }
 const specFor = (version: string): VersionSpec => {
@@ -262,11 +286,13 @@ describe.each(versions)('$version release evidence', (node) => {
   })
   it('keeps the documented sections, commands, identities and source labels', () => {
     const text = doc()
-    expect(text).toContain(node.version)
-    for (const heading of list(spec.sections)) expect(text).toContain(heading)
-    for (const command of list(spec.commands)) expect(text).toContain(command)
-    for (const identity of list(spec.identities)) expect(text).toContain(identity)
-    for (const label of list(spec.sourceLabels)) expect(text).toContain(label)
+    const markdown = parseMarkdown(text)
+    const atoms = atomsOf(text)
+    expect(atoms.some((atom) => atom.includes(node.version)), node.version).toBe(true)
+    for (const heading of list(spec.sections)) expect(markdown.headings.some((candidate) => candidate.startsWith(headingText(heading))), heading).toBe(true)
+    for (const command of list(spec.commands)) expect(markdown.codeSpans.some((span) => span.includes(command)), command).toBe(true)
+    for (const identity of list(spec.identities)) expect(atoms.some((atom) => atom.includes(identity)), identity).toBe(true)
+    for (const label of list(spec.sourceLabels)) expect(atoms.some((atom) => atom.includes(label)), label).toBe(true)
   })
   it('records every required signing marker at its minimum count', () => {
     const text = doc()
@@ -280,29 +306,54 @@ describe.each(versions)('$version release evidence', (node) => {
 describe.each(versions.filter((node) => specFor(node.version).jobs.length > 0))('$version CI jobs', (node) => {
   it('records every job with the success conclusion', () => {
     const rows = readEvidence(node.version).split(/\r?\n/).filter((line) => line.startsWith('| '))
+      .map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()))
     for (const job of JOBS) {
-      const row = rows.find((line) => line.startsWith(`| ${job} |`))
+      const row = rows.find((cells) => cells[0] === job)
       expect(row, `${node.version} missing job row ${job}`).toBeDefined()
-      expect(row).toContain('success')
+      expect(row?.[row.length - 1], `${node.version} ${job} conclusion`).toBe('success')
     }
-    expect(rows.filter((line) => line.startsWith('| Package '))).toHaveLength(3)
+    expect(rows.filter((cells) => cells[0]?.startsWith('Package '))).toHaveLength(3)
   })
 })
 describe.each(versions.filter((node) => specFor(node.version).finalize))('$version release uniqueness gate', (node) => {
   it('records the finalize gate output for the tag', () => {
-    const text = readEvidence(node.version)
-    expect(text).toContain(`releases for ${node.version}: 1 (drafts: 0, prereleases: 0)`)
-    expect(text).toContain(`latest published release: ${node.version} (this tag: ${node.version})`)
+    const spans = parseMarkdown(readEvidence(node.version)).codeSpans
+    for (const line of [`releases for ${node.version}: 1 (drafts: 0, prereleases: 0)`, `latest published release: ${node.version} (this tag: ${node.version})`]) {
+      expect(spans.some((span) => span.includes(line)), line).toBe(true)
+    }
   })
 })
 describe.each(versions.filter((node) => specFor(node.version).facts.length > 0))('$version section facts', (node) => {
   it('keeps every technical fact inside its documented section', () => {
     const text = readEvidence(node.version)
-    const spec = specFor(node.version)
-    for (const [heading, fact] of spec.facts) expect(sectionText(text, heading)).toContain(fact)
-    if (spec.minBlockedBullets !== undefined) expect(occurrences(sectionText(text, '## 7. L1 公开包复验'), 'blocked')).toBeGreaterThanOrEqual(spec.minBlockedBullets)
+    for (const fact of specFor(node.version).facts) {
+      const section = parseMarkdown(markdownSection(text, headingText(fact.heading)))
+      for (const token of fact.code ?? []) expect(section.codeSpans.some((span) => span.includes(token)), token).toBe(true)
+      for (const token of fact.items ?? []) expect(section.listItems.some((item) => item.includes(token)), token).toBe(true)
+      for (const token of fact.text ?? []) expect(section.paragraphs.some((paragraph) => paragraph.includes(token)), token).toBe(true)
+      for (const [pattern, expected] of fact.codePatterns ?? []) {
+        const matched = section.codeSpans.map((span) => new RegExp(pattern).exec(span)).find((match) => match !== null)
+        expect(matched?.slice(1), pattern).toEqual(expected)
+      }
+      if (fact.minBlockedBullets !== undefined) expect(section.listItems.filter((item) => item.includes('blocked')).length).toBeGreaterThanOrEqual(fact.minBlockedBullets)
+    }
   })
 })
+describe('current release evidence ledger', () => {
+  it('matches the ledger asset table row by row', () => {
+    const rows = parseAssetRows(readEvidence(currentEvidence.version))
+    expect(rows, `${currentEvidence.version} asset rows`).toHaveLength(currentEvidence.assets.length)
+    expect(rows.map((row) => row.name).sort(), `${currentEvidence.version} asset names`).toEqual(currentEvidence.assets.map((asset) => asset.name).sort())
+    for (const asset of currentEvidence.assets) {
+      expect(rows.find((row) => row.name === asset.name), `${currentEvidence.version} ${asset.name}`).toEqual(asset)
+    }
+  })
+  it('closes the current document digest set over the ledger', () => {
+    const expected = [...new Set(currentEvidence.assets.map((asset) => asset.sha256))].sort()
+    expect(sha256Values(readEvidence(currentEvidence.version)).sort(), currentEvidence.version).toEqual(expected)
+  })
+})
+
 describe('v0.2.1 blocked record', () => {
   it('parses as blocked with zero asset rows and zero digests', () => {
     const text = readEvidence('v0.2.1')
@@ -315,7 +366,8 @@ describe('v0.2.1 blocked record', () => {
     const conclusions = tableRows(text, '## 3. 缺失项').slice(2).map((row) => row[2])
     expect(conclusions.length).toBeGreaterThan(0)
     expect(conclusions.every((value) => /^(缺失|不可核验)$/.test(value))).toBe(true)
-    for (const heading of ['## 4. 未执行的取证动作', '## 5. 待人工动作', '## 6. 升级说明']) expect(text).toContain(heading)
+    const headings = parseMarkdown(text).headings
+    for (const heading of ['## 4. 未执行的取证动作', '## 5. 待人工动作', '## 6. 升级说明']) expect(headings).toContain(headingText(heading))
   })
 })
 describe('v0.2.4 defect record', () => {
