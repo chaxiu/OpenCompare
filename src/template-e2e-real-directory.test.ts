@@ -10,7 +10,7 @@
  * the read-only refusal / retry and the two occupied-target paths. It writes the
  * per-row evidence manifest and pins the committed evidence note.
  */
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -715,4 +715,145 @@ describe('template placement e2e on a real external directory', () => {
       'template e2e: placed row is never executable'
     ).toBe(0)
   }, 60_000)
+
+  it('runs the APFS move legs: default copy, explicit move, failed check keeps the source', async (context) => {
+    const probeRoot = await scratchRoot('opencompare-template-move-probe-')
+    await writeFile(join(probeRoot, 'probe.txt'), 'probe\n', 'utf8')
+    if (!existsSync(join(probeRoot, 'PROBE.TXT'))) {
+      console.warn(
+        'template e2e: the scratch volume is case-sensitive; skipping the APFS move e2e'
+      )
+      context.skip()
+      return
+    }
+
+    const stamp = BASE_SEC + 900
+    const sourceFacts = async (path: string) => ({
+      hash: await fileSha256(path),
+      mtimeSec: Math.floor((await stat(path)).mtimeMs / 1000)
+    })
+
+    async function legRoots(name: string, slot: string, body: string) {
+      const root = await scratchRoot(`opencompare-template-move-${name}-`)
+      const templateRoot = join(root, '模板 A')
+      const incomingRoot = join(root, '散乱 树 B')
+      const outputRoot = join(root, '输出 根')
+      await writeText(templateRoot, slot, body)
+      await writeText(incomingRoot, `bucket-${name}/${slot.slice(slot.lastIndexOf('/') + 1)}`, body, stamp)
+      return { root, templateRoot, incomingRoot, outputRoot }
+    }
+
+    // Leg 1: default copy — the target carries the source bytes / mtime and the
+    // source is untouched.
+    const copyRoots = await legRoots('copy', 'docs/clean.txt', 'clean body\n')
+    const copyPreview = await previewTemplate(platform, copyRoots)
+    const copyRow = planRows(copyPreview.plan).find((row) => row.relativePath === 'docs/clean.txt')
+    expect(copyRow?.defaultChecked, 'template e2e move: clean row default-checked').toBe(true)
+    expect(copyRow?.defaultAction, 'template e2e move: default action copy').toBe('copy')
+    expect(copyRow?.sourceRelativePath, 'template e2e move: B-relative source').toBe(
+      'bucket-copy/clean.txt'
+    )
+    expect(copyRow?.targetRelativePath, 'template e2e move: output-relative target').toBe(
+      'docs/clean.txt'
+    )
+
+    const copySource = diskPath(copyRoots.incomingRoot, 'bucket-copy/clean.txt')
+    const copyBefore = await sourceFacts(copySource)
+    const copyDefaults = resolveTemplatePlan(copyPreview.plan, {
+      checkedPaths: defaultsOf(copyPreview.plan)
+    })
+    expect(copyDefaults.moveCount, 'template e2e move: no move by default').toBe(0)
+    expect(
+      copyDefaults.executable.every((entry) => entry.action === 'copy'),
+      'template e2e move: defaults all copy'
+    ).toBe(true)
+    const copyOutcome = await applyTemplatePlan(platform, copyDefaults)
+    expect(copyOutcome.execution.failedCount).toBe(0)
+    expect(copyOutcome.execution.movedCount).toBe(0)
+    const copyTarget = diskPath(copyRoots.outputRoot, 'docs/clean.txt')
+    expect(await sourceFacts(copyTarget), 'template e2e move: copied target facts').toEqual(copyBefore)
+    expect(await sourceFacts(copySource), 'template e2e move: copy keeps source').toEqual(copyBefore)
+    expect(
+      copyOutcome.verification.entries.every((entry) => !entry.sourceDeleted && entry.action === 'copy'),
+      'template e2e move: copy result keeps the source'
+    ).toBe(true)
+
+    // Leg 2: explicit move — the target checks out first, then the source goes.
+    const moveRoots = await legRoots('move', 'docs/move.txt', 'move body\n')
+    const movePreview = await previewTemplate(platform, moveRoots)
+    const moveSource = diskPath(moveRoots.incomingRoot, 'bucket-move/move.txt')
+    const moveBefore = await sourceFacts(moveSource)
+    const moveResolved = resolveTemplatePlan(movePreview.plan, {
+      checkedPaths: ['docs/move.txt'],
+      movePaths: ['docs/move.txt']
+    })
+    expect(moveResolved.moveCount, 'template e2e move: explicit move count').toBe(1)
+    expect(moveResolved.executable[0]?.action, 'template e2e move: executable action').toBe('move')
+    const moveOutcome = await applyTemplatePlan(platform, moveResolved)
+    expect(moveOutcome.execution.failedCount).toBe(0)
+    expect(moveOutcome.execution.movedCount).toBe(1)
+    const moveTarget = diskPath(moveRoots.outputRoot, 'docs/move.txt')
+    expect(await sourceFacts(moveTarget), 'template e2e move: moved target facts').toEqual(moveBefore)
+    await expect(stat(moveSource), 'template e2e move: moved source removed').rejects.toThrow()
+    const movedRescan = await previewTemplate(platform, moveRoots)
+    const placed = planRows(movedRescan.plan).find((row) => row.relativePath === 'docs/move.txt')
+    expect(placed?.outcome, 'template e2e move: rescan placed').toBe('placed')
+    expect(placed?.defaultChecked, 'template e2e move: rescan unchecked').toBe(false)
+    expect(
+      resolveTemplatePlan(movedRescan.plan, {}).executableCount,
+      'template e2e move: rescan default is empty'
+    ).toBe(0)
+
+    // Leg 3: a failed post-write check keeps the source, keeps the target and
+    // never rolls back the earlier successful legs.
+    const failRoots = await legRoots('fail', 'docs/fail.txt', 'fail body\n')
+    const failPreview = await previewTemplate(platform, failRoots)
+    const failSource = diskPath(failRoots.incomingRoot, 'bucket-fail/fail.txt')
+    const failBefore = await sourceFacts(failSource)
+    const failResolved = resolveTemplatePlan(failPreview.plan, {
+      checkedPaths: ['docs/fail.txt'],
+      movePaths: ['docs/fail.txt']
+    })
+    const failEntry = failResolved.executable[0]
+    const tampering: typeof platform = {
+      ...platform,
+      writeTextFile: async (path, content, modifiedMs) => {
+        await platform.writeTextFile(path, content, modifiedMs)
+        if (path === failEntry.targetPath) {
+          const wrong = Math.floor((modifiedMs ?? stamp) / 1000) - 5
+          await utimes(path, wrong, wrong)
+        }
+      }
+    }
+    const failOutcome = await applyTemplatePlan(tampering, failResolved)
+    expect(failOutcome.execution.writtenCount, 'template e2e move: failed row not written').toBe(0)
+    expect(failOutcome.execution.failedCount, 'template e2e move: one failed move').toBe(1)
+    expect(failOutcome.execution.failed[0]?.reason, 'template e2e move: mtime failure reason').toBe(
+      'move-target-mtime'
+    )
+    expect(await sourceFacts(failSource), 'template e2e move: failed move keeps source').toEqual(
+      failBefore
+    )
+    await expect(
+      stat(diskPath(failRoots.outputRoot, 'docs/fail.txt')),
+      'template e2e move: failed target kept'
+    ).resolves.toBeDefined()
+
+    // Earlier legs are untouched by the later failure.
+    expect(await sourceFacts(copyTarget), 'template e2e move: copy target not rolled back').toEqual(
+      copyBefore
+    )
+    await expect(stat(moveSource), 'template e2e move: earlier move source still gone').rejects.toThrow()
+
+    for (const roots of [copyRoots, moveRoots, failRoots]) {
+      expect(
+        tempFiles(await snapshotTree(roots.outputRoot)),
+        `template e2e move: ${roots.outputRoot} no temp residue`
+      ).toEqual([])
+      expect(
+        tempFiles(await snapshotTree(roots.incomingRoot)),
+        `template e2e move: ${roots.incomingRoot} no temp residue`
+      ).toEqual([])
+    }
+  }, 120_000)
 })

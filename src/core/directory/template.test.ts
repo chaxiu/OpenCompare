@@ -540,24 +540,41 @@ describe('template placement plan', () => {
     expect(plan.placed).toEqual([])
   })
 
-  it('never places a missing slot or a directory-occupied target', async () => {
-    const { plan } = await planFor(
+  it('never places a differing missing slot but reads its moved target as placed', async () => {
+    const differing = await planFor(
       { template, incoming },
       {
         existingFiles: ['d/missing.ts'],
-        existingFileHashes: { 'd/missing.ts': sha256Hex('M') },
+        existingFileHashes: { 'd/missing.ts': sha256Hex('not M') },
         existingDirectories: ['c/guide.md']
       }
     )
-    const missing = plan.missing.find((entry) => entry.relativePath === 'd/missing.ts')
+    const missing = differing.plan.missing.find((entry) => entry.relativePath === 'd/missing.ts')
     expect(missing?.outcome).toBe('missing')
     expect(missing?.defaultChecked).toBe(false)
 
-    const occupied = plan.matched.find((entry) => entry.relativePath === 'c/guide.md')
+    const occupied = differing.plan.matched.find((entry) => entry.relativePath === 'c/guide.md')
     expect(occupied?.outcome).toBe('matched')
     expect(occupied?.occupiedByDirectory).toBe(true)
     expect(occupied?.overwrite).toBe(false)
-    expect(plan.placed).toEqual([])
+    expect(differing.plan.placed).toEqual([])
+
+    // A slot whose source already moved out of B is proven by the output root's
+    // copy: same template digest means placed, never writable again.
+    const moved = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['d/missing.ts'],
+        existingFileHashes: { 'd/missing.ts': sha256Hex('M') }
+      }
+    )
+    const placed = moved.plan.placed.find((entry) => entry.relativePath === 'd/missing.ts')
+    expect(placed?.outcome).toBe('placed')
+    expect(placed?.defaultChecked).toBe(false)
+    expect(placed?.defaultAction).toBe(undefined)
+    expect(placed?.sourcePath).toBe(null)
+    expect(moved.plan.missing.map((entry) => entry.relativePath)).not.toContain('d/missing.ts')
+    expect(resolveTemplatePlan(moved.plan, { checkedPaths: ['d/missing.ts'] }).executableCount).toBe(0)
   })
 
   it('keeps the placed partition equal to its array and the slot total', async () => {
@@ -666,7 +683,9 @@ describe('template placement plan', () => {
         writes.push(path)
         await fs.writeTextFile(path, content, modifiedMs)
       },
-      ensureDirectory: fs.ensureDirectory
+      ensureDirectory: fs.ensureDirectory,
+      listDirectory: fs.list,
+      deleteFile: async (path) => fs.deleteFile(path)
     })
 
     expect(execution.writtenCount).toBe(resolved.executableCount)
@@ -721,7 +740,9 @@ describe('template plan execution and verification', () => {
           writes.push({ path, content, modifiedMs })
           await fs.writeTextFile(path, content, modifiedMs)
           onWrite?.(path)
-        }
+        },
+        listDirectory: fs.list,
+        deleteFile: async (path: string) => fs.deleteFile(path)
       }
     }
   }
@@ -1098,6 +1119,7 @@ describe('template case-only collision', () => {
 
   it('verifies a case-only output entry instead of reporting it missing', async () => {
     const fs = createFakeFs({
+      incoming: { bucket: { 'logo.png': { text: 'NEW', modifiedMs: CASE_MTIME } } },
       out: { 'logo.png': { text: 'NEW', modifiedMs: CASE_MTIME + 800 } }
     })
     const written = [
@@ -1106,7 +1128,8 @@ describe('template case-only collision', () => {
         sourcePath: '/incoming/bucket/logo.png',
         targetPath: '/out/Logo.png',
         sourceHash: sha256Hex('NEW'),
-        modifiedMs: CASE_MTIME
+        modifiedMs: CASE_MTIME,
+        action: 'copy' as const
       }
     ]
     const io = { readTextFile: fs.readTextFile, listDirectory: fs.list }

@@ -151,6 +151,7 @@ export function TemplateDialog({
   const [submitting, setSubmitting] = useState(false)
   const [applying, setApplying] = useState(false)
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set<string>())
+  const [movePaths, setMovePaths] = useState<ReadonlySet<string>>(() => new Set<string>())
   const [conflictChoices, setConflictChoices] = useState<Readonly<Record<string, string>>>({})
   const [outcome, setOutcome] = useState<TemplateApplyOutcome | null>(null)
   const [applyFailure, setApplyFailure] = useState<unknown>(null)
@@ -168,6 +169,8 @@ export function TemplateDialog({
     setApplyFailure(null)
     setIssue(null)
     setConflictChoices({})
+    // A rescan starts over: no row is moved implicitly.
+    setMovePaths(new Set<string>())
     if (preview === null) {
       setChecked(new Set<string>())
       return
@@ -181,8 +184,18 @@ export function TemplateDialog({
     () =>
       preview === null
         ? null
-        : resolveTemplatePlan(preview.plan, { checkedPaths: [...checked], conflictChoices }),
-    [preview, checked, conflictChoices]
+        : resolveTemplatePlan(preview.plan, {
+            checkedPaths: [...checked],
+            movePaths: [...movePaths],
+            conflictChoices
+          }),
+    [preview, checked, movePaths, conflictChoices]
+  )
+
+  /** Only rows the resolved plan would really execute may be marked as moves. */
+  const executablePaths = useMemo(
+    () => new Set((resolved?.executable ?? []).map((entry) => entry.relativePath)),
+    [resolved]
   )
 
   const rejectionByPath = useMemo(
@@ -218,10 +231,21 @@ export function TemplateDialog({
 
   const resultRows = useMemo<readonly ResultRow[]>(() => {
     if (outcome === null) return []
-    return [
-      ...outcome.verification.entries.map<ResultRow>((entry) => ({ kind: 'verify', entry })),
-      ...outcome.execution.failed.map<ResultRow>((failure) => ({ kind: 'write-failure', failure }))
-    ]
+    const seen = new Set<string>()
+    const rows: ResultRow[] = []
+    // One row per slot: a failed move is never listed twice, and a path can only
+    // appear once in the result list.
+    for (const failure of outcome.execution.failed) {
+      if (seen.has(failure.relativePath)) continue
+      seen.add(failure.relativePath)
+      rows.push({ kind: 'write-failure', failure })
+    }
+    for (const entry of outcome.verification.entries) {
+      if (seen.has(entry.relativePath)) continue
+      seen.add(entry.relativePath)
+      rows.push({ kind: 'verify', entry })
+    }
+    return rows
   }, [outcome])
 
   const listRows: readonly (TemplateRow | ResultRow)[] = step === 'result' ? resultRows : rows
@@ -251,10 +275,42 @@ export function TemplateDialog({
   }
 
   function toggleChecked(relativePath: string): void {
+    const wasChecked = checked.has(relativePath)
     setChecked((current) => {
       const next = new Set(current)
       if (next.has(relativePath)) next.delete(relativePath)
       else next.add(relativePath)
+      return next
+    })
+    // Unchecking drops the move choice too: re-checking starts from copy again.
+    if (wasChecked) {
+      setMovePaths((current) => {
+        if (!current.has(relativePath)) return current
+        const next = new Set(current)
+        next.delete(relativePath)
+        return next
+      })
+    }
+  }
+
+  function toggleMove(relativePath: string): void {
+    setMovePaths((current) => {
+      const next = new Set(current)
+      if (next.has(relativePath)) next.delete(relativePath)
+      else next.add(relativePath)
+      return next
+    })
+  }
+
+  /**
+   * The batch move only re-labels rows that are already checked and executable;
+   * it never checks a row, so conflicts and hazards stay opt-in.
+   */
+  function moveAllChecked(): void {
+    if (blocked || resolved === null) return
+    setMovePaths((current) => {
+      const next = new Set(current)
+      for (const entry of resolved.executable) next.add(entry.relativePath)
       return next
     })
   }
@@ -274,7 +330,17 @@ export function TemplateDialog({
       else next[relativePath] = path
       return next
     })
-    if (path === '' || hadChoice) return
+    if (path === '' || hadChoice) {
+      if (path === '') {
+        setMovePaths((current) => {
+          if (!current.has(relativePath)) return current
+          const next = new Set(current)
+          next.delete(relativePath)
+          return next
+        })
+      }
+      return
+    }
     setChecked((current) => {
       if (!current.has(relativePath)) return current
       const next = new Set(current)
@@ -480,7 +546,17 @@ export function TemplateDialog({
     const choice = conflictChoices[entry.relativePath]
     const selectable = entry.outcome === 'matched' || entry.outcome === 'conflict'
     const rejection = rejectionByPath.get(entry.relativePath)
-    const shownSource = entry.outcome === 'conflict' ? choice : entry.sourcePath
+    const chosenCandidate =
+      entry.outcome === 'conflict'
+        ? entry.candidates.find((candidate) => candidate.path === choice)
+        : undefined
+    // Relative to tree B's root — never the absolute source path, never sliced here.
+    const shownSource =
+      entry.outcome === 'conflict'
+        ? (chosenCandidate?.sourceRelativePath ?? null)
+        : entry.sourceRelativePath
+    const action = resolved?.actions[entry.relativePath]
+    const movable = action !== undefined && executablePaths.has(entry.relativePath)
     return (
       <div className="flex h-6 items-center gap-2 px-2" data-template-row title={entry.relativePath}>
         {selectable ? (
@@ -495,9 +571,44 @@ export function TemplateDialog({
         ) : (
           <span aria-hidden className="size-4 shrink-0" />
         )}
-        <span className="truncate font-mono text-xs text-content-secondary">
-          {entry.relativePath}
+        {shownSource !== null ? (
+          <>
+            <span
+              className="truncate font-mono text-2xs text-content-secondary"
+              title={shownSource}
+            >
+              {shownSource}
+            </span>
+            <span aria-hidden className="shrink-0 text-2xs text-content-muted">
+              →
+            </span>
+          </>
+        ) : null}
+        <span className="truncate font-mono text-xs text-content-primary" title={entry.targetRelativePath}>
+          {entry.targetRelativePath}
         </span>
+        {action !== undefined ? (
+          <span
+            data-template-action
+            className={`shrink-0 text-2xs ${action === 'move' ? 'text-diff-modified' : 'text-content-muted'}`}
+          >
+            {t(
+              action === 'move'
+                ? 'directory.template.action.move'
+                : 'directory.template.action.copy'
+            )}
+          </span>
+        ) : null}
+        {selectable ? (
+          <input
+            type="checkbox"
+            className="size-4 shrink-0 accent-accent"
+            aria-label={t('directory.template.moveCheck', { path: entry.relativePath })}
+            checked={action === 'move'}
+            onChange={() => toggleMove(entry.relativePath)}
+            disabled={blocked || !movable}
+          />
+        ) : null}
         {entry.outcome === 'conflict' ? (
           <>
             <span className="shrink-0 text-2xs text-diff-conflict">
@@ -517,20 +628,10 @@ export function TemplateDialog({
               <option value="">{t('directory.template.conflict.choose')}</option>
               {entry.candidates.map((candidate) => (
                 <option key={candidate.path} value={candidate.path}>
-                  {candidate.path}
+                  {candidate.sourceRelativePath}
                 </option>
               ))}
             </select>
-          </>
-        ) : null}
-        {shownSource !== null && shownSource !== undefined ? (
-          <>
-            <span aria-hidden className="shrink-0 text-2xs text-content-muted">
-              ←
-            </span>
-            <span className="truncate font-mono text-2xs text-content-muted" title={shownSource}>
-              {shownSource}
-            </span>
           </>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -562,10 +663,26 @@ export function TemplateDialog({
         <div
           className="flex h-6 items-center gap-2 px-2"
           data-template-result-row
+          data-template-verify={entry.reason ?? 'ok'}
+          data-template-source-deleted={String(entry.sourceDeleted)}
           title={entry.targetPath}
         >
           <span className="truncate font-mono text-xs text-content-secondary">
             {entry.relativePath}
+          </span>
+          <span data-template-action className="shrink-0 text-2xs text-content-muted">
+            {t(
+              entry.action === 'move'
+                ? 'directory.template.action.move'
+                : 'directory.template.action.copy'
+            )}
+          </span>
+          <span className="shrink-0 text-2xs text-content-muted">
+            {t(
+              entry.sourceDeleted
+                ? 'directory.template.result.sourceDeleted'
+                : 'directory.template.result.sourceKept'
+            )}
           </span>
           <span className="truncate font-mono text-2xs text-content-muted">{entry.targetPath}</span>
           <span
@@ -582,6 +699,7 @@ export function TemplateDialog({
       <div
         className="flex h-6 items-center gap-2 px-2"
         data-template-failure-row
+        data-template-failure={failure.reason}
         title={failure.targetPath}
       >
         <span className="truncate font-mono text-xs text-content-secondary">
@@ -670,6 +788,14 @@ export function TemplateDialog({
             <span>
               {t('directory.template.result.verifyFailed', { count: outcome.verification.failed })}
             </span>
+            <span>{t('directory.template.result.moved', { count: outcome.execution.movedCount })}</span>
+            {outcome.execution.failedCount + outcome.verification.failed > 0 ? (
+              <span role="alert" className="text-danger">
+                {t('directory.template.result.rescanHint', {
+                  count: outcome.execution.failedCount + outcome.verification.failed
+                })}
+              </span>
+            ) : null}
           </span>
           <ToolbarButton variant="ghost" onClick={() => void rescan()} disabled={blocked}>
             {t('directory.template.result.rescan')}
@@ -710,8 +836,17 @@ export function TemplateDialog({
       <>
         <span className="tabular mr-auto text-2xs text-content-muted">
           {t('directory.template.executableCount', { count: resolved.executableCount })} ·{' '}
+          {t('directory.template.copyCount', { count: resolved.copyCount })} ·{' '}
+          {t('directory.template.moveCount', { count: resolved.moveCount })} ·{' '}
           {t('directory.template.rejectedCount', { count: resolved.rejectedCount })}
         </span>
+        <ToolbarButton
+          variant="ghost"
+          onClick={moveAllChecked}
+          disabled={blocked || resolved.executableCount === 0}
+        >
+          {t('directory.template.moveChecked')}
+        </ToolbarButton>
         <ToolbarButton variant="ghost" onClick={onCancel} disabled={blocked}>
           {t('common.cancel')}
         </ToolbarButton>
