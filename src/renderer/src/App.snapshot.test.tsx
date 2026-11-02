@@ -104,8 +104,9 @@ describe('snapshot workbench integration', () => {
     }
 
     const statusBar = screen.getByRole('contentinfo').textContent ?? ''
+    // Directory statuses read through the directory vocabulary.
     expect(statusBar).toContain(
-      `${comparison.counts.same}相同${comparison.counts.added}新增${comparison.counts.removed}删除${comparison.counts.modified}修改`
+      `${comparison.counts.same}${zh['directory.filter.same']}${comparison.counts.added}${zh['directory.filter.rightOnly']}${comparison.counts.removed}${zh['directory.filter.leftOnly']}${comparison.counts.modified}${zh['common.diff.modified']}`
     )
   })
 
@@ -234,7 +235,9 @@ describe('snapshot workbench integration', () => {
 
     expect(await screen.findByText('/snapshots/right/baseline')).toBeDefined()
     expect(await screen.findByText(/已挂载快照 baseline/)).toBeDefined()
-    expect(screen.getByRole('contentinfo').textContent).toContain('15相同0新增0删除0修改')
+    expect(screen.getByRole('contentinfo').textContent).toContain(
+      `15${zh['directory.filter.same']}0${zh['directory.filter.rightOnly']}0${zh['directory.filter.leftOnly']}0${zh['common.diff.modified']}`
+    )
 
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
     expect(screen.getAllByText(/当前过滤下/).length).toBe(2)

@@ -16,11 +16,12 @@ import { sha256Bytes } from '@core/directory/hash'
 import { directoryReportSource } from '@core/directory/report'
 import type { DirectoryReport } from '@core/directory/report'
 import { OperationCancelledError } from '@core/io'
-import { DIFF_LABEL_KEYS, DIFF_STATUSES } from '@renderer/components/diffSemantics'
+import { DIFF_STATUSES } from '@renderer/components/diffSemantics'
 import { interpolate } from '@renderer/i18n/interpolate'
 import { zh, en } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import type { RealDirectoryFixture } from '../../test-support/directoryFixture'
 import {
   createRealDirectoryFixture,
@@ -208,7 +209,7 @@ async function waitForDirectoryView(label: string): Promise<void> {
 /** The four visible numbers of the first `CompositionLegend` on screen. */
 function legendNumbers(dictionary: typeof zh | typeof en): Record<FileDiffStatus, number> {
   const labels = DIFF_STATUSES.filter((status) => status !== 'conflict').map(
-    (status) => dictionary[DIFF_LABEL_KEYS[status]]
+    (status) => dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]]
   )
   const legend = Array.from(document.querySelectorAll<HTMLElement>('span')).find((span) => {
     const cells = Array.from(span.children)

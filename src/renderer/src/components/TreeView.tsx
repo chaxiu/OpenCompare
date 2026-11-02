@@ -6,6 +6,7 @@ import type { DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import { DIRECTORY_ROW_HEIGHT, createDirectoryScrollMap } from '@core/directory/rows'
 import { useI18n } from '@renderer/i18n/context'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import { DiffBadge } from './DiffBadge'
 import { Icon } from './Icon'
 import { cx } from './utils'
@@ -123,7 +124,7 @@ function TreeRow({
       <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
         {/* Directory rows summarise the engine's own subtree counts. */}
         {isDirectory ? <CountSummary counts={node.counts} /> : null}
-        <DiffBadge status={node.status} />
+        <DiffBadge status={node.status} labelKeys={DIRECTORY_STATUS_LABEL_KEYS} />
       </span>
     </div>
   )

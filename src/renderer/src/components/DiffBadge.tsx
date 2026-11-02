@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import type { DiffStatus } from '@shared/fixtures'
 import { useI18n } from '@renderer/i18n/context'
+import type { MessageKey } from '@renderer/i18n/messages'
 import { DIFF_BADGE_CLASSES, DIFF_DOT_CLASSES, DIFF_LABEL_KEYS } from './diffSemantics'
 import { cx } from './utils'
 
@@ -21,9 +22,12 @@ export function DiffDot({
 
 export function DiffBadge({
   status,
+  labelKeys = DIFF_LABEL_KEYS,
   className
 }: {
   readonly status: DiffStatus
+  /** Optional vocabulary override; defaults to the shared text-diff words. */
+  readonly labelKeys?: Record<DiffStatus, MessageKey>
   readonly className?: string
 }): JSX.Element {
   const { t } = useI18n()
@@ -35,7 +39,7 @@ export function DiffBadge({
         className
       )}
     >
-      {t(DIFF_LABEL_KEYS[status])}
+      {t(labelKeys[status])}
     </span>
   )
 }
