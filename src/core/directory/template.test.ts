@@ -3,6 +3,7 @@ import { DIRECTORY_SCENE } from '@shared/fixtures'
 import type { DirectoryNode } from '@shared/fixtures'
 import type { ListDirectory } from './compare'
 import { scanDirectory } from './compare'
+import { sha256Hex } from './hash'
 import { OperationCancelledError } from '../io'
 import {
   createTemplatePlan,
@@ -345,6 +346,7 @@ describe('template placement plan', () => {
       outputRoot?: string
       existingFiles?: readonly string[]
       existingDirectories?: readonly string[]
+      existingFileHashes?: Readonly<Record<string, string>>
     } = {}
   ) {
     const fs = createFakeFs(files)
@@ -365,13 +367,14 @@ describe('template placement plan', () => {
   it('expands every template slot into exactly one partition and derives its target', async () => {
     const { result, plan } = await planFor({ template, incoming })
 
-    expect(plan.counts).toEqual({ matched: 3, missing: 1, conflict: 2, unused: 4 })
+    expect(plan.counts).toEqual({ matched: 3, missing: 1, conflict: 2, placed: 0, unused: 4 })
     expect(plan.counts.matched).toBe(plan.matched.length)
     expect(plan.counts.missing).toBe(plan.missing.length)
     expect(plan.counts.conflict).toBe(plan.conflicts.length)
+    expect(plan.counts.placed).toBe(plan.placed.length)
     expect(plan.counts.unused).toBe(plan.unused.length)
 
-    const slots = [...plan.matched, ...plan.missing, ...plan.conflicts]
+    const slots = [...plan.matched, ...plan.placed, ...plan.missing, ...plan.conflicts]
     expect(slots).toHaveLength(plan.templateFileCount)
     expect(plan.templateFileCount).toBe(result.templateFileCount)
 
@@ -440,6 +443,144 @@ describe('template placement plan', () => {
       .map((entry) => entry.relativePath)
     const resolved = resolveTemplatePlan(plan, { checkedPaths: defaultChecked })
     expect(resolved.executable.map((entry) => entry.relativePath)).toEqual(['a/strings.ts'])
+  })
+
+  it('marks a matched slot whose target already holds the source body as placed', async () => {
+    const { plan } = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['a/strings.ts'],
+        existingFileHashes: { 'a/strings.ts': sha256Hex('S') }
+      }
+    )
+
+    expect(plan.matched.map((entry) => entry.relativePath)).not.toContain('a/strings.ts')
+    const placed = plan.placed.find((entry) => entry.relativePath === 'a/strings.ts')
+    expect(placed?.outcome).toBe('placed')
+    expect(placed?.overwrite).toBe(false)
+    expect(placed?.defaultChecked).toBe(false)
+    expect(placed?.sourcePath).toBe('/incoming/x/strings.ts')
+    expect(placed?.sourceHash).toBe(sha256Hex('S'))
+    expect(typeof placed?.sourceModifiedMs).toBe('number')
+    expect(plan.counts.placed).toBe(1)
+
+    // A placed slot is neither executable nor rejected, even when checked.
+    const resolved = resolveTemplatePlan(plan, { checkedPaths: ['a/strings.ts'] })
+    expect(resolved.executableCount).toBe(0)
+    expect(resolved.rejectedCount).toBe(0)
+  })
+
+  it('keeps an existing target with different content as an explicit overwrite', async () => {
+    const { plan } = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['a/strings.ts'],
+        existingFileHashes: { 'a/strings.ts': sha256Hex('different') }
+      }
+    )
+
+    const entry = plan.matched.find((item) => item.relativePath === 'a/strings.ts')
+    expect(entry?.outcome).toBe('matched')
+    expect(entry?.overwrite).toBe(true)
+    expect(entry?.defaultChecked).toBe(false)
+    expect(plan.placed).toEqual([])
+
+    // Only an explicit check makes it executable.
+    expect(resolveTemplatePlan(plan, {}).executableCount).toBe(0)
+    expect(
+      resolveTemplatePlan(plan, { checkedPaths: ['a/strings.ts'] }).executable
+        .map((item) => item.relativePath)
+    ).toEqual(['a/strings.ts'])
+  })
+
+  it('marks a conflict slot as placed when its target matches one candidate body', async () => {
+    const { plan } = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['e/twin.ts', 'f/mismatch.ts'],
+        existingFileHashes: {
+          'e/twin.ts': sha256Hex('T'),
+          'f/mismatch.ts': sha256Hex('OTHER')
+        }
+      }
+    )
+
+    expect(plan.conflicts).toEqual([])
+    const ambiguous = plan.placed.find((entry) => entry.relativePath === 'e/twin.ts')
+    expect(ambiguous?.outcome).toBe('placed')
+    expect(ambiguous?.overwrite).toBe(false)
+    expect(ambiguous?.defaultChecked).toBe(false)
+    expect(ambiguous?.conflictReason).toBe('ambiguous')
+    expect(ambiguous?.candidates).toHaveLength(2)
+
+    const mismatch = plan.placed.find((entry) => entry.relativePath === 'f/mismatch.ts')
+    expect(mismatch?.conflictReason).toBe('content-mismatch')
+    expect(mismatch?.candidates).toHaveLength(1)
+
+    const resolved = resolveTemplatePlan(plan, {
+      checkedPaths: ['e/twin.ts', 'f/mismatch.ts']
+    })
+    expect(resolved.executableCount).toBe(0)
+    expect(resolved.rejectedCount).toBe(0)
+  })
+
+  it('keeps a conflict when the target body matches no candidate', async () => {
+    const { plan } = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['e/twin.ts'],
+        existingFileHashes: { 'e/twin.ts': sha256Hex('not a candidate') }
+      }
+    )
+
+    const entry = plan.conflicts.find((item) => item.relativePath === 'e/twin.ts')
+    expect(entry?.outcome).toBe('conflict')
+    expect(entry?.overwrite).toBe(true)
+    expect(entry?.defaultChecked).toBe(false)
+    expect(plan.placed).toEqual([])
+  })
+
+  it('never places a missing slot or a directory-occupied target', async () => {
+    const { plan } = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['d/missing.ts'],
+        existingFileHashes: { 'd/missing.ts': sha256Hex('M') },
+        existingDirectories: ['c/guide.md']
+      }
+    )
+    const missing = plan.missing.find((entry) => entry.relativePath === 'd/missing.ts')
+    expect(missing?.outcome).toBe('missing')
+    expect(missing?.defaultChecked).toBe(false)
+
+    const occupied = plan.matched.find((entry) => entry.relativePath === 'c/guide.md')
+    expect(occupied?.outcome).toBe('matched')
+    expect(occupied?.occupiedByDirectory).toBe(true)
+    expect(occupied?.overwrite).toBe(false)
+    expect(plan.placed).toEqual([])
+  })
+
+  it('keeps the placed partition equal to its array and the slot total', async () => {
+    const { plan } = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['a/strings.ts', 'e/twin.ts'],
+        existingFileHashes: {
+          'a/strings.ts': sha256Hex('S'),
+          'e/twin.ts': sha256Hex('T')
+        },
+        existingDirectories: ['c/guide.md']
+      }
+    )
+
+    expect(plan.counts.placed).toBe(plan.placed.length)
+    expect(plan.counts.placed).toBe(2)
+    expect(plan.templateFileCount).toBe(
+      plan.counts.matched + plan.counts.missing + plan.counts.conflict + plan.counts.placed
+    )
+    expect(plan.counts.matched).toBe(2)
+    expect(plan.counts.missing).toBe(1)
+    expect(plan.counts.conflict).toBe(1)
   })
 
   it('refuses a checked target that a directory occupies instead of throwing', async () => {

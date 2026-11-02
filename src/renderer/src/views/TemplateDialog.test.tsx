@@ -108,6 +108,7 @@ function previewOf(
   options: {
     readonly existingFiles?: readonly string[]
     readonly existingDirectories?: readonly string[]
+    readonly existingFileHashes?: Readonly<Record<string, string>>
     readonly outputRoot?: string
     readonly outputRootExists?: boolean
   } = {}
@@ -117,7 +118,8 @@ function previewOf(
     plan: createTemplatePlan(result, {
       outputRoot,
       existingFiles: options.existingFiles ?? [],
-      existingDirectories: options.existingDirectories ?? []
+      existingDirectories: options.existingDirectories ?? [],
+      existingFileHashes: options.existingFileHashes ?? {}
     }),
     templateRoot: result.templateRoot,
     incomingRoot: result.incomingRoot,
@@ -353,6 +355,7 @@ describe('template dry-run step', () => {
     renderDryRun(previewOf(OUTCOMES, { existingFiles: ['src/over.ts'], existingDirectories: ['src/taken.ts'] }))
 
     expect(screen.getByText(en['directory.template.section.matched'])).toBeDefined()
+    expect(screen.getByText(en['directory.template.section.placed'])).toBeDefined()
     expect(screen.getByText(en['directory.template.section.missing'])).toBeDefined()
     expect(screen.getByText(en['directory.template.section.conflicts'])).toBeDefined()
     expect(screen.getByText(en['directory.template.section.unused'])).toBeDefined()
@@ -407,6 +410,33 @@ describe('template dry-run step', () => {
     fireEvent.click(ok)
     fireEvent.click(over)
     expect(screen.getByText(/0 executable/)).toBeDefined()
+    const confirm = screen.getByRole('button', { name: en['directory.template.place'] })
+    expect((confirm as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('renders already placed rows in their own section without a checkbox or overwrite hint', () => {
+    renderDryRun(
+      previewOf(OUTCOMES, {
+        existingFiles: ['src/ok.ts', 'src/over.ts', 'src/taken.ts', 'src/conflict.ts'],
+        existingFileHashes: {
+          'src/ok.ts': 'h1',
+          'src/over.ts': 'h2',
+          'src/taken.ts': 'h3',
+          'src/conflict.ts': 'c2'
+        }
+      })
+    )
+
+    expect(screen.getByText(en['directory.template.section.placed'])).toBeDefined()
+    expect(screen.getByText(/4 items/)).toBeDefined()
+    for (const slot of ['src/ok.ts', 'src/over.ts', 'src/taken.ts', 'src/conflict.ts']) {
+      expect(screen.queryByLabelText(`Check ${slot}`)).toBeNull()
+    }
+    expect(screen.queryByLabelText('Choose a source for src/conflict.ts')).toBeNull()
+    expect(screen.queryByText(en['directory.template.overwrite'])).toBeNull()
+    // Placed rows are neither executable nor rejected; Apply is disabled.
+    expect(screen.getByText(/0 executable/)).toBeDefined()
+    expect(screen.getByText(/0 rejected/)).toBeDefined()
     const confirm = screen.getByRole('button', { name: en['directory.template.place'] })
     expect((confirm as HTMLButtonElement).disabled).toBe(true)
   })
@@ -574,8 +604,8 @@ describe('template dry-run step', () => {
     expect(document.querySelectorAll('[data-template-row]').length).toBeLessThan(100)
 
     const scroller = screen.getByTestId('template-rows')
-    // Four section headers plus the 1,200 entry rows (the other partitions are empty).
-    const rowCount = 4 + 1200 + 3
+    // Five section headers plus the 1,200 entry rows (the other partitions are empty).
+    const rowCount = 5 + 1200 + 4
     const map = createDirectoryScrollMap(rowCount, VIEWPORT)
 
     // Row 1,000 of the plan is reachable and still checkable.
@@ -678,7 +708,7 @@ describe('template result step', () => {
     ).toBeDefined()
   })
 
-  it('rescans the same roots back to the dry-run and leaves written slots unchecked', async () => {
+  it('rescans written slots as already placed with nothing left to execute', async () => {
     const writeTextFile = vi.fn(async () => undefined)
     const ensureDirectory = vi.fn(async () => undefined)
     const onPreview = vi.fn<TemplateDialogProps['onPreview']>(async () => null)
@@ -695,7 +725,15 @@ describe('template result step', () => {
           onPreview={async (roots) => {
             const failure = await onPreview(roots)
             if (failure === null) {
-              preview = previewOf(OUTCOMES, { existingFiles: ['src/ok.ts'] })
+              preview = previewOf(OUTCOMES, {
+                existingFiles: ['src/ok.ts', 'src/over.ts', 'src/taken.ts', 'src/conflict.ts'],
+                existingFileHashes: {
+                  'src/ok.ts': 'h1',
+                  'src/over.ts': 'h2',
+                  'src/taken.ts': 'h3',
+                  'src/conflict.ts': 'c2'
+                }
+              })
               setCurrent(preview)
             }
             return failure
@@ -723,11 +761,15 @@ describe('template result step', () => {
     // A rescan never writes or creates anything.
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(ensureDirectory).not.toHaveBeenCalled()
-    // The re-scanned plan marks the written slot as an overwrite and leaves it
-    // unchecked, so a second run cannot silently overwrite.
-    const ok = screen.getByLabelText('Check src/ok.ts') as HTMLInputElement
-    expect(ok.checked).toBe(false)
-    expect(screen.getByText(en['directory.template.overwrite'])).toBeDefined()
+    // The re-scanned plan reports the written slot as already placed: no
+    // checkbox, no overwrite hint and nothing executable.
+    expect(screen.getByText(en['directory.template.section.placed'])).toBeDefined()
+    expect(screen.queryByLabelText('Check src/ok.ts')).toBeNull()
+    expect(screen.queryByText(en['directory.template.overwrite'])).toBeNull()
+    expect(screen.getByText(/0 executable/)).toBeDefined()
+    expect(screen.getByText(/0 rejected/)).toBeDefined()
+    const confirm = screen.getByRole('button', { name: en['directory.template.place'] })
+    expect((confirm as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('localizes a preflight refusal, keeps the dialog open and retries the same plan', async () => {

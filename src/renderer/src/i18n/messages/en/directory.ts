@@ -82,6 +82,7 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.label.incoming': 'Scattered tree B: ',
   'directory.template.label.output': 'Output root: ',
   'directory.template.section.matched': 'Matched',
+  'directory.template.section.placed': 'Already placed',
   'directory.template.section.missing': 'Missing slots',
   'directory.template.section.conflicts': 'Conflicts',
   'directory.template.section.unused': 'Unused files in B',

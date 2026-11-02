@@ -216,7 +216,7 @@ async function buildBigFixture(): Promise<BigFixture> {
 }
 
 function planRows(plan: TemplatePreview['plan']): TemplatePreview['plan']['matched'] {
-  return [...plan.matched, ...plan.missing, ...plan.conflicts]
+  return [...plan.matched, ...plan.placed, ...plan.missing, ...plan.conflicts]
 }
 
 function defaultsOf(plan: TemplatePreview['plan']): string[] {
@@ -293,6 +293,7 @@ describe('template placement e2e on a real external directory', () => {
       matched: CLEAN_COUNT + 2,
       missing: MISSING_COUNT,
       conflict: 2,
+      placed: 0,
       unused: UNUSED_COUNT + 3
     })
 
@@ -377,28 +378,37 @@ describe('template placement e2e on a real external directory', () => {
   }, 120_000)
 
   it(IT.rescan, async () => {
-    const { fixture, preview, outcome } = state
+    const { fixture, outcome } = state
     const io = recordIo(platform)
     const rescanned = await previewTemplate(io.port, fixture)
 
     expect(io.writes, 'template e2e: rescan writes nothing').toEqual([])
     expect(io.directories, 'template e2e: rescan creates nothing').toEqual([])
-    expect(rescanned.plan.counts, 'template e2e: rescan counts match the disk').toEqual(
-      preview.plan.counts
-    )
-    expect(
-      rescanned.plan.counts.matched,
-      'template e2e: matched count equals the first write count'
-    ).toBe(outcome.execution.writtenCount)
+    // Every written slot now holds its source body: it is placed, not pending.
+    // The occupied slot was never written and stays a matched row.
+    expect(rescanned.plan.counts, 'template e2e: rescan counts match the disk').toEqual({
+      matched: 1,
+      missing: MISSING_COUNT,
+      conflict: 1,
+      placed: outcome.execution.writtenCount,
+      unused: UNUSED_COUNT + 3
+    })
 
     const bySlot = new Map(planRows(rescanned.plan).map((row) => [row.relativePath, row]))
     for (const entry of outcome.execution.written) {
       const row = bySlot.get(entry.relativePath)
-      expect(row?.overwrite, `template e2e: rescanned ${entry.relativePath} overwrites`).toBe(true)
+      expect(row?.outcome, `template e2e: rescanned ${entry.relativePath} placed`).toBe('placed')
+      expect(row?.overwrite, `template e2e: rescanned ${entry.relativePath} not an overwrite`).toBe(
+        false
+      )
       expect(row?.defaultChecked, `template e2e: rescanned ${entry.relativePath} unchecked`).toBe(
         false
       )
     }
+
+    const pending = resolveTemplatePlan(rescanned.plan, {})
+    expect(pending.executableCount, 'template e2e: rescan pending').toBe(0)
+    expect(pending.rejectedCount, 'template e2e: rescan rejected').toBe(0)
   }, 120_000)
 
   it(IT.evidence, async () => {

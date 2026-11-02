@@ -6,6 +6,7 @@
     "matched": 1002,
     "missing": 20,
     "conflict": 2,
+    "placed": 0,
     "unused": 43
   },
   "selection": {

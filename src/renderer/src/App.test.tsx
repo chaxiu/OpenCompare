@@ -526,19 +526,26 @@ describe('workbench shell', () => {
     await expect(port.readTextFile('/ext/out/src/core/engine.ts')).resolves.toBe('stale engine\n')
 
     // A rescan stays inside the same session and reopens the dry-run with the
-    // written slot now marked as an overwrite (and unchecked again).
+    // written slot reported as already placed (no checkbox, nothing executable),
+    // while the untouched stale target keeps its overwrite guard.
     const tabsBefore = within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
       .length
     fireEvent.click(
       within(result).getByRole('button', { name: zh['directory.template.result.rescan'] })
     )
     const rescanned = await screen.findByRole('dialog', { name: zh['directory.template.title'] })
+    expect(
+      within(rescanned).getByText(zh['directory.template.section.placed'])
+    ).toBeDefined()
+    expect(within(rescanned).queryByLabelText('勾选 src/core/strings.ts')).toBeNull()
     expect(within(rescanned).getAllByText(zh['directory.template.overwrite']).length).toBeGreaterThan(
       0
     )
     expect(
-      (within(rescanned).getByLabelText('勾选 src/core/strings.ts') as HTMLInputElement).checked
-    ).toBe(false)
+      (within(rescanned).getByRole('button', {
+        name: zh['directory.template.place']
+      }) as HTMLButtonElement).disabled
+    ).toBe(true)
     expect(
       within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length
     ).toBe(tabsBefore)
