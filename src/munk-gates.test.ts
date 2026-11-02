@@ -35,6 +35,11 @@ const EXPECTED_GATES = [
   { id: 'structured-semantics', command: 'pnpm test:structured' },
   { id: 'sync-real-gate', command: 'pnpm test:sync-real' },
   {
+    id: 'diff-normalize',
+    command:
+      'pnpm test src/core/text/normalize.test.ts src/core/text/diff.test.ts src/core/text/merge.test.ts'
+  },
+  {
     id: 'template-default-unchecked',
     command: 'pnpm test src/template-gate-default-unchecked.test.ts'
   },
@@ -134,16 +139,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly twenty-two pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty-three pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(22)
+    expect(defaultManifest.gates).toHaveLength(23)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the twenty-two commands verbatim with cwd "."', () => {
+  it('keeps the twenty-three commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )

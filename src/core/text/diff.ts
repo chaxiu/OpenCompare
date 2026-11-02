@@ -1,6 +1,14 @@
-import { diffChars, diffLines } from 'diff'
+import { diffArrays, diffChars } from 'diff'
 import type { DiffStatus } from '@shared/fixtures/types'
 import { splitLines } from './lines'
+import { describeNormalization, foldNewlines, resolveComparisonSwitches } from './normalize'
+import type {
+  ComparisonOptions,
+  ComparisonSwitches,
+  DiffNormalization,
+  NormalizationSide,
+  TextFacts
+} from './normalize'
 
 /**
  * Above this many characters a line skips the secondary character-level pass
@@ -53,15 +61,52 @@ export interface LineDiffResult {
   readonly blocks: readonly DiffBlock[]
 }
 
-/** Collapses CRLF so diff rows and `splitLines` agree on line boundaries. */
-function normalize(text: string): string {
-  return text.replace(/\r\n/g, '\n')
+/**
+ * One comparison's full output. `rows` / `blocks` keep their aligned shape,
+ * while the normalization facts and the single `differenceCount` are produced
+ * by the very same call, so the toolbar, the gates and any hint read one
+ * source instead of keeping their own predicate.
+ */
+export interface LineDiffComparison extends LineDiffResult {
+  readonly normalization: DiffNormalization
+  /** `blocks.length + (byteDifference ? 1 : 0)` — the only difference total. */
+  readonly differenceCount: number
+  /** `differenceCount === 0`. */
+  readonly identical: boolean
 }
 
-/** Splits a jsdiff value into lines, dropping the trailing empty artefact. */
-function partLines(value: string): string[] {
-  const lines = value.split('\n')
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+/** One logical source line: terminator-free display text plus the compared line. */
+interface SourceLine {
+  readonly display: string
+  /** Display text plus its own terminator, so strict mode can see CRLF vs LF. */
+  readonly compare: string
+}
+
+/** Splits text into lines, keeping each real terminator apart from the content. */
+function sourceLines(text: string): SourceLine[] {
+  const lines: SourceLine[] = []
+  let start = 0
+  let cursor = 0
+
+  while (cursor < text.length) {
+    const code = text.charCodeAt(cursor)
+    if (code !== 0x0a && code !== 0x0d) {
+      cursor += 1
+      continue
+    }
+    let terminator: string
+    if (code === 0x0d) terminator = text.charCodeAt(cursor + 1) === 0x0a ? '\r\n' : '\r'
+    else terminator = '\n'
+    const content = text.slice(start, cursor)
+    lines.push({ display: content, compare: content + terminator })
+    cursor += terminator.length
+    start = cursor
+  }
+
+  if (start < text.length) {
+    const content = text.slice(start)
+    lines.push({ display: content, compare: content })
+  }
   return lines
 }
 
@@ -133,26 +178,73 @@ function buildBlocks(rows: readonly DiffRow[]): DiffBlock[] {
  * paired modifications. Rows alternate between `same`, `modified`, `added` and
  * `removed`; filler rows carry `null` on the missing side so both panes have
  * the same row count and scroll in lockstep.
+ *
+ * Switches default to on (`ignoreNewline` / `ignoreEncoding`), so the two-arg
+ * call keeps folding CRLF, lone CR and LF into one terminator. Turning
+ * `ignoreNewline` off compares the raw terminators while still showing rows
+ * without them.
  */
-export function diffLineTexts(leftText: string, rightText: string): LineDiffResult {
+export function diffLineTexts(
+  leftText: string,
+  rightText: string,
+  options: ComparisonOptions = {}
+): LineDiffComparison {
+  const switches = resolveComparisonSwitches(options)
+  return compareLineTexts(leftText, rightText, switches, { text: leftText }, { text: rightText })
+}
+
+/**
+ * Same comparison, fed with the probe facts of both files so strict
+ * `ignoreEncoding` can tell "same text, different bytes" apart. Without facts
+ * the strict encoding switch simply cannot compare and only the text decides.
+ */
+export function diffLineTextsWithFacts(
+  leftFacts: TextFacts,
+  rightFacts: TextFacts,
+  options: ComparisonOptions = {}
+): LineDiffComparison {
+  const switches = resolveComparisonSwitches(options)
+  return compareLineTexts(leftFacts.text, rightFacts.text, switches, leftFacts, rightFacts)
+}
+
+function compareLineTexts(
+  leftText: string,
+  rightText: string,
+  switches: ComparisonSwitches,
+  leftSide: NormalizationSide,
+  rightSide: NormalizationSide
+): LineDiffComparison {
+  const rows = buildRows(leftText, rightText, switches.ignoreNewline)
+  const blocks = buildBlocks(rows)
+  const normalization = describeNormalization(leftSide, rightSide, switches)
+  const differenceCount = blocks.length + (normalization.encoding.byteDifference ? 1 : 0)
+  return { rows, blocks, normalization, differenceCount, identical: differenceCount === 0 }
+}
+
+function buildRows(leftText: string, rightText: string, ignoreNewline: boolean): DiffRow[] {
+  const left = sourceLines(ignoreNewline ? foldNewlines(leftText) : leftText)
+  const right = sourceLines(ignoreNewline ? foldNewlines(rightText) : rightText)
+
   const rows: DiffRow[] = []
   let leftIndex = 0
   let rightIndex = 0
-  let pendingRemoved: string[] = []
-  let pendingAdded: string[] = []
+  let pendingRemoved: SourceLine[] = []
+  let pendingAdded: SourceLine[] = []
 
   function flush(): void {
     if (pendingRemoved.length === 0 && pendingAdded.length === 0) return
     const paired = Math.min(pendingRemoved.length, pendingAdded.length)
 
     for (let i = 0; i < paired; i += 1) {
-      const segments = inlineSegments(pendingRemoved[i], pendingAdded[i])
+      const leftLine = pendingRemoved[i]
+      const rightLine = pendingAdded[i]
+      const segments = inlineSegments(leftLine.display, rightLine.display)
       rows.push({
         status: 'modified',
         leftLine: leftIndex + 1,
         rightLine: rightIndex + 1,
-        leftText: pendingRemoved[i],
-        rightText: pendingAdded[i],
+        leftText: leftLine.display,
+        rightText: rightLine.display,
         leftIndex,
         rightIndex,
         leftSegments: segments.left,
@@ -167,7 +259,7 @@ export function diffLineTexts(leftText: string, rightText: string): LineDiffResu
         status: 'removed',
         leftLine: leftIndex + 1,
         rightLine: null,
-        leftText: pendingRemoved[i],
+        leftText: pendingRemoved[i].display,
         rightText: null,
         leftIndex,
         rightIndex
@@ -181,7 +273,7 @@ export function diffLineTexts(leftText: string, rightText: string): LineDiffResu
         leftLine: null,
         rightLine: rightIndex + 1,
         leftText: null,
-        rightText: pendingAdded[i],
+        rightText: pendingAdded[i].display,
         leftIndex,
         rightIndex
       })
@@ -192,19 +284,22 @@ export function diffLineTexts(leftText: string, rightText: string): LineDiffResu
     pendingAdded = []
   }
 
-  for (const part of diffLines(normalize(leftText), normalize(rightText))) {
-    const lines = partLines(part.value)
-    if (part.removed) pendingRemoved.push(...lines)
-    else if (part.added) pendingAdded.push(...lines)
+  const changes = diffArrays(left, right, {
+    comparator: (a, b) => a.compare === b.compare
+  })
+
+  for (const part of changes) {
+    if (part.removed) pendingRemoved.push(...part.value)
+    else if (part.added) pendingAdded.push(...part.value)
     else {
       flush()
-      for (const line of lines) {
+      for (const line of part.value) {
         rows.push({
           status: 'same',
           leftLine: leftIndex + 1,
           rightLine: rightIndex + 1,
-          leftText: line,
-          rightText: line,
+          leftText: line.display,
+          rightText: line.display,
           leftIndex,
           rightIndex
         })
@@ -215,7 +310,7 @@ export function diffLineTexts(leftText: string, rightText: string): LineDiffResu
   }
   flush()
 
-  return { rows, blocks: buildBlocks(rows) }
+  return rows
 }
 
 /** Replaces `count` lines starting at `start` with `replacement`. */

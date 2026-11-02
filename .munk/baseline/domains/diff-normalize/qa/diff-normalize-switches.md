@@ -1,0 +1,11 @@
+covers: ac-default-on, ac-fold-newline-styles, ac-final-newline-kept, ac-strict-newline, ac-encoding-on, ac-strict-encoding-signal, ac-newline-byte-not-resurrected, ac-no-facts-safe, ac-real-diff-all-combos, ac-count-single-source, ac-signal-labels, ac-no-mutation, ac-merge-unchanged, ac-gate-added, ac-gates-green
+标题: 忽略换行 / 忽略编码两开关默认开启、显式关闭才严格，归一事实与唯一差异计数由同一次比较产出且真实差异在四种组合下均不漏
+步骤: ① 对同一输入分别省略 options、传 `{}`、传 `{ ignoreNewline: true, ignoreEncoding: true }` 调用 `diffLineTexts`，比对 rows / blocks / `differenceCount` / `identical` → ② 用 `a\r\nb`、`a\nb`、`a\rb` 两两比较（开启态），并断言折叠后行文本逐字为 `a` / `b`、`a \r\nb` vs `a\r\nb` 仍不同 → ③ 比较 `a` 与 `a\n`（开启态）确认结尾换行存在性仍算差异 → ④ 在 `{ ignoreNewline: false }` 下跑 CRLF vs LF、LF vs CR、Mixed vs LF，断言有差异块 / 非 same 行且行文本无 `\r` / `\n` → ⑤ 用显式字节数组经 `probeTextBytes` 造事实，在默认态与 `{ ignoreEncoding: false }` 下分别比较 UTF-8 vs UTF-16LE、UTF-8 vs UTF-8 BOM、UTF-8 vs GBK → ⑥ 在 `{ ignoreNewline: true, ignoreEncoding: false }` 下比较 CRLF vs LF，断言 `byteDifference === false` → ⑦ 仅文本入口在 `{ ignoreEncoding: false }` 下比较不同文本与相同文本，断言 `comparable === false` 且按文本判定 → ⑧ 四种开关组合 × 单字符替换 / 行尾空格 / 大小写 / 行顺序交换共 16 组 → ⑨ 校验 `differenceCount` 与 `blocks.length`、`byteDifference` 的加一关系及 `identical` 派生，并断言标签只在探测词表内、传入事实对象未被修改 → ⑩ 跑 `pnpm test src/core/text/normalize.test.ts src/core/text/diff.test.ts src/core/text/merge.test.ts`（`diff-normalize` 门）与全量六门禁
+期望: 两开关缺省即开启且三种写法结果同构；开启时三种换行风格互比 `identical === true`、`differenceCount === 0`、`blocks.length === 0`，但结尾换行存在与否仍判不同；关闭换行时仅终止符不同也产生差异块与非 same 行，展示行恒不含终止符；默认编码态下文本相同 / 编码与字节不同的三组判相同，严格编码下三组 `differenceCount === 1` 且 `byteDifference === true` 而不新增修改行；已忽略的换行字节差在严格编码下不被复活；无探测事实时严格编码不崩溃、不虚构字节差；16 组真实差异在四种组合下均 `differenceCount ≥ 1` 且有差异块；`identical` 恒等于 `differenceCount === 0` 且计数只有一份；`merge.ts` 与 `splitLines` 既有断言零改动通过，门禁 23 条全绿
+
+## Recent execution
+
+- workItemId: wi_ws_de8928c40350cea2
+- at: 2026-11-02T22:09:57+08:00
+- status: pass
+- note: 证据落在 `src/core/text/normalize.test.ts`（14 条 `ac-*` 一一对应：默认开启同构、CRLF/LF/CR 折叠、结尾换行保留、严格换行三组、编码三组忽略与严格字节信号、换行字节不复活、无事实安全、16 组真差异、单源计数、标签词表、不变性）、`src/core/text/diff.test.ts` 与 `merge.test.ts` 既有断言未改动即通过、`src/munk-gates.test.ts` 面量更新为 23 条门。门禁：`.munk/runs/run_ws_fa287bbdcc948d1c/code-gates/attempts/001` 23 条全绿，`pnpm test` 117 files / 1891 passed + 1 skipped。
