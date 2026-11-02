@@ -693,6 +693,138 @@ describe('published release body gate', () => {
   })
 })
 
+// A published body renders on the tag page, so a notes link kept relative
+// (`./<tag>.zh-CN.md`) resolves against the repository root and 404s. The
+// current notes pair carries tag-fixed absolute links and finalize re-reads the
+// public body to refuse any relative link or a missing absolute switch URL. The
+// step's own `run` is executed here against a simulated body assembled in the
+// release job's exact order, with a stub `gh` and no network access.
+describe('published release body link gate', () => {
+  const linkGateName = 'Assert the published release body links are absolute'
+  const linkGate = finalizeStep(linkGateName)?.run ?? ''
+  const baseUrl = `https://github.com/chaxiu/OpenCompare/blob/${currentTag}/docs/release-notes`
+  const enSwitch = `${baseUrl}/${currentTag}.zh-CN.md`
+  const zhSwitch = `${baseUrl}/${currentTag}.md`
+  const thirdLine = (doc: string): string => doc.split('\n')[2] ?? ''
+
+  it('pins both current notes language switches to tag-fixed absolute URLs', () => {
+    expect(thirdLine(releaseNotes)).toBe(`English | [简体中文](${enSwitch})`)
+    expect(thirdLine(bilingualNotes)).toBe(`[English](${zhSwitch}) | 简体中文`)
+    for (const doc of [releaseNotes, bilingualNotes]) {
+      expect(thirdLine(doc)).not.toContain('](./')
+      expect(thirdLine(doc)).not.toContain(`](${currentTag}`)
+      // The switch line is the only markdown link in either notes file, so no
+      // other body line can reintroduce a tag-page relative link.
+      expect(doc.match(/\]\([^)]*\)/g) ?? []).toHaveLength(1)
+    }
+  })
+
+  it('runs the read-only link gate in finalize after the release is made public', () => {
+    const publish = releaseWorkflow.indexOf("name: Make the tag's release public")
+    const gateIndex = releaseWorkflow.indexOf(`name: ${linkGateName}`)
+    expect(finalizeStep(linkGateName)).toBeDefined()
+    expect(publish).toBeGreaterThan(-1)
+    expect(gateIndex).toBeGreaterThan(publish)
+    expect(linkGate).toContain('gh release view "${RELEASE_TAG}"')
+    expect(linkGate).toContain('--json body')
+    expect(linkGate).toContain('link: ')
+    expect(linkGate).not.toMatch(/gh release (upload|edit|create|delete)/)
+    expect(linkGate).not.toMatch(/--method\s+(POST|PATCH|PUT|DELETE)/)
+  })
+
+  it('names the relative-link and missing-absolute-URL fail-closed branches', () => {
+    expect(linkGate).toContain('must be an absolute URL')
+    expect(linkGate).toContain('is missing the absolute language switch link')
+    expect(linkGate).toContain('exit 1')
+    expect(linkGate).toContain('en_switch=')
+    expect(linkGate).toContain('zh_switch=')
+  })
+
+  // The simulated body follows the release job's assembly order: English notes,
+  // `---`, the zh-CN details block, then the Full Changelog line.
+  const simulateBody = (english: string, chinese: string): string =>
+    [
+      english.trimEnd(),
+      '',
+      '---',
+      '',
+      '<details><summary>简体中文</summary>',
+      '',
+      chinese.trimEnd(),
+      '',
+      '</details>',
+      '',
+      `**Full Changelog**: https://github.com/chaxiu/OpenCompare/compare/${latestPublishedTag}...${currentTag}`
+    ].join('\n')
+
+  // The only place this suite runs the link gate; `gh` is a local stub echoing
+  // the fixture body, so no real release or network is ever touched.
+  const runLinkGate = (body: string): { status: number; output: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-link-gate-'))
+    try {
+      const fixture = join(dir, 'fixture-body.md')
+      writeFileSync(fixture, body)
+      const fakeGh = join(dir, 'gh')
+      writeFileSync(fakeGh, '#!/usr/bin/env bash\ncat "${FAKE_RELEASE_BODY}"\n', { mode: 0o755 })
+      const script = join(dir, 'link-gate.sh')
+      writeFileSync(script, linkGate)
+      const result = spawnSync('bash', [script], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH ?? ''}`,
+          RUNNER_TEMP: dir,
+          RELEASE_TAG: currentTag,
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare',
+          FAKE_RELEASE_BODY: fixture
+        }
+      })
+      return {
+        status: result.status ?? -1,
+        output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('passes the simulated body with exactly the two absolute switch links', () => {
+    const { status, output } = runLinkGate(simulateBody(releaseNotes, bilingualNotes))
+    expect(output).toContain('link: ' + enSwitch)
+    expect(output).toContain('link: ' + zhSwitch)
+    expect(output).toContain('links: 2')
+    expect(output).toContain('0 relative')
+    expect(output).not.toContain('::error::')
+    expect(status).toBe(0)
+  })
+
+  it('fails closed when the simulated body keeps a relative switch link', () => {
+    const { status, output } = runLinkGate(
+      simulateBody(releaseNotes.replace(enSwitch, `./${currentTag}.zh-CN.md`), bilingualNotes)
+    )
+    expect(status).not.toBe(0)
+    expect(output).toContain('::error::')
+    expect(output).toContain(`./${currentTag}.zh-CN.md`)
+    expect(output).toContain('must be an absolute URL')
+  })
+
+  it('fails closed when either or both absolute switch URLs are missing', () => {
+    const dropped = (url: string): string => url.replace('/blob/', '/blobs/')
+    const cases: Array<[string, string]> = [
+      [releaseNotes.replace(enSwitch, dropped(enSwitch)), bilingualNotes],
+      [releaseNotes, bilingualNotes.replace(zhSwitch, dropped(zhSwitch))],
+      [releaseNotes.replace(enSwitch, dropped(enSwitch)), bilingualNotes.replace(zhSwitch, dropped(zhSwitch))]
+    ]
+    for (const [english, chinese] of cases) {
+      const { status, output } = runLinkGate(simulateBody(english, chinese))
+      expect(status).not.toBe(0)
+      expect(output).toContain('::error::')
+      expect(output).toContain('is missing the absolute language switch link')
+    }
+  })
+})
+
 describe('update metadata consistency', () => {
   it('pins a space-free nsis artifact name that matches the latest.yml url template', () => {
     const artifactName = builder.nsis?.artifactName ?? ''
@@ -1914,8 +2046,14 @@ describe('release notes changelog', () => {
     expect(existsSync(bilingualNotesPath)).toBe(true)
     expect(bilingualNotes.trim().length).toBeGreaterThan(0)
     expect(firstHeading(bilingualNotes)).toContain(currentTag)
-    expect(releaseNotes).toContain(`./${currentTag}.zh-CN.md`)
-    expect(bilingualNotes).toContain(`./${currentTag}.md`)
+    // The pair is pasted into a Release body that renders on the tag page, so
+    // the mutual switch links must be tag-fixed absolute URLs, never `./` paths.
+    expect(releaseNotes).toContain(
+      `https://github.com/chaxiu/OpenCompare/blob/${currentTag}/docs/release-notes/${currentTag}.zh-CN.md`
+    )
+    expect(bilingualNotes).toContain(
+      `https://github.com/chaxiu/OpenCompare/blob/${currentTag}/docs/release-notes/${currentTag}.md`
+    )
     const orderedSection = (doc: string, headings: string[]): void => {
       const offsets = headings.map((heading) => doc.indexOf(`\n## ${heading}\n`))
       for (const offset of offsets) expect(offset).toBeGreaterThan(-1)
