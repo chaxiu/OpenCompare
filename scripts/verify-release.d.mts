@@ -247,6 +247,17 @@ export function validateSummary(
   options?: { expectedIds?: string[]; exists?: (path: string) => boolean }
 ): { ok: boolean; problems: string[] }
 
+export interface ReleaseGateVerdict {
+  ok: boolean
+  status: 'pass' | 'fail'
+  problems: string[]
+}
+
+export function judgeReleaseGate(
+  summary: unknown,
+  options?: { expectedIds?: string[]; exists?: (path: string) => boolean }
+): ReleaseGateVerdict
+
 export function writeJsonAtomic(path: string, value: unknown): void
 
 export function sha256File(path: string): string
