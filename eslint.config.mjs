@@ -7,6 +7,58 @@ import tseslint from 'typescript-eslint'
 const corePurity =
   'src/core must stay free of Electron/DOM dependencies so it can be unit-tested in plain Node.'
 
+/**
+ * Test-debt backstop, inline so it needs no new dependency: a test file keeps
+ * real assertions and never counts `it(` / `test(` occurrences as a sentinel.
+ * The gate itself reads case counts from `vitest list`; this rule only stops
+ * the cheap "whole file rewritten / assertions emptied" signals at lint time.
+ */
+const opencompare = {
+  rules: {
+    'no-test-sentinel': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Test files keep expect() assertions and never count it( / test( occurrences as a sentinel.'
+        },
+        schema: [],
+        messages: {
+          zeroExpect:
+            'Test file has no expect() assertion; an emptied or wholesale rewritten suite must not pass silently.',
+          countSentinel:
+            'Do not count test cases with {{method}}({{pattern}}); the test runner collection is the only case source.'
+        }
+      },
+      create(context) {
+        const source = context.sourceCode.text
+        const countingMethods = new Set(['match', 'exec', 'split', 'test', 'search'])
+        return {
+          Program(node) {
+            if (!/\bexpect\s*\(/.test(source)) {
+              context.report({ node, messageId: 'zeroExpect' })
+            }
+          },
+          CallExpression(node) {
+            const callee = node.callee
+            if (callee.type !== 'MemberExpression' || callee.computed) return
+            const method = callee.property.type === 'Identifier' ? callee.property.name : null
+            if (!method || !countingMethods.has(method)) return
+            const argument = node.arguments[0]
+            if (!argument || argument.type !== 'Literal') return
+            const pattern =
+              typeof argument.value === 'string'
+                ? argument.value
+                : (argument.regex?.pattern ?? null)
+            if (!pattern || !/(?:^|[^A-Za-z0-9_])(?:it|test)\\?\(/.test(pattern)) return
+            context.report({ node, messageId: 'countSentinel', data: { method, pattern } })
+          }
+        }
+      }
+    }
+  }
+}
+
 export default tseslint.config(
   { ignores: ['out/**', 'dist/**', 'coverage/**', 'node_modules/**'] },
   js.configs.recommended,
@@ -16,6 +68,15 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.node, ...globals.browser }
     }
+  },
+  {
+    // `scripts/measure-symlink-footer.evidence.test.ts` is the documented
+    // zero-assertion evidence printer, outside the vitest include; every real
+    // suite keeps the sentinel rule.
+    files: ['**/*.test.{ts,tsx}'],
+    ignores: ['scripts/measure-symlink-footer.evidence.test.ts'],
+    plugins: { opencompare },
+    rules: { 'opencompare/no-test-sentinel': 'error' }
   },
   {
     // Brand icon generator: plain Node script run with `node build/icons/generate-icons.mjs`.
