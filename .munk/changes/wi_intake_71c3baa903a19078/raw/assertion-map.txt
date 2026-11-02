@@ -1,0 +1,1431 @@
+# Assertion map: 97a18f3 -> 120f06d
+
+harness exports (34): EXTERNAL_TEMPLATE_FILES, clickControl, deletePathsOf, dropPaths, fillComparePaths, fingerprint, linkWithStamp, memoryPort, mountWorkbench, openAnotherDirectory, openAnotherFile, openCompareDialog, openDirectoryPair, openFilePair, paneTree, releaseScratchRoots, scratchRoot, scratchSides, scriptedPort, sessionTab, sessionTabCount, sessionTabRows, sessionTabs, settle, sha256Hex, statusText, submitCompare, submitComparePair, templatePort, treeRowTitles, waitForTab, writeFiles, writeStamped, writeStampedBytes
+
+## src/renderer/src/App.test.tsx
+
+- cases: 94 -> 94
+- expects inside case blocks: 534 -> 534
+- expects outside case blocks (file-local helpers): 3 -> 3
+- identical-count cases: 94/94
+- differing-count cases: 0
+- expect texts changed: 132
+- change kinds: formatting-only 37, helper-substitution 95
+
+| # | 用例标题 | 基线 expect | 现 expect | 判定 |
+| --- | --- | --- | --- | --- |
+| 1 | mounts the empty workbench on the in-memory PlatformPort | 16 | 16 | 一致 |
+| 2 | shows the loading state, then every sample session | 9 | 9 | 一致 |
+| 3 | shows each session tab the type it was opened as and drives the view | 3 | 3 | 一致 |
+| 4 | switches the work area and the status bar with the active session | 3 | 3 | 一致 |
+| 5 | shows the key-aligned CSV reconciliation with runtime counts | 4 | 4 | 一致 |
+| 6 | surfaces a readable, retryable error state | 2 | 2 | 一致 |
+| 7 | filters the directory comparison and drills a file into its file view | 9 | 9 | 一致 |
+| 8 | drills CSV and YAML files into their typed views | 6 | 6 | 一致 |
+| 9 | explains why a non-text file cannot be drilled into | 2 | 2 | 一致 |
+| 10 | degrades the native directory picker on the web runtime | 5 | 5 | 一致 |
+| 11 | previews a sync dry-run with byte totals and cancels without writing | 6 | 6 | 一致 |
+| 12 | applies the confirmed sync and refreshes the comparison tree | 9 | 9 | 一致 |
+| 13 | previews the template placement and extracts it into a real output root | 15 | 15 | 一致 |
+| 14 | reports the failed count when a checked template write is refused | 5 | 5 | 一致 |
+| 15 | refuses template placement when the left side is a mounted snapshot | 7 | 7 | 一致 |
+| 16 | cancels the template dry-run without writing and keeps the session usable | 5 | 5 | 一致 |
+| 17 | opens two real files from the pickers without loading a sample | 4 | 4 | 一致 |
+| 18 | opens two real folders and labels the session with both roots | 5 | 5 | 一致 |
+| 19 | builds directory rows only for the active session | 4 | 4 | 一致 |
+| 20 | keeps 3 tabs resident and switches with zero scans or digests | 14 | 14 | 一致 |
+| 21 | keeps filter, collapse, selection and scroll across a tab switch | 8 | 8 | 一致 |
+| 22 | reuses an alias root through the cache without folding its tab | 5 | 5 | 一致 |
+| 23 | keeps one tab when the same directory pair is compared again | 1 | 1 | 一致 |
+| 24 | leaves the workbench untouched when a picker is cancelled | 3 | 3 | 一致 |
+| 25 | opens nothing when the second picker is cancelled | 3 | 3 | 一致 |
+| 26 | adds an independent tab for every opened pair | 2 | 2 | 一致 |
+| 27 | opens a pair when two same-kind paths are dropped | 3 | 3 | 一致 |
+| 28 | opens a directory session when two directories are dropped | 2 | 2 | 一致 |
+| 29 | reports skipped unreadable entries per side as an info notice and a view count | 3 | 3 | 一致 |
+| 30 | does not drill into a directory link or read its target | 3 | 3 | 一致 |
+| 31 | drills into a file link by reading the target body | 2 | 2 | 一致 |
+| 32 | shows no skip notice when every entry was readable | 2 | 2 | 一致 |
+| 33 | reports file-handle exhaustion as a readable notice and opens no session | 3 | 3 | 一致 |
+| 34 | keeps a single dropped path as the left baseline and asks for its counterpart | 5 | 5 | 一致 |
+| 35 | rejects a drop of more than two paths without opening a session | 2 | 2 | 一致 |
+| 36 | rejects a mixed file / folder drop and keeps the current session | 3 | 3 | 一致 |
+| 37 | reports an unsupported extension without opening a session | 2 | 2 | 一致 |
+| 38 | returns to the source directory with filter, expansion, scroll and selection intact | 12 | 12 | 一致 |
+| 39 | repeats drilldown and return without drifting | 4 | 4 | 一致 |
+| 40 | keeps same-path drilldowns of two directory sessions apart | 6 | 6 | 一致 |
+| 41 | keeps unsaved edits and the dirty marker across a tab roundtrip | 9 | 9 | 一致 |
+| 42 | closes a clean background session immediately without switching away | 5 | 5 | 一致 |
+| 43 | activates the neighbour of the closed active session and empties on the last one | 11 | 11 | 一致 |
+| 44 | prompts before closing dirty work and keeps it on「继续编辑」 | 10 | 10 | 一致 |
+| 45 | discards a dirty background session without switching away | 3 | 3 | 一致 |
+| 46 | drops the dirty marker after a reset and closes without a prompt | 4 | 4 | 一致 |
+| 47 | merges samples into open sessions instead of replacing them | 7 | 7 | 一致 |
+| 48 | keeps a drilldown alive after its source directory session closes | 6 | 6 | 一致 |
+| 49 | keeps「新建对比」in the toolbar in the empty state and with sessions | 3 | 3 | 一致 |
+| 50 | offers two path inputs and both picker actions inside the dialog | 6 | 6 | 一致 |
+| 51 | opens a directory pair from the dialog picker | 3 | 3 | 一致 |
+| 52 | opens with Cmd/Ctrl+N, ignores repeats and closes on Escape without touching sessions | 7 | 7 | 一致 |
+| 53 | submits once on Enter and disables the button while the session is built | 4 | 4 | 一致 |
+| 54 | builds a code session from typed real file paths | 3 | 3 | 一致 |
+| 55 | builds a directory session from typed real directory paths | 3 | 3 | 一致 |
+| 56 | strips paired quotes and surrounding whitespace before probing | 5 | 5 | 一致 |
+| 57 | expands ~ and resolves relative paths against the platform base | 2 | 2 | 一致 |
+| 58 | never opens a native picker or save dialog for a typed pair | 3 | 3 | 一致 |
+| 59 | adds one tab and keeps the existing session in place | 4 | 4 | 一致 |
+| 60 | re-submitting the same pair keeps a single tab | 3 | 3 | 一致 |
+| 61 | names the missing right path and opens no tab | 5 | 5 | 一致 |
+| 62 | rejects an empty side without probing either path | 4 | 4 | 一致 |
+| 63 | rejects a file / directory pair and keeps the dialog open | 4 | 4 | 一致 |
+| 64 | lists the supported families for an unsupported extension | 5 | 5 | 一致 |
+| 65 | rejects a mixed file family without creating a blank tab | 2 | 2 | 一致 |
+| 66 | keeps the active session and status bar unchanged when a submit fails | 3 | 3 | 一致 |
+| 67 | keeps unsaved working copies across manual sessions | 4 | 4 | 一致 |
+| 68 | closes the dialog before a typed directory pair starts scanning | 8 | 8 | 一致 |
+| 69 | closes the dialog before a picker-started directory pair starts scanning | 5 | 5 | 一致 |
+| 70 | keeps the dialog open when the folder picker is cancelled | 7 | 7 | 一致 |
+| 71 | opens a file session from an injected request without a picker | 6 | 6 | 一致 |
+| 72 | opens a directory session from an injected request | 3 | 3 | 一致 |
+| 73 | builds the very same session the manual entry builds for the pair | 4 | 4 | 一致 |
+| 74 | reports a rejected request without touching the open sessions | 4 | 4 | 一致 |
+| 75 | keeps a single effective subscription under StrictMode | 5 | 5 | 一致 |
+| 76 | releases the subscription on unmount | 4 | 4 | 一致 |
+| 77 | signals readiness after subscribing and flushes a pre-mount request | 3 | 3 | 一致 |
+| 78 | shows real scan and digest progress, then clears it once the comparison succeeds | 9 | 9 | 一致 |
+| 79 | switches to the digest phase without falling back behind the scan total | 12 | 12 | 一致 |
+| 80 | cancels during the scan phase without touching sessions or the view | 8 | 8 | 一致 |
+| 81 | cancels a running comparison and leaves sessions, view and status bar untouched | 12 | 12 | 一致 |
+| 82 | cancels a dialog-started comparison with no modal overlay left behind | 15 | 15 | 一致 |
+| 83 | renders no progress bar while nothing is comparing | 9 | 9 | 一致 |
+| 84 | labels each file pair from its own two paths, same name or not | 8 | 8 | 一致 |
+| 85 | moves a swapped directory side onto the visible tab without the replaced path | 6 | 6 | 一致 |
+| 86 | writes a code-view file open back to the tab and the working copy | 7 | 7 | 一致 |
+| 87 | recomputes a CSV session from the file opened in its view | 5 | 5 | 一致 |
+| 88 | moves a structured session onto the format of the file opened in its view | 4 | 4 | 一致 |
+| 89 | keeps a file, a directory and a drilldown tab apart, and restores the directory label | 14 | 14 | 一致 |
+| 90 | does not let a slow read clobber a session committed meanwhile | 5 | 5 | 一致 |
+| 91 | rebuilds a same-name pair from A to B without borrowing A paths | 10 | 10 | 一致 |
+| 92 | follows both sides opened inside the view without minting a new tab | 6 | 6 | 一致 |
+| 93 | labels a drilldown tab and restores the directory tab on return | 7 | 7 | 一致 |
+| 94 | keeps file, directory and drilldown labels apart and stable on neighbour close | 13 | 13 | 一致 |
+
+### 用例块之外的 expect（文件内 helper 函数）
+
+- outside #1
+  - 基线 openPairs L1460: `expect((screen.getByRole('button', { name: '打开文件' }) as HTMLButtonElement).disabled).toBe( false )`
+  - 现   openPairs L1185: `expect((screen.getByRole('button', { name: '打开文件' }) as HTMLButtonElement).disabled).toBe(false)`
+  - 判定: 变化
+- outside #2
+  - 基线 mountReady L2341: `expect(port.calls).toContain('ready')`
+  - 现   mountReady L1952: `expect(port.calls).toContain('ready')`
+  - 判定: 文本一致
+- outside #3
+  - 基线 clickOpenFile L2960: `expect((screen.getByRole('button', { name: '打开文件' }) as HTMLButtonElement).disabled).toBe( false )`
+  - 现   clickOpenFile L2508: `expect((screen.getByRole('button', { name: '打开文件' }) as HTMLButtonElement).disabled).toBe(false)`
+  - 判定: 变化
+
+### 文件内 helper 的 expect 条数（按函数名聚合）
+
+| helper | 基线 | 现 | 基线行 | 现行 |
+| --- | --- | --- | --- | --- |
+| activeSession | 0 | — | 2349 | — |
+| dropPaths | 0 | — | 205 | — |
+| fillPaths | 0 | — | 1726 | — |
+| openDialog | 0 | — | 1721 | — |
+| paneTree | 0 | — | 1335 | — |
+| scriptedPort | 0 | — | 156 | — |
+| sessionTabs | 0 | — | 2929 | — |
+| submitComparePair | 0 | — | 2992 | — |
+| submitDialog | 0 | — | 1732 | — |
+| tab | 0 | — | 2942 | — |
+| tabCount | 0 | — | 2344 | — |
+| templatePort | 0 | — | 180 | — |
+| treeRowTitles | 0 | — | 197 | — |
+| writeFiles | 0 | — | 1741 | — |
+| writeMemoryFiles | 0 | — | 2490 | — |
+
+### expect 文本变化
+
+- shows the key-aligned CSV reconciliation with runtime counts #1
+  - 原: `expect( within(keyPicker).getByRole('button', { name: 'order_id' }).getAttribute('aria-pressed') ).toBe('true')`
+  - 现: `expect(within(keyPicker).getByRole('button', { name: 'order_id' }).getAttribute('aria-pressed')).toBe('true')`
+  - kind: formatting-only
+  - helper: —
+- shows the key-aligned CSV reconciliation with runtime counts #4
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain( \`${same}相同${added}新增${removed}删除${modified}修改\` )`
+  - 现: `expect(statusText()).toContain(\`${same}相同${added}新增${removed}删除${modified}修改\`)`
+  - kind: helper-substitution
+  - helper: statusText
+- surfaces a readable, retryable error state #1
+  - 原: `expect( await screen.findByRole('heading', { name: '样本库读取失败' }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('heading', { name: '样本库读取失败' }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- filters the directory comparison and drills a file into its file view #3
+  - 原: `expect(statusBar).toContain( \`文件（源）${comparison.counts.same + comparison.counts.removed + comparison.counts.modified}\` )`
+  - 现: `expect(statusBar).toContain(\`文件（源）${comparison.counts.same + comparison.counts.removed + comparison.counts.modified}\`)`
+  - kind: formatting-only
+  - helper: —
+- filters the directory comparison and drills a file into its file view #4
+  - 原: `expect(statusBar).toContain( \`差异${comparison.counts.added + comparison.counts.removed + comparison.counts.modified}\` )`
+  - 现: `expect(statusBar).toContain(\`差异${comparison.counts.added + comparison.counts.removed + comparison.counts.modified}\`)`
+  - kind: formatting-only
+  - helper: —
+- filters the directory comparison and drills a file into its file view #7
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain( \`0${zh['directory.filter.same']}${comparison.counts.added}${zh['directory.filter.rightOnly']}${comparison.counts.removed}${zh['directory.filter.leftOnly']}${comparison.counts.modified}${zh['common.diff.modified']}\` )`
+  - 现: `expect(statusText()).toContain( \`0${zh['directory.filter.same']}${comparison.counts.added}${zh['directory.filter.rightOnly']}${comparison.counts.removed}${zh['directory.filter.leftOnly']}${comparison.counts.modified}${zh['common.diff.modified']}\` )`
+  - kind: helper-substitution
+  - helper: statusText
+- drills CSV and YAML files into their typed views #3
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain('2相同1新增0删除1修改')`
+  - 现: `expect(statusText()).toContain('2相同1新增0删除1修改')`
+  - kind: helper-substitution
+  - helper: statusText
+- previews the template placement and extracts it into a real output root #6
+  - 原: `expect( within(result).getByText( zh['directory.template.result.written'].replace('{count}', '1') ) ).toBeDefined()`
+  - 现: `expect(within(result).getByText(zh['directory.template.result.written'].replace('{count}', '1'))).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- previews the template placement and extracts it into a real output root #7
+  - 原: `expect( within(result).getByText( zh['directory.template.result.verified'].replace('{count}', '1') ) ).toBeDefined()`
+  - 现: `expect(within(result).getByText(zh['directory.template.result.verified'].replace('{count}', '1'))).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- previews the template placement and extracts it into a real output root #9
+  - 原: `expect(port.readTextFile('/ext/out/src/core/strings.ts')).resolves.toBe( EXTERNAL_TEMPLATE_FILES['/ext/b/misc/deep/strings.ts'] )`
+  - 现: `expect(port.readTextFile('/ext/out/src/core/strings.ts')).resolves.toBe(EXTERNAL_TEMPLATE_FILES['/ext/b/misc/deep/strings.ts'])`
+  - kind: formatting-only
+  - helper: EXTERNAL_TEMPLATE_FILES
+- previews the template placement and extracts it into a real output root #11
+  - 原: `expect( within(rescanned).getByText(zh['directory.template.section.placed']) ).toBeDefined()`
+  - 现: `expect(within(rescanned).getByText(zh['directory.template.section.placed'])).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- previews the template placement and extracts it into a real output root #13
+  - 原: `expect(within(rescanned).getAllByText(zh['directory.template.overwrite']).length).toBeGreaterThan( 0 )`
+  - 现: `expect(within(rescanned).getAllByText(zh['directory.template.overwrite']).length).toBeGreaterThan(0)`
+  - kind: formatting-only
+  - helper: —
+- previews the template placement and extracts it into a real output root #14
+  - 原: `expect( (within(rescanned).getByRole('button', { name: zh['directory.template.place'] }) as HTMLButtonElement).disabled ).toBe(true)`
+  - 现: `expect( ( within(rescanned).getByRole('button', { name: zh['directory.template.place'], }) as HTMLButtonElement ).disabled ).toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- previews the template placement and extracts it into a real output root #15
+  - 原: `expect( within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length ).toBe(tabsBefore)`
+  - 现: `expect(sessionTabRows().length).toBe(tabsBefore)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- reports the failed count when a checked template write is refused #1
+  - 原: `expect( within(result).getByText( zh['directory.template.result.written'].replace('{count}', '0') ) ).toBeDefined()`
+  - 现: `expect(within(result).getByText(zh['directory.template.result.written'].replace('{count}', '0'))).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- reports the failed count when a checked template write is refused #2
+  - 原: `expect( within(result).getByText( zh['directory.template.result.writeFailed'].replace('{count}', '1') ) ).toBeDefined()`
+  - 现: `expect(within(result).getByText(zh['directory.template.result.writeFailed'].replace('{count}', '1'))).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- reports the failed count when a checked template write is refused #5
+  - 原: `expect( within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length ).toBeGreaterThan(0)`
+  - 现: `expect(sessionTabRows().length).toBeGreaterThan(0)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- refuses template placement when the left side is a mounted snapshot #1
+  - 原: `expect(alert.textContent).toBe( '当前左侧是快照，不能作为模板 A；请先打开真实目录对比。' )`
+  - 现: `expect(alert.textContent).toBe('当前左侧是快照，不能作为模板 A；请先打开真实目录对比。')`
+  - kind: formatting-only
+  - helper: —
+- refuses template placement when the left side is a mounted snapshot #6
+  - 原: `expect( within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length ).toBeGreaterThan(0)`
+  - 现: `expect(sessionTabRows().length).toBeGreaterThan(0)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- cancels the template dry-run without writing and keeps the session usable #4
+  - 原: `expect( within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab').length ).toBe(tabsBefore)`
+  - 现: `expect(sessionTabRows().length).toBe(tabsBefore)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- cancels the template dry-run without writing and keeps the session usable #5
+  - 原: `expect( await screen.findByRole('dialog', { name: '模板归位 · 选择根' }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('dialog', { name: '模板归位 · 选择根' })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- opens two real files from the pickers without loading a sample #1
+  - 原: `expect(await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })).toBeDefined()`
+  - 现: `expect(await openFilePair(scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] }), /engine\.ts/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: openFilePair, scriptedPort
+- opens two real files from the pickers without loading a sample #2
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain( \`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}\` )`
+  - 现: `expect(statusText()).toContain(\`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}\`)`
+  - kind: helper-substitution
+  - helper: statusText
+- opens two real folders and labels the session with both roots #1
+  - 原: `expect( await screen.findByRole('tab', { name: /baseline ↔ incoming/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await openAnotherDirectory(/baseline ↔ incoming/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: openAnotherDirectory
+- opens two real folders and labels the session with both roots #2
+  - 原: `expect( (screen.getByRole('tab', { name: /baseline ↔ incoming/ }).getAttribute('aria-label') ?? '') ).toContain(\`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.incoming}\`)`
+  - 现: `expect(screen.getByRole('tab', { name: /baseline ↔ incoming/ }).getAttribute('aria-label') ?? '').toContain( \`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.incoming}\` )`
+  - kind: formatting-only
+  - helper: —
+- opens two real folders and labels the session with both roots #4
+  - 原: `expect( await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await openAnotherDirectory(/baseline ↔ candidate/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: openAnotherDirectory
+- opens two real folders and labels the session with both roots #5
+  - 原: `expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)`
+  - 现: `expect(sessionTabRows()).toHaveLength(2)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- keeps 3 tabs resident and switches with zero scans or digests #2
+  - 原: `expect( within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab') ).toHaveLength(pair + 1)`
+  - 现: `expect(sessionTabRows()).toHaveLength(pair + 1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- keeps 3 tabs resident and switches with zero scans or digests #12
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(firstStatus)`
+  - 现: `expect(statusText()).toBe(firstStatus)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps filter, collapse, selection and scroll across a tab switch #7
+  - 原: `expect( within(screen.getAllByRole('tree')[0]) .getAllByText('engine.ts')[0] .closest('[role="treeitem"]') ?.getAttribute('aria-selected') ).toBe('true')`
+  - 现: `expect(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0].closest('[role="treeitem"]')?.getAttribute('aria-selected')).toBe( 'true' )`
+  - kind: formatting-only
+  - helper: —
+- reuses an alias root through the cache without folding its tab #2
+  - 原: `expect( (screen.getByRole('button', { name: '打开文件夹' }) as HTMLButtonElement).disabled ).toBe(false)`
+  - 现: `expect((screen.getByRole('button', { name: '打开文件夹' }) as HTMLButtonElement).disabled).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- reuses an alias root through the cache without folding its tab #3
+  - 原: `expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)`
+  - 现: `expect(sessionTabRows()).toHaveLength(2)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- adds an independent tab for every opened pair #1
+  - 原: `expect(within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')).toHaveLength(2)`
+  - 现: `expect(sessionTabRows()).toHaveLength(2)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- opens a pair when two same-kind paths are dropped #3
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain( \`${LEFT_REPORT} ↔ ${RIGHT_REPORT}\` )`
+  - 现: `expect(statusText()).toContain(\`${LEFT_REPORT} ↔ ${RIGHT_REPORT}\`)`
+  - kind: helper-substitution
+  - helper: statusText
+- opens a directory session when two directories are dropped #1
+  - 原: `expect( await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- opens a directory session when two directories are dropped #2
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain('差异')`
+  - 现: `expect(statusText()).toContain('差异')`
+  - kind: helper-substitution
+  - helper: statusText
+- shows no skip notice when every entry was readable #1
+  - 原: `expect( await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- keeps a single dropped path as the left baseline and asks for its counterpart #4
+  - 原: `expect(await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })).toBeDefined()`
+  - 现: `expect(await openAnotherFile(/engine\.ts/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: openAnotherFile
+- keeps a single dropped path as the left baseline and asks for its counterpart #5
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain( \`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}\` )`
+  - 现: `expect(statusText()).toContain(\`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}\`)`
+  - kind: helper-substitution
+  - helper: statusText
+- rejects a mixed file / folder drop and keeps the current session #2
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(before)`
+  - 现: `expect(statusText()).toBe(before)`
+  - kind: helper-substitution
+  - helper: statusText
+- returns to the source directory with filter, expansion, scroll and selection intact #5
+  - 原: `expect( await screen.findByText(\`${DRILLDOWN_PREFIX}src/core/engine.ts\`, {}, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByText(\`${DRILLDOWN_PREFIX}src/core/engine.ts\`, {}, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- returns to the source directory with filter, expansion, scroll and selection intact #11
+  - 原: `expect( within(paneTree(0)).getAllByText('engine.ts')[0].closest('[role="treeitem"]') ?.getAttribute('aria-selected') ).toBe('true')`
+  - 现: `expect(within(paneTree(0)).getAllByText('engine.ts')[0].closest('[role="treeitem"]')?.getAttribute('aria-selected')).toBe('true')`
+  - kind: formatting-only
+  - helper: paneTree
+- keeps same-path drilldowns of two directory sessions apart #4
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(REVERSED_DIRECTORY_ID)`
+  - 现: `expect(statusText()).toContain(REVERSED_DIRECTORY_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps same-path drilldowns of two directory sessions apart #6
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(SAMPLE_DIRECTORY_ID)`
+  - 现: `expect(statusText()).toContain(SAMPLE_DIRECTORY_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps unsaved edits and the dirty marker across a tab roundtrip #1
+  - 原: `expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - 现: `expect(sessionTab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps unsaved edits and the dirty marker across a tab roundtrip #4
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(REPORT_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps unsaved edits and the dirty marker across a tab roundtrip #5
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(ENGINE_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps unsaved edits and the dirty marker across a tab roundtrip #8
+  - 原: `expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - 现: `expect(sessionTab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- closes a clean background session immediately without switching away #2
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)`
+  - 现: `expect(sessionTabRows()).toHaveLength(1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- closes a clean background session immediately without switching away #4
+  - 原: `expect(tab(/report\.csv/).getAttribute('aria-selected')).toBe('true')`
+  - 现: `expect(sessionTab(/report\.csv/).getAttribute('aria-selected')).toBe('true')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- closes a clean background session immediately without switching away #5
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(REPORT_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- activates the neighbour of the closed active session and empties on the last one #1
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(3)`
+  - 现: `expect(sessionTabRows()).toHaveLength(3)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- activates the neighbour of the closed active session and empties on the last one #3
+  - 原: `expect(tab(/deploy\.yaml/).getAttribute('aria-selected')).toBe('true')`
+  - 现: `expect(sessionTab(/deploy\.yaml/).getAttribute('aria-selected')).toBe('true')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- activates the neighbour of the closed active session and empties on the last one #4
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(YAML_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(YAML_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- activates the neighbour of the closed active session and empties on the last one #5
+  - 原: `expect(tab(/engine\.ts/).getAttribute('aria-selected')).toBe('true')`
+  - 现: `expect(sessionTab(/engine\.ts/).getAttribute('aria-selected')).toBe('true')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- activates the neighbour of the closed active session and empties on the last one #6
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(ENGINE_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(ENGINE_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- activates the neighbour of the closed active session and empties on the last one #10
+  - 原: `expect( await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await openAnotherFile(/report\.csv/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: openAnotherFile
+- activates the neighbour of the closed active session and empties on the last one #11
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(REPORT_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- prompts before closing dirty work and keeps it on「继续编辑」 #3
+  - 原: `expect(tab(/engine\.ts/)).toBeDefined()`
+  - 现: `expect(sessionTab(/engine\.ts/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: sessionTab
+- prompts before closing dirty work and keeps it on「继续编辑」 #6
+  - 原: `expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - 现: `expect(sessionTab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- discards a dirty background session without switching away #2
+  - 原: `expect(tab(/report\.csv/).getAttribute('aria-selected')).toBe('true')`
+  - 现: `expect(sessionTab(/report\.csv/).getAttribute('aria-selected')).toBe('true')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- discards a dirty background session without switching away #3
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain(REPORT_SESSION_ID)`
+  - 现: `expect(statusText()).toContain(REPORT_SESSION_ID)`
+  - kind: helper-substitution
+  - helper: statusText
+- drops the dirty marker after a reset and closes without a prompt #1
+  - 原: `expect(tab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - 现: `expect(sessionTab(/engine\.ts/).textContent).toContain('有未保存修改')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- drops the dirty marker after a reset and closes without a prompt #2
+  - 原: `expect(tab(/engine\.ts/).textContent).not.toContain('有未保存修改')`
+  - 现: `expect(sessionTab(/engine\.ts/).textContent).not.toContain('有未保存修改')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- merges samples into open sessions instead of replacing them #2
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(5)`
+  - 现: `expect(sessionTabRows()).toHaveLength(5)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- merges samples into open sessions instead of replacing them #5
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')[0].textContent).toContain('engine.ts')`
+  - 现: `expect(sessionTabRows()[0].textContent).toContain('engine.ts')`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- merges samples into open sessions instead of replacing them #7
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab').length).toBeGreaterThan(1)`
+  - 现: `expect(sessionTabRows().length).toBeGreaterThan(1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- keeps a drilldown alive after its source directory session closes #2
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain('directory:')`
+  - 现: `expect(statusText()).toContain('directory:')`
+  - kind: helper-substitution
+  - helper: statusText
+- offers two path inputs and both picker actions inside the dialog #6
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain( \`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}\` )`
+  - 现: `expect(statusText()).toContain(\`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}\`)`
+  - kind: helper-substitution
+  - helper: statusText
+- opens a directory pair from the dialog picker #1
+  - 原: `expect( await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- opens with Cmd/Ctrl+N, ignores repeats and closes on Escape without touching sessions #6
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)`
+  - 现: `expect(sessionTabRows()).toHaveLength(1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- opens with Cmd/Ctrl+N, ignores repeats and closes on Escape without touching sessions #7
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(before)`
+  - 现: `expect(statusText()).toBe(before)`
+  - kind: helper-substitution
+  - helper: statusText
+- submits once on Enter and disables the button while the session is built #4
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)`
+  - 现: `expect(sessionTabRows()).toHaveLength(1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- builds a directory session from typed real directory paths #1
+  - 原: `expect( await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- adds one tab and keeps the existing session in place #4
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toContain('/memory/x.txt ↔ /memory/y.txt')`
+  - 现: `expect(statusText()).toContain('/memory/x.txt ↔ /memory/y.txt')`
+  - kind: helper-substitution
+  - helper: statusText
+- re-submitting the same pair keeps a single tab #2
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)`
+  - 现: `expect(sessionTabRows()).toHaveLength(1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- re-submitting the same pair keeps a single tab #3
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(firstStatus)`
+  - 现: `expect(statusText()).toBe(firstStatus)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps the active session and status bar unchanged when a submit fails #1
+  - 原: `expect(within(sessionTabs()).getAllByRole('tab')).toHaveLength(1)`
+  - 现: `expect(sessionTabRows()).toHaveLength(1)`
+  - kind: helper-substitution
+  - helper: sessionTabRows
+- closes the dialog before a typed directory pair starts scanning #6
+  - 原: `expect( (within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled ).toBe(false)`
+  - 现: `expect((within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- closes the dialog before a typed directory pair starts scanning #7
+  - 原: `expect( await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- closes the dialog before a picker-started directory pair starts scanning #4
+  - 原: `expect( (within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled ).toBe(false)`
+  - 现: `expect((within(bar).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- closes the dialog before a picker-started directory pair starts scanning #5
+  - 原: `expect( await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- keeps the dialog open when the folder picker is cancelled #1
+  - 原: `expect( (within(dialog()).getByRole('button', { name: '建立对比' }) as HTMLButtonElement).disabled ).toBe(false)`
+  - 现: `expect((within(dialog()).getByRole('button', { name: '建立对比' }) as HTMLButtonElement).disabled).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- keeps the dialog open when the folder picker is cancelled #4
+  - 原: `expect( (within(dialog()).getByRole('button', { name: '建立对比' }) as HTMLButtonElement).disabled ).toBe(false)`
+  - 现: `expect((within(dialog()).getByRole('button', { name: '建立对比' }) as HTMLButtonElement).disabled).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- opens a file session from an injected request without a picker #1
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- opens a file session from an injected request without a picker #3
+  - 原: `expect(activeSession()).toContain(\`file:${LEFT} ↔ ${RIGHT}\`)`
+  - 现: `expect(statusText()).toContain(\`file:${LEFT} ↔ ${RIGHT}\`)`
+  - kind: helper-substitution
+  - helper: statusText
+- opens a directory session from an injected request #1
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- opens a directory session from an injected request #3
+  - 原: `expect(activeSession()).toContain('directory:/memory/left-dir ↔ /memory/right-dir')`
+  - 现: `expect(statusText()).toContain('directory:/memory/left-dir ↔ /memory/right-dir')`
+  - kind: helper-substitution
+  - helper: statusText
+- builds the very same session the manual entry builds for the pair #1
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- builds the very same session the manual entry builds for the pair #2
+  - 原: `expect(tabCount()).toBe(0)`
+  - 现: `expect(sessionTabCount()).toBe(0)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- builds the very same session the manual entry builds for the pair #3
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- builds the very same session the manual entry builds for the pair #4
+  - 原: `expect(activeSession()).toBe(injected)`
+  - 现: `expect(statusText()).toBe(injected)`
+  - kind: helper-substitution
+  - helper: statusText
+- reports a rejected request without touching the open sessions #1
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- reports a rejected request without touching the open sessions #3
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- reports a rejected request without touching the open sessions #4
+  - 原: `expect(activeSession()).toBe(before)`
+  - 现: `expect(statusText()).toBe(before)`
+  - kind: helper-substitution
+  - helper: statusText
+- keeps a single effective subscription under StrictMode #3
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- keeps a single effective subscription under StrictMode #4
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- signals readiness after subscribing and flushes a pre-mount request #2
+  - 原: `expect(tabCount()).toBe(1)`
+  - 现: `expect(sessionTabCount()).toBe(1)`
+  - kind: helper-substitution
+  - helper: sessionTabCount
+- shows real scan and digest progress, then clears it once the comparison succeeds #9
+  - 原: `expect( await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- switches to the digest phase without falling back behind the scan total #12
+  - 原: `expect( await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })).toBeDefined()`
+  - kind: formatting-only
+  - helper: —
+- cancels during the scan phase without touching sessions or the view #7
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(statusBefore)`
+  - 现: `expect(statusText()).toBe(statusBefore)`
+  - kind: helper-substitution
+  - helper: statusText
+- cancels a running comparison and leaves sessions, view and status bar untouched #7
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(statusBefore)`
+  - 现: `expect(statusText()).toBe(statusBefore)`
+  - kind: helper-substitution
+  - helper: statusText
+- cancels a running comparison and leaves sessions, view and status bar untouched #10
+  - 原: `expect( await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 }) ).toBeDefined()`
+  - 现: `expect(await openAnotherDirectory(/left ↔ right/)).toBeDefined()`
+  - kind: helper-substitution
+  - helper: openAnotherDirectory
+- cancels a dialog-started comparison with no modal overlay left behind #14
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(statusBefore)`
+  - 现: `expect(statusText()).toBe(statusBefore)`
+  - kind: helper-substitution
+  - helper: statusText
+- labels each file pair from its own two paths, same name or not #3
+  - 原: `expect(fullTabText(tab(/engine\.ts/))).toContain(LEFT_ENGINE)`
+  - 现: `expect(fullTabText(sessionTab(/engine\.ts/))).toContain(LEFT_ENGINE)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels each file pair from its own two paths, same name or not #4
+  - 原: `expect(fullTabText(tab(/engine\.ts/))).toContain(RIGHT_ENGINE)`
+  - 现: `expect(fullTabText(sessionTab(/engine\.ts/))).toContain(RIGHT_ENGINE)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels each file pair from its own two paths, same name or not #5
+  - 原: `expect(fullTabText(tab(/engine\.ts/))).not.toContain(LEFT_REPORT)`
+  - 现: `expect(fullTabText(sessionTab(/engine\.ts/))).not.toContain(LEFT_REPORT)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels each file pair from its own two paths, same name or not #6
+  - 原: `expect(fullTabText(tab(/report\.csv/))).toContain(LEFT_REPORT)`
+  - 现: `expect(fullTabText(sessionTab(/report\.csv/))).toContain(LEFT_REPORT)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels each file pair from its own two paths, same name or not #7
+  - 原: `expect(fullTabText(tab(/report\.csv/))).toContain(RIGHT_REPORT)`
+  - 现: `expect(fullTabText(sessionTab(/report\.csv/))).toContain(RIGHT_REPORT)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- moves a swapped directory side onto the visible tab without the replaced path #5
+  - 原: `expect(fullTabText(tab(/baseline ↔ candidate/))).toContain(DIRECTORY_SAMPLE_PATHS.right)`
+  - 现: `expect(fullTabText(sessionTab(/baseline ↔ candidate/))).toContain(DIRECTORY_SAMPLE_PATHS.right)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #6
+  - 原: `expect(tab(/a\.md ↔ b\.md/).getAttribute('aria-selected')).toBe('true')`
+  - 现: `expect(sessionTab(/a\.md ↔ b\.md/).getAttribute('aria-selected')).toBe('true')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #7
+  - 原: `expect(fullTabText(tab(/a\.md ↔ b\.md/))).not.toContain('/samples/directory')`
+  - 现: `expect(fullTabText(sessionTab(/a\.md ↔ b\.md/))).not.toContain('/samples/directory')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #8
+  - 原: `expect(fullTabText(tab(/baseline ↔ candidate/))).toContain( \`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}\` )`
+  - 现: `expect(fullTabText(sessionTab(/baseline ↔ candidate/))).toContain(\`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}\`)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #10
+  - 原: `expect(fullTabText(tab(/baseline ↔ candidate/))).toContain( \`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}\` )`
+  - 现: `expect(fullTabText(sessionTab(/baseline ↔ candidate/))).toContain(\`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}\`)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #11
+  - 原: `expect(fullTabText(tab(/baseline ↔ candidate/))).not.toContain('engine.ts')`
+  - 现: `expect(fullTabText(sessionTab(/baseline ↔ candidate/))).not.toContain('engine.ts')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #13
+  - 原: `expect(fullTabText(tab(/engine\.ts/))).toContain(LEFT_ENGINE)`
+  - 现: `expect(fullTabText(sessionTab(/engine\.ts/))).toContain(LEFT_ENGINE)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps a file, a directory and a drilldown tab apart, and restores the directory label #14
+  - 原: `expect(fullTabText(tab(/baseline ↔ candidate/))).toContain(DIRECTORY_SAMPLE_PATHS.right)`
+  - 现: `expect(fullTabText(sessionTab(/baseline ↔ candidate/))).toContain(DIRECTORY_SAMPLE_PATHS.right)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- does not let a slow read clobber a session committed meanwhile #4
+  - 原: `expect(fullTabText(tab(/one\.txt ↔ two\.txt/))).toContain(SLOW_LEFT)`
+  - 现: `expect(fullTabText(sessionTab(/one\.txt ↔ two\.txt/))).toContain(SLOW_LEFT)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- does not let a slow read clobber a session committed meanwhile #5
+  - 原: `expect(fullTabText(tab(/alpha\.txt ↔ beta\.txt/))).toContain(FAST_LEFT)`
+  - 现: `expect(fullTabText(sessionTab(/alpha\.txt ↔ beta\.txt/))).toContain(FAST_LEFT)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- rebuilds a same-name pair from A to B without borrowing A paths #2
+  - 原: `expect(tabMatrix()).toEqual([ { title: 'report.md', subtitle: \`${A_LEFT} ↔ ${A_RIGHT} · 代码 / 文本\` } ])`
+  - 现: `expect(tabMatrix()).toEqual([{ title: 'report.md', subtitle: \`${A_LEFT} ↔ ${A_RIGHT} · 代码 / 文本\` }])`
+  - kind: formatting-only
+  - helper: —
+- rebuilds a same-name pair from A to B without borrowing A paths #5
+  - 原: `expect(tabLabels(bTab)).toEqual({ title: 'report.md', subtitle: \`${B_LEFT} ↔ ${B_RIGHT} · 代码 / 文本\` })`
+  - 现: `expect(tabLabels(bTab)).toEqual({ title: 'report.md', subtitle: \`${B_LEFT} ↔ ${B_RIGHT} · 代码 / 文本\`, })`
+  - kind: formatting-only
+  - helper: —
+- rebuilds a same-name pair from A to B without borrowing A paths #6
+  - 原: `expect(tabLabels(aTab)).toEqual({ title: 'report.md', subtitle: \`${A_LEFT} ↔ ${A_RIGHT} · 代码 / 文本\` })`
+  - 现: `expect(tabLabels(aTab)).toEqual({ title: 'report.md', subtitle: \`${A_LEFT} ↔ ${A_RIGHT} · 代码 / 文本\`, })`
+  - kind: formatting-only
+  - helper: —
+- follows both sides opened inside the view without minting a new tab #3
+  - 原: `expect(tabMatrix()).toEqual([ { title: 'alpha.ts ↔ beta.ts', subtitle: \`${NEXT_LEFT} ↔ ${NEXT_RIGHT} · 代码 / 文本\` }, { title: 'deploy.yaml', subtitle: \`${LEFT_YAML} ↔ ${RIGHT_YAML} · YAML\` } ])`
+  - 现: `expect(tabMatrix()).toEqual([ { title: 'alpha.ts ↔ beta.ts', subtitle: \`${NEXT_LEFT} ↔ ${NEXT_RIGHT} · 代码 / 文本\` }, { title: 'deploy.yaml', subtitle: \`${LEFT_YAML} ↔ ${RIGHT_YAML} · YAML\` }, ])`
+  - kind: formatting-only
+  - helper: —
+- follows both sides opened inside the view without minting a new tab #6
+  - 原: `expect(tabLabels(activeTab())).toEqual({ title: 'alpha.ts ↔ beta.ts', subtitle: \`${NEXT_LEFT} ↔ ${NEXT_RIGHT} · 代码 / 文本\` })`
+  - 现: `expect(tabLabels(activeTab())).toEqual({ title: 'alpha.ts ↔ beta.ts', subtitle: \`${NEXT_LEFT} ↔ ${NEXT_RIGHT} · 代码 / 文本\`, })`
+  - kind: formatting-only
+  - helper: —
+- labels a drilldown tab and restores the directory tab on return #1
+  - 原: `expect(tabLabels(tab(/baseline ↔ candidate/))).toEqual(directoryLabels)`
+  - 现: `expect(tabLabels(sessionTab(/baseline ↔ candidate/))).toEqual(directoryLabels)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels a drilldown tab and restores the directory tab on return #2
+  - 原: `expect(tabLabels(tab(/engine\.ts/))).toEqual(drilldownLabels)`
+  - 现: `expect(tabLabels(sessionTab(/engine\.ts/))).toEqual(drilldownLabels)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels a drilldown tab and restores the directory tab on return #3
+  - 原: `expect(tabLabels(tab(/baseline ↔ candidate/))).toEqual(directoryLabels)`
+  - 现: `expect(tabLabels(sessionTab(/baseline ↔ candidate/))).toEqual(directoryLabels)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels a drilldown tab and restores the directory tab on return #5
+  - 原: `expect(tabLabels(tab(/baseline ↔ candidate/))).toEqual(directoryLabels)`
+  - 现: `expect(tabLabels(sessionTab(/baseline ↔ candidate/))).toEqual(directoryLabels)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels a drilldown tab and restores the directory tab on return #6
+  - 原: `expect(tabLabels(tab(/engine\.ts/))).toEqual(drilldownLabels)`
+  - 现: `expect(tabLabels(sessionTab(/engine\.ts/))).toEqual(drilldownLabels)`
+  - kind: helper-substitution
+  - helper: sessionTab
+- labels a drilldown tab and restores the directory tab on return #7
+  - 原: `expect(tabLabels(tab(/baseline ↔ candidate/)).subtitle).not.toContain('engine.ts')`
+  - 现: `expect(tabLabels(sessionTab(/baseline ↔ candidate/)).subtitle).not.toContain('engine.ts')`
+  - kind: helper-substitution
+  - helper: sessionTab
+- keeps file, directory and drilldown labels apart and stable on neighbour close #10
+  - 原: `expect(tabLabels(activeTab())).toEqual({ title: 'baseline ↔ candidate', subtitle: \`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}\` })`
+  - 现: `expect(tabLabels(activeTab())).toEqual({ title: 'baseline ↔ candidate', subtitle: \`${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}\`, })`
+  - kind: formatting-only
+  - helper: —
+- keeps file, directory and drilldown labels apart and stable on neighbour close #12
+  - 原: `expect(screen.getByRole('contentinfo').textContent).toBe(panelBefore)`
+  - 现: `expect(statusText()).toBe(panelBefore)`
+  - kind: helper-substitution
+  - helper: statusText
+
+## src/sync-real-gate.test.ts
+
+- cases: 33 -> 33
+- expects inside case blocks: 370 -> 370
+- expects outside case blocks (file-local helpers): 17 -> 17
+- identical-count cases: 33/33
+- differing-count cases: 0
+- expect texts changed: 98
+- change kinds: formatting-only 89, helper-substitution 9
+
+| # | 用例标题 | 基线 expect | 现 expect | 判定 |
+| --- | --- | --- | --- | --- |
+| 1 | lists only copy / update / delete, with exact counts and bytes in both directions | 12 | 12 | 一致 |
+| 2 | keeps mirror deletions unchecked: no paths deletes nothing, checked paths delete only themselves | 14 | 14 | 一致 |
+| 3 | applies left → right for real, preserves content / structure / mtime and refreshes once | 23 | 23 | 一致 |
+| 4 | applies right → left with an explicit select-all and stays idempotent | 12 | 12 | 一致 |
+| 5 | refuses a read-only target without writing any planned item or probe file (.skipIf) | 9 | 9 | 一致 |
+| 6 | refuses an occupied copy target before any partial write and keeps it intact | 9 | 9 | 一致 |
+| 7 | rolls a mid-plan failure back to the exact previous disk and stays retryable | 12 | 12 | 一致 |
+| 8 | cancels mid-plan, rolls back and reports a cancellation distinct from failure | 7 | 7 | 一致 |
+| 9 | keeps unchecked mirror deletions untouched when the run fails | 4 | 4 | 一致 |
+| 10 | rolls a write that landed before it rejected back, for a copy and an update | 9 | 9 | 一致 |
+| 11 | reports a refresh failure after the writes landed as a readable completed-write error | 17 | 17 | 一致 |
+| 12 | copies and overwrites binary bodies byte for byte, empty files included | 16 | 16 | 一致 |
+| 13 | rolls a binary overwrite back to the exact previous bytes and mtime on failure | 7 | 7 | 一致 |
+| 14 | rolls a checked binary deletion back to the exact previous bytes and mtime | 6 | 6 | 一致 |
+| 15 | rejects with a verification failure when a written target keeps bad bytes | 9 | 9 | 一致 |
+| 16 | resolves only when every written target matches its source, and verifies just those paths | 8 | 8 | 一致 |
+| 17 | does not treat unchecked mirror deletions as a failed check | 6 | 6 | 一致 |
+| 18 | keeps the checked delete count, the applied result and the disk in one state | 37 | 37 | 一致 |
+| 19 | is executable when only the link mtime differs, aligns it, and is idempotent | 34 | 34 | 一致 |
+| 20 | stays executable in both modes while mirror deletes keep opting in | 10 | 10 | 一致 |
+| 21 | rejects through the verification path when resetting a link time fails | 6 | 6 | 一致 |
+| 22 | copies relative, dangling and directory links as links in both directions and both modes | 14 | 14 | 一致 |
+| 23 | never reads a link path for content: every read and digest skips the links | 5 | 5 | 一致 |
+| 24 | replaces a target-side link with the source link and leaves the old target intact | 8 | 8 | 一致 |
+| 25 | replaces a target-side link with an ordinary file without writing through it | 11 | 11 | 一致 |
+| 26 | replaces a target-side ordinary file with the source link without writing through it | 4 | 4 | 一致 |
+| 27 | materialises a scanned tree link as a link instead of its target body | 3 | 3 | 一致 |
+| 28 | deletes only the target-side links in mirror mode, and only when checked | 13 | 13 | 一致 |
+| 29 | rolls a link deletion back as a link with its own target and mtime | 6 | 6 | 一致 |
+| 30 | treats a failed link-mtime alignment as a write failure and rolls the links back | 4 | 4 | 一致 |
+| 31 | verifies links by form and rejects a wrong target or an unaligned link mtime | 4 | 4 | 一致 |
+| 32 | leaves an empty second dry-run and an all-same comparison after copying links | 13 | 13 | 一致 |
+| 33 | lists only the pending deletion after applying, and nothing once it is deleted | 18 | 18 | 一致 |
+
+### 用例块之外的 expect（文件内 helper 函数）
+
+- outside #1
+  - 基线 assertGroupMatchesDisk L231: `expect(group.items.map((item) => item.relativePath).sort()).toEqual`
+  - 现   expectSameFingerprint L179: `expect(after.sha256, \`${message}: sha256\`).toBe(before.sha256)`
+  - 判定: 变化
+- outside #2
+  - 基线 assertGroupMatchesDisk L232: `expect(group.count).toBe(group.items.length)`
+  - 现   expectSameFingerprint L180: `expect(after.size, \`${message}: size\`).toBe(before.size)`
+  - 判定: 变化
+- outside #3
+  - 基线 assertGroupMatchesDisk L233: `expect(group.count).toBe(expectedPaths.length)`
+  - 现   expectSameFingerprint L181: `expect(after.modifiedMs, \`${message}: mtime\`).toBe(before.modifiedMs)`
+  - 判定: 变化
+- outside #4
+  - 基线 assertGroupMatchesDisk L234: `expect(group.bytes).toBe`
+  - 现   expectSameLink L187: `expect(targetInfo.isSymbolicLink(), \`${message}: target must stay a symlink\`).toBe(true)`
+  - 判定: 变化
+- outside #5
+  - 基线 assertGroupMatchesDisk L235: `expect(group.bytes).toBe`
+  - 现   expectSameLink L188: `expect(await readlink(target), \`${message}: readlink must stay verbatim\`).toBe`
+  - 判定: 变化
+- outside #6
+  - 基线 assertGroupMatchesDisk L238: `expect(item.size).toBe(info.size)`
+  - 现   expectSameLink L189: `expect(Math.floor(targetInfo.mtimeMs / 1000), \`${message}: lstat mtime seconds\`).toBe`
+  - 判定: 变化
+- outside #7
+  - 基线 expectSameSnapshot L661: `expect(after.directories).toEqual(before.directories)`
+  - 现   assertGroupMatchesDisk L207: `expect(group.items.map((item) => item.relativePath).sort()).toEqual`
+  - 判定: 变化
+- outside #8
+  - 基线 expectSameSnapshot L662: `expect([...after.files.keys()].sort()).toEqual`
+  - 现   assertGroupMatchesDisk L208: `expect(group.count).toBe(group.items.length)`
+  - 判定: 变化
+- outside #9
+  - 基线 expectSameSnapshot L664: `expect(after.files.get(relativePath)?.content, relativePath).toBe(file.content)`
+  - 现   assertGroupMatchesDisk L209: `expect(group.count).toBe(expectedPaths.length)`
+  - 判定: 变化
+- outside #10
+  - 基线 expectSameSnapshot L665: `expect(after.files.get(relativePath)?.modifiedMs, relativePath).toBe(file.modifiedMs)`
+  - 现   assertGroupMatchesDisk L210: `expect(group.bytes).toBe`
+  - 判定: 变化
+- outside #11
+  - 基线 expectSameSnapshot L668: `expect( [...after.files.keys()].filter( (relativePath) => relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-') ) ).toEqual([])`
+  - 现   assertGroupMatchesDisk L211: `expect(group.bytes).toBe`
+  - 判定: 变化
+- outside #12
+  - 基线 expectSameFingerprint L1890: `expect(after.sha256, \`${message}: sha256\`).toBe(before.sha256)`
+  - 现   assertGroupMatchesDisk L214: `expect(item.size).toBe(info.size)`
+  - 判定: 变化
+- outside #13
+  - 基线 expectSameFingerprint L1891: `expect(after.size, \`${message}: size\`).toBe(before.size)`
+  - 现   expectSameSnapshot L576: `expect(after.directories).toEqual(before.directories)`
+  - 判定: 变化
+- outside #14
+  - 基线 expectSameFingerprint L1892: `expect(after.modifiedMs, \`${message}: mtime\`).toBe(before.modifiedMs)`
+  - 现   expectSameSnapshot L577: `expect([...after.files.keys()].sort()).toEqual`
+  - 判定: 变化
+- outside #15
+  - 基线 expectSameLink L1906: `expect(targetInfo.isSymbolicLink(), \`${message}: target must stay a symlink\`).toBe(true)`
+  - 现   expectSameSnapshot L579: `expect(after.files.get(relativePath)?.content, relativePath).toBe(file.content)`
+  - 判定: 变化
+- outside #16
+  - 基线 expectSameLink L1907: `expect(await readlink(target), \`${message}: readlink must stay verbatim\`).toBe`
+  - 现   expectSameSnapshot L580: `expect(after.files.get(relativePath)?.modifiedMs, relativePath).toBe(file.modifiedMs)`
+  - 判定: 变化
+- outside #17
+  - 基线 expectSameLink L1910: `expect(Math.floor(targetInfo.mtimeMs / 1000), \`${message}: lstat mtime seconds\`).toBe`
+  - 现   expectSameSnapshot L583: `expect( [...after.files.keys()].filter((relativePath) => relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-')) ).toEqual([])`
+  - 判定: 变化
+
+### 文件内 helper 的 expect 条数（按函数名聚合）
+
+| helper | 基线 | 现 | 基线行 | 现行 |
+| --- | --- | --- | --- | --- |
+| fingerprint | 0 | — | 1876 | — |
+| linkWithStamp | 0 | — | 1552 | — |
+| previewPair | — | 0 | — | 166 |
+| rawSha | 0 | — | 1077 | — |
+| scratchRoot | 0 | — | 173 | — |
+| writeStamped | 0 | — | 678 | — |
+| writeStampedBytes | 0 | — | 1105 | — |
+
+### expect 文本变化
+
+- lists only copy / update / delete, with exact counts and bytes in both directions #1
+  - 原: `expect(comparison.counts).toEqual({ same: SAME_COUNT, added: RIGHT_ONLY_COUNT, removed: LEFT_ONLY_COUNT, modified: MODIFIED_COUNT })`
+  - 现: `expect(comparison.counts).toEqual({ same: SAME_COUNT, added: RIGHT_ONLY_COUNT, removed: LEFT_ONLY_COUNT, modified: MODIFIED_COUNT, })`
+  - kind: formatting-only
+  - helper: —
+- lists only copy / update / delete, with exact counts and bytes in both directions #4
+  - 原: `expect(Math.max(...fixture.leftFiles.map((file) => file.relativePath.split('/').length))).toBe( 6 )`
+  - 现: `expect(Math.max(...fixture.leftFiles.map((file) => file.relativePath.split('/').length))).toBe(6)`
+  - kind: formatting-only
+  - helper: —
+- lists only copy / update / delete, with exact counts and bytes in both directions #5
+  - 原: `expect( fixture.leftFiles.some((file) => file.relativePath.includes('资料 夹/第一层 子目录')) ).toBe(true)`
+  - 现: `expect(fixture.leftFiles.some((file) => file.relativePath.includes('资料 夹/第一层 子目录'))).toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- applies left → right for real, preserves content / structure / mtime and refreshes once #13
+  - 原: `expect( (await listRelativeFiles(fixture.right)).filter((relativePath) => relativePath.endsWith('.tmp')) ).toEqual([])`
+  - 现: `expect((await listRelativeFiles(fixture.right)).filter((relativePath) => relativePath.endsWith('.tmp'))).toEqual([])`
+  - kind: formatting-only
+  - helper: —
+- applies left → right for real, preserves content / structure / mtime and refreshes once #15
+  - 原: `expect(result.comparison.counts).toEqual({ same: 1_000, added: 0, removed: 0, modified: 0 })`
+  - 现: `expect(result.comparison.counts).toEqual({ same: 1_000, added: 0, removed: 0, modified: 0, })`
+  - kind: formatting-only
+  - helper: —
+- applies right → left with an explicit select-all and stays idempotent #7
+  - 原: `expect(result.comparison.counts).toEqual({ same: 1_000, added: 0, removed: 0, modified: 0 })`
+  - 现: `expect(result.comparison.counts).toEqual({ same: 1_000, added: 0, removed: 0, modified: 0, })`
+  - kind: formatting-only
+  - helper: —
+- refuses a read-only target without writing any planned item or probe file #9
+  - 原: `expect((await readdir(fixture.right)).sort()).toEqual([ 'same.txt', 'stale-a.txt', 'stale-b.txt', 'update.txt' ])`
+  - 现: `expect((await readdir(fixture.right)).sort()).toEqual(['same.txt', 'stale-a.txt', 'stale-b.txt', 'update.txt'])`
+  - kind: formatting-only
+  - helper: —
+- cancels mid-plan, rolls back and reports a cancellation distinct from failure #7
+  - 原: `expect(rebuilt.totalCount).toBe( rebuiltComparison.counts.added + rebuiltComparison.counts.removed + rebuiltComparison.counts.modified )`
+  - 现: `expect(rebuilt.totalCount).toBe(rebuiltComparison.counts.added + rebuiltComparison.counts.removed + rebuiltComparison.counts.modified)`
+  - kind: formatting-only
+  - helper: —
+- reports a refresh failure after the writes landed as a readable completed-write error #17
+  - 原: `expect( [...after.files.keys()].filter( (relativePath) => relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-') ) ).toEqual([])`
+  - 现: `expect( [...after.files.keys()].filter((relativePath) => relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-')) ).toEqual([])`
+  - kind: formatting-only
+  - helper: —
+- copies and overwrites binary bodies byte for byte, empty files included #6
+  - 原: `expect( targetBytes.equals(sourceBytes), \`binary fidelity: ${relativePath} bytes changed on copy\` ).toBe(true)`
+  - 现: `expect(targetBytes.equals(sourceBytes), \`binary fidelity: ${relativePath} bytes changed on copy\`).toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- copies and overwrites binary bodies byte for byte, empty files included #8
+  - 原: `expect(rawSha(targetBytes), \`binary fidelity: ${relativePath} sha256\`).toBe`
+  - 现: `expect(sha256Hex(targetBytes), \`binary fidelity: ${relativePath} sha256\`).toBe`
+  - kind: helper-substitution
+  - helper: sha256Hex
+- copies and overwrites binary bodies byte for byte, empty files included #9
+  - 原: `expect( Math.floor((await stat(targetPath)).mtimeMs), \`binary fidelity: ${relativePath} mtime\` ).toBe`
+  - 现: `expect(Math.floor((await stat(targetPath)).mtimeMs), \`binary fidelity: ${relativePath} mtime\`).toBe`
+  - kind: formatting-only
+  - helper: —
+- copies and overwrites binary bodies byte for byte, empty files included #11
+  - 原: `expect(rawSha(await readFile(emptyTarget)), 'binary fidelity: empty sha256').toBe`
+  - 现: `expect(sha256Hex(await readFile(emptyTarget)), 'binary fidelity: empty sha256').toBe`
+  - kind: helper-substitution
+  - helper: sha256Hex
+- rolls a binary overwrite back to the exact previous bytes and mtime on failure #5
+  - 原: `expect(restored.equals(original), 'binary fidelity: rollback restored different bytes').toBe( true )`
+  - 现: `expect(restored.equals(original), 'binary fidelity: rollback restored different bytes').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- rolls a binary overwrite back to the exact previous bytes and mtime on failure #6
+  - 原: `expect(rawSha(restored), 'binary fidelity: rollback sha256').toBe`
+  - 现: `expect(sha256Hex(restored), 'binary fidelity: rollback sha256').toBe`
+  - kind: helper-substitution
+  - helper: sha256Hex
+- rolls a binary overwrite back to the exact previous bytes and mtime on failure #7
+  - 原: `expect( Math.floor((await stat(diskPath(right, 'a-update.png'))).mtimeMs), 'binary fidelity: rollback mtime' ).toBe(BINARY_STAMP + 2)`
+  - 现: `expect(Math.floor((await stat(diskPath(right, 'a-update.png'))).mtimeMs), 'binary fidelity: rollback mtime').toBe(BINARY_STAMP + 2)`
+  - kind: formatting-only
+  - helper: —
+- rolls a checked binary deletion back to the exact previous bytes and mtime #4
+  - 原: `expect( restored.equals(stale), 'binary fidelity: delete rollback restored different bytes' ).toBe(true)`
+  - 现: `expect(restored.equals(stale), 'binary fidelity: delete rollback restored different bytes').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- rolls a checked binary deletion back to the exact previous bytes and mtime #5
+  - 原: `expect(rawSha(restored), 'binary fidelity: delete rollback sha256').toBe`
+  - 现: `expect(sha256Hex(restored), 'binary fidelity: delete rollback sha256').toBe`
+  - kind: helper-substitution
+  - helper: sha256Hex
+- rolls a checked binary deletion back to the exact previous bytes and mtime #6
+  - 原: `expect( Math.floor((await stat(diskPath(right, 'stale.bin'))).mtimeMs), 'binary fidelity: delete rollback mtime' ).toBe(BINARY_STAMP + 9)`
+  - 现: `expect(Math.floor((await stat(diskPath(right, 'stale.bin'))).mtimeMs), 'binary fidelity: delete rollback mtime').toBe(BINARY_STAMP + 9)`
+  - kind: formatting-only
+  - helper: —
+- rejects with a verification failure when a written target keeps bad bytes #1
+  - 原: `expect(error, 'completion consistency: a mismatched target must not resolve').toBeInstanceOf( SyncVerificationError )`
+  - 现: `expect(error, 'completion consistency: a mismatched target must not resolve').toBeInstanceOf(SyncVerificationError)`
+  - kind: formatting-only
+  - helper: —
+- rejects with a verification failure when a written target keeps bad bytes #9
+  - 原: `expect(verification.comparison?.counts.modified, 'completion consistency: refresh truth').toBe( 1 )`
+  - 现: `expect(verification.comparison?.counts.modified, 'completion consistency: refresh truth').toBe(1)`
+  - kind: formatting-only
+  - helper: —
+- resolves only when every written target matches its source, and verifies just those paths #4
+  - 原: `expect( new Set(digestRequests[0]), 'completion consistency: the check must read exactly the written targets and their sources' ).toEqual(expected)`
+  - 现: `expect(new Set(digestRequests[0]), 'completion consistency: the check must read exactly the written targets and their sources').toEqual( expected )`
+  - kind: formatting-only
+  - helper: —
+- resolves only when every written target matches its source, and verifies just those paths #6
+  - 原: `expect( rawSha(await readFile(item.targetPath)), \`completion consistency: ${item.relativePath} sha256\` ).toBe`
+  - 现: `expect(sha256Hex(await readFile(item.targetPath)), \`completion consistency: ${item.relativePath} sha256\`).toBe`
+  - kind: helper-substitution
+  - helper: sha256Hex
+- keeps the checked delete count, the applied result and the disk in one state #8
+  - 原: `expect( canApplySyncPreview(preview), 'sync summary: canApply mirrors the unchecked action' ).toBe(unchecked.executable)`
+  - 现: `expect(canApplySyncPreview(preview), 'sync summary: canApply mirrors the unchecked action').toBe(unchecked.executable)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #10
+  - 原: `expect(await listRelativeFiles(right), 'sync summary: disk after unchecked run').toEqual( diskBefore )`
+  - 现: `expect(await listRelativeFiles(right), 'sync summary: disk after unchecked run').toEqual(diskBefore)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #13
+  - 原: `expect(oneChecked.guidance, 'sync summary: one checked delete points at changes').toBe( 'changes' )`
+  - 现: `expect(oneChecked.guidance, 'sync summary: one checked delete points at changes').toBe('changes')`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #14
+  - 原: `expect( canApplySyncPreview(preview, [first]), 'sync summary: canApply mirrors the checked action' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(preview, [first]), 'sync summary: canApply mirrors the checked action').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #18
+  - 原: `expect(checkedRun.alignedLinks, 'sync summary: checked run align count').toBe( oneChecked.align )`
+  - 现: `expect(checkedRun.alignedLinks, 'sync summary: checked run align count').toBe(oneChecked.align)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #19
+  - 原: `expect( await platform.exists(diskPath(right, first)), 'sync summary: checked delete left the disk' ).toBe(false)`
+  - 现: `expect(await platform.exists(diskPath(right, first)), 'sync summary: checked delete left the disk').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #20
+  - 原: `expect( await platform.exists(diskPath(right, second)), 'sync summary: unchecked delete stayed' ).toBe(true)`
+  - 现: `expect(await platform.exists(diskPath(right, second)), 'sync summary: unchecked delete stayed').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #22
+  - 原: `expect( refreshed.plan.delete.items.map((item) => item.relativePath), 'sync summary: only one deletion left' ).toEqual([second])`
+  - 现: `expect(deletePathsOf(refreshed.plan), 'sync summary: only one deletion left').toEqual([second])`
+  - kind: helper-substitution
+  - helper: deletePathsOf
+- keeps the checked delete count, the applied result and the disk in one state #23
+  - 原: `expect( syncPreviewAction(refreshed, [second]).delete, 'sync summary: checked deletion before clearing' ).toBe(1)`
+  - 现: `expect(syncPreviewAction(refreshed, [second]).delete, 'sync summary: checked deletion before clearing').toBe(1)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #26
+  - 原: `expect( canApplySyncPreview(refreshed, []), 'sync summary: canApply mirrors the cleared action' ).toBe(false)`
+  - 现: `expect(canApplySyncPreview(refreshed, []), 'sync summary: canApply mirrors the cleared action').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #28
+  - 原: `expect( await platform.exists(diskPath(right, second)), 'sync summary: cleared delete stayed' ).toBe(true)`
+  - 现: `expect(await platform.exists(diskPath(right, second)), 'sync summary: cleared delete stayed').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #31
+  - 原: `expect( await platform.exists(diskPath(right, second)), 'sync summary: applied delete left the disk' ).toBe(false)`
+  - 现: `expect(await platform.exists(diskPath(right, second)), 'sync summary: applied delete left the disk').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- keeps the checked delete count, the applied result and the disk in one state #32
+  - 原: `expect(await listRelativeFiles(right), 'sync summary: disk after applied run').toEqual([ 'shared.txt' ])`
+  - 现: `expect(await listRelativeFiles(right), 'sync summary: disk after applied run').toEqual(['shared.txt'])`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #1
+  - 原: `expect(countsBefore, 'symlink metadata: four-state counts').toEqual({ same: 4, added: 0, removed: 0, modified: 0 })`
+  - 现: `expect(countsBefore, 'symlink metadata: four-state counts').toEqual({ same: 4, added: 0, removed: 0, modified: 0, })`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #7
+  - 原: `expect( canApplySyncPreview(preview), 'symlink metadata: only the link mtime differs is still executable' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(preview), 'symlink metadata: only the link mtime differs is still executable').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #8
+  - 原: `expect( preview.linkAlignments.map((alignment) => alignment.relativePath).sort(), 'symlink metadata: pending alignment list' ).toEqual(['dangling-link', 'same-target-link'])`
+  - 现: `expect(preview.linkAlignments.map((alignment) => alignment.relativePath).sort(), 'symlink metadata: pending alignment list').toEqual([ 'dangling-link', 'same-target-link', ])`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #9
+  - 原: `expect( pendingAction.align, 'symlink metadata: pending align count is positive' ).toBeGreaterThan(0)`
+  - 现: `expect(pendingAction.align, 'symlink metadata: pending align count is positive').toBeGreaterThan(0)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #10
+  - 原: `expect( pendingAction.align, 'symlink metadata: pending align count equals the alignment list' ).toBe(preview.linkAlignments.length)`
+  - 现: `expect(pendingAction.align, 'symlink metadata: pending align count equals the alignment list').toBe(preview.linkAlignments.length)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #11
+  - 原: `expect( syncPreviewGuidance(preview), 'symlink metadata: empty plan with pending links is not the empty copy' ).toBe('changes')`
+  - 现: `expect(syncPreviewGuidance(preview), 'symlink metadata: empty plan with pending links is not the empty copy').toBe('changes')`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #12
+  - 原: `expect( en['directory.sync.empty'], 'symlink metadata: the forbidden copy says the target already matches' ).toContain('already matches the source')`
+  - 现: `expect(en['directory.sync.empty'], 'symlink metadata: the forbidden copy says the target already matches').toContain( 'already matches the source' )`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #13
+  - 原: `expect( en['directory.sync.group.align'], 'symlink metadata: the dialog points at the pending alignment' ).toBeTruthy()`
+  - 现: `expect(en['directory.sync.group.align'], 'symlink metadata: the dialog points at the pending alignment').toBeTruthy()`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #19
+  - 原: `expect( targetInfo.isSymbolicLink(), \`symlink metadata: ${relativePath} must stay a symlink\` ).toBe(true)`
+  - 现: `expect(targetInfo.isSymbolicLink(), \`symlink metadata: ${relativePath} must stay a symlink\`).toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #20
+  - 原: `expect( await readlink(target), \`symlink metadata: ${relativePath} link target\` ).toBe`
+  - 现: `expect(await readlink(target), \`symlink metadata: ${relativePath} link target\`).toBe`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #22
+  - 原: `expect( Math.floor(targetInfo.mtimeMs / 1000), \`symlink metadata: ${relativePath} lstat mtime seconds\` ).toBe`
+  - 现: `expect(Math.floor(targetInfo.mtimeMs / 1000), \`symlink metadata: ${relativePath} lstat mtime seconds\`).toBe`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #23
+  - 原: `expect( Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs), 'symlink metadata: already-aligned link stays untouched' ).toBe(stableBefore)`
+  - 现: `expect(Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs), 'symlink metadata: already-aligned link stays untouched').toBe( stableBefore )`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #25
+  - 原: `expect(sharedAfter.mtimeMs, 'symlink metadata: ordinary file mtime').toBe( sharedBefore.mtimeMs )`
+  - 现: `expect(sharedAfter.mtimeMs, 'symlink metadata: ordinary file mtime').toBe(sharedBefore.mtimeMs)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #26
+  - 原: `expect( createHash('sha256').update(await readFile(diskPath(right, 'shared.txt'))).digest('hex'), 'symlink metadata: ordinary file bytes' ).toBe(sharedDigestBefore)`
+  - 现: `expect( createHash('sha256') .update(await readFile(diskPath(right, 'shared.txt'))) .digest('hex'), 'symlink metadata: ordinary file bytes' ).toBe(sharedDigestBefore)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #27
+  - 原: `expect(result.comparison.counts, 'symlink metadata: four-state counts after').toEqual( countsBefore )`
+  - 现: `expect(result.comparison.counts, 'symlink metadata: four-state counts after').toEqual(countsBefore)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #32
+  - 原: `expect( syncPreviewAction(second).align, 'symlink metadata: align count returns to zero after applying' ).toBe(0)`
+  - 现: `expect(syncPreviewAction(second).align, 'symlink metadata: align count returns to zero after applying').toBe(0)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #33
+  - 原: `expect( canApplySyncPreview(second), 'symlink metadata: second dry-run is not executable' ).toBe(false)`
+  - 现: `expect(canApplySyncPreview(second), 'symlink metadata: second dry-run is not executable').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- is executable when only the link mtime differs, aligns it, and is idempotent #34
+  - 原: `expect( syncPreviewGuidance(second), 'symlink metadata: an already-aligned tree gets the empty copy' ).toBe('empty')`
+  - 现: `expect(syncPreviewGuidance(second), 'symlink metadata: an already-aligned tree gets the empty copy').toBe('empty')`
+  - kind: formatting-only
+  - helper: —
+- stays executable in both modes while mirror deletes keep opting in #3
+  - 原: `expect( canApplySyncPreview(incremental), 'symlink metadata: incremental only-aligning preview is executable' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(incremental), 'symlink metadata: incremental only-aligning preview is executable').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- stays executable in both modes while mirror deletes keep opting in #5
+  - 原: `expect( canApplySyncPreview(mirror), 'symlink metadata: unchecked mirror delete does not block link alignment' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(mirror), 'symlink metadata: unchecked mirror delete does not block link alignment').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- stays executable in both modes while mirror deletes keep opting in #6
+  - 原: `expect( canApplySyncPreview(mirror, ['stale.txt']), 'symlink metadata: a checked mirror delete is executable too' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(mirror, ['stale.txt']), 'symlink metadata: a checked mirror delete is executable too').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- stays executable in both modes while mirror deletes keep opting in #7
+  - 原: `expect(quiet.linkAlignments, 'symlink metadata: equal link times need no alignment').toEqual( [] )`
+  - 现: `expect(quiet.linkAlignments, 'symlink metadata: equal link times need no alignment').toEqual([])`
+  - kind: formatting-only
+  - helper: —
+- stays executable in both modes while mirror deletes keep opting in #9
+  - 原: `expect( canApplySyncPreview(quiet), 'symlink metadata: unchecked mirror delete alone is not executable' ).toBe(false)`
+  - 现: `expect(canApplySyncPreview(quiet), 'symlink metadata: unchecked mirror delete alone is not executable').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- stays executable in both modes while mirror deletes keep opting in #10
+  - 原: `expect( canApplySyncPreview(quiet, ['stale.txt']), 'symlink metadata: checked mirror delete alone is executable' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(quiet, ['stale.txt']), 'symlink metadata: checked mirror delete alone is executable').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- rejects through the verification path when resetting a link time fails #1
+  - 原: `expect(canApplySyncPreview(preview), 'symlink metadata: refused run is still executable').toBe( true )`
+  - 现: `expect(canApplySyncPreview(preview), 'symlink metadata: refused run is still executable').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- rejects through the verification path when resetting a link time fails #2
+  - 原: `expect( failure, 'symlink metadata: refused link time is a verification failure' ).toBeInstanceOf(SyncVerificationError)`
+  - 现: `expect(failure, 'symlink metadata: refused link time is a verification failure').toBeInstanceOf(SyncVerificationError)`
+  - kind: formatting-only
+  - helper: —
+- rejects through the verification path when resetting a link time fails #5
+  - 原: `expect(error.comparison?.counts, 'symlink metadata: refreshed counts').toEqual({ same: 2, added: 0, removed: 0, modified: 0 })`
+  - 现: `expect(error.comparison?.counts, 'symlink metadata: refreshed counts').toEqual({ same: 2, added: 0, removed: 0, modified: 0, })`
+  - kind: formatting-only
+  - helper: —
+- rejects through the verification path when resetting a link time fails #6
+  - 原: `expect( Math.floor((await lstat(diskPath(right, 'same-target-link'))).mtimeMs / 1000), 'symlink metadata: refused link keeps its mtime' ).toBe`
+  - 现: `expect(Math.floor((await lstat(diskPath(right, 'same-target-link'))).mtimeMs / 1000), 'symlink metadata: refused link keeps its mtime').toBe`
+  - kind: formatting-only
+  - helper: —
+- copies relative, dangling and directory links as links in both directions and both modes #1
+  - 原: `expect( linkItems.map((item) => item.relativePath).sort(), \`${label}: every source-only link is one copy item\` ).toEqual([...LINK_NAMES])`
+  - 现: `expect(linkItems.map((item) => item.relativePath).sort(), \`${label}: every source-only link is one copy item\`).toEqual([...LINK_NAMES])`
+  - kind: formatting-only
+  - helper: —
+- copies relative, dangling and directory links as links in both directions and both modes #4
+  - 原: `expect(preview.plan.delete.count, \`${label}: target-only file is the only delete\`).toBe( mode === 'mirror' ? 1 : 0 )`
+  - 现: `expect(preview.plan.delete.count, \`${label}: target-only file is the only delete\`).toBe(mode === 'mirror' ? 1 : 0)`
+  - kind: formatting-only
+  - helper: —
+- copies relative, dangling and directory links as links in both directions and both modes #11
+  - 原: `expect(await readlink(diskPath(target, 'link-rel')), \`${label}: relative link\`).toBe( 'only-on-target.txt' )`
+  - 现: `expect(await readlink(diskPath(target, 'link-rel')), \`${label}: relative link\`).toBe('only-on-target.txt')`
+  - kind: formatting-only
+  - helper: —
+- copies relative, dangling and directory links as links in both directions and both modes #12
+  - 原: `expect( await readlink(diskPath(target, 'link-dangling')), \`${label}: dangling link string\` ).toBe('missing-target.txt')`
+  - 现: `expect(await readlink(diskPath(target, 'link-dangling')), \`${label}: dangling link string\`).toBe('missing-target.txt')`
+  - kind: formatting-only
+  - helper: —
+- copies relative, dangling and directory links as links in both directions and both modes #13
+  - 原: `expect(targetNames, \`${label}: no directory subtree materialised\`).toEqual([ 'link-dangling', 'link-dir', 'link-rel', 'only-on-target.txt', 'shared.txt' ])`
+  - 现: `expect(targetNames, \`${label}: no directory subtree materialised\`).toEqual([ 'link-dangling', 'link-dir', 'link-rel', 'only-on-target.txt', 'shared.txt', ])`
+  - kind: formatting-only
+  - helper: —
+- copies relative, dangling and directory links as links in both directions and both modes #14
+  - 原: `expect( (await lstat(diskPath(target, 'link-dir'))).isDirectory(), \`${label}: a directory link is not a real directory\` ).toBe(false)`
+  - 现: `expect((await lstat(diskPath(target, 'link-dir'))).isDirectory(), \`${label}: a directory link is not a real directory\`).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- replaces a target-side link with the source link and leaves the old target intact #3
+  - 原: `expect( preview.plan.update.items[0].linkTarget, 'symlink fidelity: the update carries the source link string' ).toBe('../outside/source-target.txt')`
+  - 现: `expect(preview.plan.update.items[0].linkTarget, 'symlink fidelity: the update carries the source link string').toBe( '../outside/source-target.txt' )`
+  - kind: formatting-only
+  - helper: —
+- replaces a target-side link with an ordinary file without writing through it #3
+  - 原: `expect(item.linkTarget, 'symlink fidelity: an ordinary file item has no linkTarget') .toBeUndefined()`
+  - 现: `expect(item.linkTarget, 'symlink fidelity: an ordinary file item has no linkTarget').toBeUndefined()`
+  - kind: formatting-only
+  - helper: —
+- replaces a target-side link with an ordinary file without writing through it #6
+  - 原: `expect( targetInfo.isSymbolicLink(), 'symlink fidelity: the target path is a regular file now' ).toBe(false)`
+  - 现: `expect(targetInfo.isSymbolicLink(), 'symlink fidelity: the target path is a regular file now').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- replaces a target-side link with an ordinary file without writing through it #8
+  - 原: `expect( rawSha(await readFile(diskPath(right, 'plain.txt'))), 'symlink fidelity: replaced file sha256' ).toBe`
+  - 现: `expect(sha256Hex(await readFile(diskPath(right, 'plain.txt'))), 'symlink fidelity: replaced file sha256').toBe`
+  - kind: helper-substitution
+  - helper: sha256Hex
+- replaces a target-side link with an ordinary file without writing through it #9
+  - 原: `expect( Math.floor(targetInfo.mtimeMs), 'symlink fidelity: replaced file whole-ms mtime' ).toBe`
+  - 现: `expect(Math.floor(targetInfo.mtimeMs), 'symlink fidelity: replaced file whole-ms mtime').toBe`
+  - kind: formatting-only
+  - helper: —
+- replaces a target-side ordinary file with the source link without writing through it #2
+  - 原: `expect( preview.plan.update.items[0].linkTarget, 'symlink fidelity: the update carries the source link string' ).toBe('../outside/keep.txt')`
+  - 现: `expect(preview.plan.update.items[0].linkTarget, 'symlink fidelity: the update carries the source link string').toBe('../outside/keep.txt')`
+  - kind: formatting-only
+  - helper: —
+- replaces a target-side ordinary file with the source link without writing through it #4
+  - 原: `expect( (await lstat(diskPath(right, 'link-over-file'))).isFile(), 'symlink fidelity: the target is a link, not a file' ).toBe(false)`
+  - 现: `expect((await lstat(diskPath(right, 'link-over-file'))).isFile(), 'symlink fidelity: the target is a link, not a file').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- materialises a scanned tree link as a link instead of its target body #3
+  - 原: `expect( (await lstat(diskPath(target, 'plain.txt'))).isSymbolicLink(), 'symlink fidelity: an ordinary file stays a file' ).toBe(false)`
+  - 现: `expect((await lstat(diskPath(target, 'plain.txt'))).isSymbolicLink(), 'symlink fidelity: an ordinary file stays a file').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- deletes only the target-side links in mirror mode, and only when checked #3
+  - 原: `expect( preview.plan.delete.items.map((item) => item.relativePath).sort(), 'symlink fidelity: target-only links are delete items' ).toEqual(['dir-link', 'file-link'])`
+  - 现: `expect(deletePathsOf(preview.plan).sort(), 'symlink fidelity: target-only links are delete items').toEqual(['dir-link', 'file-link'])`
+  - kind: helper-substitution
+  - helper: deletePathsOf
+- deletes only the target-side links in mirror mode, and only when checked #4
+  - 原: `expect( canApplySyncPreview(preview), 'symlink fidelity: unchecked link deletions are not executable work' ).toBe(false)`
+  - 现: `expect(canApplySyncPreview(preview), 'symlink fidelity: unchecked link deletions are not executable work').toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- deletes only the target-side links in mirror mode, and only when checked #5
+  - 原: `expect( canApplySyncPreview(preview, ['dir-link', 'file-link']), 'symlink fidelity: checked link deletions are executable' ).toBe(true)`
+  - 现: `expect(canApplySyncPreview(preview, ['dir-link', 'file-link']), 'symlink fidelity: checked link deletions are executable').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- rolls a link deletion back as a link with its own target and mtime #2
+  - 原: `expect(error, 'symlink fidelity: a failed link delete is a target error').toBeInstanceOf( SyncTargetError )`
+  - 现: `expect(error, 'symlink fidelity: a failed link delete is a target error').toBeInstanceOf(SyncTargetError)`
+  - kind: formatting-only
+  - helper: —
+- rolls a link deletion back as a link with its own target and mtime #4
+  - 原: `expect( restored.isSymbolicLink(), 'symlink fidelity: rollback rebuilt the link, not a plain file' ).toBe(true)`
+  - 现: `expect(restored.isSymbolicLink(), 'symlink fidelity: rollback rebuilt the link, not a plain file').toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- treats a failed link-mtime alignment as a write failure and rolls the links back #1
+  - 原: `expect( error, 'symlink fidelity: a failing link mtime is a write failure, not a soft check' ).toBeInstanceOf(SyncTargetError)`
+  - 现: `expect(error, 'symlink fidelity: a failing link mtime is a write failure, not a soft check').toBeInstanceOf(SyncTargetError)`
+  - kind: formatting-only
+  - helper: —
+- treats a failed link-mtime alignment as a write failure and rolls the links back #3
+  - 原: `expect( await entryExistsOnDisk(diskPath(fixture.right, relativePath)), \`symlink fidelity: ${relativePath} was rolled back\` ).toBe(false)`
+  - 现: `expect(await entryExistsOnDisk(diskPath(fixture.right, relativePath)), \`symlink fidelity: ${relativePath} was rolled back\`).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- verifies links by form and rejects a wrong target or an unaligned link mtime #1
+  - 原: `expect( wrongTargetError, 'symlink fidelity: a wrong readlink must not resolve' ).toBeInstanceOf(SyncVerificationError)`
+  - 现: `expect(wrongTargetError, 'symlink fidelity: a wrong readlink must not resolve').toBeInstanceOf(SyncVerificationError)`
+  - kind: formatting-only
+  - helper: —
+- verifies links by form and rejects a wrong target or an unaligned link mtime #2
+  - 原: `expect( (wrongTargetError as SyncVerificationError).paths.some((path) => path.endsWith('link-rel') ), 'symlink fidelity: the wrong target is named' ).toBe(true)`
+  - 现: `expect( (wrongTargetError as SyncVerificationError).paths.some((path) => path.endsWith('link-rel')), 'symlink fidelity: the wrong target is named' ).toBe(true)`
+  - kind: formatting-only
+  - helper: —
+- verifies links by form and rejects a wrong target or an unaligned link mtime #3
+  - 原: `expect( unalignedError, 'symlink fidelity: an unaligned link mtime must not resolve' ).toBeInstanceOf(SyncVerificationError)`
+  - 现: `expect(unalignedError, 'symlink fidelity: an unaligned link mtime must not resolve').toBeInstanceOf(SyncVerificationError)`
+  - kind: formatting-only
+  - helper: —
+- verifies links by form and rejects a wrong target or an unaligned link mtime #4
+  - 原: `expect( (unalignedError as SyncVerificationError).mismatched, 'symlink fidelity: every copied link is unaligned' ).toBe(3)`
+  - 现: `expect((unalignedError as SyncVerificationError).mismatched, 'symlink fidelity: every copied link is unaligned').toBe(3)`
+  - kind: formatting-only
+  - helper: —
+- leaves an empty second dry-run and an all-same comparison after copying links #1
+  - 原: `expect( preview.plan.delete.count, \`symlink fidelity: ${run.direction} lists the target-only file\` ).toBe(1)`
+  - 现: `expect(preview.plan.delete.count, \`symlink fidelity: ${run.direction} lists the target-only file\`).toBe(1)`
+  - kind: formatting-only
+  - helper: —
+- leaves an empty second dry-run and an all-same comparison after copying links #4
+  - 原: `expect(result.comparison, \`symlink fidelity: ${run.direction} refreshes\`).not.toBe( comparison )`
+  - 现: `expect(result.comparison, \`symlink fidelity: ${run.direction} refreshes\`).not.toBe(comparison)`
+  - kind: formatting-only
+  - helper: —
+- leaves an empty second dry-run and an all-same comparison after copying links #5
+  - 原: `expect(result.comparison.counts, \`symlink fidelity: ${run.direction} four states\`).toEqual({ same: result.comparison.fileCount, added: 0, removed: 0, modified: 0 })`
+  - 现: `expect(result.comparison.counts, \`symlink fidelity: ${run.direction} four states\`).toEqual({ same: result.comparison.fileCount, added: 0, removed: 0, modified: 0, })`
+  - kind: formatting-only
+  - helper: —
+- leaves an empty second dry-run and an all-same comparison after copying links #11
+  - 原: `expect(second.linkAlignments, \`symlink fidelity: ${run.direction} second alignment\`).toEqual( [] )`
+  - 现: `expect(second.linkAlignments, \`symlink fidelity: ${run.direction} second alignment\`).toEqual([])`
+  - kind: formatting-only
+  - helper: —
+- leaves an empty second dry-run and an all-same comparison after copying links #12
+  - 原: `expect( canApplySyncPreview(second), \`symlink fidelity: ${run.direction} second preview is not executable\` ).toBe(false)`
+  - 现: `expect(canApplySyncPreview(second), \`symlink fidelity: ${run.direction} second preview is not executable\`).toBe(false)`
+  - kind: formatting-only
+  - helper: —
+- lists only the pending deletion after applying, and nothing once it is deleted #4
+  - 原: `expect(first.plan.delete.items.map((item) => item.relativePath)).toEqual([ \`round-${round}/stale.txt\` ])`
+  - 现: `expect(deletePathsOf(first.plan)).toEqual([\`round-${round}/stale.txt\`])`
+  - kind: helper-substitution
+  - helper: deletePathsOf
+- lists only the pending deletion after applying, and nothing once it is deleted #14
+  - 原: `expect(last.plan.copy.items, \`idempotent dry-run: round ${round} final copy items\`).toEqual( [] )`
+  - 现: `expect(last.plan.copy.items, \`idempotent dry-run: round ${round} final copy items\`).toEqual([])`
+  - kind: formatting-only
+  - helper: —
+- lists only the pending deletion after applying, and nothing once it is deleted #15
+  - 原: `expect( last.plan.update.items, \`idempotent dry-run: round ${round} final update items\` ).toEqual([])`
+  - 现: `expect(last.plan.update.items, \`idempotent dry-run: round ${round} final update items\`).toEqual([])`
+  - kind: formatting-only
+  - helper: —
+- lists only the pending deletion after applying, and nothing once it is deleted #16
+  - 原: `expect( last.plan.delete.items, \`idempotent dry-run: round ${round} final delete items\` ).toEqual([])`
+  - 现: `expect(last.plan.delete.items, \`idempotent dry-run: round ${round} final delete items\`).toEqual([])`
+  - kind: formatting-only
+  - helper: —
+

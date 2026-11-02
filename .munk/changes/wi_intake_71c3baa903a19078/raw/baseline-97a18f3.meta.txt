@@ -1,0 +1,11 @@
+command: pnpm exec vitest run --coverage
+cwd: /private/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/opencode/q5ev-97a18f3
+head: 97a18f34f358a6781fc11653bf564d0efd17a0e7
+start_utc: 2026-11-02T08:33:22Z
+end_utc: 2026-11-02T08:33:59Z
+exit_code: 0
+--- time -p (stderr tail) ---
+================================================================================
+real 36.85
+user 144.61
+sys 88.74
