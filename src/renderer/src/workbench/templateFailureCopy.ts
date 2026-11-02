@@ -24,6 +24,7 @@ export function templateApplyFailureCopy(error: unknown): SyncFailureCopy | null
 const WRITE_REASON_KEYS: Readonly<Record<TemplateWriteFailure['reason'], MessageKey>> = {
   'source-drift': 'directory.template.failure.sourceDrift',
   'source-unreadable': 'directory.template.failure.sourceUnreadable',
+  'path-escape': 'directory.template.failure.pathEscape',
   'write-failed': 'directory.template.failure.writeFailed'
 }
 

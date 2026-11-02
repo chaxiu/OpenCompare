@@ -56,6 +56,7 @@ const REJECTION_KEYS: Record<TemplateRejectionReason, MessageKey> = {
   'conflict-unresolved': 'directory.template.reject.conflictUnresolved',
   'conflict-candidate-outside-set': 'directory.template.reject.conflictCandidateOutsideSet',
   'target-occupied-by-directory': 'directory.template.reject.targetOccupiedByDirectory',
+  'path-escape': 'directory.template.reject.pathEscape',
   'duplicate-source': 'directory.template.reject.duplicateSource'
 }
 
