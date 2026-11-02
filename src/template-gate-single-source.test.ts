@@ -107,6 +107,16 @@ describe('template single-source gate', () => {
         partitionPaths(resolved),
         `template single-source: ${testCase.name} partitions cover the checked set`
       ).toEqual(checkedPathsOf(selection))
+      expect(
+        resolved.copyCount + resolved.moveCount,
+        `template single-source: ${testCase.name} actions cover the executable set`
+      ).toBe(resolved.executableCount)
+      for (const entry of resolved.executable) {
+        expect(
+          resolved.actions[entry.relativePath],
+          `template single-source: ${testCase.name} ${entry.relativePath} action map`
+        ).toBe(entry.action)
+      }
     }
   })
 
@@ -199,5 +209,40 @@ describe('template single-source gate', () => {
     await expect(readFile(fixture.mismatchChoice, 'utf8')).resolves.toBe(
       'incoming mismatch body\n'
     )
+  })
+
+  it('writes and deletes exactly what the resolved actions say', async () => {
+    const fixture = await buildTemplateGateFixture()
+    const preview = await previewTemplate(platform, fixture)
+    const defaults = defaultCheckedPaths(preview.plan)
+    const moved = GATE_SLOTS.clean
+    const resolved = resolveTemplatePlan(preview.plan, {
+      checkedPaths: defaults,
+      movePaths: [moved]
+    })
+
+    const movedEntry = resolved.executable.find((entry) => entry.relativePath === moved)
+    expect(movedEntry?.action, 'template single-source: move action').toBe('move')
+    expect(resolved.actions[moved], 'template single-source: move map').toBe('move')
+    expect(resolved.moveCount).toBe(1)
+    expect(resolved.copyCount).toBe(resolved.executableCount - 1)
+    expect(
+      resolved.executable.filter((entry) => entry.relativePath !== moved).every(
+        (entry) => entry.action === 'copy'
+      ),
+      'template single-source: the rest copy'
+    ).toBe(true)
+
+    const io = recordIo(platform)
+    const outcome = await applyTemplatePlan(io.port, resolved)
+    expect(
+      sortedCopy(io.writes),
+      'template single-source: move write set equals the executable targets'
+    ).toEqual(sortedCopy(resolved.executable.map((entry) => entry.targetPath)))
+    expect(io.deletes, 'template single-source: only the moved source is deleted').toEqual([
+      movedEntry?.sourcePath
+    ])
+    expect(outcome.execution.movedCount, 'template single-source: moved count').toBe(1)
+    expect(outcome.execution.writtenCount).toBe(resolved.executableCount)
   })
 })

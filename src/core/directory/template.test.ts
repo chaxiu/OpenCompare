@@ -540,24 +540,41 @@ describe('template placement plan', () => {
     expect(plan.placed).toEqual([])
   })
 
-  it('never places a missing slot or a directory-occupied target', async () => {
-    const { plan } = await planFor(
+  it('never places a differing missing slot but reads its moved target as placed', async () => {
+    const differing = await planFor(
       { template, incoming },
       {
         existingFiles: ['d/missing.ts'],
-        existingFileHashes: { 'd/missing.ts': sha256Hex('M') },
+        existingFileHashes: { 'd/missing.ts': sha256Hex('not M') },
         existingDirectories: ['c/guide.md']
       }
     )
-    const missing = plan.missing.find((entry) => entry.relativePath === 'd/missing.ts')
+    const missing = differing.plan.missing.find((entry) => entry.relativePath === 'd/missing.ts')
     expect(missing?.outcome).toBe('missing')
     expect(missing?.defaultChecked).toBe(false)
 
-    const occupied = plan.matched.find((entry) => entry.relativePath === 'c/guide.md')
+    const occupied = differing.plan.matched.find((entry) => entry.relativePath === 'c/guide.md')
     expect(occupied?.outcome).toBe('matched')
     expect(occupied?.occupiedByDirectory).toBe(true)
     expect(occupied?.overwrite).toBe(false)
-    expect(plan.placed).toEqual([])
+    expect(differing.plan.placed).toEqual([])
+
+    // A slot whose source already moved out of B is proven by the output root's
+    // copy: same template digest means placed, never writable again.
+    const moved = await planFor(
+      { template, incoming },
+      {
+        existingFiles: ['d/missing.ts'],
+        existingFileHashes: { 'd/missing.ts': sha256Hex('M') }
+      }
+    )
+    const placed = moved.plan.placed.find((entry) => entry.relativePath === 'd/missing.ts')
+    expect(placed?.outcome).toBe('placed')
+    expect(placed?.defaultChecked).toBe(false)
+    expect(placed?.defaultAction).toBe(undefined)
+    expect(placed?.sourcePath).toBe(null)
+    expect(moved.plan.missing.map((entry) => entry.relativePath)).not.toContain('d/missing.ts')
+    expect(resolveTemplatePlan(moved.plan, { checkedPaths: ['d/missing.ts'] }).executableCount).toBe(0)
   })
 
   it('keeps the placed partition equal to its array and the slot total', async () => {
@@ -666,7 +683,9 @@ describe('template placement plan', () => {
         writes.push(path)
         await fs.writeTextFile(path, content, modifiedMs)
       },
-      ensureDirectory: fs.ensureDirectory
+      ensureDirectory: fs.ensureDirectory,
+      listDirectory: fs.list,
+      deleteFile: async (path) => fs.deleteFile(path)
     })
 
     expect(execution.writtenCount).toBe(resolved.executableCount)
@@ -721,7 +740,9 @@ describe('template plan execution and verification', () => {
           writes.push({ path, content, modifiedMs })
           await fs.writeTextFile(path, content, modifiedMs)
           onWrite?.(path)
-        }
+        },
+        listDirectory: fs.list,
+        deleteFile: async (path: string) => fs.deleteFile(path)
       }
     }
   }
@@ -879,5 +900,268 @@ describe('template plan execution and verification', () => {
       },
       out: { a: { 'one.txt': { text: 'ONE', modifiedMs: SOURCE_MTIME } } }
     })
+  })
+})
+
+describe('template case-only collision', () => {
+  const CASE_MTIME = 1_600_000_000_100
+
+  async function scanTrees(fs: FakeFs) {
+    const [templateTree, incomingTree] = await Promise.all([
+      scanDirectory('/template', fs.list),
+      scanDirectory('/incoming', fs.list)
+    ])
+    return { templateTree, incomingTree }
+  }
+
+  async function matchTrees(fs: FakeFs) {
+    const { templateTree, incomingTree } = await scanTrees(fs)
+    return matchTemplate(templateTree, incomingTree, { readTextFile: fs.readTextFile })
+  }
+
+  const caseTemplate: FakeTree = { 'Logo.png': { text: 'NEW' } }
+
+  it('matches a case-only source with the same body and consumes it', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'NEW' } } }
+    })
+    const result = await matchTrees(fs)
+
+    expect(result.matched.map((item) => item.relativePath)).toEqual(['Logo.png'])
+    expect(result.matched[0]?.sourcePath).toBe('/incoming/bucket/logo.png')
+    expect(result.conflicts).toEqual([])
+    expect(result.missing).toEqual([])
+    expect(result.unused).toEqual([])
+  })
+
+  it('reports a case-only source with a different body as content-mismatch', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'OTHER' } } }
+    })
+    const result = await matchTrees(fs)
+
+    expect(result.matched).toEqual([])
+    expect(result.missing).toEqual([])
+    expect(result.unused).toEqual([])
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0]).toMatchObject({
+      relativePath: 'Logo.png',
+      reason: 'content-mismatch'
+    })
+    expect(result.conflicts[0]?.candidates).toHaveLength(1)
+  })
+
+  it('prefers the exact spelling over a case-only variant', async () => {
+    const mismatch = createFakeFs({
+      template: caseTemplate,
+      incoming: {
+        'Logo.png': { text: 'OTHER' },
+        bucket: { 'logo.png': { text: 'NEW' } }
+      }
+    })
+    const mismatchResult = await matchTrees(mismatch)
+    expect(mismatchResult.matched).toEqual([])
+    expect(mismatchResult.conflicts[0]).toMatchObject({
+      relativePath: 'Logo.png',
+      reason: 'content-mismatch'
+    })
+    expect(mismatchResult.conflicts[0]?.candidates.map((candidate) => candidate.path)).toEqual([
+      '/incoming/Logo.png'
+    ])
+    expect(mismatchResult.unused.map((item) => item.relativePath).sort()).toEqual([
+      'Logo.png',
+      'bucket/logo.png'
+    ])
+
+    const exact = createFakeFs({
+      template: caseTemplate,
+      incoming: {
+        'Logo.png': { text: 'NEW' },
+        bucket: { 'logo.png': { text: 'OTHER' } }
+      }
+    })
+    const exactResult = await matchTrees(exact)
+    expect(exactResult.matched.map((item) => item.sourcePath)).toEqual(['/incoming/Logo.png'])
+    expect(exactResult.conflicts).toEqual([])
+    expect(exactResult.unused.map((item) => item.relativePath)).toEqual(['bucket/logo.png'])
+  })
+
+  it('reports two case-only variants as an ambiguous conflict', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: {
+        a: { 'logo.png': { text: 'NEW' } },
+        b: { 'LOGO.PNG': { text: 'NEW' } }
+      }
+    })
+    const result = await matchTrees(fs)
+
+    expect(result.matched).toEqual([])
+    expect(result.missing).toEqual([])
+    expect(result.unused).toEqual([])
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0]).toMatchObject({ relativePath: 'Logo.png', reason: 'ambiguous' })
+    expect(result.conflicts[0]?.candidates).toHaveLength(2)
+  })
+
+  it('makes a case-only target with different content an unchecked overwrite', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'NEW' } } }
+    })
+    const result = await matchTrees(fs)
+    const plan = createTemplatePlan(result, {
+      outputRoot: '/out',
+      existingFiles: ['logo.png'],
+      existingFileHashes: { 'logo.png': sha256Hex('OLD') }
+    })
+
+    const row = plan.matched.find((entry) => entry.relativePath === 'Logo.png')
+    expect(row?.outcome).toBe('matched')
+    expect(row?.overwrite).toBe(true)
+    expect(row?.defaultChecked).toBe(false)
+    expect(plan.placed).toEqual([])
+    expect(resolveTemplatePlan(plan, {}).executableCount).toBe(0)
+    expect(
+      resolveTemplatePlan(plan, { checkedPaths: ['Logo.png'] }).executable.map(
+        (entry) => entry.relativePath
+      )
+    ).toEqual(['Logo.png'])
+  })
+
+  it('places a case-only target that already holds the source body', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'NEW' } } }
+    })
+    const result = await matchTrees(fs)
+    const plan = createTemplatePlan(result, {
+      outputRoot: '/out',
+      existingFiles: ['logo.png'],
+      existingFileHashes: { 'logo.png': sha256Hex('NEW') }
+    })
+
+    const row = plan.placed.find((entry) => entry.relativePath === 'Logo.png')
+    expect(row?.outcome).toBe('placed')
+    expect(row?.overwrite).toBe(false)
+    expect(row?.defaultChecked).toBe(false)
+    expect(plan.matched).toEqual([])
+
+    const resolved = resolveTemplatePlan(plan, { checkedPaths: ['Logo.png'] })
+    expect(resolved.executableCount).toBe(0)
+    expect(resolved.rejectedCount).toBe(0)
+  })
+
+  it('keeps the exact spelling ahead of a matching case variant', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'NEW' } } }
+    })
+    const result = await matchTrees(fs)
+    const plan = createTemplatePlan(result, {
+      outputRoot: '/out',
+      existingFiles: ['Logo.png', 'logo.png'],
+      existingFileHashes: {
+        'Logo.png': sha256Hex('OLD'),
+        'logo.png': sha256Hex('NEW')
+      }
+    })
+
+    const row = plan.matched.find((entry) => entry.relativePath === 'Logo.png')
+    expect(row?.outcome).toBe('matched')
+    expect(row?.overwrite).toBe(true)
+    expect(row?.defaultChecked).toBe(false)
+    expect(plan.placed).toEqual([])
+  })
+
+  it('never places when several case variants hold the target', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'NEW' } } }
+    })
+    const result = await matchTrees(fs)
+    const plan = createTemplatePlan(result, {
+      outputRoot: '/out',
+      existingFiles: ['logo.png', 'LOGO.PNG'],
+      existingFileHashes: {
+        'logo.png': sha256Hex('NEW'),
+        'LOGO.PNG': sha256Hex('NEW')
+      }
+    })
+
+    const row = plan.matched.find((entry) => entry.relativePath === 'Logo.png')
+    expect(row?.outcome).toBe('matched')
+    expect(row?.overwrite).toBe(true)
+    expect(row?.defaultChecked).toBe(false)
+    expect(plan.placed).toEqual([])
+  })
+
+  it('treats a case-only directory as an occupied target', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      incoming: { bucket: { 'logo.png': { text: 'NEW' } } }
+    })
+    const result = await matchTrees(fs)
+    const plan = createTemplatePlan(result, {
+      outputRoot: '/out',
+      existingDirectories: ['logo.png']
+    })
+
+    const row = plan.matched.find((entry) => entry.relativePath === 'Logo.png')
+    expect(row?.occupiedByDirectory).toBe(true)
+    expect(row?.defaultChecked).toBe(false)
+    expect(resolveTemplatePlan(plan, { checkedPaths: ['Logo.png'] }).rejected).toEqual([
+      { relativePath: 'Logo.png', reason: 'target-occupied-by-directory' }
+    ])
+  })
+
+  it('verifies a case-only output entry instead of reporting it missing', async () => {
+    const fs = createFakeFs({
+      incoming: { bucket: { 'logo.png': { text: 'NEW', modifiedMs: CASE_MTIME } } },
+      out: { 'logo.png': { text: 'NEW', modifiedMs: CASE_MTIME + 800 } }
+    })
+    const written = [
+      {
+        relativePath: 'Logo.png',
+        sourcePath: '/incoming/bucket/logo.png',
+        targetPath: '/out/Logo.png',
+        sourceHash: sha256Hex('NEW'),
+        modifiedMs: CASE_MTIME,
+        action: 'copy' as const
+      }
+    ]
+    const io = { readTextFile: fs.readTextFile, listDirectory: fs.list }
+
+    const verification = await verifyTemplateExtraction(written, io)
+    expect(verification.verified).toBe(1)
+    expect(verification.failed).toBe(0)
+    expect(verification.entries[0]).toMatchObject({ ok: true, reason: undefined })
+
+    await fs.writeTextFile('/out/logo.png', 'DIFFERENT', CASE_MTIME)
+    const hashMismatch = await verifyTemplateExtraction(written, io)
+    expect(hashMismatch.entries[0]).toMatchObject({ ok: false, reason: 'hash' })
+
+    await fs.writeTextFile('/out/logo.png', 'NEW', CASE_MTIME + 1_000)
+    const mtimeMismatch = await verifyTemplateExtraction(written, io)
+    expect(mtimeMismatch.entries[0]).toMatchObject({ ok: false, reason: 'mtime' })
+  })
+
+  it('matches case-only output slots after extraction', async () => {
+    const fs = createFakeFs({
+      template: caseTemplate,
+      out: { 'logo.png': { text: 'NEW' } }
+    })
+    const templateTree = await scanDirectory('/template', fs.list)
+    const outputTree = await scanDirectory('/out', fs.list)
+
+    const result = await matchTemplateSlots(templateTree, outputTree, ['Logo.png'], {
+      readTextFile: fs.readTextFile
+    })
+    expect(result.matched.map((item) => item.relativePath)).toEqual(['Logo.png'])
+    expect(result.matched[0]?.sourcePath).toBe('/out/logo.png')
+    expect(result.missing).toEqual([])
+    expect(result.conflicts).toEqual([])
   })
 })

@@ -48,10 +48,26 @@ const EXPECTED_GATES = [
     command: 'pnpm test src/template-gate-cancel-zero-write.test.ts'
   },
   { id: 'template-e2e-real', command: 'pnpm test src/template-e2e-real-directory.test.ts' },
+  {
+    id: 'template-case-collision',
+    command: 'pnpm test src/template-gate-case-collision.test.ts'
+  },
+  {
+    id: 'template-path-contained',
+    command: 'pnpm test src/template-gate-path-contained.test.ts'
+  },
+  {
+    id: 'template-move-actions',
+    command: 'pnpm test src/template-gate-move-actions.test.ts'
+  },
+  {
+    id: 'template-move-verify',
+    command: 'pnpm test src/template-gate-move-verify.test.ts'
+  },
   { id: 'verify-release-gate', command: 'pnpm test src/verify-release-gate.test.ts' }
 ] as const
 
-/** The five template placement gate files, mapped by gate id. */
+/** The nine template placement gate files, mapped by gate id. */
 const TEMPLATE_GATES = [
   {
     id: 'template-default-unchecked',
@@ -77,6 +93,26 @@ const TEMPLATE_GATES = [
     id: 'template-e2e-real',
     file: 'src/template-e2e-real-directory.test.ts',
     marker: 'real-directory end-to-end'
+  },
+  {
+    id: 'template-case-collision',
+    file: 'src/template-gate-case-collision.test.ts',
+    marker: 'case-only collision and exact-name priority'
+  },
+  {
+    id: 'template-path-contained',
+    file: 'src/template-gate-path-contained.test.ts',
+    marker: 'relative path containment and path-escape refusal'
+  },
+  {
+    id: 'template-move-actions',
+    file: 'src/template-gate-move-actions.test.ts',
+    marker: 'per-row action column and explicit move'
+  },
+  {
+    id: 'template-move-verify',
+    file: 'src/template-gate-move-verify.test.ts',
+    marker: 'real-disk move write verify delete keeps the source'
   }
 ] as const
 
@@ -98,16 +134,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly seventeen pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty-one pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(17)
+    expect(defaultManifest.gates).toHaveLength(21)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the seventeen commands verbatim with cwd "."', () => {
+  it('keeps the twenty-one commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
@@ -154,7 +190,7 @@ describe('default code-gates matrix', () => {
     }
   })
 
-  it('registers the five template placement gates before the release driver gate', () => {
+  it('registers the nine template placement gates before the release driver gate', () => {
     const tail = defaultManifest.gates.slice(-(TEMPLATE_GATES.length + 1), -1)
     expect(tail.map((gate) => gate.id)).toEqual(TEMPLATE_GATES.map((gate) => gate.id))
     expect(defaultManifest.gates.at(-1)?.id).toBe('verify-release-gate')
@@ -174,7 +210,7 @@ describe('default code-gates matrix', () => {
     }
   })
 
-  it('maps the four template placement behaviours onto the template gates', () => {
+  it('maps every template placement behaviour onto the template gates', () => {
     const description = defaultManifest.description
     for (const expected of TEMPLATE_GATES) {
       expect(description.toLowerCase(), `manifest: marker "${expected.marker}"`).toContain(

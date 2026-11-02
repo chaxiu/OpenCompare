@@ -107,10 +107,16 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.output.exists': 'Exists',
   'directory.template.rows': 'Template placement rows',
   'directory.template.checkSlot': 'Check {path}',
+  'directory.template.moveCheck': 'Move {path}',
+  'directory.template.moveChecked': 'Set checked rows to move',
+  'directory.template.action.copy': 'Copy',
+  'directory.template.action.move': 'Move',
   'directory.template.overwrite': 'Overwrites an existing file in the output root',
   'directory.template.occupied': 'A directory occupies the target',
   'directory.template.executableCount': '{count} executable',
   'directory.template.rejectedCount': '{count} rejected',
+  'directory.template.copyCount': '{count} copy',
+  'directory.template.moveCount': '{count} move',
   'directory.template.error.snapshotLeft':
     'The left side is a snapshot and cannot be template A; open a real directory comparison first.',
   'directory.template.error.incomingEmpty':
@@ -130,7 +136,7 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.error.outputNotDirectory':
     'The output root exists but is not a directory: {path}',
   'directory.template.placing': 'Placing…',
-  'directory.template.place': 'Extract and place',
+  'directory.template.place': 'Place files',
   'directory.template.conflict.choose': 'Choose a source…',
   'directory.template.conflict.candidate': 'Choose a source for {path}',
   'directory.template.reject.notExecutable': 'this slot has no writable source',
@@ -138,13 +144,25 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.reject.conflictCandidateOutsideSet':
     'the chosen source is not one of the candidates',
   'directory.template.reject.targetOccupiedByDirectory': 'a folder occupies the target',
+  'directory.template.reject.pathEscape': 'the target path escapes the output root',
   'directory.template.reject.duplicateSource': 'an earlier slot already uses this source',
   'directory.template.error.applyRefused': 'Cannot write to the output root {path}: {reason}',
   'directory.template.error.applyFailed':
     'Placement failed; check the output root and try again.',
   'directory.template.failure.sourceDrift': 'the source changed after planning',
   'directory.template.failure.sourceUnreadable': 'the source cannot be read',
+  'directory.template.failure.pathEscape': 'the target path escapes the output root',
   'directory.template.failure.writeFailed': 'the write failed',
+  'directory.template.failure.moveTargetMissing':
+    'post-write check: the move target is gone, source kept',
+  'directory.template.failure.moveTargetHash':
+    'post-write check: the move target sha256 differs from the source, source kept',
+  'directory.template.failure.moveTargetMtime':
+    'post-write check: the move target mtimeSec differs from the source, source kept',
+  'directory.template.failure.moveTargetUnreadable':
+    'post-write check: the target or source cannot be read, source kept',
+  'directory.template.failure.moveDeleteFailed':
+    'the target checked out but removing the source failed, source kept',
   'directory.template.failure.withCode': '{reason} (code {code})',
   'directory.template.result.title': 'Template placement result',
   'directory.template.result.rows': 'Template placement verification',
@@ -152,6 +170,10 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.result.writeFailed': 'Write failures {count}',
   'directory.template.result.verified': 'Verified {count}',
   'directory.template.result.verifyFailed': 'Verification failures {count}',
+  'directory.template.result.moved': 'Sources removed {count}',
+  'directory.template.result.rescanHint': '{count} rows still need a rescan',
+  'directory.template.result.sourceDeleted': 'Source removed',
+  'directory.template.result.sourceKept': 'Source kept',
   'directory.template.result.ok': 'Verified',
   'directory.template.result.rescan': 'Rescan output root',
   'directory.template.result.retry': 'Retry',
@@ -161,6 +183,8 @@ export const directory: Record<keyof typeof zhDirectory, string> = {
   'directory.template.verify.hash': 'the target sha256 differs from the source',
   'directory.template.verify.mtime': 'the target mtimeSec differs from the source',
   'directory.template.verify.unreadable': 'the target cannot be read',
+  'directory.template.verify.sourceRetained': 'the source is still there after the move',
+  'directory.template.verify.sourceMissing': 'the source is gone after the copy',
   'directory.report.toolbar.export': 'Export HTML report',
   'directory.report.toolbar.exportTitle':
     'Export the current directory comparison as a self-contained HTML report that opens offline; cancelling the save writes nothing',

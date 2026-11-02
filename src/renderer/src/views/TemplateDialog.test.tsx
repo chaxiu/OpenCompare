@@ -63,6 +63,7 @@ const OUTCOMES: TemplateMatchResult = {
       relativePath: 'src/ok.ts',
       templatePath: '/ext/a/src/ok.ts',
       sourcePath: '/ext/b/x/ok.ts',
+      sourceRelativePath: 'x/ok.ts',
       size: 1,
       hash: 'h1',
       modifiedMs: 1_700_000_000_001,
@@ -72,6 +73,7 @@ const OUTCOMES: TemplateMatchResult = {
       relativePath: 'src/over.ts',
       templatePath: '/ext/a/src/over.ts',
       sourcePath: '/ext/b/x/over.ts',
+      sourceRelativePath: 'x/over.ts',
       size: 2,
       hash: 'h2',
       modifiedMs: 1_700_000_000_002,
@@ -81,21 +83,41 @@ const OUTCOMES: TemplateMatchResult = {
       relativePath: 'src/taken.ts',
       templatePath: '/ext/a/src/taken.ts',
       sourcePath: '/ext/b/x/taken.ts',
+      sourceRelativePath: 'x/taken.ts',
       size: 3,
       hash: 'h3',
       modifiedMs: 1_700_000_000_003,
       text: 'C'
     }
   ],
-  missing: [{ relativePath: 'src/missing.ts', templatePath: '/ext/a/src/missing.ts', size: 4 }],
+  missing: [
+    {
+      relativePath: 'src/missing.ts',
+      templatePath: '/ext/a/src/missing.ts',
+      size: 4,
+      hash: 'h-missing'
+    }
+  ],
   conflicts: [
     {
       relativePath: 'src/conflict.ts',
       templatePath: '/ext/a/src/conflict.ts',
       reason: 'ambiguous',
       candidates: [
-        { path: '/ext/b/one/conflict.ts', size: 5, hash: 'c1', modifiedMs: 1_700_000_000_005 },
-        { path: '/ext/b/two/conflict.ts', size: 6, hash: 'c2', modifiedMs: 1_700_000_000_006 }
+        {
+          path: '/ext/b/one/conflict.ts',
+          sourceRelativePath: 'one/conflict.ts',
+          size: 5,
+          hash: 'c1',
+          modifiedMs: 1_700_000_000_005
+        },
+        {
+          path: '/ext/b/two/conflict.ts',
+          sourceRelativePath: 'two/conflict.ts',
+          size: 6,
+          hash: 'c2',
+          modifiedMs: 1_700_000_000_006
+        }
       ]
     }
   ],
@@ -128,28 +150,36 @@ function previewOf(
   }
 }
 
-function writtenEntry(relativePath: string): TemplateWrittenEntry {
+function writtenEntry(
+  relativePath: string,
+  action: TemplateWrittenEntry['action'] = 'copy'
+): TemplateWrittenEntry {
   return {
     relativePath,
     sourcePath: `/ext/b/x/${relativePath}`,
     targetPath: `/ext/out/${relativePath}`,
     sourceHash: `h-${relativePath}`,
-    modifiedMs: 1_700_000_000_000
+    modifiedMs: 1_700_000_000_000,
+    action
   }
 }
 
 function verifiedEntry(
   relativePath: string,
   ok = true,
-  reason?: TemplateVerificationEntry['reason']
+  reason?: TemplateVerificationEntry['reason'],
+  action: TemplateVerificationEntry['action'] = 'copy'
 ): TemplateVerificationEntry {
   return {
     relativePath,
     targetPath: `/ext/out/${relativePath}`,
+    sourcePath: `/ext/b/x/${relativePath}`,
+    action,
     expectedHash: `h-${relativePath}`,
     actualHash: ok ? `h-${relativePath}` : 'other',
     expectedMtimeSec: 1_700_000_000,
     actualMtimeSec: 1_700_000_000,
+    sourceDeleted: action === 'move',
     ok,
     ...(reason === undefined ? {} : { reason })
   }
@@ -166,12 +196,13 @@ function outcomeOf(
   const failed = options.failed ?? []
   const entries =
     options.entries ??
-    written.map((item) => verifiedEntry(item.relativePath))
+    written.map((item) => verifiedEntry(item.relativePath, true, undefined, item.action))
   const verified = entries.filter((entry) => entry.ok).length
   return {
     execution: {
       written,
       writtenCount: written.length,
+      movedCount: written.filter((item) => item.action === 'move').length,
       failed,
       failedCount: failed.length,
       cancelled: false
@@ -360,9 +391,11 @@ describe('template dry-run step', () => {
     expect(screen.getByText(en['directory.template.section.conflicts'])).toBeDefined()
     expect(screen.getByText(en['directory.template.section.unused'])).toBeDefined()
 
-    // matched / conflict rows carry both the slot and its B source.
+    // matched / conflict rows carry both the slot and its B-relative source.
     expect(screen.getByText('src/ok.ts')).toBeDefined()
-    expect(screen.getByText('/ext/b/x/ok.ts')).toBeDefined()
+    expect(screen.getByText('x/ok.ts')).toBeDefined()
+    // The default action is copy, stated per source-bearing row.
+    expect(screen.getAllByText(en['directory.template.action.copy']).length).toBeGreaterThan(0)
     // A conflict row offers its candidates as a picker, none selected yet.
     expect(conflictSelect().value).toBe('')
     expect(
@@ -500,12 +533,12 @@ describe('template dry-run step', () => {
     fireEvent.change(conflictSelect(), { target: { value: '/ext/b/one/conflict.ts' } })
     fireEvent.click(conflictCheckbox())
     expect(screen.getByText(/2 executable/)).toBeDefined()
-    expect(screen.getAllByText('/ext/b/one/conflict.ts').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('one/conflict.ts').length).toBeGreaterThan(0)
 
     fireEvent.change(conflictSelect(), { target: { value: '/ext/b/two/conflict.ts' } })
     expect(conflictCheckbox().checked).toBe(true)
     expect(screen.getByText(/2 executable/)).toBeDefined()
-    expect(screen.getAllByText('/ext/b/two/conflict.ts').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('two/conflict.ts').length).toBeGreaterThan(0)
 
     // Emptying the candidate also clears the check and counts a refusal.
     fireEvent.change(conflictSelect(), { target: { value: '' } })
@@ -524,6 +557,7 @@ describe('template dry-run step', () => {
           relativePath: 'a/dup.ts',
           templatePath: '/ext/a/a/dup.ts',
           sourcePath: '/ext/b/x/dup.ts',
+          sourceRelativePath: 'x/dup.ts',
           size: 1,
           hash: 'd1',
           modifiedMs: 1_700_000_000_010,
@@ -533,6 +567,7 @@ describe('template dry-run step', () => {
           relativePath: 'b/dup.ts',
           templatePath: '/ext/a/b/dup.ts',
           sourcePath: '/ext/b/x/dup.ts',
+          sourceRelativePath: 'x/dup.ts',
           size: 1,
           hash: 'd1',
           modifiedMs: 1_700_000_000_010,
@@ -586,11 +621,78 @@ describe('template dry-run step', () => {
     expect(screen.getByText(/Will be created/)).toBeDefined()
   })
 
+  it('defaults every checked row to copy and only moves on an explicit choice', () => {
+    renderDryRun(
+      previewOf(OUTCOMES, {
+        existingFiles: ['src/over.ts'],
+        existingDirectories: ['src/taken.ts']
+      })
+    )
+
+    const moveOk = screen.getByLabelText('Move src/ok.ts') as HTMLInputElement
+    expect(moveOk.checked, 'template dialog: default action is copy').toBe(false)
+    // Only a checked, executable row may be marked as a move.
+    expect(moveOk.disabled).toBe(false)
+    expect((screen.getByLabelText('Move src/over.ts') as HTMLInputElement).disabled).toBe(true)
+
+    fireEvent.click(moveOk)
+    expect(screen.getByText(/1 executable/)).toBeDefined()
+    expect(screen.getByText(/0 copy/)).toBeDefined()
+    expect(screen.getByText(/1 move/)).toBeDefined()
+
+    // Unchecking clears the move choice: re-checking starts from copy again.
+    fireEvent.click(screen.getByLabelText('Check src/ok.ts'))
+    fireEvent.click(screen.getByLabelText('Check src/ok.ts'))
+    expect((screen.getByLabelText('Move src/ok.ts') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText(/0 move/)).toBeDefined()
+  })
+
+  it('sets only the already-checked rows to move and never checks a hazard', () => {
+    renderDryRun(
+      previewOf(OUTCOMES, {
+        existingFiles: ['src/over.ts'],
+        existingDirectories: ['src/taken.ts']
+      })
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: en['directory.template.moveChecked'] }))
+
+    expect((screen.getByLabelText('Move src/ok.ts') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('Check src/over.ts') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText(/1 move/)).toBeDefined()
+
+    // A second batch click is idempotent and still checks nothing.
+    fireEvent.click(screen.getByRole('button', { name: en['directory.template.moveChecked'] }))
+    expect((screen.getByLabelText('Check src/over.ts') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText(/1 move/)).toBeDefined()
+  })
+
+  it('keeps a resolved conflict on copy until its move is explicit', () => {
+    const onConfirm = vi.fn<TemplateDialogProps['onConfirm']>(async () => outcomeOf())
+    renderDryRun(previewOf(OUTCOMES), { onConfirm })
+
+    fireEvent.change(conflictSelect(), { target: { value: '/ext/b/one/conflict.ts' } })
+    fireEvent.click(conflictCheckbox())
+    expect((screen.getByLabelText('Move src/conflict.ts') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText(/0 move/)).toBeDefined()
+
+    fireEvent.click(screen.getByLabelText('Move src/conflict.ts'))
+    fireEvent.click(screen.getByRole('button', { name: en['directory.template.place'] }))
+
+    const resolved = onConfirm.mock.calls[0][0] as {
+      readonly executable: readonly { readonly relativePath: string; readonly action: string }[]
+    }
+    expect(resolved.executable.find((entry) => entry.relativePath === 'src/conflict.ts')?.action).toBe(
+      'move'
+    )
+  })
+
   it('windows a 1,200-row plan and keeps the tail checkable', async () => {
     const matched = Array.from({ length: 1200 }, (_, index) => ({
       relativePath: `src/f${index}.ts`,
       templatePath: `/ext/a/src/f${index}.ts`,
       sourcePath: `/ext/b/x/f${index}.ts`,
+      sourceRelativePath: `x/f${index}.ts`,
       size: index,
       hash: `h${index}`,
       modifiedMs: 1_700_000_000_000 + index,
@@ -653,6 +755,52 @@ describe('template result step', () => {
     expect(screen.getByText(en['directory.template.verify.missing'])).toBeDefined()
     // A failed row never turns the block into an "all succeeded" claim.
     expect(container.textContent ?? '').not.toMatch(/all (rows|items) (were )?(placed|verified)/i)
+    expect(container.textContent ?? '').not.toMatch(HAN)
+  })
+
+  it('shows the move action and source state on a verified result row', async () => {
+    const onConfirm = vi.fn(async () =>
+      outcomeOf({
+        written: [writtenEntry('src/move.ts', 'move')],
+        entries: [verifiedEntry('src/move.ts', true, undefined, 'move')]
+      })
+    )
+    const { container } = renderDryRun(previewOf(OUTCOMES), { onConfirm })
+
+    fireEvent.click(screen.getByRole('button', { name: en['directory.template.place'] }))
+    await screen.findByRole('dialog', { name: en['directory.template.result.title'] })
+
+    const row = document.querySelector('[data-template-result-row]') as HTMLElement
+    expect(row.getAttribute('data-template-verify')).toBe('ok')
+    expect(row.getAttribute('data-template-source-deleted')).toBe('true')
+    expect(row.textContent).toContain(en['directory.template.action.move'])
+    expect(row.textContent).toContain(en['directory.template.result.sourceDeleted'])
+    expect(container.textContent ?? '').not.toMatch(HAN)
+  })
+
+  it('localizes a move verification failure and keeps its stable reason', async () => {
+    const onConfirm = vi.fn(async () =>
+      outcomeOf({
+        written: [],
+        entries: [],
+        failed: [
+          {
+            relativePath: 'src/move.ts',
+            sourcePath: '/ext/b/x/move.ts',
+            targetPath: '/ext/out/src/move.ts',
+            reason: 'move-target-mtime'
+          }
+        ]
+      })
+    )
+    const { container } = renderDryRun(previewOf(OUTCOMES), { onConfirm })
+
+    fireEvent.click(screen.getByRole('button', { name: en['directory.template.place'] }))
+    await screen.findByRole('dialog', { name: en['directory.template.result.title'] })
+
+    const row = document.querySelector('[data-template-failure-row]') as HTMLElement
+    expect(row.getAttribute('data-template-failure')).toBe('move-target-mtime')
+    expect(row.textContent).toContain(en['directory.template.failure.moveTargetMtime'])
     expect(container.textContent ?? '').not.toMatch(HAN)
   })
 
@@ -800,12 +948,13 @@ describe('template result step', () => {
     expect(second.executableCount).toBe(first.executableCount)
   })
 
-  it('closes without writing when cancelled from the dry-run', () => {
+  it('closes without writing or deleting when cancelled from the dry-run', () => {
     const writeTextFile = vi.fn(async () => undefined)
     const ensureDirectory = vi.fn(async () => undefined)
+    const deleteFile = vi.fn(async () => undefined)
     const onCancel = vi.fn()
     renderDryRun(previewOf(OUTCOMES), {
-      platform: platformWith({ writeTextFile, ensureDirectory }),
+      platform: platformWith({ writeTextFile, ensureDirectory, deleteFile }),
       onCancel
     })
 
@@ -813,6 +962,7 @@ describe('template result step', () => {
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(ensureDirectory).not.toHaveBeenCalled()
+    expect(deleteFile).not.toHaveBeenCalled()
   })
 })
 

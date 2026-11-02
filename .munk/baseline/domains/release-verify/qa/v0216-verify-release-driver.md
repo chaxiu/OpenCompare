@@ -1,7 +1,7 @@
 # v0.2.16 L1 验收驱动收敛为仓内唯一实现 + 只读发布后复验流水线
 
 - WI：`wi_intake_ab3a874c53d49528`
-- 域：`release-verify`（验收驱动 CLI / 检查注册表 / fail-closed 汇总 / 只读复验 workflow / 门禁与教训沉淀；跨域事实同步：`domains/quality-gates` 矩阵 16 → 17、`.munk/baseline/tech/overview.md` 门禁清单）
+- 域：`release-verify`（验收驱动 CLI / 检查注册表 / fail-closed 汇总 / 只读复验 workflow / 门禁与教训沉淀；跨域事实同步：`domains/quality-gates` 矩阵末尾追加 `verify-release-gate`（合入 main tip 后 20 → 21）、`.munk/baseline/tech/overview.md` 门禁清单）
 - 来源：`.munk/changes/wi_intake_ab3a874c53d49528/prd.md`（本 WI change pack **只有 `prd.md`**，无 `tests/cases/**` / `tech.md` / `ux/**`，故按 prd 的 21 条 AC 逐条落档，非 change-pack 用例 copy；`needSelfTest=false`，以 Host `code_gates` 为交付门槛）
 - 基线：`main @3dab29c`（本 worktree HEAD，已含 v0.2.16 双语互链绝对化与发布正文链接门）
 - 交付 commit：本 WI 分支 `munk/wi_intake_ab3a874c53d49528` 上的实现提交 + fold 提交
@@ -35,7 +35,7 @@
 | ac-spike | workflow 内置 `spike` job（`ubuntu-latest` + `macos-latest`，Linux 走 `xvfb-run`）先于矩阵，矩阵 `needs: spike`；`--spike` 只做 Electron + CDP 起窗 | **未取得实机证据**：本 WI 未 push / 未 dispatch，无 run id、无 `ImageOS` / `ImageVersion`；脚本与 workflow 能力已就位，不得写成就绪 |
 | ac-v0216-run | 需对已公开 v0.2.16 实跑 `workflow_dispatch` 并归档六组全 pass 证据 | **未取得实机证据**：同上，无 run id；首次真实发版后的 dispatch 才是首次实战 |
 | ac-local-ci-parity | 同一 tag 下本地 `--layer=ci` 与 CI run 的 identity / cancel-log 结论逐项对照 | **未取得实机证据**：缺 CI run 侧数据，本 WI 只有脚本层与门禁层覆盖 |
-| ac-gate | `.munk/code-gates.json` 末尾追加 `{ id: "verify-release-gate", cwd: ".", command: "pnpm test src/verify-release-gate.test.ts" }`（矩阵 16 → 17），`src/munk-gates.test.ts` 期望矩阵与长度断言同步；门禁单跑 1 file / 57 tests / 17.61s，Host attempt 001 `passed` | 满足 |
+| ac-gate | `.munk/code-gates.json` 末尾追加 `{ id: "verify-release-gate", cwd: ".", command: "pnpm test src/verify-release-gate.test.ts" }`（合入 main tip 四条模板门禁后矩阵 20 → 21），`src/munk-gates.test.ts` 期望矩阵与长度断言同步；门禁单跑 1 file / 57 tests / 17.61s，Host attempt 001 `passed` | 满足 |
 | ac-lessons | `docs/lessons.md` 新增第 11 节：逐字记录 tab=0 / 树=0 → `HeapProfiler.collectGarbage`×2 → 静置 1s → `JSHeapUsedSize`、第 3 − 第 2 ≤16 MiB、未 GC 轮末堆只记录、v0.2.16 证据路径与 241.6→241.8 MB、旧 `d1≥d2≥d3` 废止理由、CI 不跑内存腿并归 product-qa `task_0194dba8b812d08b` | 满足 |
 | ac-b-local-only | `LOCAL_CHECKS` 仅 `local-fixture` / `local-rounds-4state` / `local-retained-heap`；`MANUAL_NOT_COVERED` 承载窗口布局 / 滚动 / 原生面板 / TCC 并标 `not-covered`，不进 `checks`；`judgeLocalRounds` 断言四态和等于总行数、三轮一致，缺目录 / 缺轮即 fail | 满足（脚本层 + 门禁，真实 6.4 GiB 长跑未执行） |
 | ac-threshold | `RETENTION_THRESHOLD_BYTES = 16 * 1024 * 1024`；`judgeRetainedHeap` 边界用例：差值 = 16 MiB pass、16 MiB + 1 fail；CLI 无放宽阈值的开关（负断言） | 满足（脚本层 + 门禁） |
@@ -45,7 +45,7 @@
 - Host `code_gates` attempt 001：**17 门**全 passed / exit 0，`manifest.ok = true`，证据 `.munk/runs/run_intake_ab3a874c53d49528/code-gates/attempts/001`（逐门 `.log` + `.result.json`）。
 - `pnpm test`：108 files / **1625 passed + 1 skipped（1626）**、32.25s（`test.log`）。
 - `verify-release-gate`：1 file / **57 tests passed**、17.61s（`verify-release-gate.log`），全部离线注入 fixture，不启 Electron、不访问本机 `/Users/zhutao/opencompare-fixtures`。
-- 矩阵形状：`gates` 16 → 17，末尾追加 `verify-release-gate`；前 16 项 id / 顺序 / 命令 / `cwd` 逐字未动；`description` 追加发布验收驱动覆盖映射（15 项 A 层注册表、CI 零 heap、B 层 16 MiB、workflow 只读）。
+- 矩阵形状：`gates` 末尾追加 `verify-release-gate`（合入 main tip 后 20 → 21）；前 20 项 id / 顺序 / 命令 / `cwd` 逐字未动，九条模板门禁仍在第 17–20 位；`description` 追加发布验收驱动覆盖映射（15 项 A 层注册表、CI 零 heap、B 层 16 MiB、workflow 只读）。
 
 ## 未纳入项（刻意不做）
 

@@ -24,7 +24,13 @@ export function templateApplyFailureCopy(error: unknown): SyncFailureCopy | null
 const WRITE_REASON_KEYS: Readonly<Record<TemplateWriteFailure['reason'], MessageKey>> = {
   'source-drift': 'directory.template.failure.sourceDrift',
   'source-unreadable': 'directory.template.failure.sourceUnreadable',
-  'write-failed': 'directory.template.failure.writeFailed'
+  'path-escape': 'directory.template.failure.pathEscape',
+  'write-failed': 'directory.template.failure.writeFailed',
+  'move-target-missing': 'directory.template.failure.moveTargetMissing',
+  'move-target-hash': 'directory.template.failure.moveTargetHash',
+  'move-target-mtime': 'directory.template.failure.moveTargetMtime',
+  'move-target-unreadable': 'directory.template.failure.moveTargetUnreadable',
+  'move-delete-failed': 'directory.template.failure.moveDeleteFailed'
 }
 
 /** Localized reason of one per-row write failure, OS code included when known. */
@@ -43,7 +49,9 @@ const VERIFY_REASON_KEYS = {
   directory: 'directory.template.verify.directory',
   hash: 'directory.template.verify.hash',
   mtime: 'directory.template.verify.mtime',
-  unreadable: 'directory.template.verify.unreadable'
+  unreadable: 'directory.template.verify.unreadable',
+  'source-retained': 'directory.template.verify.sourceRetained',
+  'source-missing': 'directory.template.verify.sourceMissing'
 } as const
 
 export type TemplateVerifyReason = keyof typeof VERIFY_REASON_KEYS

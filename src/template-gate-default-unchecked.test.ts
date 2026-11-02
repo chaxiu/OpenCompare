@@ -70,6 +70,49 @@ describe('template default-checked gate', () => {
     }
   })
 
+  it('defaults every source row to copy, never moves by default and ignores moves on hazards', async () => {
+    const fixture = await buildTemplateGateFixture()
+    const preview = await previewTemplate(platform, fixture)
+    const rows = allRows(preview.plan)
+
+    for (const row of rows) {
+      if (row.outcome === 'matched') {
+        expect(row.defaultAction, `template default-checked: ${row.relativePath} default action`).toBe(
+          'copy'
+        )
+      } else {
+        expect(
+          row.defaultAction,
+          `template default-checked: ${row.relativePath} has no source action`
+        ).toBe(undefined)
+      }
+    }
+
+    const defaults = rows.filter((row) => row.defaultChecked).map((row) => row.relativePath)
+    const resolved = resolveTemplatePlan(preview.plan, { checkedPaths: defaults })
+    expect(resolved.moveCount, 'template default-checked: no move by default').toBe(0)
+    expect(
+      resolved.executable.every((entry) => entry.action === 'copy'),
+      'template default-checked: default executable rows copy'
+    ).toBe(true)
+
+    // A move selection on an unchecked hazard changes nothing.
+    const hazards = resolveTemplatePlan(preview.plan, {
+      checkedPaths: defaults,
+      movePaths: [GATE_SLOTS.overwrite, GATE_SLOTS.mismatch, GATE_SLOTS.ambiguous]
+    })
+    expect(hazards.executable.every((entry) => entry.action === 'copy')).toBe(true)
+    expect(hazards.actions[GATE_SLOTS.overwrite], 'template default-checked: hazard stays copy').toBe(
+      'copy'
+    )
+    expect(
+      hazards.actions[GATE_SLOTS.mismatch],
+      'template default-checked: a conflict without a candidate has no action'
+    ).toBe(undefined)
+    expect(hazards.executable.map((entry) => entry.relativePath)).not.toContain(GATE_SLOTS.overwrite)
+    expect(hazards.executable.map((entry) => entry.relativePath)).not.toContain(GATE_SLOTS.mismatch)
+  })
+
   it('leaves every overwrite, conflict, missing and occupied row unchecked', async () => {
     const fixture = await buildTemplateGateFixture()
     const preview = await previewTemplate(platform, fixture)

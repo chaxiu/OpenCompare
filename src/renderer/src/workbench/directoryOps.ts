@@ -37,6 +37,7 @@ import { isOperationCancelled } from '@core/io'
 import {
   createTemplatePlan,
   executeTemplatePlan,
+  foldCase,
   matchTemplate,
   verifyTemplateExtraction
 } from '@core/directory/template'
@@ -687,16 +688,20 @@ export async function previewTemplate(
       .filter(([relativePath, node]) => relativePath !== '' && node.kind === 'directory')
       .map(([relativePath]) => relativePath)
 
-    // Only an existing file that sits exactly on a matched / conflict slot can
-    // be "already placed": its digest is compared with the slot's source. Every
+    // Only an existing file that sits on a matched / conflict slot — exactly or
+    // as the only case-only variant (APFS is case-insensitive) — can be
+    // "already placed": its digest is compared with the slot's source. Every
     // other output file stays untouched, and an unreadable target simply keeps
     // its overwrite / conflict protection. Nothing is written here.
     const slotPaths = new Set<string>()
-    for (const item of result.matched) slotPaths.add(item.relativePath)
-    for (const item of result.conflicts) slotPaths.add(item.relativePath)
+    for (const item of result.matched) slotPaths.add(foldCase(item.relativePath))
+    for (const item of result.conflicts) slotPaths.add(foldCase(item.relativePath))
+    // A moved slot has no source left in B; its output copy is what proves the
+    // slot placed on the next scan, so its digest must be read too.
+    for (const item of result.missing) slotPaths.add(foldCase(item.relativePath))
     const hashes: Record<string, string> = {}
     for (const relativePath of existingFiles) {
-      if (!slotPaths.has(relativePath)) continue
+      if (!slotPaths.has(foldCase(relativePath))) continue
       try {
         hashes[relativePath] = sha256Hex(
           await platform.readTextFile(joinRelativePath(outputRoot, relativePath))
@@ -741,7 +746,11 @@ export async function applyTemplatePlan(
   const execution = await executeTemplatePlan(resolved, {
     readTextFile: (path) => platform.readTextFile(path),
     writeTextFile: (path, content, modifiedMs) => platform.writeTextFile(path, content, modifiedMs),
-    ensureDirectory: (path) => platform.ensureDirectory(path)
+    ensureDirectory: (path) => platform.ensureDirectory(path),
+    listDirectory: (path) => platform.listDirectory(path),
+    // A move removes exactly the source path the plan recorded, never a path
+    // rebuilt from the slot or anything under template A / the output root.
+    deleteFile: (path) => platform.deleteFile(path)
   })
   const verification = await verifyTemplatePlan(platform, execution.written)
   return { execution, verification }

@@ -106,17 +106,20 @@ export async function installTemplatePlatform(): Promise<void> {
   registerPlatformIpc()
 }
 
-/** Counts every real write / directory creation a run attempts. */
+/** Counts every real write / directory creation / source deletion a run attempts. */
 export function recordIo(port: PlatformPort): {
   readonly port: PlatformPort
   readonly writes: string[]
   readonly directories: string[]
+  readonly deletes: string[]
 } {
   const writes: string[] = []
   const directories: string[] = []
+  const deletes: string[] = []
   return {
     writes,
     directories,
+    deletes,
     port: {
       ...port,
       writeTextFile: (path, content, modifiedMs) => {
@@ -126,6 +129,10 @@ export function recordIo(port: PlatformPort): {
       ensureDirectory: (path) => {
         directories.push(path)
         return port.ensureDirectory(path)
+      },
+      deleteFile: (path) => {
+        deletes.push(path)
+        return port.deleteFile(path)
       }
     }
   }

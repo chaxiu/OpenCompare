@@ -155,4 +155,35 @@ describe('template sha-mtime gate', () => {
     expect(diskPath(fixture.outputRoot, hashSlot)).toBe(entryOf(hashSlot).targetPath)
     await expect(readFile(entryOf(hashSlot).targetPath, 'utf8')).resolves.toBe('tampered body\n')
   })
+
+  it('keeps the source sha256 / mtimeSec on a moved target and removes only that source', async () => {
+    const fixture = await buildTemplateGateFixture()
+    const preview = await previewTemplate(platform, fixture)
+    const resolved = resolveTemplatePlan(preview.plan, {
+      checkedPaths: [GATE_SLOTS.clean],
+      movePaths: [GATE_SLOTS.clean]
+    })
+    expect(resolved.executable[0]?.action, 'template sha-mtime: move action').toBe('move')
+    const sourcePath = resolved.executable[0].sourcePath
+    const sourceSec = Math.floor((await stat(sourcePath)).mtimeMs / 1000)
+    const sourceSha = await fileSha256(sourcePath)
+
+    const outcome = await applyTemplatePlan(platform, resolved)
+    expect(outcome.execution.failedCount, 'template sha-mtime: move has no failure').toBe(0)
+    expect(outcome.execution.movedCount, 'template sha-mtime: one moved row').toBe(1)
+
+    const targetPath = resolved.executable[0].targetPath
+    expect(await fileSha256(targetPath), 'template sha-mtime: moved target sha256').toBe(sourceSha)
+    expect(Math.floor((await stat(targetPath)).mtimeMs / 1000), 'template sha-mtime: moved target mtimeSec').toBe(
+      sourceSec
+    )
+    await expect(stat(sourcePath), 'template sha-mtime: moved source removed').rejects.toThrow()
+
+    const verification = outcome.verification.entries.find(
+      (entry) => entry.relativePath === GATE_SLOTS.clean
+    )
+    expect(verification?.action, 'template sha-mtime: verification action').toBe('move')
+    expect(verification?.sourceDeleted, 'template sha-mtime: verification source state').toBe(true)
+    expect(verification?.ok).toBe(true)
+  })
 })

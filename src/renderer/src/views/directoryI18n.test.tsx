@@ -274,21 +274,41 @@ function makeTemplatePreview(overrides: Partial<TemplateMatchResult> = {}): Temp
         relativePath: 'app/a.ts',
         templatePath: '/template/app/a.ts',
         sourcePath: '/incoming/x/a.ts',
+        sourceRelativePath: 'x/a.ts',
         size: 12,
         hash: 'a1',
         modifiedMs: 1_700_000_000_000,
         text: 'a'
       }
     ],
-    missing: [{ relativePath: 'app/b.ts', templatePath: '/template/app/b.ts', size: 20 }],
+    missing: [
+      {
+        relativePath: 'app/b.ts',
+        templatePath: '/template/app/b.ts',
+        size: 20,
+        hash: 'b1'
+      }
+    ],
     conflicts: [
       {
         relativePath: 'app/c.ts',
         templatePath: '/template/app/c.ts',
         reason: 'ambiguous',
         candidates: [
-          { path: '/incoming/one/c.ts', size: 1, hash: 'c1', modifiedMs: 1_700_000_000_001 },
-          { path: '/incoming/two/c.ts', size: 2, hash: 'c2', modifiedMs: 1_700_000_000_002 }
+          {
+            path: '/incoming/one/c.ts',
+            sourceRelativePath: 'one/c.ts',
+            size: 1,
+            hash: 'c1',
+            modifiedMs: 1_700_000_000_001
+          },
+          {
+            path: '/incoming/two/c.ts',
+            sourceRelativePath: 'two/c.ts',
+            size: 2,
+            hash: 'c2',
+            modifiedMs: 1_700_000_000_002
+          }
         ]
       },
       {
@@ -296,7 +316,13 @@ function makeTemplatePreview(overrides: Partial<TemplateMatchResult> = {}): Temp
         templatePath: '/template/app/d.ts',
         reason: 'content-mismatch',
         candidates: [
-          { path: '/incoming/three/d.ts', size: 3, hash: 'c3', modifiedMs: 1_700_000_000_003 }
+          {
+            path: '/incoming/three/d.ts',
+            sourceRelativePath: 'three/d.ts',
+            size: 3,
+            hash: 'c3',
+            modifiedMs: 1_700_000_000_003
+          }
         ]
       }
     ],
@@ -322,7 +348,14 @@ const templatePlatform: PlatformPort = createWebPlatformPort()
 
 /** A confirm answer the copy tests never inspect: nothing is written here. */
 const templateOutcome = async (): Promise<TemplateApplyOutcome> => ({
-  execution: { written: [], writtenCount: 0, failed: [], failedCount: 0, cancelled: false },
+  execution: {
+    written: [],
+    writtenCount: 0,
+    movedCount: 0,
+    failed: [],
+    failedCount: 0,
+    cancelled: false
+  },
   verification: { entries: [], verified: 0, failed: 0 }
 })
 
@@ -1191,7 +1224,7 @@ describe('TemplateDialog bilingual copy', () => {
     ])
     expect(screen.getAllByText(en['directory.template.conflict.choose']).length).toBe(2)
     expect(button('Cancel')).toBeDefined()
-    expect(button('Extract and place')).toBeDefined()
+    expect(button('Place files')).toBeDefined()
   })
 
   it('keeps the zh template wording unchanged', () => {
@@ -1221,7 +1254,7 @@ describe('TemplateDialog bilingual copy', () => {
     expect(screen.getByText(zh['directory.template.reason.contentMismatch'])).toBeDefined()
     expect(screen.getAllByText('1 个')).toHaveLength(2)
     expect(button('取消')).toBeDefined()
-    expect(button('确认提取归位')).toBeDefined()
+    expect(button('确认归位')).toBeDefined()
   })
 
   it('disables the confirm action when nothing matched and shows None', () => {
@@ -1237,7 +1270,7 @@ describe('TemplateDialog bilingual copy', () => {
       />,
       'en'
     )
-    expect((button('Extract and place') as HTMLButtonElement).disabled).toBe(true)
+    expect((button('Place files') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getAllByText('None').length).toBeGreaterThan(0)
     cleanup()
 
