@@ -449,7 +449,8 @@
         "Assert packaged version matches the tag",
         "Upload installers to the tag's release"
       ],
-      "mustBeLast": false
+      "mustBeLast": false,
+      "job": "release"
     },
     {
       "id": "windows-feed-position",
@@ -458,7 +459,8 @@
         "Assert the Windows update feed points at the NSIS installer",
         "Upload installers to the tag's release"
       ],
-      "mustBeLast": false
+      "mustBeLast": false,
+      "job": "release"
     },
     {
       "id": "finalize-latest-last",
@@ -471,7 +473,8 @@
         "Assert latest*.yml urls match the release assets",
         "Assert the tag is the latest published release"
       ],
-      "mustBeLast": true
+      "mustBeLast": true,
+      "job": "finalize"
     }
   ],
   "finalizeGates": [
@@ -488,9 +491,15 @@
       "recursive": false,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [
-        "自制",
-        "可替换",
+      "headings": [
+        "自制图标",
+        "替换说明"
+      ],
+      "text": [
+        "纯自制",
+        "可替换"
+      ],
+      "code": [
         "build/icons/icon.svg",
         "build/icon.png",
         "build/icon.icns",
@@ -506,14 +515,20 @@
       "recursive": false,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [
-        "打包后硬校验",
+      "headings": [
+        "打包后硬校验"
+      ],
+      "items": [
+        "唯一公开正式 Release"
+      ],
+      "text": [
+        "失败即终止",
+        "不上传"
+      ],
+      "code": [
         "codesign --verify --deep --strict",
         "xcrun stapler validate",
-        "spctl -a -vv",
-        "失败即终止",
-        "不上传",
-        "唯一公开"
+        "spctl -a -vv"
       ],
       "absent": [],
       "absentPatterns": []
@@ -524,24 +539,33 @@
       "recursive": false,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [
+      "headings": [
+        "唯一公开 Release"
+      ],
+      "items": [
+        "NSIS",
+        "免安装",
+        "无安装步骤",
+        "latest.yml"
+      ],
+      "code": [
         ".github/workflows/release.yml",
         "workflow_dispatch",
         "v*",
-        "install → lint → typecheck → test → build",
         "v0.1.2",
         "latest*.yml",
         "release:metadata",
         "codesign --verify --deep --strict",
         "xcrun stapler validate",
-        "spctl -a -vv",
-        "唯一公开 Release",
-        "- **Windows**：NSIS `.exe` 安装包 + 免安装 `.zip`（解压即用，无安装步骤）"
+        "spctl -a -vv"
       ],
-      "absent": [
-        "Windows**：NSIS `.exe` 安装包。"
+      "absent": [],
+      "absentPatterns": [
+        "NSIS `\\.exe` 安装包。"
       ],
-      "absentPatterns": []
+      "codePatterns": [
+        "^install → lint → typecheck → test → build$"
+      ]
     },
     {
       "id": "release-process-perf",
@@ -549,12 +573,16 @@
       "recursive": false,
       "anchor": "Release-time performance evidence",
       "normalizeEnDash": true,
-      "tokens": [
+      "code": [
         "1.9-2.0 GiB",
         "1.6-1.9 GiB",
         "2.15-2.5 GiB",
-        "1.3M",
-        "3 会话",
+        "1.3M"
+      ],
+      "items": [
+        "3 会话"
+      ],
+      "text": [
         "原始证据归档在仓库外",
         "archived outside the repository"
       ],
@@ -567,7 +595,7 @@
       "recursive": false,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [
+      "links": [
         "docs/release-process.md"
       ],
       "absent": [
@@ -584,7 +612,7 @@
       "recursive": false,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [
+      "links": [
         "docs/release-process.md"
       ],
       "absent": [
@@ -601,7 +629,7 @@
       "recursive": true,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [
+      "atoms": [
         "76,604",
         "11,105,870,346",
         "21.6",
@@ -625,7 +653,6 @@
       "recursive": false,
       "anchor": null,
       "normalizeEnDash": false,
-      "tokens": [],
       "absent": [
         "continue-on-error",
         "|| true",
@@ -641,9 +668,12 @@
       "heading": "Windows portable download",
       "sentences": 2,
       "sentenceSeparator": "(?<=\\.)\\s+",
-      "tokens": [
-        "Windows ships both the NSIS installer and a portable `.zip` (extract and run, no installation step).",
-        "Auto-update keeps resolving to the NSIS installer, so the portable zip is a download only."
+      "code": [
+        ".zip"
+      ],
+      "text": [
+        "no installation step",
+        "NSIS"
       ],
       "absent": []
     },
@@ -653,9 +683,12 @@
       "heading": "Windows 免安装包",
       "sentences": 2,
       "sentenceSeparator": "(?<=。)",
-      "tokens": [
-        "Windows 同时提供 NSIS 安装包与免安装 `.zip`（解压即用，无安装步骤）。",
-        "自动更新仍指向 NSIS 安装包，免安装 zip 只作为下载。"
+      "code": [
+        ".zip"
+      ],
+      "text": [
+        "无安装步骤",
+        "NSIS"
       ],
       "absent": []
     }

@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 import { BRAND_NAME, buildAboutPanelOptions, resolveBrandIconPath } from '../shared/brand'
 import { createMenuTemplate } from './menu'
-import { builder, currentTag, currentVersion, finalizeStep, packageStep, pkg, repoRoot } from './release-doc-fixtures.test-helpers'
+import { builder, currentTag, currentVersion, finalizeStep, markdownSection, packageStep, parseMarkdown, pkg, repoRoot, workflow, yamlScalars } from './release-doc-fixtures.test-helpers'
 
 // Table-driven contract for the shipped brand assets, release.yml and the release docs.
 // Expected data: src/main/__fixtures__/release-artifacts-and-brand.json (product files stay under test).
@@ -16,9 +17,13 @@ interface BrandAsset { id: string; path: string; kind: string; headerHex: string
 interface BuilderRow { id: string; path: string; value?: unknown; mustExist?: boolean }
 interface SourceRow { id: string; path: string; patterns: Strings; absentPatterns: Strings }
 interface StepRow { id: string; job: 'release' | 'finalize'; name: string; if?: string; tokens: Strings; absent: Strings; patterns: Strings; absentPatterns: Strings }
-interface StepOrderRow { id: string; names: Strings; mustBeLast: boolean }
-interface DocsRow { id: string; path: string; recursive: boolean; anchor: string | null; normalizeEnDash: boolean; tokens: Strings; absent: Strings; absentPatterns: Strings }
-interface NotesRow { id: string; doc: string; heading: string; sentences: number; sentenceSeparator: string; tokens: Strings; absent: Strings }
+interface StepOrderRow { id: string; job: 'release' | 'finalize'; names: Strings; mustBeLast: boolean }
+interface DocsRow {
+  id: string; path: string; recursive: boolean; anchor: string | null; normalizeEnDash: boolean
+  code?: Strings; codePatterns?: Strings; headings?: Strings; table?: Strings; links?: Strings; items?: Strings; text?: Strings; atoms?: Strings
+  absent: Strings; absentPatterns: Strings
+}
+interface NotesRow { id: string; doc: string; heading: string; sentences: number; sentenceSeparator: string; code: Strings; text: Strings; absent: Strings }
 interface RenderRow { id: string; builderPath: string; arch: string; ext: string; expected: string }
 interface WinCase { id: string; script: 'version' | 'feed' | 'assets'; artifacts?: 'both' | 'zip-only' | 'exe-only' | 'none'; latest?: 'installer-only' | 'with-zip'; omit?: 'none' | 'zip' | 'exe'; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings }
 interface Fixture {
@@ -74,17 +79,15 @@ const fixtureRowIds = [
 
 const stepOf = (row: StepRow): { if?: string; run?: string } | undefined =>
   row.job === 'release' ? packageStep(row.name) : finalizeStep(row.name)
-const scopedText = (text: string, anchor: string, normalizeEnDash: boolean): string => {
-  const start = text.indexOf(anchor)
-  expect(start, anchor).toBeGreaterThan(-1)
-  const scoped = text.slice(start)
-  expect(scoped.length, `${anchor}: non-empty`).toBeGreaterThan(0)
-  return normalizeEnDash ? scoped.replaceAll('–', '-') : scoped
-}
+const stepsOf = (job: 'release' | 'finalize'): Array<{ name?: string; run?: string }> => workflow.jobs?.[job]?.steps ?? []
+const allRunText = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? []).map((step) => step.run ?? '').join('\n')
 const perfArchiveText = (path: string): string =>
   readdirSync(join(repoRoot, path), { recursive: true }).map((entry) => String(entry))
     .filter((entry) => entry.endsWith('.md'))
     .map((entry) => readText(join(path, entry))).join('\n')
+const documentAtoms = (doc: ReturnType<typeof parseMarkdown>): string[] => [
+  ...doc.headings, ...doc.codeSpans, ...doc.tableCells, ...doc.listItems, ...doc.paragraphs, ...doc.links.flatMap((link) => [link.text, link.target])
+]
 
 describe('brand icon assets', () => {
   it.each(fixture.brandAssets)('$id ships at $path with its declared header', (asset) => {
@@ -194,11 +197,22 @@ describe('native About menu entry', () => {
 describe('documentation markers', () => {
   it.each(fixture.docs)('$id documents its markers', (row) => {
     useRow(row.id)
+    if (row.path.endsWith('.yml')) {
+      const text = yamlScalars(parse(readText(row.path))).join('\n')
+      expectAbsent(text, row.absent, row.id); expectNoPattern(text, row.absentPatterns, row.id); return
+    }
     const raw = row.recursive ? perfArchiveText(row.path) : readText(row.path)
-    const text = row.anchor ? scopedText(raw, row.anchor, row.normalizeEnDash) : raw
-    expectTokens(text, row.tokens, row.id)
-    expectAbsent(text, row.absent, row.id)
-    expectNoPattern(text, row.absentPatterns, row.id)
+    const scoped = row.anchor ? markdownSection(raw, row.anchor) : raw
+    const doc = parseMarkdown(row.normalizeEnDash ? scoped.replaceAll('–', '-') : scoped)
+    const groups: Array<[string, Strings | undefined]> = [['code', row.code], ['headings', row.headings], ['table', row.table], ['links', row.links], ['items', row.items], ['text', row.text], ['atoms', row.atoms]]
+    const values: Record<string, string[]> = {
+      code: doc.codeSpans, headings: doc.headings, table: doc.tableCells,
+      links: doc.links.flatMap((link) => [link.text, link.target]), items: doc.listItems, text: doc.paragraphs, atoms: documentAtoms(doc)
+    }
+    for (const [group, tokens] of groups) for (const token of tokens ?? []) expect(values[group].some((value) => value.includes(token)), `${row.id} ${group}: ${token}`).toBe(true)
+    for (const pattern of row.codePatterns ?? []) expect(values.code.some((value) => new RegExp(pattern).test(value)), `${row.id} codePattern: ${pattern}`).toBe(true)
+    const present = documentAtoms(doc).join('\n')
+    expectAbsent(present, row.absent, row.id); expectNoPattern(present, row.absentPatterns, row.id)
   })
 })
 
@@ -206,15 +220,13 @@ describe('bilingual portable-zip notes', () => {
   it.each(fixture.notesSections)('$id announces the portable zip', (row) => {
     useRow(row.id)
     const text = readText(fill(row.doc, { tag: currentTag }))
-    const start = text.indexOf(`### ${row.heading}`)
-    expect(start, `${row.id}: heading ${row.heading}`).toBeGreaterThan(-1)
-    const end = text.indexOf('\n## ', start)
-    expect(end, row.id).toBeGreaterThan(start)
-    const section = text.slice(start, end)
-    expectTokens(section, row.tokens, row.id)
-    expectAbsent(section, row.absent, row.id)
-    const body = section.replace(/^###[^\n]*\n/, '').trim()
-    const sentences = body.split(new RegExp(row.sentenceSeparator)).map((part) => part.trim()).filter(Boolean)
+    const section = parseMarkdown(markdownSection(text, row.heading))
+    expect(section.headings.some((heading) => heading.includes(row.heading)), `${row.id}: heading ${row.heading}`).toBe(true)
+    for (const token of row.code) expect(section.codeSpans.some((span) => span.includes(token)), `${row.id}: ${token}`).toBe(true)
+    for (const token of row.text) expect(section.paragraphs.some((paragraph) => paragraph.includes(token)), `${row.id}: ${token}`).toBe(true)
+    const present = section.paragraphs.join('\n')
+    expectAbsent(present, row.absent, row.id)
+    const sentences = present.split(new RegExp(row.sentenceSeparator)).map((part) => part.trim()).filter(Boolean)
     expect(sentences, row.id).toHaveLength(row.sentences)
   })
 })
@@ -235,23 +247,19 @@ describe('release workflow step contracts', () => {
 
   it.each(fixture.stepOrder)('$id keeps the workflow order', (row) => {
     useRow(row.id)
+    const names = stepsOf(row.job).map((step) => step.name ?? '')
     const indexes = row.names.map((name) => {
-      const index = releaseWorkflowRef.indexOf(`name: ${name}`)
-      expect(index, name).toBeGreaterThan(-1)
+      const index = names.indexOf(name)
+      expect(index, `${row.job}: ${name}`).toBeGreaterThan(-1)
       return index
     })
-    for (let index = 1; index < indexes.length; index += 1) {
-      expect(indexes[index], row.names[index]).toBeGreaterThan(indexes[index - 1])
-    }
-    if (row.mustBeLast) {
-      const last = row.names[row.names.length - 1]
-      expect(releaseWorkflowRef.slice(indexes[indexes.length - 1] + last.length)).not.toMatch(/\n {6}- name:/)
-    }
+    for (let index = 1; index < indexes.length; index += 1) expect(indexes[index], row.names[index]).toBeGreaterThan(indexes[index - 1])
+    if (row.mustBeLast) expect(names[names.length - 1], `${row.job}: last step`).toBe(row.names[row.names.length - 1])
   })
 
   it('never combines gh api --slurp with --jq or --template', () => {
     const config = fixture.ghApiCompatibility
-    const commands = releaseWorkflowRef.replace(/\\\r?\n\s*/g, ' ').split(/\r?\n/)
+    const commands = allRunText.replace(/\\\r?\n\s*/g, ' ').split(/\r?\n/)
       .filter((line) => /\bgh api\b/.test(line) && !line.trimStart().startsWith('#'))
     expect(commands.length).toBeGreaterThan(0)
     for (const command of commands.filter((line) => line.includes(config.slurp))) {
@@ -271,7 +279,6 @@ describe('single public release gate', () => {
 // scripts themselves run against tempdir fixtures.
 // ---------------------------------------------------------------------------
 
-const releaseWorkflowRef = readText('.github/workflows/release.yml')
 const renderName = (builderPath: string, ext: string, arch = 'x64'): string =>
   fill(String(pick(builder as unknown, builderPath) ?? ''), {
     productName: String(builder.productName ?? ''), version: currentVersion, arch, ext
@@ -388,6 +395,14 @@ describe('Windows portable zip release surface', () => {
 })
 
 describe('fixture ledger coverage', () => {
+  it('keeps every documentation token a structural atom, never a sentence', () => {
+    const docs = fixture.docs.flatMap((row) => [row.code, row.headings, row.table, row.links, row.items, row.text, row.atoms, row.absent].flatMap((tokens) => tokens ?? []))
+    const notes = fixture.notesSections.flatMap((row) => [...row.code, ...row.text, ...row.absent])
+    const sentence = /[，。：；]/
+    const longEnglish = (token: string): boolean => token.trim().split(/\s+/).filter(Boolean).length >= 8
+    expect([...docs, ...notes].filter((token) => sentence.test(token) || longEnglish(token))).toEqual([])
+  })
+
   it('consumes every fixture row exactly once by id', () => {
     expect(new Set(fixtureRowIds).size, 'duplicate fixture ids').toBe(fixtureRowIds.length)
     expect([...referencedIds].sort(), 'unused fixture rows').toEqual([...fixtureRowIds].sort())

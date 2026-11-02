@@ -324,7 +324,8 @@
         "Assert latest*.yml urls match the release assets",
         "Assert the tag is the latest published release"
       ],
-      "mustBeLast": true
+      "mustBeLast": true,
+      "job": "finalize"
     },
     {
       "id": "metadata-gate-position",
@@ -333,31 +334,24 @@
         "Assert latest*.yml urls match the release assets",
         "Assert the tag is the latest published release"
       ],
-      "mustBeLast": false
+      "mustBeLast": false,
+      "job": "finalize"
     }
   ],
   "workflowChecks": [
     {
       "id": "workflow-trigger-and-single-release",
+      "scope": "yaml",
       "tokens": [],
       "absent": [
         "--publish always"
       ],
-      "patterns": [
-        "tags:\\s*\\n\\s*-\\s*'v\\*'",
-        "name: Quality gates",
-        "needs: gates",
-        "target: mac",
-        "target: win",
-        "target: linux",
-        "GH_REPO: \\$\\{\\{ github\\.repository \\}\\}",
-        "electron-builder --\\$\\{\\{ matrix\\.target \\}\\} --publish never",
-        "gh api --method DELETE"
-      ],
+      "patterns": [],
       "absentPatterns": []
     },
     {
       "id": "workflow-single-release-commands",
+      "scope": "runs",
       "tokens": [],
       "absent": [],
       "patterns": [
@@ -369,6 +363,7 @@
     },
     {
       "id": "workflow-asset-family",
+      "scope": "runs",
       "tokens": [
         ".dmg",
         ".zip",
@@ -385,6 +380,7 @@
     },
     {
       "id": "workflow-legacy-apple-id",
+      "scope": "yaml",
       "tokens": [],
       "absent": [],
       "patterns": [],
@@ -781,6 +777,71 @@
         "status": "verified",
         "assets": 12
       }
-    ]
+    ],
+    "currentVersion": {
+      "version": "v0.2.16",
+      "assets": [
+        {
+          "name": "latest-linux.yml",
+          "bytes": 535,
+          "sha256": "2b313ae61c76f700fc6183b3f10c6994f3b8895c1840bcd4c916c1f353f83e8a"
+        },
+        {
+          "name": "latest-mac.yml",
+          "bytes": 521,
+          "sha256": "8ff0cfa49dc749271ceea392fbd8776d77b9a31cc63f49ef922243e19898ac76"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 354,
+          "sha256": "c4ef230d5d5c4644d4c07782d0bd042128dc26c523f803663fa2199d29333a38"
+        },
+        {
+          "name": "opencompare_0.2.16_amd64.deb",
+          "bytes": 92234340,
+          "sha256": "2d5f77d4466c58a6cf6957b150e4aff171ae07848139d7e9dba5f8a1d7d66b9f"
+        },
+        {
+          "name": "OpenCompare-0.2.16-arm64-mac.zip",
+          "bytes": 107355131,
+          "sha256": "5bf180e7646831e2ac5fdd9587f8d2ba975694ee890b38de82b6edbda1e0c0dc"
+        },
+        {
+          "name": "OpenCompare-0.2.16-arm64-mac.zip.blockmap",
+          "bytes": 113686,
+          "sha256": "d46c98aecc0f16ba74eb6251ecd4c8672ff5b8b56dc8dced46ca9d9d397d9f45"
+        },
+        {
+          "name": "OpenCompare-0.2.16-arm64.dmg",
+          "bytes": 111477257,
+          "sha256": "4036c3a3a8523362c42bac6f0256b724edb6c185117a2b2f6c63f4b6bb74690b"
+        },
+        {
+          "name": "OpenCompare-0.2.16-arm64.dmg.blockmap",
+          "bytes": 118259,
+          "sha256": "b3c2847545b29ec19a30a96fcb41f70d31abfb5e6e233720a2a25ed60214d809"
+        },
+        {
+          "name": "OpenCompare-0.2.16-win-x64.zip",
+          "bytes": 131649968,
+          "sha256": "175403582b59fca4d1a0d2f6e1b97d1b393979b98e3463012279e1788fb6d0df"
+        },
+        {
+          "name": "OpenCompare-0.2.16.AppImage",
+          "bytes": 118158769,
+          "sha256": "d08519e28c132e1338ab2d285c43df3cf0dbf3465ecd543048ce3498b28841d4"
+        },
+        {
+          "name": "OpenCompare-Setup-0.2.16.exe",
+          "bytes": 101434344,
+          "sha256": "cb67421b65a26083b475bdfb8e939ebfe7dfe87df91315002f76abf353ed68a6"
+        },
+        {
+          "name": "OpenCompare-Setup-0.2.16.exe.blockmap",
+          "bytes": 106602,
+          "sha256": "78be1cf81464102ddc22c670a720382047bf157aa54c219295c7b06b747dd3a4"
+        }
+      ]
+    }
   }
 }

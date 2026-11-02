@@ -49,20 +49,29 @@ export const builderConfig = readFileSync(join(repoRoot, 'electron-builder.yml')
 const entitlementsPath = builder.mac?.entitlements ?? ''
 export const macEntitlements = entitlementsPath ? readFileSync(join(repoRoot, entitlementsPath), 'utf8') : ''
 
-export const releaseWorkflow = readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8')
+const releaseWorkflow = readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8')
 
 export interface WorkflowStep {
   name?: string
   if?: string
   run?: string
   uses?: string
+  env?: Record<string, string>
   with?: Record<string, string>
 }
 
-export const workflow = parse(releaseWorkflow) as {
-  jobs?: Record<string, { steps?: WorkflowStep[] }>
+export interface WorkflowJob {
+  name?: string
+  needs?: string | string[]
+  strategy?: { matrix?: { include?: Array<Record<string, string>> } }
+  steps?: WorkflowStep[]
 }
-const gatesSteps: WorkflowStep[] = workflow.jobs?.gates?.steps ?? []
+
+export const workflow = parse(releaseWorkflow) as {
+  on?: Record<string, { tags?: string[]; inputs?: Record<string, { default?: string }> }>
+  jobs?: Record<string, WorkflowJob>
+}
+export const gatesSteps: WorkflowStep[] = workflow.jobs?.gates?.steps ?? []
 export const gateStep = (name: string): WorkflowStep | undefined =>
   gatesSteps.find((step) => step.name === name)
 const packageSteps: WorkflowStep[] = workflow.jobs?.release?.steps ?? []
@@ -88,6 +97,61 @@ const readNotes = (tag: string): string => {
 export const releaseNotes = readNotes(currentTag)
 const bilingualNotesPath = join(repoRoot, `docs/release-notes/${currentTag}.zh-CN.md`)
 export const bilingualNotes = existsSync(bilingualNotesPath) ? readFileSync(bilingualNotesPath, 'utf8') : ''
+
+/** Markdown atoms a document assertion may read; never the raw document text. */
+export interface MarkdownDoc {
+  headings: string[]
+  codeSpans: string[]
+  tableCells: string[]
+  links: Array<{ text: string; target: string }>
+  listItems: string[]
+  paragraphs: string[]
+}
+
+export const parseMarkdown = (markdown: string): MarkdownDoc => {
+  const doc: MarkdownDoc = { headings: [], codeSpans: [], tableCells: [], links: [], listItems: [], paragraphs: [] }
+  let fenced = false
+  let paragraph: string[] = []
+  const flush = (): void => {
+    if (paragraph.length > 0) doc.paragraphs.push(paragraph.join(' ').trim())
+    paragraph = []
+  }
+  for (const raw of markdown.replaceAll('\r', '').split('\n')) {
+    const line = raw.trimEnd()
+    if (/^\s*(?:```|~~~)/.test(line)) { flush(); fenced = !fenced; continue }
+    if (fenced) { doc.codeSpans.push(line.trim()); continue }
+    for (const match of line.matchAll(/`([^`]+)`/g)) doc.codeSpans.push(match[1])
+    for (const match of line.matchAll(/\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) doc.links.push({ text: match[1], target: match[2] })
+    for (const match of line.matchAll(/<((?:https?|mailto):[^>]+)>/g)) doc.links.push({ text: match[1], target: match[1] })
+    const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line)
+    if (heading !== null) { flush(); doc.headings.push(heading[1]); continue }
+    if (/^\s*\|/.test(line)) { flush(); doc.tableCells.push(...line.split('|').slice(1, -1).map((cell) => cell.trim()).filter(Boolean)); continue }
+    const listItem = /^\s*(?:[-*+]|\d+\.)\s+(.+)$/.exec(line)
+    if (listItem !== null) { flush(); doc.listItems.push(listItem[1].trim()); continue }
+    if (line.trim() === '' || /^\s*(?:>|<!--|--$)/.test(line)) { flush(); continue }
+    paragraph.push(line.trim())
+  }
+  flush()
+  return doc
+}
+
+/** Body of the first heading that contains `anchor`, up to the next same-or-higher heading. */
+export const markdownSection = (markdown: string, anchor: string): string => {
+  const lines = markdown.replaceAll('\r', '').split('\n')
+  const start = lines.findIndex((line) => /^#{1,6}\s/.test(line) && line.includes(anchor))
+  if (start < 0) return ''
+  const level = /^(#{1,6})/.exec(lines[start])?.[1].length ?? 6
+  const end = lines.findIndex((line, index) => index > start && new RegExp(`^#{1,${level}}\\s`).test(line))
+  return lines.slice(start, end < 0 ? undefined : end).join('\n')
+}
+
+/** Every scalar string value in a parsed YAML document. */
+export const yamlScalars = (value: unknown): string[] => {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(yamlScalars)
+  if (value !== null && typeof value === 'object') return Object.values(value).flatMap(yamlScalars)
+  return []
+}
 
 export const signingSecrets = [
   'CSC_LINK',
@@ -119,8 +183,10 @@ export const releaseFacts = {
     changelogTopTag: /^## (.+)$/m.exec(changelog)?.[1] ?? '',
     notesHeadingTag: tagIn(firstHeading(releaseNotes)),
     readmeLine5Tag: tagIn(statusLine(readmeEn)),
-    workflowDispatchDefault: /default:\s*'([^']+)'/.exec(releaseWorkflow)?.[1] ?? '',
-    processDocDefault: /default:\s*'([^']+)'/.exec(releaseProcessDoc)?.[1] ?? ''
+    workflowDispatchDefault: workflow.on?.workflow_dispatch?.inputs?.tag?.default ?? '',
+    processDocDefault: parseMarkdown(releaseProcessDoc).codeSpans
+      .map((span) => /^default:\s*'([^']+)'$/.exec(span)?.[1] ?? '')
+      .find((tag) => tag !== '') ?? ''
   },
   notes: {
     tag: currentTag,
