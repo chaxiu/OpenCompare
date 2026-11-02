@@ -2,710 +2,399 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-
-// Read-only assertions over docs/release-evidence/v0.2.1.md. This file never
-// downloads, unpacks, mounts, signs, notarizes or writes to git; it only parses
-// the evidence Markdown so a missing/fabricated evidence record fails `pnpm test`.
+// Read-only assertions over docs/release-evidence/*.md and the ledger that pins
+// their historical asset rows. No download, unpack, mount, sign, notarize or git
+// write happens here; a missing or fabricated record fails `pnpm test`.
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
-const evidencePath = join(repoRoot, 'docs/release-evidence/v0.2.1.md')
-
-const PASSING_MARKERS = [
-  'valid on disk',
-  'satisfies its Designated Requirement',
-  'The validate action worked!',
-  'source=Notarized Developer ID'
-]
+const evidenceDir = join(repoRoot, 'docs/release-evidence')
+const ledgerPath = join(repoRoot, 'docs/release-evidence-ledger.json')
 
 type EvidenceStatus = 'verified' | 'blocked'
-
-interface EvidenceReport {
-  status: EvidenceStatus | null
-  problems: string[]
+interface LedgerAsset { name: string; bytes: number; sha256: string }
+interface ExtraDigest { label: string; sha256: string }
+interface LedgerVersion { version: string; status: EvidenceStatus; assets: LedgerAsset[]; extraDigests: ExtraDigest[] }
+interface Ledger { versions: LedgerVersion[] }
+interface EvidenceReport { status: EvidenceStatus | null; problems: string[] }
+interface MarkerRule { marker: string; minimum: number }
+interface VersionSpec {
+  sections: string
+  commands: string
+  identities: string
+  markers: MarkerRule[]
+  jobs: string[]
+  finalize: boolean
+  sourceLabels: string
+  facts: Array<[heading: string, text: string]>
+  minBlockedBullets?: number
 }
+const HEX64 = /^[0-9a-f]{64}$/
+const PASSING_MARKERS = ['valid on disk', 'satisfies its Designated Requirement', 'The validate action worked!', 'source=Notarized Developer ID']
+const JOBS = ['Quality gates', 'Package mac', 'Package win', 'Package linux', 'Publish the GitHub Release']
+const SIGNING_MARKERS: MarkerRule[] = ['valid on disk', 'satisfies its Designated Requirement', 'The validate action worked!', 'accepted', 'source=Notarized Developer ID'].map((marker) => ({ marker, minimum: 2 }))
+const list = (value: string): string[] => (value.trim() ? value.split(' | ') : [])
+const ledgerSource = existsSync(ledgerPath) ? readFileSync(ledgerPath, 'utf8') : ''
+const ledger = JSON.parse(ledgerSource || '{"versions":[]}') as Ledger
+const versions = ledger.versions
+const docCache = new Map<string, string>()
+const readEvidence = (version: string): string => {
+  const path = join(evidenceDir, `${version}.md`)
+  const doc = docCache.get(version) ?? (existsSync(path) ? readFileSync(path, 'utf8') : '')
+  docCache.set(version, doc)
+  return doc
+}
+const sha256Values = (doc: string): string[] => [...new Set(doc.match(/[0-9a-f]{64}/g) ?? [])]
+const occurrences = (text: string, marker: string): number => text.split(marker).length - 1
+const parseStatus = (doc: string): string | null => /^\s*(?:-\s*)?status:\s*(\S+)\s*$/m.exec(doc)?.[1] ?? null
 
-const sha256Values = (doc: string): string[] => [
-  ...new Set(doc.match(/[0-9a-f]{64}/g) ?? [])
-]
+// Three formats live in the pinned history: 3-column markdown, 4-column
+// markdown (v0.2.7 adds the public URL) and the v0.2.2 TSV asset listing.
+const parseAssetRows = (doc: string): LedgerAsset[] => {
+  const rows: LedgerAsset[] = []
+  for (const line of doc.split(/\r?\n/)) {
+    const markdown = /^\| `([^`]+)` \| ([\d,]+) \| `([0-9a-f]{64})` \|(?: .+ \|)?$/.exec(line)
+    if (markdown) {
+      rows.push({ name: markdown[1], bytes: Number(markdown[2].replaceAll(',', '')), sha256: markdown[3] })
+      continue
+    }
+    const tsv = /^([\w.@-]+)\t(\d+)\tsha256:([0-9a-f]{64})$/.exec(line)
+    if (tsv) rows.push({ name: tsv[1], bytes: Number(tsv[2]), sha256: tsv[3] })
+  }
+  return rows
+}
+const sectionText = (doc: string, heading: string): string => {
+  const start = doc.indexOf(heading)
+  if (start < 0) return ''
+  const rest = doc.slice(start + heading.length)
+  const end = rest.search(/\n## /)
+  return end < 0 ? rest : rest.slice(0, end)
+}
+const tableRows = (doc: string, heading: string): string[][] =>
+  sectionText(doc, heading).split(/\r?\n/).filter((line) => line.startsWith('| ')).map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()))
 
-const inspectReleaseEvidence = (doc: string, version = 'v0.2.1'): EvidenceReport => {
+// Baseline pure inspector: status grammar, verified marker pairs and the blocked
+// branch. Fixture digests stay synthetic so no history is copied into this file.
+const inspectReleaseEvidence = (doc: string, version: string): EvidenceReport => {
   const problems: string[] = []
   const text = doc.trim()
   if (!text) return { status: null, problems: ['证据文件缺失或为空'] }
   if (!text.includes(version)) problems.push(`证据文件未声明 ${version}`)
-
-  const statusMatch = text.match(/^\s*(?:-\s*)?status:\s*(\S+)\s*$/m)
-  const status = statusMatch?.[1]
+  const status = parseStatus(text)
   if (status !== 'verified' && status !== 'blocked') {
     problems.push('status 必须为 verified 或 blocked')
     return { status: null, problems }
   }
-
-  const occurrences = (marker: string): number => text.split(marker).length - 1
-
   if (status === 'verified') {
-    const required: Array<[marker: string, minimum: number]> = [
-      ['valid on disk', 2],
-      ['satisfies its Designated Requirement', 2],
-      ['The validate action worked!', 2],
-      ['accepted', 2],
-      ['source=Notarized Developer ID', 2]
-    ]
-    for (const [marker, minimum] of required) {
-      if (occurrences(marker) < minimum) {
-        problems.push(`verified 分支需记录至少 ${minimum} 处「${marker}」`)
-      }
+    for (const { marker, minimum } of SIGNING_MARKERS) {
+      if (occurrences(text, marker) < minimum) problems.push(`verified 分支需记录至少 ${minimum} 处「${marker}」`)
     }
-    if (sha256Values(text).length < 2) {
-      problems.push('verified 分支需记录两个不同产物的 SHA-256')
-    }
+    if (sha256Values(text).length < 2) problems.push('verified 分支需记录两个不同产物的 SHA-256')
   } else {
-    for (const marker of PASSING_MARKERS) {
-      if (text.includes(marker)) {
-        problems.push(`blocked 分支不得出现通过标记「${marker}」`)
-      }
-    }
-    if (sha256Values(text).length > 0) {
-      problems.push('blocked 分支不得记录产物 SHA-256')
-    }
+    for (const marker of PASSING_MARKERS) if (text.includes(marker)) problems.push(`blocked 分支不得出现通过标记「${marker}」`)
+    if (sha256Values(text).length > 0) problems.push('blocked 分支不得记录产物 SHA-256')
   }
-
   return { status, problems }
 }
 
-const readEvidence = (path = evidencePath): string =>
-  existsSync(path) ? readFileSync(path, 'utf8') : ''
-
-const verifiedFixture = (): string =>
-  [
-    '# v0.2.1 本机 dmg/zip 签名公证取证证据',
-    'status: verified',
-    '',
-    'zip app: valid on disk',
-    'zip app: satisfies its Designated Requirement',
-    'dmg app: valid on disk',
-    'dmg app: satisfies its Designated Requirement',
-    'zip app: The validate action worked!',
-    'dmg app: The validate action worked!',
-    'zip app: accepted',
-    'dmg app: accepted',
-    'zip app: source=Notarized Developer ID',
-    'dmg app: source=Notarized Developer ID',
-    '',
-    `dmg sha256: ${'a'.repeat(64)}`,
-    `zip sha256: ${'b'.repeat(64)}`
-  ].join('\n')
-
-const blockedFixture = (): string =>
-  [
-    '# v0.2.1 本机 dmg/zip 签名公证取证证据',
-    'status: blocked',
-    '',
-    'git ls-remote --tags origin refs/tags/v0.2.1',
-    '',
-    'gh release view v0.2.1 --repo chaxiu/OpenCompare --json tagName,isDraft,isPrerelease,url,assets',
-    '',
-    'release not found'
-  ].join('\n')
-
-describe('v0.2.1 release evidence document', () => {
-  it('exists, is non-empty and carries a supported status', () => {
-    expect(existsSync(evidencePath)).toBe(true)
-    const doc = readEvidence()
-    expect(doc.trim().length).toBeGreaterThan(0)
-    expect(doc).toContain('v0.2.1')
-
-    const { status, problems } = inspectReleaseEvidence(doc)
-    expect(problems).toEqual([])
-    expect(status === 'verified' || status === 'blocked').toBe(true)
-  })
-
-  it('blocked record keeps readiness-gate raw output and escalation request', () => {
-    const doc = readEvidence()
-    expect(doc).toContain('git ls-remote --tags origin refs/tags/v0.2.1')
-    expect(doc).toContain('gh release view v0.2.1 --repo chaxiu/OpenCompare')
-    expect(doc).toContain('release not found')
-    expect(doc).toContain('缺失项')
-    expect(doc).toContain('待人工动作')
-    expect(doc).toContain('升级')
-  })
-})
-
-describe('inspectReleaseEvidence', () => {
-  it('accepts a complete verified record', () => {
-    expect(inspectReleaseEvidence(verifiedFixture())).toEqual({
-      status: 'verified',
-      problems: []
-    })
-  })
-
-  it('accepts a blocked record without passing output', () => {
-    expect(inspectReleaseEvidence(blockedFixture())).toEqual({
-      status: 'blocked',
-      problems: []
-    })
-  })
-
-  it('rejects a missing or empty record', () => {
-    expect(inspectReleaseEvidence('').status).toBeNull()
-    expect(inspectReleaseEvidence('   \n').problems.length).toBeGreaterThan(0)
-  })
-
-  it('rejects an unsupported status value', () => {
-    const { status, problems } = inspectReleaseEvidence(
-      blockedFixture().replace('status: blocked', 'status: pending')
-    )
-    expect(status).toBeNull()
-    expect(problems).toContain('status 必须为 verified 或 blocked')
-  })
-
-  it('rejects a verified record that misses any required marker pair', () => {
-    const markers = [
-      'valid on disk',
-      'satisfies its Designated Requirement',
-      'The validate action worked!',
-      'accepted',
-      'source=Notarized Developer ID'
-    ]
-    for (const marker of markers) {
-      const doc = verifiedFixture()
-        .split('\n')
-        .filter((line) => !line.includes(marker))
-        .join('\n')
-      expect(inspectReleaseEvidence(doc).problems.length).toBeGreaterThan(0)
-    }
-  })
-
-  it('rejects a verified record with fewer than two distinct sha256 values', () => {
-    const doc = verifiedFixture().replace('b'.repeat(64), 'a'.repeat(64))
-    expect(inspectReleaseEvidence(doc).problems).toContain(
-      'verified 分支需记录两个不同产物的 SHA-256'
-    )
-  })
-
-  it('rejects a blocked record that carries passing output', () => {
-    for (const marker of PASSING_MARKERS) {
-      const doc = `${blockedFixture()}\n${marker}\n`
-      expect(inspectReleaseEvidence(doc).problems.length).toBeGreaterThan(0)
-    }
-  })
-
-  it('rejects a blocked record that carries an artifact sha256', () => {
-    const doc = `${blockedFixture()}\ndmg sha256: ${'c'.repeat(64)}\n`
-    expect(inspectReleaseEvidence(doc).problems).toContain(
-      'blocked 分支不得记录产物 SHA-256'
-    )
-  })
-})
-
-// Same read-only parser, different evidence record. The v0.2.2 file is the
-// published-release counterpart of the v0.2.1 blocked record above.
-const evidenceV022Path = join(repoRoot, 'docs/release-evidence/v0.2.2.md')
-
-describe('v0.2.2 release evidence document', () => {
-  it('exists, is non-empty, declares the version once and passes the verified branch', () => {
-    expect(existsSync(evidenceV022Path)).toBe(true)
-    const doc = readEvidence(evidenceV022Path)
-    expect(doc.trim().length).toBeGreaterThan(0)
-    expect(doc).toContain('v0.2.2')
-    expect(doc.match(/^status:\s*verified$/gm)?.length).toBe(1)
-
-    const { status, problems } = inspectReleaseEvidence(doc, 'v0.2.2')
-    expect(problems).toEqual([])
-    expect(status).toBe('verified')
-  })
-
-  it('records the public dmg and zip SHA-256 values', () => {
-    const doc = readEvidence(evidenceV022Path)
-    expect(doc).toContain('7c7232b9c02431c36d98a6b367436697ab379e9ef8c97e30c59b29e57eaa6ae8')
-    expect(doc).toContain('2f0a2e0fb00cacaa442ffa4796c47afc3e438555a8641dc8234aa3f608b12f34')
-  })
-
-  it('records the read-only forensic commands and the host facts', () => {
-    const doc = readEvidence(evidenceV022Path)
-    for (const command of [
-      'gh release view v0.2.2 --repo chaxiu/OpenCompare',
-      'shasum -a 256',
-      'ditto -x -k',
-      'hdiutil attach -nobrowse -readonly',
-      'hdiutil detach',
-      'codesign -dv --verbose=4',
-      'sw_vers',
-      'uname -m'
-    ]) {
-      expect(doc).toContain(command)
-    }
-    expect(doc).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}/)
-  })
-
-  it('records both bundle identities and the packaged brand icon digest', () => {
-    const doc = readEvidence(evidenceV022Path)
-    expect(doc).toContain('CFBundleShortVersionString')
-    expect(doc).toContain('CFBundleIconFile')
-    for (const marker of [
-      /Authority=Developer ID Application: Tao Zhu \(3X4J53U6RY\)/g,
-      /TeamIdentifier=3X4J53U6RY/g,
-      /flags=0x10000\(runtime\)/g
-    ]) {
-      expect(doc.match(marker)?.length ?? 0).toBeGreaterThanOrEqual(2)
-    }
-    expect(doc).toContain('a099851e7c8888e244410a5490800e837920d337c2588fb9e70ce577c2fc0f8f')
-  })
-
-  it('flags a document that does not declare the expected version', () => {
-    expect(inspectReleaseEvidence(readEvidence(), 'v0.2.2').problems).toContain(
-      '证据文件未声明 v0.2.2'
-    )
-  })
-})
-
-// v0.2.4 shipped. Its evidence file is a read-only record of the tag-triggered
-// CI run plus the host-side recheck; the table below mirrors the run's
-// evidence/assets-sha256.txt and must stay byte-identical.
-const evidenceV024Path = join(repoRoot, 'docs/release-evidence/v0.2.4.md')
-
-const v024Assets: Array<[name: string, sha256: string]> = [
-  ['latest-linux.yml', 'f1a51b5d107b942b49258773f9cf52bf3a47c7dfd72aa86f8d2772d899285e72'],
-  ['latest-mac.yml', '1b47bfa931f32ee1398dcef13f937bbff02c1ec6d8d3e874dff34c2f4d5bf0ba'],
-  ['latest.yml', '8e5c05e69dd9334009089a44e1962538413c5ecbd995b018b0f3624792e6eaca'],
-  ['opencompare_0.2.4_amd64.deb', '4ddd85c57444746eded750d87b25583de82166d3dc5dc3f663b8db257671c972'],
-  ['OpenCompare-0.2.4-arm64-mac.zip', '8f8ff17af1e8439fa8a2c4a3ee1819c4a8e4e2ec6c1235e390fbc047674ddca4'],
-  ['OpenCompare-0.2.4-arm64-mac.zip.blockmap', '855090700f75c0a2577f8ed3631f650c5dad0a498531af48ddba4e2a516df716'],
-  ['OpenCompare-0.2.4-arm64.dmg', 'ae0dc1081db73e0b2f9148fee8cdee8110cc1a12189246a2a5f60f22e566d6f3'],
-  ['OpenCompare-0.2.4-arm64.dmg.blockmap', '2bc656ab743cc90b1c260622a9af4962ead1f6ef05a301fda20805ae90d63d73'],
-  ['OpenCompare-0.2.4.AppImage', 'fcb6c2c95cac7db51747d5238cdcdc4d8fef0c2bfe62c6f1f111f6ec66a4f896'],
-  ['OpenCompare.Setup.0.2.4.exe', 'd7e39acb8dead8a2adca9e7a016f7b5ff0f3c99445333fcae7b45916a7195ede'],
-  ['OpenCompare.Setup.0.2.4.exe.blockmap', 'fa26cbb8915371acc2626f90afdd0e793e84e663326e892e80678533fc9843d9']
-]
-
-const v024Jobs = [
-  'Quality gates',
-  'Package mac',
-  'Package win',
-  'Package linux',
-  'Publish the GitHub Release'
-]
-
-describe('v0.2.4 release evidence document', () => {
-  const doc = (): string => readEvidence(evidenceV024Path)
-
-  it('exists, is non-empty and declares the verified run identity', () => {
-    expect(existsSync(evidenceV024Path)).toBe(true)
-    const text = doc()
-    expect(text.trim().length).toBeGreaterThan(0)
-    expect(text.match(/^status:\s*verified$/gm)?.length).toBe(1)
-    for (const marker of [
-      'v0.2.4',
-      '39692988051',
-      '55d3af2db1632d05f94b3eca88020240714b21f6'
-    ]) {
-      expect(text).toContain(marker)
-    }
-  })
-
-  it('records every job with the CI success conclusion', () => {
-    const rows = doc()
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith('| '))
-    for (const job of v024Jobs) {
-      const row = rows.find((line) => line.startsWith(`| ${job} |`))
-      expect(row, `missing job row ${job}`).toBeDefined()
-      expect(row).toContain('success')
-    }
-    expect(rows.filter((line) => line.startsWith('| Package ')).length).toBe(3)
-  })
-
-  it('lists exactly the 11 published assets and their sha256 values', () => {
-    const text = doc()
-    const rows = text
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith('| `'))
-    const listed = rows
-      .map((row) => /^\| `([^`]+)` \|[^|]*\| `([0-9a-f]{64})` \|$/.exec(row))
-      .filter((match): match is RegExpExecArray => match !== null)
-      .map((match) => [match[1], match[2]] as const)
-    expect(listed.map(([name]) => name).sort()).toEqual(v024Assets.map(([name]) => name).sort())
-    for (const [name, sha] of v024Assets) {
-      expect(listed.find(([listedName]) => listedName === name)?.[1]).toBe(sha)
-    }
-    // No sha256 outside the published asset list.
-    const digests = new Set(text.match(/[0-9a-f]{64}/g) ?? [])
-    expect([...digests].sort()).toEqual(v024Assets.map(([, sha]) => sha).sort())
-  })
-
-  it('records the mac signing markers with their source', () => {
-    const text = doc()
-    for (const marker of [
-      'notarization successful',
-      'valid on disk',
-      'satisfies its Designated Requirement',
-      'The validate action worked!',
-      'accepted',
-      'source=Notarized Developer ID',
-      'Authority=Developer ID Application: Tao Zhu (3X4J53U6RY)',
-      'TeamIdentifier=3X4J53U6RY',
-      'flags=0x10000(runtime)'
-    ]) {
-      expect(text).toContain(marker)
-    }
-    expect(text).toContain('CI 日志')
-    expect(text).toContain('本机复核')
-  })
-
-  it('records the release uniqueness and latest gates', () => {
-    const text = doc()
-    expect(text).toContain('releases for v0.2.4: 1 (drafts: 0, prereleases: 0)')
-    expect(text).toContain('latest published release: v0.2.4 (this tag: v0.2.4)')
-    expect(text).toContain('11/11')
-  })
-
-  it('records the Windows update url defect as an unfixed P2 leftover', () => {
-    const text = doc()
-    for (const marker of [
-      'OpenCompare-Setup-0.2.4.exe',
-      'OpenCompare.Setup.0.2.4.exe',
-      'P2',
-      'v0.2.2 起既有',
-      '无运行时消费者',
-      '不重发',
-      '不改写'
-    ]) {
-      expect(text).toContain(marker)
-    }
-  })
-
-  it('records the embedded AppImage blockmap conclusion', () => {
-    const text = doc()
-    expect(text).toContain('blockMapSize')
-    expect(text).toContain('*.AppImage.blockmap')
-    expect(text).toContain('内嵌')
-  })
-})
-
-// v0.2.5 shipped. Its evidence file is the post-release counterpart of the
-// v0.2.4 record: the CI run identity, the 11 published asset digests, the raw
-// codesign/stapler/spctl output for both macOS products, and the local
-// `pnpm release:metadata` transcript. The inspector below is v0.2.5-specific so
-// the v0.2.1 / v0.2.4 blocks stay byte-identical.
-const evidenceV025Path = join(repoRoot, 'docs/release-evidence/v0.2.5.md')
-
-const v025Assets: Array<[name: string, sha256: string]> = [
-  ['latest-linux.yml', '1da4010a6aadca05009d8f66be60943b3e494e82b36b39f6a4828adc0fe9706b'],
-  ['latest-mac.yml', '576e08f85d3d2698866bab6475c3d0c3fe157f203c50aae3d8380e357945ce37'],
-  ['latest.yml', '00d8f97455e0e8b319d46b9c870f17ca8ed45dcbf66780b9c899b93903010f29'],
-  ['opencompare_0.2.5_amd64.deb', '4d126dd1d35e64fbaeca67e512b70a590485382695c7daa6398aede7c50c68ba'],
-  ['OpenCompare-0.2.5-arm64-mac.zip', '81cda3cc14413b15a5ad2f75256b562efcdfc9fef2bde480c344e0503663f121'],
-  ['OpenCompare-0.2.5-arm64-mac.zip.blockmap', 'b5a2a66f5f2f5faceabdb46d2cf2115f32f8ea85c2f49e740038fbd8657eaf4e'],
-  ['OpenCompare-0.2.5-arm64.dmg', '2068667f22bd92e38927732128443127e18f06c0fc1fe7da8ec1442d6142c527'],
-  ['OpenCompare-0.2.5-arm64.dmg.blockmap', 'ba74335cd738c14e5b12a7140909b1131b097592eebca53b775c5b5f103fd1a4'],
-  ['OpenCompare-0.2.5.AppImage', 'e0be93f63363b7ce93afb2d9be1886ff8dcf692642a56d010b19ecd0d29883b6'],
-  ['OpenCompare-Setup-0.2.5.exe', '6fbf4698c284cf55109c07994cb65c145c5612685c249e7e6922a04cc8c62402'],
-  ['OpenCompare-Setup-0.2.5.exe.blockmap', '272867f6e7655c1cdba52b5bdff424c3e53e3d1ef7b446ea365bf279bb606442']
-]
-
-// Raw `codesign -dv --verbose=4` output carries the signed bundle's own
-// CandidateCDHashFull / CMSDigest. It is not an asset digest, so it is the only
-// 64-hex value allowed outside the published asset table.
-const v025BundleCdHash = '3a46aec75cdbf188cade0bcc04bb297f5fe91c4298b3efcc7dc5a19c21f56adb'
-
-const v025Jobs = [
-  'Quality gates',
-  'Package mac',
-  'Package win',
-  'Package linux',
-  'Publish the GitHub Release'
-]
-
-interface V025Report {
-  status: 'verified' | null
-  problems: string[]
-}
-
-const v025AssetRows = (doc: string): Array<[name: string, bytes: string, sha256: string]> => {
-  const start = doc.indexOf('## 2.')
-  const end = doc.indexOf('\n## 3.')
-  if (start < 0 || end <= start) return []
-  const rows: Array<[string, string, string]> = []
-  for (const line of doc.slice(start, end).split(/\r?\n/)) {
-    const match = /^\| `([^`]+)` \| ([\d,]+) \| `([0-9a-f]{64})` \|$/.exec(line)
-    if (match) rows.push([match[1], match[2], match[3]])
-  }
-  return rows
-}
-
-const inspectV025Evidence = (doc: string): V025Report => {
+// Ledger-driven inspector: every expected value is injected from the JSON, so a
+// tampered ledger row or a tampered document row both surface as a named problem.
+const inspectLedgerEvidence = (doc: string, node: LedgerVersion): EvidenceReport => {
   const problems: string[] = []
   const text = doc.trim()
   if (!text) return { status: null, problems: ['证据文件缺失或为空'] }
-  if (!text.includes('v0.2.5')) problems.push('证据文件未声明 v0.2.5')
-
+  if (!text.includes(node.version)) problems.push(`证据文件未声明 ${node.version}`)
   const statusLines = text.match(/^\s*(?:-\s*)?status:\s*(\S+)\s*$/gm) ?? []
-  const statusValues = text.match(/^\s*(?:-\s*)?status:\s*(\S+)\s*$/m)
   if (statusLines.length !== 1) problems.push('全文必须恰好一处 status: 行')
-  if (statusValues?.[1] !== 'verified') {
-    problems.push('status 必须为 verified')
-    return { status: null, problems }
+  const status = parseStatus(text)
+  if (status !== node.status) problems.push(`${node.version} status 必须为 ${node.status}`)
+  if (node.status === 'blocked') {
+    for (const marker of PASSING_MARKERS) if (text.includes(marker)) problems.push(`blocked 分支不得出现通过标记「${marker}」`)
+    if (sha256Values(text).length > 0) problems.push('blocked 分支不得记录产物 SHA-256')
+    return { status: status as EvidenceStatus | null, problems }
   }
   if (text.includes('pending')) problems.push('verified 记录不得残留 pending 字样')
+  if (/待回填|TBD|TODO|FIXME/.test(text)) problems.push('verified 记录不得残留占位标记')
+  if (node.version === 'v0.2.5' && (/<[^>\n]+>/.test(text) || /```text\r?\n\s*```/.test(text))) problems.push('v0.2.5 不得残留尖括号占位或空 text 代码块')
+  const rows = parseAssetRows(text)
+  if (rows.length !== node.assets.length) problems.push(`${node.version} 资产表必须恰好 ${node.assets.length} 行，实际 ${rows.length} 行`)
+  const pinned = new Map(node.assets.map((asset) => [asset.name, asset]))
+  for (const row of rows) {
+    const expected = pinned.get(row.name)
+    if (expected === undefined) { problems.push(`${node.version} 资产表出现未登记资产名「${row.name}」`); continue }
+    if (row.bytes !== expected.bytes) problems.push(`${node.version} 资产「${row.name}」字节数与台账不一致`)
+    if (row.sha256 !== expected.sha256) problems.push(`${node.version} 资产「${row.name}」sha256 与台账不一致`)
+  }
+  for (const asset of node.assets) if (!rows.some((row) => row.name === asset.name)) problems.push(`${node.version} 资产表缺少「${asset.name}」`)
 
-  for (const marker of ['待回填', 'TBD', 'TODO']) {
-    if (text.includes(marker)) problems.push(`不得残留占位标记「${marker}」`)
-  }
-  if (/<[^>\n]+>/.test(text)) problems.push('不得残留尖括号占位')
-  if (/^```text\s*$/m.test(text) && /```text\r?\n\s*```/.test(text)) {
-    problems.push('不得保留空的 text 代码块')
-  }
-
-  const rows = v025AssetRows(text)
-  if (rows.length !== 11) problems.push(`资产表必须恰好 11 行，实际 ${rows.length} 行`)
-  const expected = new Map(v025Assets)
-  for (const [name, bytes, sha] of rows) {
-    if (!expected.has(name)) problems.push(`资产表出现未发布资产名「${name}」`)
-    if (!/^[1-9][\d,]*$/.test(bytes)) problems.push(`资产「${name}」字节数必须为正整数`)
-    const pinned = expected.get(name)
-    if (pinned !== undefined && pinned !== sha) {
-      problems.push(`资产「${name}」sha256 与实测钉板不一致`)
-    }
-  }
-  if (new Set(rows.map(([, , sha]) => sha)).size !== rows.length) {
-    problems.push('11 个资产 sha256 必须互不相同')
-  }
-  const allowedDigests = new Set([...v025Assets.map(([, sha]) => sha), v025BundleCdHash])
-  for (const digest of sha256Values(text)) {
-    if (!allowedDigests.has(digest)) problems.push(`出现未登记的 64 位十六进制「${digest}」`)
-  }
-  for (const [name] of v025Assets) {
-    if (!rows.some(([listed]) => listed === name)) problems.push(`资产表缺少「${name}」`)
-  }
-
-  const occurrences = (marker: string): number => text.split(marker).length - 1
-  for (const marker of [
-    'valid on disk',
-    'satisfies its Designated Requirement',
-    'The validate action worked!',
-    'accepted',
-    'source=Notarized Developer ID'
-  ]) {
-    if (occurrences(marker) < 2) problems.push(`需为两套产物各记录一次「${marker}」`)
-  }
-  for (const source of ['dmg 内 `.app`', 'zip 内 `.app`']) {
-    if (!text.includes(source)) problems.push(`缺少「${source}」来源标注`)
-  }
-
-  const jobRows = text.split(/\r?\n/)
-  for (const job of v025Jobs) {
-    const row = jobRows.find((line) => line.startsWith(`| ${job} |`))
-    if (row === undefined) problems.push(`缺少 job 行「${job}」`)
-    else if (!row.includes('success')) problems.push(`job「${job}」结论不是 success`)
-  }
-
-  for (const line of [
-    'releases for v0.2.5: 1 (drafts: 0, prereleases: 0)',
-    'latest published release: v0.2.5 (this tag: v0.2.5)',
-    '39713762292',
-    '2eedc5de1ebfbc8e835d08d18e959b394fadceb4',
-    '2026-10-22T02:56:27Z',
-    'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5'
-  ]) {
-    if (!text.includes(line)) problems.push(`缺少发布标识原文「${line}」`)
-  }
-
-  const metadataLines = [...text.matchAll(/^(latest[\w.-]*\.yml): url (\d+)\/(\d+) 命中资产名$/gm)]
-  if (metadataLines.length !== 3) {
-    problems.push(`元数据命中行必须为 3 行，实际 ${metadataLines.length} 行`)
-  }
-  for (const [, file, hits, total] of metadataLines) {
-    if (hits !== total) problems.push(`${file} 命中数 ${hits}/${total} 未全部命中`)
-  }
-  for (const line of [
-    'release:metadata 校验通过：3 份 latest*.yml、11 个资产名。',
-    '旧错位名 0 命中',
-    'pnpm release:metadata --dir',
-    'OpenCompare-Setup-0.2.5.exe',
-    'OpenCompare.Setup.0.2.5.exe',
-    '退出码 `0`'
-  ]) {
-    if (!text.includes(line)) problems.push(`缺少元数据实测证据「${line}」`)
-  }
-
-  for (const marker of [
-    'product-qa',
-    '干净环境',
-    '3 轮',
-    '取消',
-    '已跳过：左 X / 右 Y',
-    '不跟随符号链接',
-    'spctl',
-    'stapler',
-    'codesign'
-  ]) {
-    if (!text.includes(marker)) problems.push(`第 6 节 product-qa 交接缺少「${marker}」`)
-  }
-
-  return { status: 'verified', problems }
+  const closure = new Set([...node.assets.map((asset) => asset.sha256), ...node.extraDigests.map((digest) => digest.sha256)])
+  const found = sha256Values(text)
+  for (const digest of found) if (!closure.has(digest)) problems.push(`${node.version} 出现未登记的 64 位十六进制「${digest}」`)
+  for (const digest of closure) if (!found.includes(digest)) problems.push(`${node.version} 证据文档缺少台账 digest「${digest}」`)
+  return { status: status as EvidenceStatus | null, problems }
 }
-
-describe('v0.2.5 verified release evidence document', () => {
-  const doc = (): string => readEvidence(evidenceV025Path)
-
-  it('exists, is non-empty and declares verified exactly once', () => {
-    expect(existsSync(evidenceV025Path)).toBe(true)
+const specs: Record<string, VersionSpec> = {
+  'v0.2.1': {
+    sections: '## 1. 机器与取证时间 | ## 2. 只读就绪门 | ## 3. 缺失项 | ## 4. 未执行的取证动作 | ## 5. 待人工动作 | ## 6. 升级说明',
+    commands: 'git ls-remote --tags origin refs/tags/v0.2.1 | gh release view v0.2.1 --repo chaxiu/OpenCompare | git tag --list v0.2.1',
+    identities: 'release not found', markers: [], jobs: [], finalize: false, sourceLabels: '', facts: []
+  },
+  'v0.2.2': {
+    sections: '## 1. 机器与取证时间 | ## 2. 公开 Release 只读门 | ## 3. 下载与 SHA-256 对账 | ## 4. 解包与挂载 | ## 5. dmg 内 `OpenCompare.app` | ## 6. zip 内 `OpenCompare.app` | ## 7. 双产物身份与图标对账 | ## 8. 卸载与清理',
+    commands: 'gh release view v0.2.2 --repo chaxiu/OpenCompare | shasum -a 256 | ditto -x -k | hdiutil attach -nobrowse -readonly | hdiutil detach | codesign -dv --verbose=4 | sw_vers | uname -m',
+    identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.2',
+    markers: [
+      { marker: 'CFBundleShortVersionString', minimum: 1 },
+      { marker: 'CFBundleIconFile', minimum: 1 },
+      { marker: 'Authority=Developer ID Application: Tao Zhu (3X4J53U6RY)', minimum: 2 },
+      { marker: 'TeamIdentifier=3X4J53U6RY', minimum: 2 },
+      { marker: 'flags=0x10000(runtime)', minimum: 2 }
+    ],
+    jobs: [], finalize: false, sourceLabels: '', facts: []
+  },
+  'v0.2.4': {
+    sections: '## 1. 发布标识 | ## 2. CI job 结论 | ## 3. 资产 sha256 全表 | ## 4. macOS 签名、公证与 Gatekeeper | ## 5. Release 唯一性、latest 门与资产对账 | ## 6. 更新元数据：AppImage blockmap 形态 | ## 7. 遗留缺陷：Windows 更新 URL 与真实资产名不一致',
+    commands: 'shasum -a 256 | gh release list',
+    identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.4 | 39692988051 | 55d3af2db1632d05f94b3eca88020240714b21f6',
+    markers: ['notarization successful', ...SIGNING_MARKERS.map(({ marker }) => marker), 'Authority=Developer ID Application: Tao Zhu (3X4J53U6RY)', 'TeamIdentifier=3X4J53U6RY', 'flags=0x10000(runtime)'].map((marker) => ({ marker, minimum: 1 })),
+    jobs: JOBS, finalize: true, sourceLabels: 'CI 日志 | 本机复核',
+    facts: [['## 6. 更新元数据：AppImage blockmap 形态', 'blockMapSize'], ['## 6. 更新元数据：AppImage blockmap 形态', '*.AppImage.blockmap'], ['## 6. 更新元数据：AppImage blockmap 形态', '内嵌']]
+  },
+  'v0.2.5': {
+    sections: '## 1. 发布前就绪清单（发布前快照） | ## 2. 资产名 / 字节 / sha256 | ## 3. 发布标识、CI job 结论与唯一 Release / latest 门 | ## 4. macOS 两套产物的签名 / 公证 / Gatekeeper 原文 | ## 5. 本地元数据命中校验实测 | ## 6. product-qa 公开复验交接区',
+    commands: 'codesign --verify --deep --strict --verbose=2 | codesign -dv --verbose=4 | xcrun stapler validate | spctl -a -vv --type execute | hdiutil detach | pnpm release:metadata --dir',
+    identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5 | 39713762292 | 2eedc5de1ebfbc8e835d08d18e959b394fadceb4',
+    markers: SIGNING_MARKERS, jobs: JOBS, finalize: true, sourceLabels: 'dmg 内 `.app` | zip 内 `.app`',
+    facts: [
+      ['## 5. 本地元数据命中校验实测', '旧错位名 0 命中'], ['## 5. 本地元数据命中校验实测', 'OpenCompare-Setup-0.2.5.exe'],
+      ['## 5. 本地元数据命中校验实测', 'OpenCompare.Setup.0.2.5.exe'], ['## 5. 本地元数据命中校验实测', 'release:metadata 校验通过：3 份 latest*.yml、11 个资产名。'],
+      ['## 6. product-qa 公开复验交接区', 'product-qa'], ['## 6. product-qa 公开复验交接区', '干净环境'], ['## 6. product-qa 公开复验交接区', '3 轮'],
+      ['## 6. product-qa 公开复验交接区', '已跳过：左 X / 右 Y'], ['## 6. product-qa 公开复验交接区', '不跟随符号链接'], ['## 6. product-qa 公开复验交接区', '第 6 节']
+    ]
+  },
+  'v0.2.7': {
+    sections: '## 1. tag 与构建检出 | ## 2. 公开 Release | ## 3. Release CI run 与五 job 结论 | ## 4. 11 件公开资产：字节 / sha256 / 公开 URL | ## 5. 唯一性与 latest 门 | ## 6. macOS 签名 / 公证 | ## 7. L1 公开包复验 | ## 8. 负载面对照复验 | ## 9. 判定口径（公司 2026-10-27 裁决） | ## 10. 已知遗留 / 边界',
+    commands: '',
+    identities: 'https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.7 | 422765578 | 40100596470 | adc6e1e50b84e211d1e1791a4ae61b6d6ba87d24 | e071f876da8cf502728e4d31b2699da8254629d5',
+    markers: SIGNING_MARKERS, jobs: JOBS, finalize: true, sourceLabels: '',
+    facts: [['## 7. L1 公开包复验', 'ZenMind'], ['## 7. L1 公开包复验', 'Δ3=2.06 MB'], ['## 7. L1 公开包复验', '116 ms']], minBlockedBullets: 4
+  }
+}
+const specFor = (version: string): VersionSpec => {
+  const spec = specs[version]
+  if (spec === undefined) throw new Error(`missing structural spec for ${version}`)
+  return spec
+}
+const verifiedFixture = (): string =>
+  [
+    '# v0.2.1 本机 dmg/zip 签名公证取证证据', 'status: verified',
+    'zip app: valid on disk', 'zip app: satisfies its Designated Requirement', 'dmg app: valid on disk', 'dmg app: satisfies its Designated Requirement',
+    'zip app: The validate action worked!', 'dmg app: The validate action worked!', 'zip app: accepted', 'dmg app: accepted',
+    'zip app: source=Notarized Developer ID', 'dmg app: source=Notarized Developer ID',
+    `dmg sha256: ${'a'.repeat(64)}`, `zip sha256: ${'b'.repeat(64)}`
+  ].join('\n')
+const blockedFixture = (): string =>
+  ['# v0.2.1 本机 dmg/zip 签名公证取证证据', 'status: blocked', 'git ls-remote --tags origin refs/tags/v0.2.1', 'gh release view v0.2.1 --repo chaxiu/OpenCompare --json tagName,isDraft,isPrerelease,url,assets', 'release not found'].join('\n')
+describe('release evidence ledger', () => {
+  it('exists, parses and lists exactly the five pinned versions', () => {
+    expect(existsSync(ledgerPath)).toBe(true)
+    expect(ledgerSource.trim().length).toBeGreaterThan(0)
+    expect(Array.isArray(ledger.versions)).toBe(true)
+    expect(versions.map((node) => node.version)).toEqual(['v0.2.1', 'v0.2.2', 'v0.2.4', 'v0.2.5', 'v0.2.7'])
+    expect(new Set(versions.map((node) => node.version)).size).toBe(versions.length)
+    expect(Object.keys(specs).sort()).toEqual(versions.map((node) => node.version).sort())
+  })
+  it('pins 44 asset rows, 3 extra digests and the blocked zero-asset version', () => {
+    expect(versions.map((node) => node.assets.length)).toEqual([0, 11, 11, 11, 11])
+    expect(versions.reduce((total, node) => total + node.assets.length, 0)).toBe(44)
+    expect(versions.reduce((total, node) => total + node.extraDigests.length, 0)).toBe(3)
+    expect(versions.find((node) => node.version === 'v0.2.1')?.status).toBe('blocked')
+  })
+  it('keeps every asset name unique, every byte count positive and every sha256 well formed', () => {
+    for (const node of versions) {
+      const names = node.assets.map((asset) => asset.name)
+      expect(names.every((name) => name.trim().length > 0)).toBe(true)
+      expect(new Set(names).size).toBe(names.length)
+      for (const asset of node.assets) {
+        expect(Number.isInteger(asset.bytes) && asset.bytes > 0, `${node.version} ${asset.name}`).toBe(true)
+        expect(asset.sha256, `${node.version} ${asset.name}`).toMatch(HEX64)
+      }
+    }
+  })
+  it('labels every extra digest and gives it a valid sha256', () => {
+    const extras = versions.flatMap((node) => node.extraDigests)
+    expect(extras).toHaveLength(3)
+    for (const digest of extras) {
+      expect(digest.label.trim().length).toBeGreaterThan(0)
+      expect(digest.sha256).toMatch(HEX64)
+    }
+  })
+  it('closes 47 unique digests over assets plus extra digests', () => {
+    const all = new Set(versions.flatMap((node) => [...node.assets.map((asset) => asset.sha256), ...node.extraDigests.map((digest) => digest.sha256)]))
+    expect(all.size).toBe(47)
+    expect(versions.map((node) => new Set([...node.assets.map((asset) => asset.sha256), ...node.extraDigests.map((digest) => digest.sha256)]).size)).toEqual([0, 13, 11, 12, 11])
+  })
+  it('parses the three documented asset table formats', () => {
+    const first = 'a'.repeat(64)
+    const second = 'b'.repeat(64)
+    const rows = parseAssetRows([`| \`a.bin\` | 1,024 | \`${first}\` |`, `| \`b.bin\` | 2048 | \`${second}\` | <https://example.test/b.bin> |`, `c.bin\t3072\tsha256:${first}`].join('\n'))
+    expect(rows).toEqual([{ name: 'a.bin', bytes: 1024, sha256: first }, { name: 'b.bin', bytes: 2048, sha256: second }, { name: 'c.bin', bytes: 3072, sha256: first }])
+  })
+})
+describe.each(versions)('$version release evidence', (node) => {
+  const doc = (): string => readEvidence(node.version)
+  const spec = specFor(node.version)
+  it('exists, declares the version and carries the ledger status', () => {
+    expect(existsSync(join(evidenceDir, `${node.version}.md`))).toBe(true)
     const text = doc()
     expect(text.trim().length).toBeGreaterThan(0)
-    expect(text.match(/^status:\s*verified$/gm)?.length).toBe(1)
-    expect(text.match(/^status:/gm)?.length).toBe(1)
-    expect(text).not.toContain('pending')
-    const { status, problems } = inspectV025Evidence(text)
-    expect(problems).toEqual([])
-    expect(status).toBe('verified')
+    expect(parseStatus(text)).toBe(node.status)
+    expect(text.match(/^\s*(?:-\s*)?status:\s*\S+\s*$/gm) ?? []).toHaveLength(1)
+    expect(inspectLedgerEvidence(text, node).problems).toEqual([])
   })
-
-  it('pins every published asset with real bytes and sha256', () => {
-    const rows = v025AssetRows(doc())
-    expect(rows).toHaveLength(11)
-    expect(rows.map(([name]) => name).sort()).toEqual(v025Assets.map(([name]) => name).sort())
-    for (const [name, bytes, sha] of rows) {
-      expect(Number(bytes.replaceAll(',', '')), name).toBeGreaterThan(0)
-      expect(sha, name).toBe(new Map(v025Assets).get(name))
-    }
+  it('matches the ledger asset table row by row', () => {
+    const rows = parseAssetRows(doc())
+    expect(rows).toHaveLength(node.assets.length)
+    expect(rows.map((row) => row.name).sort()).toEqual(node.assets.map((asset) => asset.name).sort())
+    for (const asset of node.assets) expect(rows.find((row) => row.name === asset.name), `${node.version} ${asset.name}`).toEqual(asset)
   })
-
-  it('records the run identity, job conclusions and the latest gates', () => {
+  it('closes the document digest set over the ledger', () => {
+    const expected = [...new Set([...node.assets.map((asset) => asset.sha256), ...node.extraDigests.map((digest) => digest.sha256)])].sort()
+    expect(sha256Values(doc()).sort()).toEqual(expected)
+  })
+  it('keeps the documented sections, commands, identities and source labels', () => {
     const text = doc()
-    for (const marker of [
-      'releases for v0.2.5: 1 (drafts: 0, prereleases: 0)',
-      'latest published release: v0.2.5 (this tag: v0.2.5)',
-      '39713762292',
-      '2eedc5de1ebfbc8e835d08d18e959b394fadceb4'
-    ]) {
-      expect(text).toContain(marker)
+    expect(text).toContain(node.version)
+    for (const heading of list(spec.sections)) expect(text).toContain(heading)
+    for (const command of list(spec.commands)) expect(text).toContain(command)
+    for (const identity of list(spec.identities)) expect(text).toContain(identity)
+    for (const label of list(spec.sourceLabels)) expect(text).toContain(label)
+  })
+  it('records every required signing marker at its minimum count', () => {
+    const text = doc()
+    if (spec.markers.length === 0) {
+      for (const marker of PASSING_MARKERS) expect(occurrences(text, marker)).toBe(0)
+      return
     }
-    const rows = text.split(/\r?\n/)
-    for (const job of v025Jobs) {
+    for (const { marker, minimum } of spec.markers) expect(occurrences(text, marker), `${node.version} ${marker}`).toBeGreaterThanOrEqual(minimum)
+  })
+})
+describe.each(versions.filter((node) => specFor(node.version).jobs.length > 0))('$version CI jobs', (node) => {
+  it('records every job with the success conclusion', () => {
+    const rows = readEvidence(node.version).split(/\r?\n/).filter((line) => line.startsWith('| '))
+    for (const job of JOBS) {
       const row = rows.find((line) => line.startsWith(`| ${job} |`))
-      expect(row, `missing job row ${job}`).toBeDefined()
+      expect(row, `${node.version} missing job row ${job}`).toBeDefined()
       expect(row).toContain('success')
     }
+    expect(rows.filter((line) => line.startsWith('| Package '))).toHaveLength(3)
   })
-
-  it('records both macOS products with every signing marker', () => {
-    const text = doc()
-    for (const marker of [
-      'valid on disk',
-      'satisfies its Designated Requirement',
-      'The validate action worked!',
-      'accepted',
-      'source=Notarized Developer ID'
-    ]) {
-      expect(text.split(marker).length - 1, marker).toBeGreaterThanOrEqual(2)
-    }
-    expect(text).toContain('dmg 内 `.app`')
-    expect(text).toContain('zip 内 `.app`')
-    expect(text).toContain('codesign --verify --deep --strict --verbose=2')
-    expect(text).toContain('codesign -dv --verbose=4')
-    expect(text).toContain('xcrun stapler validate')
-    expect(text).toContain('spctl -a -vv --type execute')
-    expect(text).toContain('hdiutil detach')
+})
+describe.each(versions.filter((node) => specFor(node.version).finalize))('$version release uniqueness gate', (node) => {
+  it('records the finalize gate output for the tag', () => {
+    const text = readEvidence(node.version)
+    expect(text).toContain(`releases for ${node.version}: 1 (drafts: 0, prereleases: 0)`)
+    expect(text).toContain(`latest published release: ${node.version} (this tag: ${node.version})`)
   })
-
-  it('records the metadata hits, the hyphenated windows name and zero legacy hits', () => {
-    const text = doc()
-    expect(text).toContain('release:metadata 校验通过：3 份 latest*.yml、11 个资产名。')
-    expect(text).toContain('旧错位名 0 命中')
-    expect(text).toContain('OpenCompare-Setup-0.2.5.exe')
-    expect(text).toContain('OpenCompare.Setup.0.2.5.exe')
-    expect(text).toContain('pnpm release:metadata --dir')
-    const lines = [...text.matchAll(/^(latest[\w.-]*\.yml): url (\d+)\/(\d+) 命中资产名$/gm)]
-    expect(lines).toHaveLength(3)
+})
+describe.each(versions.filter((node) => specFor(node.version).facts.length > 0))('$version section facts', (node) => {
+  it('keeps every technical fact inside its documented section', () => {
+    const text = readEvidence(node.version)
+    const spec = specFor(node.version)
+    for (const [heading, fact] of spec.facts) expect(sectionText(text, heading)).toContain(fact)
+    if (spec.minBlockedBullets !== undefined) expect(occurrences(sectionText(text, '## 7. L1 公开包复验'), 'blocked')).toBeGreaterThanOrEqual(spec.minBlockedBullets)
+  })
+})
+describe('v0.2.1 blocked record', () => {
+  it('parses as blocked with zero asset rows and zero digests', () => {
+    const text = readEvidence('v0.2.1')
+    expect(parseStatus(text)).toBe('blocked')
+    expect(parseAssetRows(text)).toEqual([])
+    expect(sha256Values(text)).toEqual([])
+  })
+  it('keeps the missing-item conclusions and the escalation sections', () => {
+    const text = readEvidence('v0.2.1')
+    const conclusions = tableRows(text, '## 3. 缺失项').slice(2).map((row) => row[2])
+    expect(conclusions.length).toBeGreaterThan(0)
+    expect(conclusions.every((value) => /^(缺失|不可核验)$/.test(value))).toBe(true)
+    for (const heading of ['## 4. 未执行的取证动作', '## 5. 待人工动作', '## 6. 升级说明']) expect(text).toContain(heading)
+  })
+})
+describe('v0.2.4 defect record', () => {
+  it('records the Windows update url defect as a P2 leftover table', () => {
+    const rows = tableRows(readEvidence('v0.2.4'), '## 7. 遗留缺陷：Windows 更新 URL 与真实资产名不一致').slice(2)
+    expect(rows.map(([key]) => key)).toEqual(['等级', '现象', '根因', '起始版本', '运行时影响', '本次处置'])
+    expect(rows.every(([, value]) => value.trim().length > 0)).toBe(true)
+    expect(rows[0][1]).toMatch(/^P2/)
+    expect(rows[1][1]).toMatch(/OpenCompare-Setup-0\.2\.4\.exe.*OpenCompare\.Setup\.0\.2\.4\.exe/)
+  })
+})
+describe('v0.2.5 metadata hits', () => {
+  it('records three latest*.yml files whose urls all hit a real asset name', () => {
+    const lines = [...readEvidence('v0.2.5').matchAll(/^(latest[\w.-]*\.yml): url (\d+)\/(\d+) 命中资产名$/gm)]
+    expect(lines.map(([, file]) => file)).toEqual(['latest-linux.yml', 'latest-mac.yml', 'latest.yml'])
     for (const [, , hits, total] of lines) expect(hits).toBe(total)
   })
-
-  it('keeps the product-qa handoff section and its status rule wording', () => {
-    const text = doc()
-    for (const marker of [
-      'product-qa',
-      '干净环境',
-      '3 轮',
-      '已跳过：左 X / 右 Y',
-      '不跟随符号链接'
-    ]) {
-      expect(text).toContain(marker)
+})
+describe('inspectReleaseEvidence negative fixtures', () => {
+  it('accepts a complete verified record', () => {
+    expect(inspectReleaseEvidence(verifiedFixture(), 'v0.2.1')).toEqual({ status: 'verified', problems: [] })
+  })
+  it('accepts a blocked record without passing output', () => {
+    expect(inspectReleaseEvidence(blockedFixture(), 'v0.2.1')).toEqual({ status: 'blocked', problems: [] })
+  })
+  it('rejects a missing or empty record', () => {
+    expect(inspectReleaseEvidence('', 'v0.2.1').status).toBeNull()
+    expect(inspectReleaseEvidence('   \n', 'v0.2.1').problems.length).toBeGreaterThan(0)
+  })
+  it('rejects a record that does not declare the expected version', () => {
+    expect(inspectReleaseEvidence(readEvidence('v0.2.1'), 'v0.2.2').problems.join('\n')).toMatch(/证据文件未声明 v0\.2\.2/)
+  })
+  it('rejects an unsupported status value', () => {
+    const report = inspectReleaseEvidence(blockedFixture().replace('status: blocked', 'status: pending'), 'v0.2.1')
+    expect(report.status).toBeNull()
+    expect(report.problems.join('\n')).toMatch(/status 必须为 verified 或 blocked/)
+  })
+  it('rejects a verified record that misses any required marker pair', () => {
+    for (const { marker } of SIGNING_MARKERS) {
+      const doc = verifiedFixture().split('\n').filter((line) => !line.includes(marker)).join('\n')
+      expect(inspectReleaseEvidence(doc, 'v0.2.1').problems.length, marker).toBeGreaterThan(0)
     }
-    expect(text).toContain('第 6 节')
+  })
+  it('rejects a verified record with fewer than two distinct sha256 values', () => {
+    expect(inspectReleaseEvidence(verifiedFixture().replace('b'.repeat(64), 'a'.repeat(64)), 'v0.2.1').problems.join('\n')).toMatch(/verified 分支需记录两个不同产物的 SHA-256/)
+  })
+  it('rejects a blocked record that carries passing output', () => {
+    for (const marker of PASSING_MARKERS) expect(inspectReleaseEvidence(`${blockedFixture()}\n${marker}\n`, 'v0.2.1').problems.length, marker).toBeGreaterThan(0)
+  })
+  it('rejects a blocked record that carries an artifact sha256', () => {
+    expect(inspectReleaseEvidence(`${blockedFixture()}\ndmg sha256: ${'c'.repeat(64)}\n`, 'v0.2.1').problems.join('\n')).toMatch(/blocked 分支不得记录产物 SHA-256/)
   })
 })
-
-describe('inspectV025Evidence negative fixtures', () => {
+describe('inspectLedgerEvidence v0.2.5 negative fixtures', () => {
+  const v025 = (): LedgerVersion => {
+    const node = versions.find((candidate) => candidate.version === 'v0.2.5')
+    if (node === undefined) throw new Error('v0.2.5 missing from ledger')
+    return node
+  }
   it('rejects a record that loses one product marker pair', () => {
-    const doc = readEvidence(evidenceV025Path)
-      .split('\n')
-      .filter((line) => !line.includes('source=Notarized Developer ID'))
-      .join('\n')
-    expect(inspectV025Evidence(doc).problems).not.toEqual([])
+    const doc = readEvidence('v0.2.5').split('\n').filter((line) => !line.includes('source=Notarized Developer ID')).join('\n')
+    expect(inspectReleaseEvidence(doc, 'v0.2.5').problems.length).toBeGreaterThan(0)
   })
-
-  it('rejects a record whose asset sha256 does not match the measured digest', () => {
-    const doc = readEvidence(evidenceV025Path).replace(v025Assets[0][1], 'f'.repeat(64))
-    const problems = inspectV025Evidence(doc).problems
-    expect(problems).toContain('资产「latest-linux.yml」sha256 与实测钉板不一致')
+  it('rejects an asset sha256 that does not match the ledger', () => {
+    const node = v025()
+    expect(inspectLedgerEvidence(readEvidence('v0.2.5').replace(node.assets[0].sha256, 'f'.repeat(64)), node).problems.join('\n')).toMatch(/资产「latest-linux\.yml」sha256 与台账不一致/)
   })
-
   it('rejects a record with fewer than eleven asset rows', () => {
-    const doc = readEvidence(evidenceV025Path)
-      .split('\n')
-      .filter((line) => !line.startsWith('| `OpenCompare-0.2.5.AppImage` |'))
-      .join('\n')
-    const problems = inspectV025Evidence(doc).problems
-    expect(problems).toContain('资产表必须恰好 11 行，实际 10 行')
-    expect(problems).toContain('资产表缺少「OpenCompare-0.2.5.AppImage」')
+    const node = v025()
+    const doc = readEvidence('v0.2.5').split('\n').filter((line) => !line.startsWith('| `OpenCompare-0.2.5.AppImage` |')).join('\n')
+    const problems = inspectLedgerEvidence(doc, node).problems.join('\n')
+    expect(problems).toMatch(/资产表必须恰好 11 行，实际 10 行/)
+    expect(problems).toMatch(/资产表缺少「OpenCompare-0\.2\.5\.AppImage」/)
   })
-
   it('rejects a record that still carries a pending status', () => {
-    const doc = readEvidence(evidenceV025Path).replace(
-      'status: verified',
-      'status: verified\nstatus: pending'
-    )
-    const { status, problems } = inspectV025Evidence(doc)
-    expect(problems).toContain('全文必须恰好一处 status: 行')
-    expect(problems).toContain('verified 记录不得残留 pending 字样')
-    expect(status).toBe('verified')
-  })
-})
-
-// v0.2.7 shipped. Its evidence record is the newest published counterpart of
-// the v0.2.5 record above: the same read-only parser with an explicit path, so
-// a missing or fabricated record fails `pnpm test` without touching history.
-const evidenceV027Path = join(repoRoot, 'docs/release-evidence/v0.2.7.md')
-
-describe('v0.2.7 release evidence document', () => {
-  const doc = (): string => readEvidence(evidenceV027Path)
-
-  it('exists, is non-empty and declares verified exactly once', () => {
-    expect(existsSync(evidenceV027Path)).toBe(true)
-    const text = doc()
-    expect(text.trim().length).toBeGreaterThan(0)
-    expect(text.match(/^status:\s*verified$/gm)?.length).toBe(1)
-
-    const { status, problems } = inspectReleaseEvidence(text, 'v0.2.7')
-    expect(problems).toEqual([])
-    expect(status).toBe('verified')
-  })
-
-  it('records the release identity, run, dmg digest and the blocked L1 legs', () => {
-    const text = doc()
-    for (const marker of [
-      'adc6e1e50b84e211d1e1791a4ae61b6d6ba87d24',
-      'e071f876da8cf502728e4d31b2699da8254629d5',
-      '422765578',
-      '40100596470',
-      '4375fe95f5048195e1bcf46513da6291a8363585ed01f6f636ec18845a24e8f5',
-      'blocked',
-      'ZenMind',
-      'Δ3=2.06 MB',
-      '116 ms'
-    ]) {
-      expect(text).toContain(marker)
-    }
-    expect(text.match(/blocked/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
-    expect(text).not.toMatch(/\b(?:TODO|TBD|FIXME)\b/)
+    const node = v025()
+    const report = inspectLedgerEvidence(readEvidence('v0.2.5').replace('status: verified', 'status: verified\nstatus: pending'), node)
+    expect(report.problems.join('\n')).toMatch(/全文必须恰好一处 status: 行/)
+    expect(report.problems.join('\n')).toMatch(/verified 记录不得残留 pending 字样/)
+    expect(report.status).toBe('verified')
   })
 })
