@@ -11,75 +11,55 @@
  * source mtime, the refreshed comparison is the single source of counts, and a
  * second dry-run after an explicit select-all is empty.
  */
-import {
-  chmod,
-  lstat,
-  lutimes,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  readlink,
-  rm,
-  stat,
-  symlink,
-  utimes,
-  writeFile
-} from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, readFile, readlink, stat, utimes, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { compareDirectories, createComparisonCache, scanDirectory } from '@core/directory/compare'
 import type { ComparisonCache, DirectoryComparison } from '@core/directory/compare'
-import {
-  buildSyncPlan,
-  copyScannedTree,
-  executeSyncPlan,
-  SyncRefreshError,
-  SyncTargetError,
-  SyncVerificationError
-} from '@core/directory/sync'
-import type { SyncDirection, SyncIo, SyncPlanGroup } from '@core/directory/sync'
+import { buildSyncPlan, copyScannedTree, executeSyncPlan, SyncRefreshError, SyncTargetError, SyncVerificationError } from '@core/directory/sync'
+import type { SyncDirection, SyncIo, SyncMode, SyncPlanGroup } from '@core/directory/sync'
 import { isOperationCancelled } from '@core/io'
 import { en } from '@renderer/i18n/messages'
 import { digestFilesForComparison } from '@renderer/platform'
 import { syncPreviewGuidance } from '@renderer/views/directoryCopy'
-import {
-  applySyncPreview,
-  canApplySyncPreview,
-  previewSync,
-  syncPreviewAction
-} from '@renderer/workbench/directoryOps'
+import { applySyncPreview, canApplySyncPreview, previewSync, syncPreviewAction } from '@renderer/workbench/directoryOps'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import type {
-  DigestFilesResult,
-  DirectoryEntry,
-  DirectoryListing,
-  PathProbeKind,
-  PlatformPort,
-  UserSettings
-} from '@shared/platform/types'
+import type { DigestFilesResult, DirectoryEntry, DirectoryListing, PathProbeKind, PlatformPort, UserSettings } from '@shared/platform/types'
 import { registerPlatformIpc } from './main/platform/electron-platform'
+import {
+  deletePathsOf,
+  fingerprint,
+  type FileFingerprint,
+  linkWithStamp,
+  releaseScratchRoots,
+  scratchRoot,
+  scratchSides,
+  settle,
+  sha256Hex,
+  writeStamped,
+  writeStampedBytes,
+} from './test/sharedHarness'
 
 const { handlers } = vi.hoisted(() => ({
-  handlers: new Map<string, (...args: unknown[]) => unknown>()
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
 }))
 
 vi.mock('electron', () => ({
   app: {
     getPath: () => tmpdir(),
-    getLocale: () => 'en-US'
+    getLocale: () => 'en-US',
   },
   dialog: {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
-    showSaveDialog: async () => ({ canceled: true, filePath: undefined })
+    showSaveDialog: async () => ({ canceled: true, filePath: undefined }),
   },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler)
-    }
-  }
+    },
+  },
 }))
 
 function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
@@ -96,29 +76,17 @@ const platform: PlatformPort = {
   selectFile: async () => null,
   resolveDroppedPath: async () => '',
   saveFile: async () => null,
-  listDirectory: (path) =>
-    invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
-  listDirectories: (paths, options) =>
-    invoke(PLATFORM_CHANNELS.listDirectories, paths, options) as Promise<
-      readonly DirectoryListing[]
-    >,
+  listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
+  listDirectories: (paths, options) => invoke(PLATFORM_CHANNELS.listDirectories, paths, options) as Promise<readonly DirectoryListing[]>,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
-  readFileBytes: (path) =>
-    invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
-  writeFileBytes: (path, content, modifiedMs) =>
-    invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
-  setSymbolicLinkModifiedMs: (path, modifiedMs) =>
-    invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
-  readSymbolicLink: (path) =>
-    invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
-  createSymbolicLink: (target, path) =>
-    invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
-  digestFiles: (paths, options) =>
-    invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
-  cancelOperation: (operationId) =>
-    invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
-  writeTextFile: (path, content, modifiedMs) =>
-    invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
+  readFileBytes: (path) => invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
+  writeFileBytes: (path, content, modifiedMs) => invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
+  setSymbolicLinkModifiedMs: (path, modifiedMs) => invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
+  readSymbolicLink: (path) => invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
+  createSymbolicLink: (target, path) => invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
+  digestFiles: (paths, options) => invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
+  cancelOperation: (operationId) => invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
+  writeTextFile: (path, content, modifiedMs) => invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
   exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
   statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
   checkWritable: (path) => invoke(PLATFORM_CHANNELS.checkWritable, path) as Promise<void>,
@@ -127,11 +95,9 @@ const platform: PlatformPort = {
   removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
   temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
   realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
-  readUserSettings: () =>
-    invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
-  writeUserSettings: (settings) =>
-    invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
-  systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>
+  readUserSettings: () => invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
+  writeUserSettings: (settings) => invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+  systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>,
 }
 
 function syncIo(port: PlatformPort): SyncIo {
@@ -146,7 +112,7 @@ function syncIo(port: PlatformPort): SyncIo {
     removeDirectory: (path) => port.removeDirectory(path),
     statPath: (path) => port.statPath(path),
     listDirectory: (path) => port.listDirectory(path),
-    checkWritable: (path) => port.checkWritable(path)
+    checkWritable: (path) => port.checkWritable(path),
   }
 }
 
@@ -163,24 +129,12 @@ function recordWrites(port: PlatformPort): {
       writeFileBytes: (path, content, modifiedMs) => {
         writes.push(path)
         return port.writeFileBytes(path, content, modifiedMs)
-      }
-    }
+      },
+    },
   }
 }
 
-const roots: string[] = []
-
-async function scratchRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'opencompare-sync-real-'))
-  roots.push(root)
-  return root
-}
-
-async function inChunks<T>(
-  items: readonly T[],
-  size: number,
-  action: (item: T) => Promise<void>
-): Promise<void> {
+async function inChunks<T>(items: readonly T[], size: number, action: (item: T) => Promise<void>): Promise<void> {
   for (let start = 0; start < items.length; start += size) {
     await Promise.all(items.slice(start, start + size).map(action))
   }
@@ -190,11 +144,7 @@ function diskPath(root: string, relativePath: string): string {
   return join(root, ...relativePath.split('/'))
 }
 
-async function comparePair(
-  leftRoot: string,
-  rightRoot: string,
-  cache: ComparisonCache = createComparisonCache()
-): Promise<DirectoryComparison> {
+async function comparePair(leftRoot: string, rightRoot: string, cache: ComparisonCache = createComparisonCache()): Promise<DirectoryComparison> {
   return compareDirectories(
     leftRoot,
     rightRoot,
@@ -204,9 +154,39 @@ async function comparePair(
     undefined,
     {
       digestFiles: (paths) => digestFilesForComparison(platform, paths),
-      listDirectories: (paths) => platform.listDirectories(paths)
+      listDirectories: (paths) => platform.listDirectories(paths),
     }
   )
+}
+
+/**
+ * One comparison plus the preview derived from it, so a test that needs both
+ * does not spell the same two production calls twice.
+ */
+async function previewPair(
+  left: string,
+  right: string,
+  direction: SyncDirection,
+  mode: SyncMode,
+  sequence: number,
+  cache: ComparisonCache = createComparisonCache()
+): Promise<{ comparison: DirectoryComparison; preview: Awaited<ReturnType<typeof previewSync>> }> {
+  const comparison = await comparePair(left, right, cache)
+  return { comparison, preview: await previewSync(platform, comparison, direction, mode, sequence) }
+}
+
+function expectSameFingerprint(before: FileFingerprint, after: FileFingerprint, message: string): void {
+  expect(after.sha256, `${message}: sha256`).toBe(before.sha256)
+  expect(after.size, `${message}: size`).toBe(before.size)
+  expect(after.modifiedMs, `${message}: mtime`).toBe(before.modifiedMs)
+}
+
+/** The link must be a link, keep its literal target and its whole-second mtime. */
+async function expectSameLink(source: string, target: string, message: string): Promise<void> {
+  const targetInfo = await lstat(target)
+  expect(targetInfo.isSymbolicLink(), `${message}: target must stay a symlink`).toBe(true)
+  expect(await readlink(target), `${message}: readlink must stay verbatim`).toBe(await readlink(source))
+  expect(Math.floor(targetInfo.mtimeMs / 1000), `${message}: lstat mtime seconds`).toBe(Math.floor((await lstat(source)).mtimeMs / 1000))
 }
 
 async function listRelativeFiles(root: string): Promise<string[]> {
@@ -223,11 +203,7 @@ async function groupBytes(root: string, items: SyncPlanGroup['items']): Promise<
   return total
 }
 
-async function assertGroupMatchesDisk(
-  group: SyncPlanGroup,
-  root: string,
-  expectedPaths: readonly string[]
-): Promise<void> {
+async function assertGroupMatchesDisk(group: SyncPlanGroup, root: string, expectedPaths: readonly string[]): Promise<void> {
   expect(group.items.map((item) => item.relativePath).sort()).toEqual([...expectedPaths].sort())
   expect(group.count).toBe(group.items.length)
   expect(group.count).toBe(expectedPaths.length)
@@ -276,7 +252,7 @@ const DIRECTORIES = [
   'docs/specs/v1/notes',
   'src',
   'src/core',
-  'src/core/directory'
+  'src/core/directory',
 ] as const
 
 function directoryFor(index: number): string {
@@ -300,18 +276,14 @@ async function stampTree(root: string, files: readonly PlannedFile[]): Promise<v
 }
 
 async function buildRealFixture(): Promise<RealFixture> {
-  const root = await scratchRoot()
-  const left = join(root, 'left')
-  const right = join(root, 'right')
-  await mkdir(left, { recursive: true })
-  await mkdir(right, { recursive: true })
+  const { root, left, right } = await scratchSides()
 
   const same: PlannedFile[] = []
   for (let index = 0; index < SAME_COUNT; index += 1) {
     same.push({
       relativePath: `${directoryFor(index)}/相同 文件-${index}.txt`,
       text: `相同 内容 ${index}\n`,
-      stampMs: 1_700_000_000_000 + index
+      stampMs: 1_700_000_000_000 + index,
     })
   }
 
@@ -319,7 +291,7 @@ async function buildRealFixture(): Promise<RealFixture> {
   for (let index = 0; index < LEFT_ONLY_COUNT; index += 1) {
     leftOnly.push({
       relativePath: `${directoryFor(index)}/仅左 文件-${index}.txt`,
-      text: `仅左 内容 ${index}\n`
+      text: `仅左 内容 ${index}\n`,
     })
   }
 
@@ -327,7 +299,7 @@ async function buildRealFixture(): Promise<RealFixture> {
   for (let index = 0; index < RIGHT_ONLY_COUNT; index += 1) {
     rightOnly.push({
       relativePath: `${directoryFor(index)}/仅右 文件-${index}.txt`,
-      text: `仅右 内容 ${index}\n`
+      text: `仅右 内容 ${index}\n`,
     })
   }
 
@@ -355,270 +327,213 @@ async function buildRealFixture(): Promise<RealFixture> {
 
 beforeAll(() => registerPlatformIpc())
 
-afterAll(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
-})
+afterAll(releaseScratchRoots)
 
 describe('real-disk mirror sync gate', () => {
-  it(
-    'lists only copy / update / delete, with exact counts and bytes in both directions',
-    async () => {
-      const fixture = await buildRealFixture()
-      const comparison = await comparePair(fixture.left, fixture.right)
+  it('lists only copy / update / delete, with exact counts and bytes in both directions', async () => {
+    const fixture = await buildRealFixture()
+    const comparison = await comparePair(fixture.left, fixture.right)
 
-      expect(comparison.counts).toEqual({
-        same: SAME_COUNT,
-        added: RIGHT_ONLY_COUNT,
-        removed: LEFT_ONLY_COUNT,
-        modified: MODIFIED_COUNT
-      })
-      // Two 1,000-file sides, all four states present, ≥4 levels deep.
-      expect((await listRelativeFiles(fixture.left)).length).toBe(1_000)
-      expect((await listRelativeFiles(fixture.right)).length).toBe(1_000)
-      expect(Math.max(...fixture.leftFiles.map((file) => file.relativePath.split('/').length))).toBe(
-        6
+    expect(comparison.counts).toEqual({
+      same: SAME_COUNT,
+      added: RIGHT_ONLY_COUNT,
+      removed: LEFT_ONLY_COUNT,
+      modified: MODIFIED_COUNT,
+    })
+    // Two 1,000-file sides, all four states present, ≥4 levels deep.
+    expect((await listRelativeFiles(fixture.left)).length).toBe(1_000)
+    expect((await listRelativeFiles(fixture.right)).length).toBe(1_000)
+    expect(Math.max(...fixture.leftFiles.map((file) => file.relativePath.split('/').length))).toBe(6)
+    expect(fixture.leftFiles.some((file) => file.relativePath.includes('资料 夹/第一层 子目录'))).toBe(true)
+
+    // Every `same` pair really has identical content and the same whole ms.
+    for (const file of fixture.same) {
+      const leftPath = diskPath(fixture.left, file.relativePath)
+      const rightPath = diskPath(fixture.right, file.relativePath)
+      expect(await readFile(rightPath, 'utf8')).toBe(await readFile(leftPath, 'utf8'))
+      expect(Math.floor((await stat(rightPath)).mtimeMs)).toBe(Math.floor((await stat(leftPath)).mtimeMs))
+    }
+
+    const directions: readonly [SyncDirection, readonly PlannedFile[], readonly PlannedFile[]][] = [
+      ['left-to-right', fixture.leftOnly, fixture.rightOnly],
+      ['right-to-left', fixture.rightOnly, fixture.leftOnly],
+    ]
+
+    for (const [direction, expectedCopy, expectedDelete] of directions) {
+      const plan = buildSyncPlan(comparison, direction, 'mirror')
+      const target = direction === 'left-to-right' ? fixture.right : fixture.left
+      const source = direction === 'left-to-right' ? fixture.left : fixture.right
+
+      await assertGroupMatchesDisk(
+        plan.copy,
+        source,
+        expectedCopy.map((file) => file.relativePath)
       )
-      expect(
-        fixture.leftFiles.some((file) => file.relativePath.includes('资料 夹/第一层 子目录'))
-      ).toBe(true)
-
-      // Every `same` pair really has identical content and the same whole ms.
-      for (const file of fixture.same) {
-        const leftPath = diskPath(fixture.left, file.relativePath)
-        const rightPath = diskPath(fixture.right, file.relativePath)
-        expect(await readFile(rightPath, 'utf8')).toBe(await readFile(leftPath, 'utf8'))
-        expect(Math.floor((await stat(rightPath)).mtimeMs)).toBe(
-          Math.floor((await stat(leftPath)).mtimeMs)
-        )
-      }
-
-      const directions: readonly [SyncDirection, readonly PlannedFile[], readonly PlannedFile[]][] =
-        [
-          ['left-to-right', fixture.leftOnly, fixture.rightOnly],
-          ['right-to-left', fixture.rightOnly, fixture.leftOnly]
-        ]
-
-      for (const [direction, expectedCopy, expectedDelete] of directions) {
-        const plan = buildSyncPlan(comparison, direction, 'mirror')
-        const target = direction === 'left-to-right' ? fixture.right : fixture.left
-        const source = direction === 'left-to-right' ? fixture.left : fixture.right
-
-        await assertGroupMatchesDisk(
-          plan.copy,
-          source,
-          expectedCopy.map((file) => file.relativePath)
-        )
-        await assertGroupMatchesDisk(
-          plan.update,
-          source,
-          fixture.modified.map((file) => file.relativePath)
-        )
-        await assertGroupMatchesDisk(
-          plan.delete,
-          target,
-          expectedDelete.map((file) => file.relativePath)
-        )
-
-        // `same` never enters any group.
-        const planned = new Set(
-          [...plan.copy.items, ...plan.update.items, ...plan.delete.items].map(
-            (item) => item.relativePath
-          )
-        )
-        for (const file of fixture.same) expect(planned.has(file.relativePath)).toBe(false)
-        expect(plan.totalCount).toBe(plan.copy.count + plan.update.count + plan.delete.count)
-        expect(plan.totalBytes).toBe(plan.copy.bytes + plan.update.bytes + plan.delete.bytes)
-      }
-
-      // A second comparison from a cold cache sees the same four-state split.
-      const cold = await comparePair(fixture.left, fixture.right)
-      expect(cold.counts).toEqual(comparison.counts)
-      expect(cold.fileCount).toBe(comparison.fileCount)
-    },
-    120_000
-  )
-
-  it(
-    'keeps mirror deletions unchecked: no paths deletes nothing, checked paths delete only themselves',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(join(left, '共享 目录'), { recursive: true })
-      await mkdir(join(right, '共享 目录'), { recursive: true })
-      await mkdir(join(right, '待删 目录', '更深'), { recursive: true })
-
-      const shared = join(left, '共享 目录', '相同 文件.txt')
-      await writeFile(shared, '相同 内容\n', 'utf8')
-      await writeFile(join(right, '共享 目录', '相同 文件.txt'), '相同 内容\n', 'utf8')
-      await utimes(shared, new Date(1_600_000_000_000), new Date(1_600_000_000_000))
-      await utimes(
-        join(right, '共享 目录', '相同 文件.txt'),
-        new Date(1_600_000_000_000),
-        new Date(1_600_000_000_000)
+      await assertGroupMatchesDisk(
+        plan.update,
+        source,
+        fixture.modified.map((file) => file.relativePath)
       )
-      await writeFile(join(right, '待删 目录', '其一.txt'), '其一', 'utf8')
-      await writeFile(join(right, '待删 目录', '更深', '其二.txt'), '其二', 'utf8')
-
-      const comparison = await comparePair(left, right)
-      expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 0, modified: 0 })
-
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      expect(preview.materializeTarget).toBe(false)
-      expect(preview.plan.copy.count).toBe(0)
-      expect(preview.plan.update.count).toBe(0)
-      expect(preview.plan.delete.count).toBe(2)
-
-      const io = syncIo(platform)
-      const before = await listRelativeFiles(right)
-
-      // Empty selection and an omitted option both mean "delete nothing".
-      const emptyRun = await executeSyncPlan(preview.plan, io, { deletePaths: [] })
-      expect(emptyRun.deleted).toBe(0)
-      expect(await listRelativeFiles(right)).toEqual(before)
-
-      const defaultRun = await executeSyncPlan(preview.plan, io)
-      expect(defaultRun.deleted).toBe(0)
-      expect(await listRelativeFiles(right)).toEqual(before)
-
-      // Only the explicitly checked relative path disappears.
-      const checked = preview.plan.delete.items[0].relativePath
-      const unchecked = preview.plan.delete.items[1].relativePath
-      const run = await executeSyncPlan(preview.plan, io, { deletePaths: [checked] })
-      expect(run.deleted).toBe(1)
-      expect(run.affected).toContain(diskPath(right, checked))
-      expect(await platform.exists(diskPath(right, checked))).toBe(false)
-      expect(await platform.exists(diskPath(right, unchecked))).toBe(true)
-      expect(await listRelativeFiles(right)).toEqual(
-        before.filter((relativePath) => relativePath !== checked)
-      )
-    },
-    60_000
-  )
-
-  it(
-    'applies left → right for real, preserves content / structure / mtime and refreshes once',
-    async () => {
-      const fixture = await buildRealFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      const checked = preview.plan.delete.items.map((item) => item.relativePath)
-
-      const result = await applySyncPreview(platform, preview, cache, checked)
-      expect(result.copied).toBe(LEFT_ONLY_COUNT)
-      expect(result.updated).toBe(MODIFIED_COUNT)
-      expect(result.deleted).toBe(RIGHT_ONLY_COUNT)
-      expect(result.copied).toBe(preview.plan.copy.count)
-      expect(result.updated).toBe(preview.plan.update.count)
-      expect(result.deleted).toBe(checked.length)
-
-      // The completion notice reports exactly what the preview promised: the
-      // same action object the dialog renders, item by item.
-      const action = syncPreviewAction(preview, checked)
-      expect(action.executable, 'sync summary: select-all preview is executable').toBe(true)
-      expect(
-        [result.copied, result.updated, result.deleted, result.alignedLinks],
-        'sync summary: completion counts match the preview action'
-      ).toEqual([action.copy, action.update, action.delete, action.align])
-
-      // Every source file now exists at the same relative path with the same
-      // UTF-8 body and a millisecond-equal mtime on the target.
-      for (const file of fixture.leftFiles) {
-        const sourcePath = diskPath(fixture.left, file.relativePath)
-        const targetPath = diskPath(fixture.right, file.relativePath)
-        expect(await readFile(targetPath, 'utf8')).toBe(await readFile(sourcePath, 'utf8'))
-        expect(Math.floor((await stat(targetPath)).mtimeMs)).toBe(
-          Math.floor((await stat(sourcePath)).mtimeMs)
-        )
-      }
-
-      // The deepest Chinese + space path is found by the very same relative path.
-      const deepFile = fixture.leftFiles.find((file) =>
-        file.relativePath.startsWith('资料 夹/第一层 子目录/第二层/深层 目录/第五层')
-      )
-      if (deepFile === undefined) throw new Error('fixture has no level-5 file')
-      expect(await platform.statPath(diskPath(fixture.right, deepFile.relativePath))).toBe('file')
-      expect(await listRelativeFiles(fixture.right)).toEqual(
-        fixture.leftFiles.map((file) => file.relativePath).sort()
-      )
-      // Atomic writes clean up after themselves on the success path too.
-      expect(
-        (await listRelativeFiles(fixture.right)).filter((relativePath) => relativePath.endsWith('.tmp'))
-      ).toEqual([])
-
-      // The returned comparison is the single source of the refreshed state.
-      const fresh = await comparePair(fixture.left, fixture.right)
-      expect(result.comparison.counts).toEqual(fresh.counts)
-      expect(result.comparison.counts).toEqual({
-        same: 1_000,
-        added: 0,
-        removed: 0,
-        modified: 0
-      })
-      expect(result.comparison.skipped).toBe(fresh.skipped)
-      expect(result.comparison.leftSkipped).toBe(fresh.leftSkipped)
-      expect(result.comparison.rightSkipped).toBe(fresh.rightSkipped)
-
-      // Immediately re-running the same direction is empty: no ghost entries
-      // from mtime precision, separators or Chinese / space paths.
-      const second = await previewSync(
-        platform,
-        result.comparison,
-        'left-to-right',
-        'mirror',
-        2
-      )
-      expect(second.plan.copy.count).toBe(0)
-      expect(second.plan.update.count).toBe(0)
-      expect(second.plan.delete.count).toBe(0)
-      expect(second.plan.totalCount).toBe(0)
-      expect(second.plan.totalBytes).toBe(0)
-    },
-    120_000
-  )
-
-  it(
-    'applies right → left with an explicit select-all and stays idempotent',
-    async () => {
-      const fixture = await buildRealFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      const preview = await previewSync(platform, comparison, 'right-to-left', 'mirror', 1)
-      const checked = preview.plan.delete.items.map((item) => item.relativePath)
-      expect(checked.sort()).toEqual(
-        fixture.leftOnly.map((file) => file.relativePath).sort()
+      await assertGroupMatchesDisk(
+        plan.delete,
+        target,
+        expectedDelete.map((file) => file.relativePath)
       )
 
-      const result = await applySyncPreview(platform, preview, cache, checked)
-      expect(result.copied).toBe(RIGHT_ONLY_COUNT)
-      expect(result.updated).toBe(MODIFIED_COUNT)
-      expect(result.deleted).toBe(LEFT_ONLY_COUNT)
+      // `same` never enters any group.
+      const planned = new Set([...plan.copy.items, ...plan.update.items, ...plan.delete.items].map((item) => item.relativePath))
+      for (const file of fixture.same) expect(planned.has(file.relativePath)).toBe(false)
+      expect(plan.totalCount).toBe(plan.copy.count + plan.update.count + plan.delete.count)
+      expect(plan.totalBytes).toBe(plan.copy.bytes + plan.update.bytes + plan.delete.bytes)
+    }
 
-      for (const file of fixture.rightFiles) {
-        const sourcePath = diskPath(fixture.right, file.relativePath)
-        const targetPath = diskPath(fixture.left, file.relativePath)
-        expect(await readFile(targetPath, 'utf8')).toBe(await readFile(sourcePath, 'utf8'))
-        expect(Math.floor((await stat(targetPath)).mtimeMs)).toBe(
-          Math.floor((await stat(sourcePath)).mtimeMs)
-        )
-      }
-      expect(result.comparison.counts).toEqual({
-        same: 1_000,
-        added: 0,
-        removed: 0,
-        modified: 0
-      })
+    // A second comparison from a cold cache sees the same four-state split.
+    const cold = await comparePair(fixture.left, fixture.right)
+    expect(cold.counts).toEqual(comparison.counts)
+    expect(cold.fileCount).toBe(comparison.fileCount)
+  }, 120_000)
 
-      const second = buildSyncPlan(result.comparison, 'right-to-left', 'mirror')
-      expect(second.copy.count).toBe(0)
-      expect(second.update.count).toBe(0)
-      expect(second.delete.count).toBe(0)
-      expect(second.totalCount).toBe(0)
-      expect(second.totalBytes).toBe(0)
-    },
-    120_000
-  )
+  it('keeps mirror deletions unchecked: no paths deletes nothing, checked paths delete only themselves', async () => {
+    const { left, right } = await scratchSides()
+    await mkdir(join(left, '共享 目录'), { recursive: true })
+    await mkdir(join(right, '共享 目录'), { recursive: true })
+    await mkdir(join(right, '待删 目录', '更深'), { recursive: true })
+
+    const shared = join(left, '共享 目录', '相同 文件.txt')
+    await writeFile(shared, '相同 内容\n', 'utf8')
+    await writeFile(join(right, '共享 目录', '相同 文件.txt'), '相同 内容\n', 'utf8')
+    await utimes(shared, new Date(1_600_000_000_000), new Date(1_600_000_000_000))
+    await utimes(join(right, '共享 目录', '相同 文件.txt'), new Date(1_600_000_000_000), new Date(1_600_000_000_000))
+    await writeFile(join(right, '待删 目录', '其一.txt'), '其一', 'utf8')
+    await writeFile(join(right, '待删 目录', '更深', '其二.txt'), '其二', 'utf8')
+
+    const comparison = await comparePair(left, right)
+    expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 0, modified: 0 })
+
+    const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+    expect(preview.materializeTarget).toBe(false)
+    expect(preview.plan.copy.count).toBe(0)
+    expect(preview.plan.update.count).toBe(0)
+    expect(preview.plan.delete.count).toBe(2)
+
+    const io = syncIo(platform)
+    const before = await listRelativeFiles(right)
+
+    // Empty selection and an omitted option both mean "delete nothing".
+    const emptyRun = await executeSyncPlan(preview.plan, io, { deletePaths: [] })
+    expect(emptyRun.deleted).toBe(0)
+    expect(await listRelativeFiles(right)).toEqual(before)
+
+    const defaultRun = await executeSyncPlan(preview.plan, io)
+    expect(defaultRun.deleted).toBe(0)
+    expect(await listRelativeFiles(right)).toEqual(before)
+
+    // Only the explicitly checked relative path disappears.
+    const checked = preview.plan.delete.items[0].relativePath
+    const unchecked = preview.plan.delete.items[1].relativePath
+    const run = await executeSyncPlan(preview.plan, io, { deletePaths: [checked] })
+    expect(run.deleted).toBe(1)
+    expect(run.affected).toContain(diskPath(right, checked))
+    expect(await platform.exists(diskPath(right, checked))).toBe(false)
+    expect(await platform.exists(diskPath(right, unchecked))).toBe(true)
+    expect(await listRelativeFiles(right)).toEqual(before.filter((relativePath) => relativePath !== checked))
+  }, 60_000)
+
+  it('applies left → right for real, preserves content / structure / mtime and refreshes once', async () => {
+    const fixture = await buildRealFixture()
+    const cache = createComparisonCache()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'mirror', 1, cache)
+    const checked = deletePathsOf(preview.plan)
+
+    const result = await applySyncPreview(platform, preview, cache, checked)
+    expect(result.copied).toBe(LEFT_ONLY_COUNT)
+    expect(result.updated).toBe(MODIFIED_COUNT)
+    expect(result.deleted).toBe(RIGHT_ONLY_COUNT)
+    expect(result.copied).toBe(preview.plan.copy.count)
+    expect(result.updated).toBe(preview.plan.update.count)
+    expect(result.deleted).toBe(checked.length)
+
+    // The completion notice reports exactly what the preview promised: the
+    // same action object the dialog renders, item by item.
+    const action = syncPreviewAction(preview, checked)
+    expect(action.executable, 'sync summary: select-all preview is executable').toBe(true)
+    expect(
+      [result.copied, result.updated, result.deleted, result.alignedLinks],
+      'sync summary: completion counts match the preview action'
+    ).toEqual([action.copy, action.update, action.delete, action.align])
+
+    // Every source file now exists at the same relative path with the same
+    // UTF-8 body and a millisecond-equal mtime on the target.
+    for (const file of fixture.leftFiles) {
+      const sourcePath = diskPath(fixture.left, file.relativePath)
+      const targetPath = diskPath(fixture.right, file.relativePath)
+      expect(await readFile(targetPath, 'utf8')).toBe(await readFile(sourcePath, 'utf8'))
+      expect(Math.floor((await stat(targetPath)).mtimeMs)).toBe(Math.floor((await stat(sourcePath)).mtimeMs))
+    }
+
+    // The deepest Chinese + space path is found by the very same relative path.
+    const deepFile = fixture.leftFiles.find((file) => file.relativePath.startsWith('资料 夹/第一层 子目录/第二层/深层 目录/第五层'))
+    if (deepFile === undefined) throw new Error('fixture has no level-5 file')
+    expect(await platform.statPath(diskPath(fixture.right, deepFile.relativePath))).toBe('file')
+    expect(await listRelativeFiles(fixture.right)).toEqual(fixture.leftFiles.map((file) => file.relativePath).sort())
+    // Atomic writes clean up after themselves on the success path too.
+    expect((await listRelativeFiles(fixture.right)).filter((relativePath) => relativePath.endsWith('.tmp'))).toEqual([])
+
+    // The returned comparison is the single source of the refreshed state.
+    const fresh = await comparePair(fixture.left, fixture.right)
+    expect(result.comparison.counts).toEqual(fresh.counts)
+    expect(result.comparison.counts).toEqual({
+      same: 1_000,
+      added: 0,
+      removed: 0,
+      modified: 0,
+    })
+    expect(result.comparison.skipped).toBe(fresh.skipped)
+    expect(result.comparison.leftSkipped).toBe(fresh.leftSkipped)
+    expect(result.comparison.rightSkipped).toBe(fresh.rightSkipped)
+
+    // Immediately re-running the same direction is empty: no ghost entries
+    // from mtime precision, separators or Chinese / space paths.
+    const second = await previewSync(platform, result.comparison, 'left-to-right', 'mirror', 2)
+    expect(second.plan.copy.count).toBe(0)
+    expect(second.plan.update.count).toBe(0)
+    expect(second.plan.delete.count).toBe(0)
+    expect(second.plan.totalCount).toBe(0)
+    expect(second.plan.totalBytes).toBe(0)
+  }, 120_000)
+
+  it('applies right → left with an explicit select-all and stays idempotent', async () => {
+    const fixture = await buildRealFixture()
+    const cache = createComparisonCache()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'right-to-left', 'mirror', 1, cache)
+    const checked = deletePathsOf(preview.plan)
+    expect(checked.sort()).toEqual(fixture.leftOnly.map((file) => file.relativePath).sort())
+
+    const result = await applySyncPreview(platform, preview, cache, checked)
+    expect(result.copied).toBe(RIGHT_ONLY_COUNT)
+    expect(result.updated).toBe(MODIFIED_COUNT)
+    expect(result.deleted).toBe(LEFT_ONLY_COUNT)
+
+    for (const file of fixture.rightFiles) {
+      const sourcePath = diskPath(fixture.right, file.relativePath)
+      const targetPath = diskPath(fixture.left, file.relativePath)
+      expect(await readFile(targetPath, 'utf8')).toBe(await readFile(sourcePath, 'utf8'))
+      expect(Math.floor((await stat(targetPath)).mtimeMs)).toBe(Math.floor((await stat(sourcePath)).mtimeMs))
+    }
+    expect(result.comparison.counts).toEqual({
+      same: 1_000,
+      added: 0,
+      removed: 0,
+      modified: 0,
+    })
+
+    const second = buildSyncPlan(result.comparison, 'right-to-left', 'mirror')
+    expect(second.copy.count).toBe(0)
+    expect(second.update.count).toBe(0)
+    expect(second.delete.count).toBe(0)
+    expect(second.totalCount).toBe(0)
+    expect(second.totalBytes).toBe(0)
+  }, 120_000)
 })
 
 /* ------------------------------------------------------------------ */
@@ -646,7 +561,7 @@ async function snapshotTree(root: string): Promise<DiskSnapshot> {
         const info = await stat(diskPath(root, child))
         files.set(child, {
           content: await readFile(diskPath(root, child), 'utf8'),
-          modifiedMs: Math.floor(info.mtimeMs)
+          modifiedMs: Math.floor(info.mtimeMs),
         })
       }
     }
@@ -666,19 +581,11 @@ function expectSameSnapshot(before: DiskSnapshot, after: DiskSnapshot): void {
   }
   // No atomic-write temporary file and no writability probe may survive a run.
   expect(
-    [...after.files.keys()].filter(
-      (relativePath) =>
-        relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-')
-    )
+    [...after.files.keys()].filter((relativePath) => relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-'))
   ).toEqual([])
 }
 
 const SAFETY_STAMP = 1_700_000_500_000
-
-async function writeStamped(path: string, text: string, stampMs: number): Promise<void> {
-  await writeFile(path, text, 'utf8')
-  await utimes(path, new Date(stampMs), new Date(stampMs))
-}
 
 interface SafetyFixture {
   readonly root: string
@@ -730,11 +637,10 @@ describe('real-disk sync failure safety', () => {
       let error: unknown
       try {
         await chmod(fixture.right, 0o555)
-        error = await executeSyncPlan(plan, syncIo(recorded.port), {
-          deletePaths: ['stale-a.txt', 'stale-b.txt']
-        }).then(
-          () => undefined,
-          (reason: unknown) => reason
+        error = await settle(
+          executeSyncPlan(plan, syncIo(recorded.port), {
+            deletePaths: ['stale-a.txt', 'stale-b.txt'],
+          })
         )
       } finally {
         await chmod(fixture.right, 0o755)
@@ -752,344 +658,276 @@ describe('real-disk sync failure safety', () => {
       // so no probe file and no planned item ever reached the disk.
       expect(recorded.writes).toEqual([])
       expectSameSnapshot(before, await snapshotTree(fixture.right))
-      expect((await readdir(fixture.right)).sort()).toEqual([
-        'same.txt',
-        'stale-a.txt',
-        'stale-b.txt',
-        'update.txt'
-      ])
+      expect((await readdir(fixture.right)).sort()).toEqual(['same.txt', 'stale-a.txt', 'stale-b.txt', 'update.txt'])
     },
     60_000
   )
 
-  it(
-    'refuses an occupied copy target before any partial write and keeps it intact',
-    async () => {
-      const fixture = await buildSafetyFixture()
-      const comparison = await comparePair(fixture.left, fixture.right)
-      const plan = buildSyncPlan(comparison, 'left-to-right', 'mirror')
-      const copyItem = plan.copy.items.find((item) => item.relativePath === 'added/one.txt')
-      if (copyItem === undefined) throw new Error('fixture has no added/one.txt copy item')
+  it('refuses an occupied copy target before any partial write and keeps it intact', async () => {
+    const fixture = await buildSafetyFixture()
+    const comparison = await comparePair(fixture.left, fixture.right)
+    const plan = buildSyncPlan(comparison, 'left-to-right', 'mirror')
+    const copyItem = plan.copy.items.find((item) => item.relativePath === 'added/one.txt')
+    if (copyItem === undefined) throw new Error('fixture has no added/one.txt copy item')
 
-      // The plan is stale by the time it runs: a same-named directory now sits
-      // at a path the plan still wants to copy a file to.
-      await mkdir(copyItem.targetPath, { recursive: true })
-      const before = await snapshotTree(fixture.right)
-      const recorded = recordWrites(platform)
+    // The plan is stale by the time it runs: a same-named directory now sits
+    // at a path the plan still wants to copy a file to.
+    await mkdir(copyItem.targetPath, { recursive: true })
+    const before = await snapshotTree(fixture.right)
+    const recorded = recordWrites(platform)
 
-      const error = await executeSyncPlan(plan, syncIo(recorded.port), {
-        deletePaths: ['stale-a.txt', 'stale-b.txt']
-      }).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
+    const error = await settle(
+      executeSyncPlan(plan, syncIo(recorded.port), {
+        deletePaths: ['stale-a.txt', 'stale-b.txt'],
+      })
+    )
 
-      expect(error).toBeInstanceOf(SyncTargetError)
-      expect((error as SyncTargetError).code).toBe('EISDIR')
-      const message = (error as Error).message
-      expect(message).toMatch(/[一-龥]/)
-      expect(message).toContain(copyItem.targetPath)
-      expect(message).toContain('EISDIR')
-      expect(message).not.toContain('Error invoking remote method')
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EISDIR')
+    const message = (error as Error).message
+    expect(message).toMatch(/[一-龥]/)
+    expect(message).toContain(copyItem.targetPath)
+    expect(message).toContain('EISDIR')
+    expect(message).not.toContain('Error invoking remote method')
 
-      // Refused in the preflight: no write ran and the occupying directory is
-      // untouched, so no earlier item landed and nothing was left behind.
-      expect(recorded.writes).toEqual([])
-      expectSameSnapshot(before, await snapshotTree(fixture.right))
-      expect((await stat(copyItem.targetPath)).isDirectory()).toBe(true)
-      expect(await readdir(copyItem.targetPath)).toEqual([])
-    },
-    60_000
-  )
+    // Refused in the preflight: no write ran and the occupying directory is
+    // untouched, so no earlier item landed and nothing was left behind.
+    expect(recorded.writes).toEqual([])
+    expectSameSnapshot(before, await snapshotTree(fixture.right))
+    expect((await stat(copyItem.targetPath)).isDirectory()).toBe(true)
+    expect(await readdir(copyItem.targetPath)).toEqual([])
+  }, 60_000)
 
-  it(
-    'rolls a mid-plan failure back to the exact previous disk and stays retryable',
-    async () => {
-      const fixture = await buildSafetyFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 3, modified: 1 })
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      const checked = preview.plan.delete.items.map((item) => item.relativePath)
-      const before = await snapshotTree(fixture.right)
+  it('rolls a mid-plan failure back to the exact previous disk and stays retryable', async () => {
+    const fixture = await buildSafetyFixture()
+    const cache = createComparisonCache()
+    const comparison = await comparePair(fixture.left, fixture.right, cache)
+    expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 3, modified: 1 })
+    const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+    const checked = deletePathsOf(preview.plan)
+    const before = await snapshotTree(fixture.right)
 
-      // Fail the run after every copy / update and one of the two deletions.
-      const failing: PlatformPort = {
-        ...platform,
-        deleteFile: async (path) => {
-          if (path.endsWith('stale-b.txt')) {
-            throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
-          }
-          return platform.deleteFile(path)
+    // Fail the run after every copy / update and one of the two deletions.
+    const failing: PlatformPort = {
+      ...platform,
+      deleteFile: async (path) => {
+        if (path.endsWith('stale-b.txt')) {
+          throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
         }
-      }
+        return platform.deleteFile(path)
+      },
+    }
 
-      const error = await applySyncPreview(failing, preview, cache, checked).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
+    const error = await settle(applySyncPreview(failing, preview, cache, checked))
 
-      expect(error).toBeInstanceOf(SyncTargetError)
-      expect((error as SyncTargetError).code).toBe('EBUSY')
-      const message = (error as Error).message
-      expect(message).toMatch(/[一-龥]/)
-      expect(message).toContain('stale-b.txt')
-      expect(message).toContain('EBUSY')
-      expect(message).not.toContain('Error invoking remote method')
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EBUSY')
+    const message = (error as Error).message
+    expect(message).toMatch(/[一-龥]/)
+    expect(message).toContain('stale-b.txt')
+    expect(message).toContain('EBUSY')
+    expect(message).not.toContain('Error invoking remote method')
 
-      // Overwritten bytes / mtimes restored, the deleted file re-created, the
-      // files and both created directory levels removed again.
-      expectSameSnapshot(before, await snapshotTree(fixture.right))
-      // The failed apply produced no new comparison: the caller session is intact.
-      expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 3, modified: 1 })
+    // Overwritten bytes / mtimes restored, the deleted file re-created, the
+    // files and both created directory levels removed again.
+    expectSameSnapshot(before, await snapshotTree(fixture.right))
+    // The failed apply produced no new comparison: the caller session is intact.
+    expect(comparison.counts).toEqual({ same: 1, added: 2, removed: 3, modified: 1 })
 
-      // The very same preview is retryable and now lands everything.
-      const retry = await applySyncPreview(platform, preview, cache, checked)
-      expect(retry.copied).toBe(3)
-      expect(retry.updated).toBe(1)
-      expect(retry.deleted).toBe(2)
-      expect(retry.comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
-    },
-    60_000
-  )
+    // The very same preview is retryable and now lands everything.
+    const retry = await applySyncPreview(platform, preview, cache, checked)
+    expect(retry.copied).toBe(3)
+    expect(retry.updated).toBe(1)
+    expect(retry.deleted).toBe(2)
+    expect(retry.comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
+  }, 60_000)
 
-  it(
-    'cancels mid-plan, rolls back and reports a cancellation distinct from failure',
-    async () => {
-      const fixture = await buildSafetyFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      const before = await snapshotTree(fixture.right)
+  it('cancels mid-plan, rolls back and reports a cancellation distinct from failure', async () => {
+    const fixture = await buildSafetyFixture()
+    const cache = createComparisonCache()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'mirror', 1, cache)
+    const before = await snapshotTree(fixture.right)
 
-      const controller = new AbortController()
-      const cancelling: PlatformPort = {
-        ...platform,
-        writeFileBytes: async (path, content, modifiedMs) => {
-          await platform.writeFileBytes(path, content, modifiedMs)
-          // Abort right after one planned write landed; later items never start.
-          if (path.endsWith('added/deep/two.txt')) controller.abort()
+    const controller = new AbortController()
+    const cancelling: PlatformPort = {
+      ...platform,
+      writeFileBytes: async (path, content, modifiedMs) => {
+        await platform.writeFileBytes(path, content, modifiedMs)
+        // Abort right after one planned write landed; later items never start.
+        if (path.endsWith('added/deep/two.txt')) controller.abort()
+      },
+    }
+
+    const error = await settle(
+      applySyncPreview(cancelling, preview, cache, [], {
+        signal: controller.signal,
+      })
+    )
+
+    expect(isOperationCancelled(error)).toBe(true)
+    const message = (error as Error).message
+    expect(message).toContain('已取消')
+    expect(message).not.toMatch(/[（(]E[A-Z]+[）)]/)
+    expectSameSnapshot(before, await snapshotTree(fixture.right))
+
+    // A cold dry-run immediately after the cancellation reflects the real disk.
+    const rebuiltComparison = await comparePair(fixture.left, fixture.right)
+    const rebuilt = buildSyncPlan(rebuiltComparison, 'left-to-right', 'mirror')
+    expect(rebuilt.copy.count).toBe(3)
+    expect(rebuilt.update.count).toBe(1)
+    expect(rebuilt.delete.count).toBe(2)
+    expect(rebuilt.totalCount).toBe(rebuiltComparison.counts.added + rebuiltComparison.counts.removed + rebuiltComparison.counts.modified)
+  }, 60_000)
+
+  it('keeps unchecked mirror deletions untouched when the run fails', async () => {
+    const fixture = await buildSafetyFixture()
+    const cache = createComparisonCache()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'mirror', 1, cache)
+    const before = await snapshotTree(fixture.right)
+
+    const failing: PlatformPort = {
+      ...platform,
+      writeFileBytes: async (path, content, modifiedMs) => {
+        if (path.endsWith('added/one.txt')) {
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
         }
+        return platform.writeFileBytes(path, content, modifiedMs)
+      },
+    }
+
+    // Zero checked deletions; the run still fails after earlier copies landed.
+    const error = await settle(applySyncPreview(failing, preview, cache, []))
+
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
+    expectSameSnapshot(before, await snapshotTree(fixture.right))
+    expect(await platform.exists(diskPath(fixture.right, 'stale-a.txt'))).toBe(true)
+    expect(await platform.exists(diskPath(fixture.right, 'stale-b.txt'))).toBe(true)
+  }, 60_000)
+
+  it('rolls a write that landed before it rejected back, for a copy and an update', async () => {
+    const fixture = await buildSafetyFixture()
+    const cache = createComparisonCache()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'mirror', 1, cache)
+    const checked = deletePathsOf(preview.plan)
+    const before = await snapshotTree(fixture.right)
+
+    /** Writes for real, then rejects exactly once on `relativePath`. */
+    function postWriteFailure(relativePath: string): {
+      readonly port: PlatformPort
+      readonly landed: () => boolean
+    } {
+      const targetPath = diskPath(fixture.right, relativePath)
+      let landed = false
+      return {
+        landed: () => landed,
+        port: {
+          ...platform,
+          writeFileBytes: async (path, content, modifiedMs) => {
+            await platform.writeFileBytes(path, content, modifiedMs)
+            if (!landed && path === targetPath) {
+              landed = true
+              throw Object.assign(new Error('rename landed, mtime backfill failed'), {
+                code: 'EACCES',
+              })
+            }
+          },
+        },
       }
+    }
 
-      const error = await applySyncPreview(cancelling, preview, cache, [], {
-        signal: controller.signal
-      }).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
+    for (const relativePath of ['added/one.txt', 'update.txt']) {
+      const failure = postWriteFailure(relativePath)
+      const error = await settle(applySyncPreview(failure.port, preview, cache, checked))
 
-      expect(isOperationCancelled(error)).toBe(true)
-      const message = (error as Error).message
-      expect(message).toContain('已取消')
-      expect(message).not.toMatch(/[（(]E[A-Z]+[）)]/)
-      expectSameSnapshot(before, await snapshotTree(fixture.right))
-
-      // A cold dry-run immediately after the cancellation reflects the real disk.
-      const rebuiltComparison = await comparePair(fixture.left, fixture.right)
-      const rebuilt = buildSyncPlan(rebuiltComparison, 'left-to-right', 'mirror')
-      expect(rebuilt.copy.count).toBe(3)
-      expect(rebuilt.update.count).toBe(1)
-      expect(rebuilt.delete.count).toBe(2)
-      expect(rebuilt.totalCount).toBe(
-        rebuiltComparison.counts.added +
-          rebuiltComparison.counts.removed +
-          rebuiltComparison.counts.modified
-      )
-    },
-    60_000
-  )
-
-  it(
-    'keeps unchecked mirror deletions untouched when the run fails',
-    async () => {
-      const fixture = await buildSafetyFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      const before = await snapshotTree(fixture.right)
-
-      const failing: PlatformPort = {
-        ...platform,
-        writeFileBytes: async (path, content, modifiedMs) => {
-          if (path.endsWith('added/one.txt')) {
-            throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
-          }
-          return platform.writeFileBytes(path, content, modifiedMs)
-        }
-      }
-
-      // Zero checked deletions; the run still fails after earlier copies landed.
-      const error = await applySyncPreview(failing, preview, cache, []).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-
+      expect(failure.landed(), relativePath).toBe(true)
       expect(error).toBeInstanceOf(SyncTargetError)
       expect((error as SyncTargetError).code).toBe('EACCES')
-      expectSameSnapshot(before, await snapshotTree(fixture.right))
-      expect(await platform.exists(diskPath(fixture.right, 'stale-a.txt'))).toBe(true)
-      expect(await platform.exists(diskPath(fixture.right, 'stale-b.txt'))).toBe(true)
-    },
-    60_000
-  )
-
-  it(
-    'rolls a write that landed before it rejected back, for a copy and an update',
-    async () => {
-      const fixture = await buildSafetyFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      const checked = preview.plan.delete.items.map((item) => item.relativePath)
-      const before = await snapshotTree(fixture.right)
-
-      /** Writes for real, then rejects exactly once on `relativePath`. */
-      function postWriteFailure(relativePath: string): {
-        readonly port: PlatformPort
-        readonly landed: () => boolean
-      } {
-        const targetPath = diskPath(fixture.right, relativePath)
-        let landed = false
-        return {
-          landed: () => landed,
-          port: {
-            ...platform,
-            writeFileBytes: async (path, content, modifiedMs) => {
-              await platform.writeFileBytes(path, content, modifiedMs)
-              if (!landed && path === targetPath) {
-                landed = true
-                throw Object.assign(new Error('rename landed, mtime backfill failed'), {
-                  code: 'EACCES'
-                })
-              }
-            }
-          }
-        }
-      }
-
-      for (const relativePath of ['added/one.txt', 'update.txt']) {
-        const failure = postWriteFailure(relativePath)
-        const error = await applySyncPreview(
-          failure.port,
-          preview,
-          cache,
-          checked
-        ).then(
-          () => undefined,
-          (reason: unknown) => reason
-        )
-
-        expect(failure.landed(), relativePath).toBe(true)
-        expect(error).toBeInstanceOf(SyncTargetError)
-        expect((error as SyncTargetError).code).toBe('EACCES')
-        const message = (error as Error).message
-        expect(message).toMatch(/[一-龥]/)
-        expect(message).toContain(diskPath(fixture.right, relativePath))
-        expect(message).toContain('EACCES')
-        expect(message).not.toContain('Error invoking remote method')
-
-        // Bytes, millisecond mtimes and directories are all exactly as before.
-        expectSameSnapshot(before, await snapshotTree(fixture.right))
-        // Everything this run created is gone again, multi-level directories too.
-        expect(await platform.exists(diskPath(fixture.right, 'added/one.txt'))).toBe(false)
-        expect(await platform.statPath(diskPath(fixture.right, 'added'))).toBe('missing')
-      }
-    },
-    60_000
-  )
-
-  it(
-    'reports a refresh failure after the writes landed as a readable completed-write error',
-    async () => {
-      const fixture = await buildSafetyFixture()
-      const cache = createComparisonCache()
-      const comparison = await comparePair(fixture.left, fixture.right, cache)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      const checked = preview.plan.delete.items.map((item) => item.relativePath)
-      let refreshing = false
-      const refreshFailure = (path: string): Error =>
-        new Error(
-          `Error invoking remote method 'platform:list-directory': Error: ` +
-            `无法读取目录 ${path}：没有访问权限（EACCES）。`
-        )
-
-      // The last planned operation is the last checked deletion: everything after
-      // it belongs to the refresh, which is where the injected read failure hits.
-      const failingRefresh: PlatformPort = {
-        ...platform,
-        deleteFile: async (path) => {
-          await platform.deleteFile(path)
-          if (path.endsWith('stale-b.txt')) refreshing = true
-        },
-        listDirectory: async (path) => {
-          if (refreshing) throw refreshFailure(path)
-          return platform.listDirectory(path)
-        },
-        listDirectories: async (paths, options) => {
-          if (refreshing) throw refreshFailure(paths[0] ?? '')
-          return platform.listDirectories(paths, options)
-        }
-      }
-
-      const error = await applySyncPreview(failingRefresh, preview, cache, checked).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-
-      expect(error).toBeInstanceOf(SyncRefreshError)
-      expect(error).not.toBeInstanceOf(SyncTargetError)
-      const refresh = error as SyncRefreshError
-      expect(refresh.copied).toBe(preview.plan.copy.count)
-      expect(refresh.updated).toBe(preview.plan.update.count)
-      expect(refresh.deleted).toBe(checked.length)
-
-      const message = refresh.message
+      const message = (error as Error).message
       expect(message).toMatch(/[一-龥]/)
-      expect(message).toContain('写入已完成')
-      expect(message).toContain(`新增拷贝 ${preview.plan.copy.count}`)
-      expect(message).toContain(`覆盖 ${preview.plan.update.count}`)
-      expect(message).toContain(`删除 ${checked.length}`)
+      expect(message).toContain(diskPath(fixture.right, relativePath))
       expect(message).toContain('EACCES')
       expect(message).not.toContain('Error invoking remote method')
 
-      // Nothing was rolled back: the target holds the fully applied plan.
-      const after = await snapshotTree(fixture.right)
-      expect(after.files.get('update.txt')?.content).toBe('new body!!\n')
-      expect(after.files.get('added/deep/three.txt')?.content).toBe('copy three\n')
-      expect(after.files.has('stale-a.txt')).toBe(false)
-      expect(after.files.has('stale-b.txt')).toBe(false)
-      expect(
-        [...after.files.keys()].filter(
-          (relativePath) =>
-            relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-')
-        )
-      ).toEqual([])
-    },
-    60_000
-  )
+      // Bytes, millisecond mtimes and directories are all exactly as before.
+      expectSameSnapshot(before, await snapshotTree(fixture.right))
+      // Everything this run created is gone again, multi-level directories too.
+      expect(await platform.exists(diskPath(fixture.right, 'added/one.txt'))).toBe(false)
+      expect(await platform.statPath(diskPath(fixture.right, 'added'))).toBe('missing')
+    }
+  }, 60_000)
+
+  it('reports a refresh failure after the writes landed as a readable completed-write error', async () => {
+    const fixture = await buildSafetyFixture()
+    const cache = createComparisonCache()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'mirror', 1, cache)
+    const checked = deletePathsOf(preview.plan)
+    let refreshing = false
+    const refreshFailure = (path: string): Error =>
+      new Error(`Error invoking remote method 'platform:list-directory': Error: ` + `无法读取目录 ${path}：没有访问权限（EACCES）。`)
+
+    // The last planned operation is the last checked deletion: everything after
+    // it belongs to the refresh, which is where the injected read failure hits.
+    const failingRefresh: PlatformPort = {
+      ...platform,
+      deleteFile: async (path) => {
+        await platform.deleteFile(path)
+        if (path.endsWith('stale-b.txt')) refreshing = true
+      },
+      listDirectory: async (path) => {
+        if (refreshing) throw refreshFailure(path)
+        return platform.listDirectory(path)
+      },
+      listDirectories: async (paths, options) => {
+        if (refreshing) throw refreshFailure(paths[0] ?? '')
+        return platform.listDirectories(paths, options)
+      },
+    }
+
+    const error = await settle(applySyncPreview(failingRefresh, preview, cache, checked))
+
+    expect(error).toBeInstanceOf(SyncRefreshError)
+    expect(error).not.toBeInstanceOf(SyncTargetError)
+    const refresh = error as SyncRefreshError
+    expect(refresh.copied).toBe(preview.plan.copy.count)
+    expect(refresh.updated).toBe(preview.plan.update.count)
+    expect(refresh.deleted).toBe(checked.length)
+
+    const message = refresh.message
+    expect(message).toMatch(/[一-龥]/)
+    expect(message).toContain('写入已完成')
+    expect(message).toContain(`新增拷贝 ${preview.plan.copy.count}`)
+    expect(message).toContain(`覆盖 ${preview.plan.update.count}`)
+    expect(message).toContain(`删除 ${checked.length}`)
+    expect(message).toContain('EACCES')
+    expect(message).not.toContain('Error invoking remote method')
+
+    // Nothing was rolled back: the target holds the fully applied plan.
+    const after = await snapshotTree(fixture.right)
+    expect(after.files.get('update.txt')?.content).toBe('new body!!\n')
+    expect(after.files.get('added/deep/three.txt')?.content).toBe('copy three\n')
+    expect(after.files.has('stale-a.txt')).toBe(false)
+    expect(after.files.has('stale-b.txt')).toBe(false)
+    expect(
+      [...after.files.keys()].filter((relativePath) => relativePath.endsWith('.tmp') || relativePath.includes('.opencompare-sync-probe-'))
+    ).toEqual([])
+  }, 60_000)
 })
 
 /* ------------------------------------------------------------------ */
 /* Binary byte fidelity on the same real temp disks                    */
 /* ------------------------------------------------------------------ */
 
-function rawSha(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex')
-}
-
 /** Real PNG signature + IHDR/IDAT-shaped bytes plus invalid UTF-8 sequences. */
 const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0xff, 0x80, 0xc3, 0x00, 0xfe, 0x7f
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0xff, 0x80, 0xc3, 0x00, 0xfe, 0x7f,
 ])
 
 /** Bytes no UTF-8 decoder can round-trip: NULs, lone continuations, 0xC3 without a tail. */
 const RANDOM_BYTES = Buffer.from([
-  0x00, 0x01, 0x7f, 0x80, 0xff, 0xc3, 0x28, 0x00, 0x9f, 0x92, 0xe2, 0x28, 0xa1, 0x00, 0xc3, 0xed,
-  0xa0, 0x80, 0x00, 0x0a
+  0x00, 0x01, 0x7f, 0x80, 0xff, 0xc3, 0x28, 0x00, 0x9f, 0x92, 0xe2, 0x28, 0xa1, 0x00, 0xc3, 0xed, 0xa0, 0x80, 0x00, 0x0a,
 ])
 
 interface BinaryFixture {
@@ -1102,20 +940,12 @@ interface BinaryFixture {
 
 const BINARY_STAMP = 1_700_000_700_000
 
-async function writeStampedBytes(path: string, bytes: Uint8Array, stampMs: number): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, bytes)
-  await utimes(path, new Date(stampMs), new Date(stampMs))
-}
-
 /**
  * One same text pair, three binary copies (PNG / invalid UTF-8 / empty) and one
  * binary overwrite whose target body differs.
  */
 async function buildBinaryFixture(): Promise<BinaryFixture> {
-  const root = await scratchRoot()
-  const left = join(root, 'left')
-  const right = join(root, 'right')
+  const { root, left, right } = await scratchSides()
   await mkdir(join(left, 'assets'), { recursive: true })
   await mkdir(join(right, 'assets'), { recursive: true })
 
@@ -1126,164 +956,118 @@ async function buildBinaryFixture(): Promise<BinaryFixture> {
   await writeStampedBytes(diskPath(left, 'assets/random.bin'), RANDOM_BYTES, BINARY_STAMP + 2)
   await writeStampedBytes(diskPath(left, 'assets/empty.bin'), Buffer.alloc(0), BINARY_STAMP + 3)
   await writeStampedBytes(diskPath(left, 'assets/updated.png'), PNG_BYTES, BINARY_STAMP + 4)
-  await writeStampedBytes(
-    diskPath(right, 'assets/updated.png'),
-    Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05]),
-    BINARY_STAMP + 5
-  )
+  await writeStampedBytes(diskPath(right, 'assets/updated.png'), Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05]), BINARY_STAMP + 5)
 
   return {
     root,
     left,
     right,
-    fidelity: ['assets/logo.png', 'assets/random.bin', 'assets/empty.bin', 'assets/updated.png']
+    fidelity: ['assets/logo.png', 'assets/random.bin', 'assets/empty.bin', 'assets/updated.png'],
   }
 }
 
 describe('real-disk sync binary fidelity', () => {
-  it(
-    'copies and overwrites binary bodies byte for byte, empty files included',
-    async () => {
-      const fixture = await buildBinaryFixture()
-      const comparison = await comparePair(fixture.left, fixture.right)
-      expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 3, modified: 1 })
+  it('copies and overwrites binary bodies byte for byte, empty files included', async () => {
+    const fixture = await buildBinaryFixture()
+    const comparison = await comparePair(fixture.left, fixture.right)
+    expect(comparison.counts).toEqual({ same: 1, added: 0, removed: 3, modified: 1 })
 
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
-      expect(preview.plan.copy.count).toBe(3)
-      expect(preview.plan.update.count).toBe(1)
+    const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+    expect(preview.plan.copy.count).toBe(3)
+    expect(preview.plan.update.count).toBe(1)
 
-      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(result.copied).toBe(3)
-      expect(result.updated).toBe(1)
+    const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(result.copied).toBe(3)
+    expect(result.updated).toBe(1)
 
-      for (const relativePath of fixture.fidelity) {
-        const sourcePath = diskPath(fixture.left, relativePath)
-        const targetPath = diskPath(fixture.right, relativePath)
-        const sourceBytes = await readFile(sourcePath)
-        const targetBytes = await readFile(targetPath)
-        expect(
-          targetBytes.equals(sourceBytes),
-          `binary fidelity: ${relativePath} bytes changed on copy`
-        ).toBe(true)
-        expect(targetBytes.length, `binary fidelity: ${relativePath} size`).toBe(sourceBytes.length)
-        expect(rawSha(targetBytes), `binary fidelity: ${relativePath} sha256`).toBe(
-          rawSha(sourceBytes)
-        )
-        expect(
-          Math.floor((await stat(targetPath)).mtimeMs),
-          `binary fidelity: ${relativePath} mtime`
-        ).toBe(Math.floor((await stat(sourcePath)).mtimeMs))
-      }
-
-      // A 0-byte source stays 0 bytes with the empty-content hash.
-      const emptyTarget = diskPath(fixture.right, 'assets/empty.bin')
-      expect((await stat(emptyTarget)).size, 'binary fidelity: empty file stays empty').toBe(0)
-      expect(rawSha(await readFile(emptyTarget)), 'binary fidelity: empty sha256').toBe(
-        createHash('sha256').update(Buffer.alloc(0)).digest('hex')
+    for (const relativePath of fixture.fidelity) {
+      const sourcePath = diskPath(fixture.left, relativePath)
+      const targetPath = diskPath(fixture.right, relativePath)
+      const sourceBytes = await readFile(sourcePath)
+      const targetBytes = await readFile(targetPath)
+      expect(targetBytes.equals(sourceBytes), `binary fidelity: ${relativePath} bytes changed on copy`).toBe(true)
+      expect(targetBytes.length, `binary fidelity: ${relativePath} size`).toBe(sourceBytes.length)
+      expect(sha256Hex(targetBytes), `binary fidelity: ${relativePath} sha256`).toBe(sha256Hex(sourceBytes))
+      expect(Math.floor((await stat(targetPath)).mtimeMs), `binary fidelity: ${relativePath} mtime`).toBe(
+        Math.floor((await stat(sourcePath)).mtimeMs)
       )
+    }
 
-      // UTF-8 text still round-trips exactly, and the four-state counting is unchanged.
-      expect(await readFile(diskPath(fixture.right, 'shared.txt'), 'utf8')).toBe('shared body\n')
-      expect(result.comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
+    // A 0-byte source stays 0 bytes with the empty-content hash.
+    const emptyTarget = diskPath(fixture.right, 'assets/empty.bin')
+    expect((await stat(emptyTarget)).size, 'binary fidelity: empty file stays empty').toBe(0)
+    expect(sha256Hex(await readFile(emptyTarget)), 'binary fidelity: empty sha256').toBe(
+      createHash('sha256').update(Buffer.alloc(0)).digest('hex')
+    )
 
-      // An immediately rebuilt plan is empty: the bytes and mtimes really match.
-      const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
-      expect(second.copy.count, 'binary fidelity: second copy count').toBe(0)
-      expect(second.update.count, 'binary fidelity: second update count').toBe(0)
-      expect(second.delete.count, 'binary fidelity: second delete count').toBe(0)
-    },
-    120_000
-  )
+    // UTF-8 text still round-trips exactly, and the four-state counting is unchanged.
+    expect(await readFile(diskPath(fixture.right, 'shared.txt'), 'utf8')).toBe('shared body\n')
+    expect(result.comparison.counts).toEqual({ same: 5, added: 0, removed: 0, modified: 0 })
 
-  it(
-    'rolls a binary overwrite back to the exact previous bytes and mtime on failure',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const original = Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff, 0x80])
-      await writeStampedBytes(diskPath(left, 'a-update.png'), PNG_BYTES, BINARY_STAMP)
-      await writeStampedBytes(diskPath(left, 'z-copy.txt'), Buffer.from('copy me'), BINARY_STAMP + 1)
-      await writeStampedBytes(diskPath(right, 'a-update.png'), original, BINARY_STAMP + 2)
+    // An immediately rebuilt plan is empty: the bytes and mtimes really match.
+    const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
+    expect(second.copy.count, 'binary fidelity: second copy count').toBe(0)
+    expect(second.update.count, 'binary fidelity: second update count').toBe(0)
+    expect(second.delete.count, 'binary fidelity: second delete count').toBe(0)
+  }, 120_000)
 
-      const comparison = await comparePair(left, right)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
-      expect(preview.plan.update.count).toBe(1)
-      expect(preview.plan.copy.count).toBe(1)
+  it('rolls a binary overwrite back to the exact previous bytes and mtime on failure', async () => {
+    const { left, right } = await scratchSides()
+    const original = Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff, 0x80])
+    await writeStampedBytes(diskPath(left, 'a-update.png'), PNG_BYTES, BINARY_STAMP)
+    await writeStampedBytes(diskPath(left, 'z-copy.txt'), Buffer.from('copy me'), BINARY_STAMP + 1)
+    await writeStampedBytes(diskPath(right, 'a-update.png'), original, BINARY_STAMP + 2)
 
-      const failing: PlatformPort = {
-        ...platform,
-        writeFileBytes: async (path, content, modifiedMs) => {
-          if (path.endsWith('z-copy.txt')) {
-            throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
-          }
-          return platform.writeFileBytes(path, content, modifiedMs)
+    const { preview } = await previewPair(left, right, 'left-to-right', 'incremental', 1)
+    expect(preview.plan.update.count).toBe(1)
+    expect(preview.plan.copy.count).toBe(1)
+
+    const failing: PlatformPort = {
+      ...platform,
+      writeFileBytes: async (path, content, modifiedMs) => {
+        if (path.endsWith('z-copy.txt')) {
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
         }
-      }
+        return platform.writeFileBytes(path, content, modifiedMs)
+      },
+    }
 
-      const error = await applySyncPreview(failing, preview, createComparisonCache(), []).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-      expect(error).toBeInstanceOf(SyncTargetError)
-      expect((error as SyncTargetError).code).toBe('EACCES')
+    const error = await settle(applySyncPreview(failing, preview, createComparisonCache(), []))
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
 
-      const restored = await readFile(diskPath(right, 'a-update.png'))
-      expect(restored.equals(original), 'binary fidelity: rollback restored different bytes').toBe(
-        true
-      )
-      expect(rawSha(restored), 'binary fidelity: rollback sha256').toBe(rawSha(original))
-      expect(
-        Math.floor((await stat(diskPath(right, 'a-update.png'))).mtimeMs),
-        'binary fidelity: rollback mtime'
-      ).toBe(BINARY_STAMP + 2)
-    },
-    60_000
-  )
+    const restored = await readFile(diskPath(right, 'a-update.png'))
+    expect(restored.equals(original), 'binary fidelity: rollback restored different bytes').toBe(true)
+    expect(sha256Hex(restored), 'binary fidelity: rollback sha256').toBe(sha256Hex(original))
+    expect(Math.floor((await stat(diskPath(right, 'a-update.png'))).mtimeMs), 'binary fidelity: rollback mtime').toBe(BINARY_STAMP + 2)
+  }, 60_000)
 
-  it(
-    'rolls a checked binary deletion back to the exact previous bytes and mtime',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const stale = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x80])
-      await mkdir(left, { recursive: true })
-      await writeStampedBytes(diskPath(right, 'stale.bin'), stale, BINARY_STAMP + 9)
+  it('rolls a checked binary deletion back to the exact previous bytes and mtime', async () => {
+    const { left, right } = await scratchSides()
+    const stale = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x80])
+    await writeStampedBytes(diskPath(right, 'stale.bin'), stale, BINARY_STAMP + 9)
 
-      const comparison = await comparePair(left, right)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      expect(preview.plan.delete.count).toBe(1)
-      const checked = preview.plan.delete.items.map((item) => item.relativePath)
+    const { preview } = await previewPair(left, right, 'left-to-right', 'mirror', 1)
+    expect(preview.plan.delete.count).toBe(1)
+    const checked = deletePathsOf(preview.plan)
 
-      const failing: PlatformPort = {
-        ...platform,
-        deleteFile: async (path) => {
-          await platform.deleteFile(path)
-          throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
-        }
-      }
+    const failing: PlatformPort = {
+      ...platform,
+      deleteFile: async (path) => {
+        await platform.deleteFile(path)
+        throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
+      },
+    }
 
-      const error = await applySyncPreview(failing, preview, createComparisonCache(), checked).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-      expect(error).toBeInstanceOf(SyncTargetError)
-      expect((error as SyncTargetError).code).toBe('EBUSY')
+    const error = await settle(applySyncPreview(failing, preview, createComparisonCache(), checked))
+    expect(error).toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EBUSY')
 
-      const restored = await readFile(diskPath(right, 'stale.bin'))
-      expect(
-        restored.equals(stale),
-        'binary fidelity: delete rollback restored different bytes'
-      ).toBe(true)
-      expect(rawSha(restored), 'binary fidelity: delete rollback sha256').toBe(rawSha(stale))
-      expect(
-        Math.floor((await stat(diskPath(right, 'stale.bin'))).mtimeMs),
-        'binary fidelity: delete rollback mtime'
-      ).toBe(BINARY_STAMP + 9)
-    },
-    60_000
-  )
+    const restored = await readFile(diskPath(right, 'stale.bin'))
+    expect(restored.equals(stale), 'binary fidelity: delete rollback restored different bytes').toBe(true)
+    expect(sha256Hex(restored), 'binary fidelity: delete rollback sha256').toBe(sha256Hex(stale))
+    expect(Math.floor((await stat(diskPath(right, 'stale.bin'))).mtimeMs), 'binary fidelity: delete rollback mtime').toBe(BINARY_STAMP + 9)
+  }, 60_000)
 })
 
 /* ------------------------------------------------------------------ */
@@ -1291,255 +1075,171 @@ describe('real-disk sync binary fidelity', () => {
 /* ------------------------------------------------------------------ */
 
 describe('real-disk sync completion consistency', () => {
-  it(
-    'rejects with a verification failure when a written target keeps bad bytes',
-    async () => {
-      const fixture = await buildBinaryFixture()
-      const comparison = await comparePair(fixture.left, fixture.right)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+  it('rejects with a verification failure when a written target keeps bad bytes', async () => {
+    const fixture = await buildBinaryFixture()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'incremental', 1)
 
-      // The write seam "succeeds" but lands corrupted bytes for one file: only
-      // the post-write digest can catch this.
-      const corrupting: PlatformPort = {
-        ...platform,
-        writeFileBytes: async (path, content, modifiedMs) => {
-          if (path.endsWith('logo.png')) {
-            const corrupted = Buffer.from(content)
-            corrupted[0] = corrupted[0] ^ 0xff
-            return platform.writeFileBytes(path, corrupted, modifiedMs)
-          }
-          return platform.writeFileBytes(path, content, modifiedMs)
+    // The write seam "succeeds" but lands corrupted bytes for one file: only
+    // the post-write digest can catch this.
+    const corrupting: PlatformPort = {
+      ...platform,
+      writeFileBytes: async (path, content, modifiedMs) => {
+        if (path.endsWith('logo.png')) {
+          const corrupted = Buffer.from(content)
+          corrupted[0] = corrupted[0] ^ 0xff
+          return platform.writeFileBytes(path, corrupted, modifiedMs)
         }
-      }
+        return platform.writeFileBytes(path, content, modifiedMs)
+      },
+    }
 
-      const error = await applySyncPreview(corrupting, preview, createComparisonCache(), []).then(
-        () => undefined,
-        (reason: unknown) => reason
+    const error = await settle(applySyncPreview(corrupting, preview, createComparisonCache(), []))
+
+    expect(error, 'completion consistency: a mismatched target must not resolve').toBeInstanceOf(SyncVerificationError)
+    expect(error).not.toBeInstanceOf(SyncRefreshError)
+    const verification = error as SyncVerificationError
+    expect(verification.mismatched, 'completion consistency: mismatch count').toBe(1)
+    expect(verification.paths[0]).toContain('logo.png')
+    expect(verification.message).toContain('1 个目标')
+    expect(verification.copied).toBe(3)
+    expect(verification.updated).toBe(1)
+    // Writes landed, so nothing is rolled back: only the notice is blocked.
+    const targetBytes = await readFile(diskPath(fixture.right, 'assets/logo.png'))
+    expect(targetBytes.equals(PNG_BYTES), 'completion consistency: no rollback').toBe(false)
+    // The refreshed comparison reports the real disk state.
+    expect(verification.comparison?.counts.modified, 'completion consistency: refresh truth').toBe(1)
+  }, 120_000)
+
+  it('resolves only when every written target matches its source, and verifies just those paths', async () => {
+    const fixture = await buildBinaryFixture()
+    const { preview } = await previewPair(fixture.left, fixture.right, 'left-to-right', 'incremental', 1)
+
+    // Record every digest request the apply makes. The first one is the
+    // post-write check, which must read exactly this run's targets + sources.
+    const digestRequests: string[][] = []
+    const recording: PlatformPort = {
+      ...platform,
+      digestFiles: (paths, options) => {
+        digestRequests.push([...paths])
+        return platform.digestFiles(paths, options)
+      },
+    }
+
+    const result = await applySyncPreview(recording, preview, createComparisonCache(), [])
+    expect(result.copied).toBe(3)
+    expect(result.updated).toBe(1)
+
+    const writtenPaths = [...preview.plan.copy.items, ...preview.plan.update.items]
+    const expected = new Set([...writtenPaths.map((item) => item.targetPath), ...writtenPaths.map((item) => item.sourcePath as string)])
+    expect(digestRequests.length, 'completion consistency: a check must run').toBeGreaterThan(0)
+    expect(new Set(digestRequests[0]), 'completion consistency: the check must read exactly the written targets and their sources').toEqual(
+      expected
+    )
+    // The untouched `same` file is never part of the post-write check.
+    expect(digestRequests[0]).not.toContain(diskPath(fixture.left, 'shared.txt'))
+
+    // Every written target is byte-equal to its source and the rebuild is empty.
+    for (const item of writtenPaths) {
+      expect(sha256Hex(await readFile(item.targetPath)), `completion consistency: ${item.relativePath} sha256`).toBe(
+        sha256Hex(await readFile(item.sourcePath as string))
       )
+    }
+    const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
+    expect(second.copy.count).toBe(0)
+    expect(second.update.count).toBe(0)
+  }, 120_000)
 
-      expect(error, 'completion consistency: a mismatched target must not resolve').toBeInstanceOf(
-        SyncVerificationError
-      )
-      expect(error).not.toBeInstanceOf(SyncRefreshError)
-      const verification = error as SyncVerificationError
-      expect(verification.mismatched, 'completion consistency: mismatch count').toBe(1)
-      expect(verification.paths[0]).toContain('logo.png')
-      expect(verification.message).toContain('1 个目标')
-      expect(verification.copied).toBe(3)
-      expect(verification.updated).toBe(1)
-      // Writes landed, so nothing is rolled back: only the notice is blocked.
-      const targetBytes = await readFile(diskPath(fixture.right, 'assets/logo.png'))
-      expect(targetBytes.equals(PNG_BYTES), 'completion consistency: no rollback').toBe(false)
-      // The refreshed comparison reports the real disk state.
-      expect(verification.comparison?.counts.modified, 'completion consistency: refresh truth').toBe(
-        1
-      )
-    },
-    120_000
-  )
+  it('does not treat unchecked mirror deletions as a failed check', async () => {
+    const { left, right } = await scratchSides()
+    await writeStampedBytes(diskPath(left, 'new.txt'), Buffer.from('new'), BINARY_STAMP)
+    await writeStampedBytes(diskPath(right, 'stale.txt'), Buffer.from('stale'), BINARY_STAMP + 1)
 
-  it(
-    'resolves only when every written target matches its source, and verifies just those paths',
-    async () => {
-      const fixture = await buildBinaryFixture()
-      const comparison = await comparePair(fixture.left, fixture.right)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+    const { preview } = await previewPair(left, right, 'left-to-right', 'mirror', 1)
+    expect(preview.plan.copy.count).toBe(1)
+    expect(preview.plan.delete.count).toBe(1)
 
-      // Record every digest request the apply makes. The first one is the
-      // post-write check, which must read exactly this run's targets + sources.
-      const digestRequests: string[][] = []
-      const recording: PlatformPort = {
-        ...platform,
-        digestFiles: (paths, options) => {
-          digestRequests.push([...paths])
-          return platform.digestFiles(paths, options)
-        }
-      }
+    // Deletions default to unchecked: the copied file lands, the stale one stays.
+    const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(result.copied).toBe(1)
+    expect(result.deleted).toBe(0)
+    expect(await platform.exists(diskPath(right, 'stale.txt'))).toBe(true)
+    // The remaining difference is only the unchecked deletion, not a failure.
+    expect(result.comparison.counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
+  }, 60_000)
 
-      const result = await applySyncPreview(recording, preview, createComparisonCache(), [])
-      expect(result.copied).toBe(3)
-      expect(result.updated).toBe(1)
+  it('keeps the checked delete count, the applied result and the disk in one state', async () => {
+    const { left, right } = await scratchSides()
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await writeStamped(join(right, 'stale-a.txt'), 'stale a\n', BINARY_STAMP)
+    await writeStamped(join(right, 'stale-b.txt'), 'stale b\n', BINARY_STAMP)
 
-      const writtenPaths = [...preview.plan.copy.items, ...preview.plan.update.items]
-      const expected = new Set([
-        ...writtenPaths.map((item) => item.targetPath),
-        ...writtenPaths.map((item) => item.sourcePath as string)
-      ])
-      expect(digestRequests.length, 'completion consistency: a check must run').toBeGreaterThan(0)
-      expect(
-        new Set(digestRequests[0]),
-        'completion consistency: the check must read exactly the written targets and their sources'
-      ).toEqual(expected)
-      // The untouched `same` file is never part of the post-write check.
-      expect(digestRequests[0]).not.toContain(diskPath(fixture.left, 'shared.txt'))
+    const { preview } = await previewPair(left, right, 'left-to-right', 'mirror', 1)
+    expect(preview.plan.copy.count, 'sync summary: no copy').toBe(0)
+    expect(preview.plan.update.count, 'sync summary: no update').toBe(0)
+    expect(preview.plan.delete.count, 'sync summary: two mirror deletions').toBe(2)
+    const [first, second] = deletePathsOf(preview.plan).sort()
+    const diskBefore = await listRelativeFiles(right)
 
-      // Every written target is byte-equal to its source and the rebuild is empty.
-      for (const item of writtenPaths) {
-        expect(
-          rawSha(await readFile(item.targetPath)),
-          `completion consistency: ${item.relativePath} sha256`
-        ).toBe(rawSha(await readFile(item.sourcePath as string)))
-      }
-      const second = buildSyncPlan(result.comparison, 'left-to-right', 'incremental')
-      expect(second.copy.count).toBe(0)
-      expect(second.update.count).toBe(0)
-    },
-    120_000
-  )
+    // 1) Default unchecked: nothing is claimed executable and nothing leaves disk.
+    const unchecked = syncPreviewAction(preview)
+    expect(unchecked.delete, 'sync summary: default delete count').toBe(0)
+    expect(unchecked.planned, 'sync summary: default planned items').toBe(2)
+    expect(unchecked.executable, 'sync summary: default is not executable').toBe(false)
+    expect(unchecked.guidance, 'sync summary: default guidance').toBe('noExecutable')
+    expect(canApplySyncPreview(preview), 'sync summary: canApply mirrors the unchecked action').toBe(unchecked.executable)
+    const uncheckedRun = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(uncheckedRun.deleted, 'sync summary: unchecked run deletes nothing').toBe(0)
+    expect(await listRelativeFiles(right), 'sync summary: disk after unchecked run').toEqual(diskBefore)
 
-  it(
-    'does not treat unchecked mirror deletions as a failed check',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(left, { recursive: true })
-      await writeStampedBytes(diskPath(left, 'new.txt'), Buffer.from('new'), BINARY_STAMP)
-      await writeStampedBytes(diskPath(right, 'stale.txt'), Buffer.from('stale'), BINARY_STAMP + 1)
+    // 2) One checked: the action count, the applied result and the entries that
+    //    left the disk are the same number.
+    const oneChecked = syncPreviewAction(preview, [first])
+    expect(oneChecked.delete, 'sync summary: one checked delete count').toBe(1)
+    expect(oneChecked.executable, 'sync summary: one checked delete is executable').toBe(true)
+    expect(oneChecked.guidance, 'sync summary: one checked delete points at changes').toBe('changes')
+    expect(canApplySyncPreview(preview, [first]), 'sync summary: canApply mirrors the checked action').toBe(true)
+    const checkedRun = await applySyncPreview(platform, preview, createComparisonCache(), [first])
+    expect(checkedRun.deleted, 'sync summary: checked delete result').toBe(oneChecked.delete)
+    expect(checkedRun.copied, 'sync summary: checked run copy count').toBe(oneChecked.copy)
+    expect(checkedRun.updated, 'sync summary: checked run update count').toBe(oneChecked.update)
+    expect(checkedRun.alignedLinks, 'sync summary: checked run align count').toBe(oneChecked.align)
+    expect(await platform.exists(diskPath(right, first)), 'sync summary: checked delete left the disk').toBe(false)
+    expect(await platform.exists(diskPath(right, second)), 'sync summary: unchecked delete stayed').toBe(true)
+    expect(await listRelativeFiles(right), 'sync summary: disk after checked run').toEqual(
+      diskBefore.filter((relativePath) => relativePath !== first)
+    )
 
-      const comparison = await comparePair(left, right)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      expect(preview.plan.copy.count).toBe(1)
-      expect(preview.plan.delete.count).toBe(1)
+    // 3) Cleared again on the refreshed preview: the count falls back to 0 and a
+    //    run removes nothing — the real-disk "check then uncheck" path.
+    const refreshed = await previewSync(platform, checkedRun.comparison, 'left-to-right', 'mirror', 2)
+    expect(deletePathsOf(refreshed.plan), 'sync summary: only one deletion left').toEqual([second])
+    expect(syncPreviewAction(refreshed, [second]).delete, 'sync summary: checked deletion before clearing').toBe(1)
+    const cleared = syncPreviewAction(refreshed, [])
+    expect(cleared.delete, 'sync summary: cleared delete count').toBe(0)
+    expect(cleared.executable, 'sync summary: cleared is not executable').toBe(false)
+    expect(canApplySyncPreview(refreshed, []), 'sync summary: canApply mirrors the cleared action').toBe(false)
+    const clearedRun = await applySyncPreview(platform, refreshed, createComparisonCache(), [])
+    expect(clearedRun.deleted, 'sync summary: cleared run deletes nothing').toBe(0)
+    expect(await platform.exists(diskPath(right, second)), 'sync summary: cleared delete stayed').toBe(true)
 
-      // Deletions default to unchecked: the copied file lands, the stale one stays.
-      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(result.copied).toBe(1)
-      expect(result.deleted).toBe(0)
-      expect(await platform.exists(diskPath(right, 'stale.txt'))).toBe(true)
-      // The remaining difference is only the unchecked deletion, not a failure.
-      expect(result.comparison.counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
-    },
-    60_000
-  )
+    // 4) Applied for real: result and disk agree, and the next preview has
+    //    nothing left to execute, so no stale summary can survive the run.
+    const applied = syncPreviewAction(refreshed, [second])
+    expect(applied.delete, 'sync summary: applied delete count').toBe(1)
+    const appliedRun = await applySyncPreview(platform, refreshed, createComparisonCache(), [second])
+    expect(appliedRun.deleted, 'sync summary: applied delete result').toBe(applied.delete)
+    expect(await platform.exists(diskPath(right, second)), 'sync summary: applied delete left the disk').toBe(false)
+    expect(await listRelativeFiles(right), 'sync summary: disk after applied run').toEqual(['shared.txt'])
 
-  it(
-    'keeps the checked delete count, the applied result and the disk in one state',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await writeStamped(join(right, 'stale-a.txt'), 'stale a\n', BINARY_STAMP)
-      await writeStamped(join(right, 'stale-b.txt'), 'stale b\n', BINARY_STAMP)
-
-      const comparison = await comparePair(left, right)
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      expect(preview.plan.copy.count, 'sync summary: no copy').toBe(0)
-      expect(preview.plan.update.count, 'sync summary: no update').toBe(0)
-      expect(preview.plan.delete.count, 'sync summary: two mirror deletions').toBe(2)
-      const [first, second] = preview.plan.delete.items
-        .map((item) => item.relativePath)
-        .sort()
-      const diskBefore = await listRelativeFiles(right)
-
-      // 1) Default unchecked: nothing is claimed executable and nothing leaves disk.
-      const unchecked = syncPreviewAction(preview)
-      expect(unchecked.delete, 'sync summary: default delete count').toBe(0)
-      expect(unchecked.planned, 'sync summary: default planned items').toBe(2)
-      expect(unchecked.executable, 'sync summary: default is not executable').toBe(false)
-      expect(unchecked.guidance, 'sync summary: default guidance').toBe('noExecutable')
-      expect(
-        canApplySyncPreview(preview),
-        'sync summary: canApply mirrors the unchecked action'
-      ).toBe(unchecked.executable)
-      const uncheckedRun = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(uncheckedRun.deleted, 'sync summary: unchecked run deletes nothing').toBe(0)
-      expect(await listRelativeFiles(right), 'sync summary: disk after unchecked run').toEqual(
-        diskBefore
-      )
-
-      // 2) One checked: the action count, the applied result and the entries that
-      //    left the disk are the same number.
-      const oneChecked = syncPreviewAction(preview, [first])
-      expect(oneChecked.delete, 'sync summary: one checked delete count').toBe(1)
-      expect(oneChecked.executable, 'sync summary: one checked delete is executable').toBe(true)
-      expect(oneChecked.guidance, 'sync summary: one checked delete points at changes').toBe(
-        'changes'
-      )
-      expect(
-        canApplySyncPreview(preview, [first]),
-        'sync summary: canApply mirrors the checked action'
-      ).toBe(true)
-      const checkedRun = await applySyncPreview(platform, preview, createComparisonCache(), [first])
-      expect(checkedRun.deleted, 'sync summary: checked delete result').toBe(oneChecked.delete)
-      expect(checkedRun.copied, 'sync summary: checked run copy count').toBe(oneChecked.copy)
-      expect(checkedRun.updated, 'sync summary: checked run update count').toBe(oneChecked.update)
-      expect(checkedRun.alignedLinks, 'sync summary: checked run align count').toBe(
-        oneChecked.align
-      )
-      expect(
-        await platform.exists(diskPath(right, first)),
-        'sync summary: checked delete left the disk'
-      ).toBe(false)
-      expect(
-        await platform.exists(diskPath(right, second)),
-        'sync summary: unchecked delete stayed'
-      ).toBe(true)
-      expect(await listRelativeFiles(right), 'sync summary: disk after checked run').toEqual(
-        diskBefore.filter((relativePath) => relativePath !== first)
-      )
-
-      // 3) Cleared again on the refreshed preview: the count falls back to 0 and a
-      //    run removes nothing — the real-disk "check then uncheck" path.
-      const refreshed = await previewSync(
-        platform,
-        checkedRun.comparison,
-        'left-to-right',
-        'mirror',
-        2
-      )
-      expect(
-        refreshed.plan.delete.items.map((item) => item.relativePath),
-        'sync summary: only one deletion left'
-      ).toEqual([second])
-      expect(
-        syncPreviewAction(refreshed, [second]).delete,
-        'sync summary: checked deletion before clearing'
-      ).toBe(1)
-      const cleared = syncPreviewAction(refreshed, [])
-      expect(cleared.delete, 'sync summary: cleared delete count').toBe(0)
-      expect(cleared.executable, 'sync summary: cleared is not executable').toBe(false)
-      expect(
-        canApplySyncPreview(refreshed, []),
-        'sync summary: canApply mirrors the cleared action'
-      ).toBe(false)
-      const clearedRun = await applySyncPreview(platform, refreshed, createComparisonCache(), [])
-      expect(clearedRun.deleted, 'sync summary: cleared run deletes nothing').toBe(0)
-      expect(
-        await platform.exists(diskPath(right, second)),
-        'sync summary: cleared delete stayed'
-      ).toBe(true)
-
-      // 4) Applied for real: result and disk agree, and the next preview has
-      //    nothing left to execute, so no stale summary can survive the run.
-      const applied = syncPreviewAction(refreshed, [second])
-      expect(applied.delete, 'sync summary: applied delete count').toBe(1)
-      const appliedRun = await applySyncPreview(platform, refreshed, createComparisonCache(), [
-        second
-      ])
-      expect(appliedRun.deleted, 'sync summary: applied delete result').toBe(applied.delete)
-      expect(
-        await platform.exists(diskPath(right, second)),
-        'sync summary: applied delete left the disk'
-      ).toBe(false)
-      expect(await listRelativeFiles(right), 'sync summary: disk after applied run').toEqual([
-        'shared.txt'
-      ])
-
-      const next = await previewSync(platform, appliedRun.comparison, 'left-to-right', 'mirror', 3)
-      const empty = syncPreviewAction(next)
-      expect(empty.delete, 'sync summary: next preview has no deletion').toBe(0)
-      expect(empty.planned, 'sync summary: next preview plans nothing').toBe(0)
-      expect(empty.executable, 'sync summary: next preview is not executable').toBe(false)
-      expect(empty.guidance, 'sync summary: next preview is empty').toBe('empty')
-      expect(syncPreviewGuidance(next), 'sync summary: guidance seam agrees').toBe('empty')
-    },
-    60_000
-  )
+    const next = await previewSync(platform, appliedRun.comparison, 'left-to-right', 'mirror', 3)
+    const empty = syncPreviewAction(next)
+    expect(empty.delete, 'sync summary: next preview has no deletion').toBe(0)
+    expect(empty.planned, 'sync summary: next preview plans nothing').toBe(0)
+    expect(empty.executable, 'sync summary: next preview is not executable').toBe(false)
+    expect(empty.guidance, 'sync summary: next preview is empty').toBe('empty')
+    expect(syncPreviewGuidance(next), 'sync summary: guidance seam agrees').toBe('empty')
+  }, 60_000)
 })
 
 /* ------------------------------------------------------------------ */
@@ -1549,314 +1249,200 @@ describe('real-disk sync completion consistency', () => {
 const LINK_SOURCE_STAMP = 1_700_001_000_000
 const LINK_TARGET_STAMP = 1_800_001_000_000
 
-async function linkWithStamp(target: string, path: string, stampMs: number): Promise<void> {
-  await symlink(target, path)
-  const seconds = Math.floor(stampMs) / 1000 + 1e-6
-  await lutimes(path, seconds, seconds)
-}
-
 describe('real-disk sync symlink metadata', () => {
-  it(
-    'is executable when only the link mtime differs, aligns it, and is idempotent',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+  it('is executable when only the link mtime differs, aligns it, and is idempotent', async () => {
+    const { left, right } = await scratchSides()
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
 
-      for (const side of [left, right]) {
-        await linkWithStamp(
-          'shared.txt',
-          diskPath(side, 'same-target-link'),
-          side === left ? LINK_SOURCE_STAMP : LINK_TARGET_STAMP
-        )
-        await linkWithStamp(
-          'missing-target.txt',
-          diskPath(side, 'dangling-link'),
-          side === left ? LINK_SOURCE_STAMP + 1_000 : LINK_TARGET_STAMP + 1_000
-        )
-        await linkWithStamp(
-          'shared.txt',
-          diskPath(side, 'stable-link'),
-          LINK_SOURCE_STAMP - 1_000
-        )
-      }
+    for (const side of [left, right]) {
+      await linkWithStamp('shared.txt', diskPath(side, 'same-target-link'), side === left ? LINK_SOURCE_STAMP : LINK_TARGET_STAMP)
+      await linkWithStamp(
+        'missing-target.txt',
+        diskPath(side, 'dangling-link'),
+        side === left ? LINK_SOURCE_STAMP + 1_000 : LINK_TARGET_STAMP + 1_000
+      )
+      await linkWithStamp('shared.txt', diskPath(side, 'stable-link'), LINK_SOURCE_STAMP - 1_000)
+    }
 
-      const comparison = await comparePair(left, right)
-      // Links still judge by target string only: all four pairs are `same`.
-      const countsBefore = { ...comparison.counts }
-      expect(countsBefore, 'symlink metadata: four-state counts').toEqual({
-        same: 4,
-        added: 0,
-        removed: 0,
-        modified: 0
-      })
+    const comparison = await comparePair(left, right)
+    // Links still judge by target string only: all four pairs are `same`.
+    const countsBefore = { ...comparison.counts }
+    expect(countsBefore, 'symlink metadata: four-state counts').toEqual({
+      same: 4,
+      added: 0,
+      removed: 0,
+      modified: 0,
+    })
 
-      const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
-      // Metadata alignment never becomes a plan item or a counted group.
-      expect(preview.plan.copy.count, 'symlink metadata: alignment is not a copy').toBe(0)
-      expect(preview.plan.update.count, 'symlink metadata: alignment is not an update').toBe(0)
-      expect(preview.plan.delete.count, 'symlink metadata: alignment is not a delete').toBe(0)
-      const plannedLinks = [
-        ...preview.plan.copy.items,
-        ...preview.plan.update.items,
-        ...preview.plan.delete.items
-      ].map((item) => item.relativePath)
-      expect(plannedLinks, 'symlink metadata: no link enters the plan').toEqual([])
-      expect(preview.plan.totalCount, 'symlink metadata: all three groups are empty').toBe(0)
+    const preview = await previewSync(platform, comparison, 'left-to-right', 'mirror', 1)
+    // Metadata alignment never becomes a plan item or a counted group.
+    expect(preview.plan.copy.count, 'symlink metadata: alignment is not a copy').toBe(0)
+    expect(preview.plan.update.count, 'symlink metadata: alignment is not an update').toBe(0)
+    expect(preview.plan.delete.count, 'symlink metadata: alignment is not a delete').toBe(0)
+    const plannedLinks = [...preview.plan.copy.items, ...preview.plan.update.items, ...preview.plan.delete.items].map(
+      (item) => item.relativePath
+    )
+    expect(plannedLinks, 'symlink metadata: no link enters the plan').toEqual([])
+    expect(preview.plan.totalCount, 'symlink metadata: all three groups are empty').toBe(0)
 
-      // The user-facing executable predicate sees the pending alignment work.
-      expect(
-        canApplySyncPreview(preview),
-        'symlink metadata: only the link mtime differs is still executable'
-      ).toBe(true)
-      expect(
-        preview.linkAlignments.map((alignment) => alignment.relativePath).sort(),
-        'symlink metadata: pending alignment list'
-      ).toEqual(['dangling-link', 'same-target-link'])
+    // The user-facing executable predicate sees the pending alignment work.
+    expect(canApplySyncPreview(preview), 'symlink metadata: only the link mtime differs is still executable').toBe(true)
+    expect(preview.linkAlignments.map((alignment) => alignment.relativePath).sort(), 'symlink metadata: pending alignment list').toEqual([
+      'dangling-link',
+      'same-target-link',
+    ])
 
-      // The shared action counts exactly the pending links, and that count is
-      // what keeps Apply executable even though all three groups are empty.
-      const pendingAction = syncPreviewAction(preview)
-      expect(
-        pendingAction.align,
-        'symlink metadata: pending align count is positive'
-      ).toBeGreaterThan(0)
-      expect(
-        pendingAction.align,
-        'symlink metadata: pending align count equals the alignment list'
-      ).toBe(preview.linkAlignments.length)
+    // The shared action counts exactly the pending links, and that count is
+    // what keeps Apply executable even though all three groups are empty.
+    const pendingAction = syncPreviewAction(preview)
+    expect(pendingAction.align, 'symlink metadata: pending align count is positive').toBeGreaterThan(0)
+    expect(pendingAction.align, 'symlink metadata: pending align count equals the alignment list').toBe(preview.linkAlignments.length)
 
-      // Copy rule: an empty plan with pending alignments must never claim the
-      // target already matches the source; it points at the alignment work.
-      expect(
-        syncPreviewGuidance(preview),
-        'symlink metadata: empty plan with pending links is not the empty copy'
-      ).toBe('changes')
-      expect(
-        en['directory.sync.empty'],
-        'symlink metadata: the forbidden copy says the target already matches'
-      ).toContain('already matches the source')
-      expect(
-        en['directory.sync.group.align'],
-        'symlink metadata: the dialog points at the pending alignment'
-      ).toBeTruthy()
+    // Copy rule: an empty plan with pending alignments must never claim the
+    // target already matches the source; it points at the alignment work.
+    expect(syncPreviewGuidance(preview), 'symlink metadata: empty plan with pending links is not the empty copy').toBe('changes')
+    expect(en['directory.sync.empty'], 'symlink metadata: the forbidden copy says the target already matches').toContain(
+      'already matches the source'
+    )
+    expect(en['directory.sync.group.align'], 'symlink metadata: the dialog points at the pending alignment').toBeTruthy()
 
-      const stableBefore = Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs)
-      const sharedBefore = await stat(diskPath(right, 'shared.txt'))
-      const sharedDigestBefore = createHash('sha256')
+    const stableBefore = Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs)
+    const sharedBefore = await stat(diskPath(right, 'shared.txt'))
+    const sharedDigestBefore = createHash('sha256')
+      .update(await readFile(diskPath(right, 'shared.txt')))
+      .digest('hex')
+
+    const recorded = recordWrites(platform)
+    const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
+    expect(result.copied).toBe(0)
+    expect(result.updated).toBe(0)
+    expect(result.deleted).toBe(0)
+    expect(result.alignedLinks, 'symlink metadata: aligned link count').toBe(2)
+    // Aligning a link mtime writes no ordinary file content at all.
+    expect(recorded.writes, 'symlink metadata: alignment writes no file content').toEqual([])
+
+    for (const relativePath of ['same-target-link', 'dangling-link']) {
+      const source = diskPath(left, relativePath)
+      const target = diskPath(right, relativePath)
+      const targetInfo = await lstat(target)
+      expect(targetInfo.isSymbolicLink(), `symlink metadata: ${relativePath} must stay a symlink`).toBe(true)
+      expect(await readlink(target), `symlink metadata: ${relativePath} link target`).toBe(await readlink(source))
+      expect(target, `symlink metadata: ${relativePath} relative path`).toBe(diskPath(right, relativePath))
+      expect(Math.floor(targetInfo.mtimeMs / 1000), `symlink metadata: ${relativePath} lstat mtime seconds`).toBe(
+        Math.floor((await lstat(source)).mtimeMs / 1000)
+      )
+    }
+
+    // A link whose mtime already matched is not touched at all.
+    expect(Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs), 'symlink metadata: already-aligned link stays untouched').toBe(
+      stableBefore
+    )
+
+    // Ordinary files keep their bytes, size and whole-millisecond mtime.
+    const sharedAfter = await stat(diskPath(right, 'shared.txt'))
+    expect(sharedAfter.size, 'symlink metadata: ordinary file size').toBe(sharedBefore.size)
+    expect(sharedAfter.mtimeMs, 'symlink metadata: ordinary file mtime').toBe(sharedBefore.mtimeMs)
+    expect(
+      createHash('sha256')
         .update(await readFile(diskPath(right, 'shared.txt')))
-        .digest('hex')
+        .digest('hex'),
+      'symlink metadata: ordinary file bytes'
+    ).toBe(sharedDigestBefore)
 
-      const recorded = recordWrites(platform)
-      const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
-      expect(result.copied).toBe(0)
-      expect(result.updated).toBe(0)
-      expect(result.deleted).toBe(0)
-      expect(result.alignedLinks, 'symlink metadata: aligned link count').toBe(2)
-      // Aligning a link mtime writes no ordinary file content at all.
-      expect(recorded.writes, 'symlink metadata: alignment writes no file content').toEqual([])
+    // Alignment leaves the four-state counts and the three groups untouched.
+    expect(result.comparison.counts, 'symlink metadata: four-state counts after').toEqual(countsBefore)
 
-      for (const relativePath of ['same-target-link', 'dangling-link']) {
-        const source = diskPath(left, relativePath)
-        const target = diskPath(right, relativePath)
-        const targetInfo = await lstat(target)
-        expect(
-          targetInfo.isSymbolicLink(),
-          `symlink metadata: ${relativePath} must stay a symlink`
-        ).toBe(true)
-        expect(
-          await readlink(target),
-          `symlink metadata: ${relativePath} link target`
-        ).toBe(await readlink(source))
-        expect(target, `symlink metadata: ${relativePath} relative path`).toBe(
-          diskPath(right, relativePath)
-        )
-        expect(
-          Math.floor(targetInfo.mtimeMs / 1000),
-          `symlink metadata: ${relativePath} lstat mtime seconds`
-        ).toBe(Math.floor((await lstat(source)).mtimeMs / 1000))
-      }
+    // Alignment still leaves the dry-run empty: neither byte nor count changed.
+    const second = await previewSync(platform, result.comparison, 'left-to-right', 'mirror', 2)
+    expect(second.plan.copy.count, 'symlink metadata: second dry-run copy').toBe(0)
+    expect(second.plan.update.count, 'symlink metadata: second dry-run update').toBe(0)
+    expect(second.plan.delete.count, 'symlink metadata: second dry-run delete').toBe(0)
+    expect(second.linkAlignments, 'symlink metadata: second dry-run alignment list').toEqual([])
+    expect(syncPreviewAction(second).align, 'symlink metadata: align count returns to zero after applying').toBe(0)
+    expect(canApplySyncPreview(second), 'symlink metadata: second dry-run is not executable').toBe(false)
+    expect(syncPreviewGuidance(second), 'symlink metadata: an already-aligned tree gets the empty copy').toBe('empty')
+  }, 60_000)
 
-      // A link whose mtime already matched is not touched at all.
-      expect(
-        Math.floor((await lstat(diskPath(right, 'stable-link'))).mtimeMs),
-        'symlink metadata: already-aligned link stays untouched'
-      ).toBe(stableBefore)
+  it('stays executable in both modes while mirror deletes keep opting in', async () => {
+    const { left, right } = await scratchSides()
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await linkWithStamp('shared.txt', diskPath(left, 'same-target-link'), LINK_SOURCE_STAMP)
+    await linkWithStamp('shared.txt', diskPath(right, 'same-target-link'), LINK_TARGET_STAMP)
+    // Target-only file: a mirror deletion the user has not checked yet.
+    await writeStamped(join(right, 'stale.txt'), 'stale\n', BINARY_STAMP)
 
-      // Ordinary files keep their bytes, size and whole-millisecond mtime.
-      const sharedAfter = await stat(diskPath(right, 'shared.txt'))
-      expect(sharedAfter.size, 'symlink metadata: ordinary file size').toBe(sharedBefore.size)
-      expect(sharedAfter.mtimeMs, 'symlink metadata: ordinary file mtime').toBe(
-        sharedBefore.mtimeMs
-      )
-      expect(
-        createHash('sha256').update(await readFile(diskPath(right, 'shared.txt'))).digest('hex'),
-        'symlink metadata: ordinary file bytes'
-      ).toBe(sharedDigestBefore)
+    const comparison = await comparePair(left, right)
+    const incremental = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
+    expect(incremental.plan.delete.count, 'symlink metadata: incremental has no delete').toBe(0)
+    expect(incremental.linkAlignments.length, 'symlink metadata: incremental alignment').toBe(1)
+    expect(canApplySyncPreview(incremental), 'symlink metadata: incremental only-aligning preview is executable').toBe(true)
 
-      // Alignment leaves the four-state counts and the three groups untouched.
-      expect(result.comparison.counts, 'symlink metadata: four-state counts after').toEqual(
-        countsBefore
-      )
+    const mirror = await previewSync(platform, comparison, 'left-to-right', 'mirror', 2)
+    expect(mirror.plan.delete.count, 'symlink metadata: mirror lists the stale file').toBe(1)
+    expect(canApplySyncPreview(mirror), 'symlink metadata: unchecked mirror delete does not block link alignment').toBe(true)
+    expect(canApplySyncPreview(mirror, ['stale.txt']), 'symlink metadata: a checked mirror delete is executable too').toBe(true)
 
-      // Alignment still leaves the dry-run empty: neither byte nor count changed.
-      const second = await previewSync(platform, result.comparison, 'left-to-right', 'mirror', 2)
-      expect(second.plan.copy.count, 'symlink metadata: second dry-run copy').toBe(0)
-      expect(second.plan.update.count, 'symlink metadata: second dry-run update').toBe(0)
-      expect(second.plan.delete.count, 'symlink metadata: second dry-run delete').toBe(0)
-      expect(second.linkAlignments, 'symlink metadata: second dry-run alignment list').toEqual([])
-      expect(
-        syncPreviewAction(second).align,
-        'symlink metadata: align count returns to zero after applying'
-      ).toBe(0)
-      expect(
-        canApplySyncPreview(second),
-        'symlink metadata: second dry-run is not executable'
-      ).toBe(false)
-      expect(
-        syncPreviewGuidance(second),
-        'symlink metadata: an already-aligned tree gets the empty copy'
-      ).toBe('empty')
-    },
-    60_000
-  )
+    // Counter-control: with the link times already equal, an unchecked mirror
+    // deletion alone keeps Apply disabled — the delete opt-in is unchanged.
+    const quietRoot = await scratchRoot()
+    const quietLeft = join(quietRoot, 'left')
+    const quietRight = join(quietRoot, 'right')
+    await mkdir(quietLeft, { recursive: true })
+    await mkdir(quietRight, { recursive: true })
+    await writeStamped(join(quietLeft, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await writeStamped(join(quietRight, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await linkWithStamp('shared.txt', diskPath(quietLeft, 'aligned-link'), LINK_SOURCE_STAMP)
+    await linkWithStamp('shared.txt', diskPath(quietRight, 'aligned-link'), LINK_SOURCE_STAMP)
+    await writeStamped(join(quietRight, 'stale.txt'), 'stale\n', BINARY_STAMP)
 
-  it(
-    'stays executable in both modes while mirror deletes keep opting in',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await linkWithStamp('shared.txt', diskPath(left, 'same-target-link'), LINK_SOURCE_STAMP)
-      await linkWithStamp('shared.txt', diskPath(right, 'same-target-link'), LINK_TARGET_STAMP)
-      // Target-only file: a mirror deletion the user has not checked yet.
-      await writeStamped(join(right, 'stale.txt'), 'stale\n', BINARY_STAMP)
+    const quiet = await previewSync(platform, await comparePair(quietLeft, quietRight), 'left-to-right', 'mirror', 3)
+    expect(quiet.linkAlignments, 'symlink metadata: equal link times need no alignment').toEqual([])
+    expect(quiet.plan.delete.count, 'symlink metadata: counter-control delete count').toBe(1)
+    expect(canApplySyncPreview(quiet), 'symlink metadata: unchecked mirror delete alone is not executable').toBe(false)
+    expect(canApplySyncPreview(quiet, ['stale.txt']), 'symlink metadata: checked mirror delete alone is executable').toBe(true)
+  }, 60_000)
 
-      const comparison = await comparePair(left, right)
-      const incremental = await previewSync(platform, comparison, 'left-to-right', 'incremental', 1)
-      expect(incremental.plan.delete.count, 'symlink metadata: incremental has no delete').toBe(0)
-      expect(incremental.linkAlignments.length, 'symlink metadata: incremental alignment').toBe(1)
-      expect(
-        canApplySyncPreview(incremental),
-        'symlink metadata: incremental only-aligning preview is executable'
-      ).toBe(true)
+  it('rejects through the verification path when resetting a link time fails', async () => {
+    const { left, right } = await scratchSides()
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
+    await linkWithStamp('shared.txt', diskPath(left, 'same-target-link'), LINK_SOURCE_STAMP)
+    await linkWithStamp('shared.txt', diskPath(right, 'same-target-link'), LINK_TARGET_STAMP)
 
-      const mirror = await previewSync(platform, comparison, 'left-to-right', 'mirror', 2)
-      expect(mirror.plan.delete.count, 'symlink metadata: mirror lists the stale file').toBe(1)
-      expect(
-        canApplySyncPreview(mirror),
-        'symlink metadata: unchecked mirror delete does not block link alignment'
-      ).toBe(true)
-      expect(
-        canApplySyncPreview(mirror, ['stale.txt']),
-        'symlink metadata: a checked mirror delete is executable too'
-      ).toBe(true)
+    const preview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'incremental', 1)
+    expect(canApplySyncPreview(preview), 'symlink metadata: refused run is still executable').toBe(true)
 
-      // Counter-control: with the link times already equal, an unchecked mirror
-      // deletion alone keeps Apply disabled — the delete opt-in is unchanged.
-      const quietRoot = await scratchRoot()
-      const quietLeft = join(quietRoot, 'left')
-      const quietRight = join(quietRoot, 'right')
-      await mkdir(quietLeft, { recursive: true })
-      await mkdir(quietRight, { recursive: true })
-      await writeStamped(join(quietLeft, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await writeStamped(join(quietRight, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await linkWithStamp('shared.txt', diskPath(quietLeft, 'aligned-link'), LINK_SOURCE_STAMP)
-      await linkWithStamp('shared.txt', diskPath(quietRight, 'aligned-link'), LINK_SOURCE_STAMP)
-      await writeStamped(join(quietRight, 'stale.txt'), 'stale\n', BINARY_STAMP)
+    const refusing: PlatformPort = {
+      ...platform,
+      setSymbolicLinkModifiedMs: async (path) => {
+        throw new Error(`无法设置链接时间 ${path}：没有访问权限（EACCES）。`)
+      },
+    }
 
-      const quiet = await previewSync(
-        platform,
-        await comparePair(quietLeft, quietRight),
-        'left-to-right',
-        'mirror',
-        3
-      )
-      expect(quiet.linkAlignments, 'symlink metadata: equal link times need no alignment').toEqual(
-        []
-      )
-      expect(quiet.plan.delete.count, 'symlink metadata: counter-control delete count').toBe(1)
-      expect(
-        canApplySyncPreview(quiet),
-        'symlink metadata: unchecked mirror delete alone is not executable'
-      ).toBe(false)
-      expect(
-        canApplySyncPreview(quiet, ['stale.txt']),
-        'symlink metadata: checked mirror delete alone is executable'
-      ).toBe(true)
-    },
-    60_000
-  )
-
-  it(
-    'rejects through the verification path when resetting a link time fails',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', BINARY_STAMP)
-      await linkWithStamp('shared.txt', diskPath(left, 'same-target-link'), LINK_SOURCE_STAMP)
-      await linkWithStamp('shared.txt', diskPath(right, 'same-target-link'), LINK_TARGET_STAMP)
-
-      const preview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      expect(canApplySyncPreview(preview), 'symlink metadata: refused run is still executable').toBe(
-        true
-      )
-
-      const refusing: PlatformPort = {
-        ...platform,
-        setSymbolicLinkModifiedMs: async (path) => {
-          throw new Error(`无法设置链接时间 ${path}：没有访问权限（EACCES）。`)
-        }
-      }
-
-      let failure: unknown
-      try {
-        await applySyncPreview(refusing, preview, createComparisonCache(), [])
-      } catch (cause) {
-        failure = cause
-      }
-      expect(
-        failure,
-        'symlink metadata: refused link time is a verification failure'
-      ).toBeInstanceOf(SyncVerificationError)
-      const error = failure as SyncVerificationError
-      expect(error.paths, 'symlink metadata: refused link path').toEqual([
-        diskPath(right, 'same-target-link')
-      ])
-      // The refreshed real-disk comparison travels with the failure, and the
-      // unreset link keeps its old mtime: no success may be claimed.
-      expect(error.comparison, 'symlink metadata: refreshed comparison').toBeDefined()
-      expect(error.comparison?.counts, 'symlink metadata: refreshed counts').toEqual({
-        same: 2,
-        added: 0,
-        removed: 0,
-        modified: 0
-      })
-      expect(
-        Math.floor((await lstat(diskPath(right, 'same-target-link'))).mtimeMs / 1000),
-        'symlink metadata: refused link keeps its mtime'
-      ).toBe(Math.floor(LINK_TARGET_STAMP / 1000))
-    },
-    60_000
-  )
+    let failure: unknown
+    try {
+      await applySyncPreview(refusing, preview, createComparisonCache(), [])
+    } catch (cause) {
+      failure = cause
+    }
+    expect(failure, 'symlink metadata: refused link time is a verification failure').toBeInstanceOf(SyncVerificationError)
+    const error = failure as SyncVerificationError
+    expect(error.paths, 'symlink metadata: refused link path').toEqual([diskPath(right, 'same-target-link')])
+    // The refreshed real-disk comparison travels with the failure, and the
+    // unreset link keeps its old mtime: no success may be claimed.
+    expect(error.comparison, 'symlink metadata: refreshed comparison').toBeDefined()
+    expect(error.comparison?.counts, 'symlink metadata: refreshed counts').toEqual({
+      same: 2,
+      added: 0,
+      removed: 0,
+      modified: 0,
+    })
+    expect(Math.floor((await lstat(diskPath(right, 'same-target-link'))).mtimeMs / 1000), 'symlink metadata: refused link keeps its mtime').toBe(
+      Math.floor(LINK_TARGET_STAMP / 1000)
+    )
+  }, 60_000)
 })
 
 /* ------------------------------------------------------------------ */
@@ -1866,49 +1452,11 @@ describe('real-disk sync symlink metadata', () => {
 const LINK_FIDELITY_STAMP = 1_700_002_000_000
 const LINK_NAMES = ['link-dangling', 'link-dir', 'link-rel'] as const
 
-interface FileFingerprint {
-  readonly sha256: string
-  readonly size: number
-  readonly modifiedMs: number
-}
-
-/** Bytes + size + whole-ms mtime of one real file, to prove it was not touched. */
-async function fingerprint(path: string): Promise<FileFingerprint> {
-  const info = await stat(path)
-  return {
-    sha256: rawSha(await readFile(path)),
-    size: info.size,
-    modifiedMs: Math.floor(info.mtimeMs)
-  }
-}
-
-function expectSameFingerprint(
-  before: FileFingerprint,
-  after: FileFingerprint,
-  message: string
-): void {
-  expect(after.sha256, `${message}: sha256`).toBe(before.sha256)
-  expect(after.size, `${message}: size`).toBe(before.size)
-  expect(after.modifiedMs, `${message}: mtime`).toBe(before.modifiedMs)
-}
-
 /** True when a directory entry exists at `path`, links included (never followed). */
 async function entryExistsOnDisk(path: string): Promise<boolean> {
   return lstat(path).then(
     () => true,
     () => false
-  )
-}
-
-/** The link must be a link, keep its literal target and its whole-second mtime. */
-async function expectSameLink(source: string, target: string, message: string): Promise<void> {
-  const targetInfo = await lstat(target)
-  expect(targetInfo.isSymbolicLink(), `${message}: target must stay a symlink`).toBe(true)
-  expect(await readlink(target), `${message}: readlink must stay verbatim`).toBe(
-    await readlink(source)
-  )
-  expect(Math.floor(targetInfo.mtimeMs / 1000), `${message}: lstat mtime seconds`).toBe(
-    Math.floor((await lstat(source)).mtimeMs / 1000)
   )
 }
 
@@ -1927,26 +1475,16 @@ interface LinkFidelityFixture {
  * link to a directory outside the pair. The pointed-at file inside the target
  * side is the proof the link write never reads or rewrites it.
  */
-async function buildLinkFidelityFixture(
-  linkSide: 'left' | 'right'
-): Promise<LinkFidelityFixture> {
-  const root = await scratchRoot()
-  const left = join(root, 'left')
-  const right = join(root, 'right')
+async function buildLinkFidelityFixture(linkSide: 'left' | 'right'): Promise<LinkFidelityFixture> {
+  const { root, left, right } = await scratchSides()
   const outside = join(root, 'outside')
-  await mkdir(left, { recursive: true })
-  await mkdir(right, { recursive: true })
   await mkdir(join(outside, 'kept-dir', 'nested'), { recursive: true })
 
   await writeStamped(join(left, 'shared.txt'), 'shared body\n', LINK_FIDELITY_STAMP)
   await writeStamped(join(right, 'shared.txt'), 'shared body\n', LINK_FIDELITY_STAMP)
   await writeStamped(join(outside, 'kept.txt'), 'kept body\n', LINK_FIDELITY_STAMP + 1)
   await writeStamped(join(outside, 'kept-dir', 'child.txt'), 'child\n', LINK_FIDELITY_STAMP + 2)
-  await writeStamped(
-    join(outside, 'kept-dir', 'nested', 'deep.txt'),
-    'deep\n',
-    LINK_FIDELITY_STAMP + 3
-  )
+  await writeStamped(join(outside, 'kept-dir', 'nested', 'deep.txt'), 'deep\n', LINK_FIDELITY_STAMP + 3)
 
   const source = linkSide === 'left' ? left : right
   const target = linkSide === 'left' ? right : left
@@ -1959,729 +1497,439 @@ async function buildLinkFidelityFixture(
 }
 
 describe('real-disk sync symlink fidelity', () => {
-  it(
-    'copies relative, dangling and directory links as links in both directions and both modes',
-    async () => {
-      const combos = [
-        ['left-to-right', 'left', 'incremental'],
-        ['left-to-right', 'left', 'mirror'],
-        ['right-to-left', 'right', 'incremental'],
-        ['right-to-left', 'right', 'mirror']
-      ] as const
+  it('copies relative, dangling and directory links as links in both directions and both modes', async () => {
+    const combos = [
+      ['left-to-right', 'left', 'incremental'],
+      ['left-to-right', 'left', 'mirror'],
+      ['right-to-left', 'right', 'incremental'],
+      ['right-to-left', 'right', 'mirror'],
+    ] as const
 
-      let sequence = 0
-      for (const [direction, linkSide, mode] of combos) {
-        sequence += 1
-        const fixture = await buildLinkFidelityFixture(linkSide)
-        const source = linkSide === 'left' ? fixture.left : fixture.right
-        const target = linkSide === 'left' ? fixture.right : fixture.left
-        const label = `symlink fidelity: ${direction} ${mode}`
+    let sequence = 0
+    for (const [direction, linkSide, mode] of combos) {
+      sequence += 1
+      const fixture = await buildLinkFidelityFixture(linkSide)
+      const source = linkSide === 'left' ? fixture.left : fixture.right
+      const target = linkSide === 'left' ? fixture.right : fixture.left
+      const label = `symlink fidelity: ${direction} ${mode}`
 
-        // Files the run must never touch: the link's relative target on the
-        // target side, and everything the directory link points at.
-        const targetOnlyBefore = await fingerprint(join(target, 'only-on-target.txt'))
-        const outsideFileBefore = await fingerprint(join(fixture.outside, 'kept.txt'))
-        const outsideChildBefore = await fingerprint(join(fixture.outside, 'kept-dir', 'child.txt'))
+      // Files the run must never touch: the link's relative target on the
+      // target side, and everything the directory link points at.
+      const targetOnlyBefore = await fingerprint(join(target, 'only-on-target.txt'))
+      const outsideFileBefore = await fingerprint(join(fixture.outside, 'kept.txt'))
+      const outsideChildBefore = await fingerprint(join(fixture.outside, 'kept-dir', 'child.txt'))
 
-        const comparison = await comparePair(fixture.left, fixture.right)
-        const preview = await previewSync(platform, comparison, direction, mode, sequence)
+      const { preview } = await previewPair(fixture.left, fixture.right, direction, mode, sequence)
 
-        const linkItems = preview.plan.copy.items.filter(
-          (item) => item.linkTarget !== undefined
-        )
-        expect(
-          linkItems.map((item) => item.relativePath).sort(),
-          `${label}: every source-only link is one copy item`
-        ).toEqual([...LINK_NAMES])
-        expect(preview.plan.copy.count, `${label}: one copy per link`).toBe(3)
-        expect(preview.plan.update.count, `${label}: no update`).toBe(0)
-        expect(preview.plan.delete.count, `${label}: target-only file is the only delete`).toBe(
-          mode === 'mirror' ? 1 : 0
-        )
-        for (const item of linkItems) {
-          expect(item.linkTarget, `${label}: ${item.relativePath} linkTarget`).toBe(
-            await readlink(item.sourcePath as string)
-          )
-        }
-        for (const item of preview.plan.delete.items) {
-          expect(item.linkTarget, `${label}: a delete item is not a link write`).toBeUndefined()
-        }
-
-        expect(canApplySyncPreview(preview), `${label}: links are executable work`).toBe(true)
-        const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
-        expect(result.copied, `${label}: link copies are counted`).toBe(3)
-        expect(result.updated, `${label}: no update landed`).toBe(0)
-        expect(result.deleted, `${label}: unchecked deletes stay put`).toBe(0)
-
-        for (const relativePath of LINK_NAMES) {
-          await expectSameLink(
-            diskPath(source, relativePath),
-            diskPath(target, relativePath),
-            `${label}: ${relativePath}`
-          )
-        }
-        // The relative target string is kept literally, not resolved to an absolute path.
-        expect(await readlink(diskPath(target, 'link-rel')), `${label}: relative link`).toBe(
-          'only-on-target.txt'
-        )
-        expect(
-          await readlink(diskPath(target, 'link-dangling')),
-          `${label}: dangling link string`
-        ).toBe('missing-target.txt')
-        // The directory target is never materialised into the target tree: the
-        // link itself is the only entry, no ordinary copy of its children.
-        const targetNames = (await readdir(target)).sort()
-        expect(targetNames, `${label}: no directory subtree materialised`).toEqual([
-          'link-dangling',
-          'link-dir',
-          'link-rel',
-          'only-on-target.txt',
-          'shared.txt'
-        ])
-        expect(
-          (await lstat(diskPath(target, 'link-dir'))).isDirectory(),
-          `${label}: a directory link is not a real directory`
-        ).toBe(false)
-
-        expectSameFingerprint(
-          targetOnlyBefore,
-          await fingerprint(join(target, 'only-on-target.txt')),
-          `${label}: the relative link target was not written through`
-        )
-        expectSameFingerprint(
-          outsideFileBefore,
-          await fingerprint(join(fixture.outside, 'kept.txt')),
-          `${label}: an outside file was not touched`
-        )
-        expectSameFingerprint(
-          outsideChildBefore,
-          await fingerprint(join(fixture.outside, 'kept-dir', 'child.txt')),
-          `${label}: a directory link target subtree was not touched`
-        )
+      const linkItems = preview.plan.copy.items.filter((item) => item.linkTarget !== undefined)
+      expect(linkItems.map((item) => item.relativePath).sort(), `${label}: every source-only link is one copy item`).toEqual([...LINK_NAMES])
+      expect(preview.plan.copy.count, `${label}: one copy per link`).toBe(3)
+      expect(preview.plan.update.count, `${label}: no update`).toBe(0)
+      expect(preview.plan.delete.count, `${label}: target-only file is the only delete`).toBe(mode === 'mirror' ? 1 : 0)
+      for (const item of linkItems) {
+        expect(item.linkTarget, `${label}: ${item.relativePath} linkTarget`).toBe(await readlink(item.sourcePath as string))
       }
-    },
-    180_000
-  )
-
-  it(
-    'never reads a link path for content: every read and digest skips the links',
-    async () => {
-      const fixture = await buildLinkFidelityFixture('left')
-      // One ordinary source-only file proves the recording really sees content
-      // reads; the links below must stay out of every read and digest.
-      await writeStampedBytes(
-        diskPath(fixture.left, 'extra-copy.bin'),
-        Buffer.from([0x00, 0x01, 0xff]),
-        LINK_FIDELITY_STAMP + 5
-      )
-      const reads: string[] = []
-      const digests: string[] = []
-      const recording: PlatformPort = {
-        ...platform,
-        readFileBytes: async (path) => {
-          reads.push(path)
-          return platform.readFileBytes(path)
-        },
-        digestFiles: async (paths, options) => {
-          digests.push(...paths)
-          return platform.digestFiles(paths, options)
-        }
+      for (const item of preview.plan.delete.items) {
+        expect(item.linkTarget, `${label}: a delete item is not a link write`).toBeUndefined()
       }
 
-      const preview = await previewSync(
-        recording,
-        await compareDirectories(
-          fixture.left,
-          fixture.right,
-          (path) => recording.listDirectory(path),
-          (path) => recording.readTextFile(path),
-          createComparisonCache(),
-          undefined,
-          {
-            digestFiles: (paths) => digestFilesForComparison(recording, paths),
-            listDirectories: (paths) => recording.listDirectories(paths)
-          }
-        ),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      const result = await applySyncPreview(recording, preview, createComparisonCache(), [])
-      expect(result.copied, 'symlink fidelity: dangling links still land').toBe(4)
+      expect(canApplySyncPreview(preview), `${label}: links are executable work`).toBe(true)
+      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+      expect(result.copied, `${label}: link copies are counted`).toBe(3)
+      expect(result.updated, `${label}: no update landed`).toBe(0)
+      expect(result.deleted, `${label}: unchecked deletes stay put`).toBe(0)
 
-      const linkPaths = LINK_NAMES.flatMap((name) => [
-        diskPath(fixture.left, name),
-        diskPath(fixture.right, name)
+      for (const relativePath of LINK_NAMES) {
+        await expectSameLink(diskPath(source, relativePath), diskPath(target, relativePath), `${label}: ${relativePath}`)
+      }
+      // The relative target string is kept literally, not resolved to an absolute path.
+      expect(await readlink(diskPath(target, 'link-rel')), `${label}: relative link`).toBe('only-on-target.txt')
+      expect(await readlink(diskPath(target, 'link-dangling')), `${label}: dangling link string`).toBe('missing-target.txt')
+      // The directory target is never materialised into the target tree: the
+      // link itself is the only entry, no ordinary copy of its children.
+      const targetNames = (await readdir(target)).sort()
+      expect(targetNames, `${label}: no directory subtree materialised`).toEqual([
+        'link-dangling',
+        'link-dir',
+        'link-rel',
+        'only-on-target.txt',
+        'shared.txt',
       ])
-      for (const path of linkPaths) {
-        expect(reads, `symlink fidelity: ${path} must never be read as bytes`).not.toContain(path)
-        expect(digests, `symlink fidelity: ${path} must never be digested`).not.toContain(path)
-      }
-      // Counter-control: ordinary content reads really were recorded.
-      expect(reads, 'symlink fidelity: ordinary reads are still recorded').toContain(
-        diskPath(fixture.left, 'extra-copy.bin')
-      )
-      expect(digests, 'symlink fidelity: ordinary digests are still recorded').toContain(
-        diskPath(fixture.left, 'extra-copy.bin')
-      )
-    },
-    60_000
-  )
-
-  it(
-    'replaces a target-side link with the source link and leaves the old target intact',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const outside = join(root, 'outside')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await mkdir(outside, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(outside, 'source-target.txt'), 'source target\n', LINK_FIDELITY_STAMP + 1)
-      await writeStamped(join(outside, 'old-target.txt'), 'old target\n', LINK_FIDELITY_STAMP + 2)
-      await linkWithStamp('../outside/source-target.txt', join(left, 'swap-link'), LINK_FIDELITY_STAMP + 3)
-      await linkWithStamp('../outside/old-target.txt', join(right, 'swap-link'), LINK_FIDELITY_STAMP + 4)
-      const oldTargetBefore = await fingerprint(join(outside, 'old-target.txt'))
-      const sourceTargetBefore = await fingerprint(join(outside, 'source-target.txt'))
-
-      const preview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      expect(preview.plan.copy.count, 'symlink fidelity: nothing to copy').toBe(0)
-      expect(preview.plan.update.count, 'symlink fidelity: different links are one update').toBe(1)
-      expect(
-        preview.plan.update.items[0].linkTarget,
-        'symlink fidelity: the update carries the source link string'
-      ).toBe('../outside/source-target.txt')
-      expect(canApplySyncPreview(preview), 'symlink fidelity: link update is executable').toBe(true)
-
-      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(result.updated, 'symlink fidelity: a link replacement counts as updated').toBe(1)
-      expect(result.copied).toBe(0)
-      expect(result.deleted).toBe(0)
-      await expectSameLink(
-        diskPath(left, 'swap-link'),
-        diskPath(right, 'swap-link'),
-        'symlink fidelity: replaced link'
-      )
-      expect(await readlink(diskPath(right, 'swap-link'))).toBe('../outside/source-target.txt')
-      expectSameFingerprint(
-        oldTargetBefore,
-        await fingerprint(join(outside, 'old-target.txt')),
-        'symlink fidelity: the replaced link target was not written through'
-      )
-      expectSameFingerprint(
-        sourceTargetBefore,
-        await fingerprint(join(outside, 'source-target.txt')),
-        'symlink fidelity: the new link target was not touched'
-      )
-    },
-    60_000
-  )
-
-  it(
-    'replaces a target-side link with an ordinary file without writing through it',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const outside = join(root, 'outside')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await mkdir(outside, { recursive: true })
-      await writeStamped(join(left, 'plain.txt'), 'source body\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(left, 'copied.txt'), 'copied body\n', LINK_FIDELITY_STAMP + 1)
-      await writeStamped(join(outside, 'old.txt'), 'old body\n', LINK_FIDELITY_STAMP + 2)
-      await linkWithStamp('../outside/old.txt', join(right, 'plain.txt'), LINK_FIDELITY_STAMP + 3)
-      const oldBefore = await fingerprint(join(outside, 'old.txt'))
-
-      const recorded = recordWrites(platform)
-      const preview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      expect(preview.plan.update.count, 'symlink fidelity: file over link is one update').toBe(1)
-      expect(preview.plan.copy.count, 'symlink fidelity: ordinary copy is one item').toBe(1)
-      for (const item of [...preview.plan.update.items, ...preview.plan.copy.items]) {
-        expect(item.linkTarget, 'symlink fidelity: an ordinary file item has no linkTarget')
-          .toBeUndefined()
-      }
-
-      const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
-      expect(result.updated, 'symlink fidelity: file over link counts as updated').toBe(1)
-      expect(result.copied).toBe(1)
-
-      const targetInfo = await lstat(diskPath(right, 'plain.txt'))
-      expect(
-        targetInfo.isSymbolicLink(),
-        'symlink fidelity: the target path is a regular file now'
-      ).toBe(false)
-      const sourceInfo = await stat(diskPath(left, 'plain.txt'))
-      expect(targetInfo.size, 'symlink fidelity: replaced file size').toBe(sourceInfo.size)
-      expect(
-        rawSha(await readFile(diskPath(right, 'plain.txt'))),
-        'symlink fidelity: replaced file sha256'
-      ).toBe(rawSha(await readFile(diskPath(left, 'plain.txt'))))
-      expect(
-        Math.floor(targetInfo.mtimeMs),
-        'symlink fidelity: replaced file whole-ms mtime'
-      ).toBe(Math.floor(sourceInfo.mtimeMs))
+      expect((await lstat(diskPath(target, 'link-dir'))).isDirectory(), `${label}: a directory link is not a real directory`).toBe(false)
 
       expectSameFingerprint(
-        oldBefore,
-        await fingerprint(join(outside, 'old.txt')),
-        'symlink fidelity: the old link target keeps bytes and mtime'
+        targetOnlyBefore,
+        await fingerprint(join(target, 'only-on-target.txt')),
+        `${label}: the relative link target was not written through`
       )
-      expect(recorded.writes, 'symlink fidelity: only planned paths were written').toContain(
-        diskPath(right, 'plain.txt')
-      )
-      expect(recorded.writes, 'symlink fidelity: the old target file was never written').not.toContain(
-        join(outside, 'old.txt')
-      )
-    },
-    60_000
-  )
-
-  it(
-    'replaces a target-side ordinary file with the source link without writing through it',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const outside = join(root, 'outside')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await mkdir(outside, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
-      await linkWithStamp('../outside/keep.txt', join(left, 'link-over-file'), LINK_FIDELITY_STAMP + 2)
-      await writeStamped(join(right, 'link-over-file'), 'old file body\n', LINK_FIDELITY_STAMP + 3)
-      const keepBefore = await fingerprint(join(outside, 'keep.txt'))
-
-      const preview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      expect(preview.plan.update.count, 'symlink fidelity: link over a file is one update').toBe(1)
-      expect(
-        preview.plan.update.items[0].linkTarget,
-        'symlink fidelity: the update carries the source link string'
-      ).toBe('../outside/keep.txt')
-
-      const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(result.updated, 'symlink fidelity: link over a file counts as updated').toBe(1)
-      await expectSameLink(
-        diskPath(left, 'link-over-file'),
-        diskPath(right, 'link-over-file'),
-        'symlink fidelity: link replacing a file'
-      )
-      expect(
-        (await lstat(diskPath(right, 'link-over-file'))).isFile(),
-        'symlink fidelity: the target is a link, not a file'
-      ).toBe(false)
+      expectSameFingerprint(outsideFileBefore, await fingerprint(join(fixture.outside, 'kept.txt')), `${label}: an outside file was not touched`)
       expectSameFingerprint(
-        keepBefore,
-        await fingerprint(join(outside, 'keep.txt')),
-        'symlink fidelity: the link target was not written through'
+        outsideChildBefore,
+        await fingerprint(join(fixture.outside, 'kept-dir', 'child.txt')),
+        `${label}: a directory link target subtree was not touched`
       )
-    },
-    60_000
-  )
+    }
+  }, 180_000)
 
-  it(
-    'materialises a scanned tree link as a link instead of its target body',
-    async () => {
-      const root = await scratchRoot()
-      const source = join(root, 'source')
-      const target = join(root, 'materialised')
-      await mkdir(source, { recursive: true })
-      await writeStamped(join(source, 'plain.txt'), 'plain body\n', LINK_FIDELITY_STAMP)
-      await linkWithStamp('plain.txt', join(source, 'relative-link'), LINK_FIDELITY_STAMP + 1)
-      await linkWithStamp('missing.txt', join(source, 'dangling-link'), LINK_FIDELITY_STAMP + 2)
+  it('never reads a link path for content: every read and digest skips the links', async () => {
+    const fixture = await buildLinkFidelityFixture('left')
+    // One ordinary source-only file proves the recording really sees content
+    // reads; the links below must stay out of every read and digest.
+    await writeStampedBytes(diskPath(fixture.left, 'extra-copy.bin'), Buffer.from([0x00, 0x01, 0xff]), LINK_FIDELITY_STAMP + 5)
+    const reads: string[] = []
+    const digests: string[] = []
+    const recording: PlatformPort = {
+      ...platform,
+      readFileBytes: async (path) => {
+        reads.push(path)
+        return platform.readFileBytes(path)
+      },
+      digestFiles: async (paths, options) => {
+        digests.push(...paths)
+        return platform.digestFiles(paths, options)
+      },
+    }
 
-      const tree = await scanDirectory(source, (path) => platform.listDirectory(path))
-      const copied = await copyScannedTree(tree, target, syncIo(platform))
-      expect(copied, 'symlink fidelity: every scanned entry was materialised').toBe(3)
-      await expectSameLink(
-        diskPath(source, 'relative-link'),
-        diskPath(target, 'relative-link'),
-        'symlink fidelity: materialised relative link'
-      )
-      await expectSameLink(
-        diskPath(source, 'dangling-link'),
-        diskPath(target, 'dangling-link'),
-        'symlink fidelity: materialised dangling link'
-      )
-      expect(await readFile(diskPath(target, 'plain.txt'), 'utf8')).toBe('plain body\n')
-      expect(
-        (await lstat(diskPath(target, 'plain.txt'))).isSymbolicLink(),
-        'symlink fidelity: an ordinary file stays a file'
-      ).toBe(false)
-    },
-    60_000
-  )
-
-  it(
-    'deletes only the target-side links in mirror mode, and only when checked',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const outside = join(root, 'outside')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await mkdir(join(outside, 'kept-dir'), { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
-      await writeStamped(join(outside, 'kept-dir', 'child.txt'), 'child\n', LINK_FIDELITY_STAMP + 2)
-      await linkWithStamp('../outside/keep.txt', join(right, 'file-link'), LINK_FIDELITY_STAMP + 3)
-      await linkWithStamp('../outside/kept-dir', join(right, 'dir-link'), LINK_FIDELITY_STAMP + 4)
-      const keepBefore = await fingerprint(join(outside, 'keep.txt'))
-      const childBefore = await fingerprint(join(outside, 'kept-dir', 'child.txt'))
-
-      const preview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'mirror',
-        1
-      )
-      expect(preview.plan.copy.count, 'symlink fidelity: nothing to copy').toBe(0)
-      expect(preview.plan.update.count).toBe(0)
-      expect(
-        preview.plan.delete.items.map((item) => item.relativePath).sort(),
-        'symlink fidelity: target-only links are delete items'
-      ).toEqual(['dir-link', 'file-link'])
-      expect(
-        canApplySyncPreview(preview),
-        'symlink fidelity: unchecked link deletions are not executable work'
-      ).toBe(false)
-      expect(
-        canApplySyncPreview(preview, ['dir-link', 'file-link']),
-        'symlink fidelity: checked link deletions are executable'
-      ).toBe(true)
-
-      // Default run: nothing is checked, so both links stay and the dry-run
-      // still lists them with the same count.
-      const untouched = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(untouched.deleted, 'symlink fidelity: link deletes stay opt-in').toBe(0)
-      expect(await entryExistsOnDisk(diskPath(right, 'file-link'))).toBe(true)
-      expect(await entryExistsOnDisk(diskPath(right, 'dir-link'))).toBe(true)
-      const stillListed = await previewSync(
-        platform,
-        untouched.comparison,
-        'left-to-right',
-        'mirror',
-        2
-      )
-      expect(stillListed.plan.delete.count, 'symlink fidelity: dry-run still lists both').toBe(2)
-
-      const checkedPreview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'mirror',
-        3
-      )
-      const removed = await applySyncPreview(
-        platform,
-        checkedPreview,
+    const preview = await previewSync(
+      recording,
+      await compareDirectories(
+        fixture.left,
+        fixture.right,
+        (path) => recording.listDirectory(path),
+        (path) => recording.readTextFile(path),
         createComparisonCache(),
-        ['dir-link', 'file-link']
-      )
-      expect(removed.deleted, 'symlink fidelity: checked link deletions are counted').toBe(2)
-      expect(await entryExistsOnDisk(diskPath(right, 'file-link'))).toBe(false)
-      expect(await entryExistsOnDisk(diskPath(right, 'dir-link'))).toBe(false)
-      expectSameFingerprint(
-        keepBefore,
-        await fingerprint(join(outside, 'keep.txt')),
-        'symlink fidelity: a deleted link target file is untouched'
-      )
-      expectSameFingerprint(
-        childBefore,
-        await fingerprint(join(outside, 'kept-dir', 'child.txt')),
-        'symlink fidelity: a deleted directory link target is untouched'
-      )
-      expect((await readdir(join(outside, 'kept-dir'))).sort()).toEqual(['child.txt'])
-    },
-    60_000
-  )
-
-  it(
-    'rolls a link deletion back as a link with its own target and mtime',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      const outside = join(root, 'outside')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await mkdir(outside, { recursive: true })
-      await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
-      await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
-      await linkWithStamp('../outside/keep.txt', join(right, 'stale-link'), LINK_FIDELITY_STAMP + 2)
-      const keepBefore = await fingerprint(join(outside, 'keep.txt'))
-      const linkTargetBefore = await readlink(diskPath(right, 'stale-link'))
-      const linkMtimeBefore = Math.floor(
-        (await lstat(diskPath(right, 'stale-link'))).mtimeMs / 1000
-      )
-
-      const preview = await previewSync(
-        platform,
-        await comparePair(left, right),
-        'left-to-right',
-        'mirror',
-        1
-      )
-      expect(preview.plan.delete.count, 'symlink fidelity: link is a delete item').toBe(1)
-
-      const failing: PlatformPort = {
-        ...platform,
-        deleteFile: async (path) => {
-          await platform.deleteFile(path)
-          if (path === diskPath(right, 'stale-link')) {
-            throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
-          }
+        undefined,
+        {
+          digestFiles: (paths) => digestFilesForComparison(recording, paths),
+          listDirectories: (paths) => recording.listDirectories(paths),
         }
-      }
+      ),
+      'left-to-right',
+      'incremental',
+      1
+    )
+    const result = await applySyncPreview(recording, preview, createComparisonCache(), [])
+    expect(result.copied, 'symlink fidelity: dangling links still land').toBe(4)
 
-      const error = await applySyncPreview(failing, preview, createComparisonCache(), [
-        'stale-link'
-      ]).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-      expect(error, 'symlink fidelity: a failed link delete is a target error').toBeInstanceOf(
-        SyncTargetError
-      )
-      expect((error as SyncTargetError).code).toBe('EBUSY')
+    const linkPaths = LINK_NAMES.flatMap((name) => [diskPath(fixture.left, name), diskPath(fixture.right, name)])
+    for (const path of linkPaths) {
+      expect(reads, `symlink fidelity: ${path} must never be read as bytes`).not.toContain(path)
+      expect(digests, `symlink fidelity: ${path} must never be digested`).not.toContain(path)
+    }
+    // Counter-control: ordinary content reads really were recorded.
+    expect(reads, 'symlink fidelity: ordinary reads are still recorded').toContain(diskPath(fixture.left, 'extra-copy.bin'))
+    expect(digests, 'symlink fidelity: ordinary digests are still recorded').toContain(diskPath(fixture.left, 'extra-copy.bin'))
+  }, 60_000)
 
-      const restored = await lstat(diskPath(right, 'stale-link'))
-      expect(
-        restored.isSymbolicLink(),
-        'symlink fidelity: rollback rebuilt the link, not a plain file'
-      ).toBe(true)
-      expect(await readlink(diskPath(right, 'stale-link'))).toBe(linkTargetBefore)
-      expect(Math.floor(restored.mtimeMs / 1000)).toBe(linkMtimeBefore)
-      expectSameFingerprint(
-        keepBefore,
-        await fingerprint(join(outside, 'keep.txt')),
-        'symlink fidelity: a link-delete rollback never touches the target'
-      )
-    },
-    60_000
-  )
+  it('replaces a target-side link with the source link and leaves the old target intact', async () => {
+    const { root, left, right } = await scratchSides()
+    const outside = join(root, 'outside')
+    await mkdir(outside, { recursive: true })
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(outside, 'source-target.txt'), 'source target\n', LINK_FIDELITY_STAMP + 1)
+    await writeStamped(join(outside, 'old-target.txt'), 'old target\n', LINK_FIDELITY_STAMP + 2)
+    await linkWithStamp('../outside/source-target.txt', join(left, 'swap-link'), LINK_FIDELITY_STAMP + 3)
+    await linkWithStamp('../outside/old-target.txt', join(right, 'swap-link'), LINK_FIDELITY_STAMP + 4)
+    const oldTargetBefore = await fingerprint(join(outside, 'old-target.txt'))
+    const sourceTargetBefore = await fingerprint(join(outside, 'source-target.txt'))
 
-  it(
-    'treats a failed link-mtime alignment as a write failure and rolls the links back',
-    async () => {
-      const fixture = await buildLinkFidelityFixture('left')
-      const preview = await previewSync(
-        platform,
-        await comparePair(fixture.left, fixture.right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      const failing: PlatformPort = {
-        ...platform,
-        setSymbolicLinkModifiedMs: async (path, modifiedMs) => {
-          if (path.endsWith('link-rel')) {
-            throw new Error(`无法设置链接时间 ${path}：没有访问权限（EACCES）。`)
-          }
-          return platform.setSymbolicLinkModifiedMs(path, modifiedMs)
+    const preview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'incremental', 1)
+    expect(preview.plan.copy.count, 'symlink fidelity: nothing to copy').toBe(0)
+    expect(preview.plan.update.count, 'symlink fidelity: different links are one update').toBe(1)
+    expect(preview.plan.update.items[0].linkTarget, 'symlink fidelity: the update carries the source link string').toBe(
+      '../outside/source-target.txt'
+    )
+    expect(canApplySyncPreview(preview), 'symlink fidelity: link update is executable').toBe(true)
+
+    const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(result.updated, 'symlink fidelity: a link replacement counts as updated').toBe(1)
+    expect(result.copied).toBe(0)
+    expect(result.deleted).toBe(0)
+    await expectSameLink(diskPath(left, 'swap-link'), diskPath(right, 'swap-link'), 'symlink fidelity: replaced link')
+    expect(await readlink(diskPath(right, 'swap-link'))).toBe('../outside/source-target.txt')
+    expectSameFingerprint(
+      oldTargetBefore,
+      await fingerprint(join(outside, 'old-target.txt')),
+      'symlink fidelity: the replaced link target was not written through'
+    )
+    expectSameFingerprint(
+      sourceTargetBefore,
+      await fingerprint(join(outside, 'source-target.txt')),
+      'symlink fidelity: the new link target was not touched'
+    )
+  }, 60_000)
+
+  it('replaces a target-side link with an ordinary file without writing through it', async () => {
+    const { root, left, right } = await scratchSides()
+    const outside = join(root, 'outside')
+    await mkdir(outside, { recursive: true })
+    await writeStamped(join(left, 'plain.txt'), 'source body\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(left, 'copied.txt'), 'copied body\n', LINK_FIDELITY_STAMP + 1)
+    await writeStamped(join(outside, 'old.txt'), 'old body\n', LINK_FIDELITY_STAMP + 2)
+    await linkWithStamp('../outside/old.txt', join(right, 'plain.txt'), LINK_FIDELITY_STAMP + 3)
+    const oldBefore = await fingerprint(join(outside, 'old.txt'))
+
+    const recorded = recordWrites(platform)
+    const preview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'incremental', 1)
+    expect(preview.plan.update.count, 'symlink fidelity: file over link is one update').toBe(1)
+    expect(preview.plan.copy.count, 'symlink fidelity: ordinary copy is one item').toBe(1)
+    for (const item of [...preview.plan.update.items, ...preview.plan.copy.items]) {
+      expect(item.linkTarget, 'symlink fidelity: an ordinary file item has no linkTarget').toBeUndefined()
+    }
+
+    const result = await applySyncPreview(recorded.port, preview, createComparisonCache(), [])
+    expect(result.updated, 'symlink fidelity: file over link counts as updated').toBe(1)
+    expect(result.copied).toBe(1)
+
+    const targetInfo = await lstat(diskPath(right, 'plain.txt'))
+    expect(targetInfo.isSymbolicLink(), 'symlink fidelity: the target path is a regular file now').toBe(false)
+    const sourceInfo = await stat(diskPath(left, 'plain.txt'))
+    expect(targetInfo.size, 'symlink fidelity: replaced file size').toBe(sourceInfo.size)
+    expect(sha256Hex(await readFile(diskPath(right, 'plain.txt'))), 'symlink fidelity: replaced file sha256').toBe(
+      sha256Hex(await readFile(diskPath(left, 'plain.txt')))
+    )
+    expect(Math.floor(targetInfo.mtimeMs), 'symlink fidelity: replaced file whole-ms mtime').toBe(Math.floor(sourceInfo.mtimeMs))
+
+    expectSameFingerprint(oldBefore, await fingerprint(join(outside, 'old.txt')), 'symlink fidelity: the old link target keeps bytes and mtime')
+    expect(recorded.writes, 'symlink fidelity: only planned paths were written').toContain(diskPath(right, 'plain.txt'))
+    expect(recorded.writes, 'symlink fidelity: the old target file was never written').not.toContain(join(outside, 'old.txt'))
+  }, 60_000)
+
+  it('replaces a target-side ordinary file with the source link without writing through it', async () => {
+    const { root, left, right } = await scratchSides()
+    const outside = join(root, 'outside')
+    await mkdir(outside, { recursive: true })
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
+    await linkWithStamp('../outside/keep.txt', join(left, 'link-over-file'), LINK_FIDELITY_STAMP + 2)
+    await writeStamped(join(right, 'link-over-file'), 'old file body\n', LINK_FIDELITY_STAMP + 3)
+    const keepBefore = await fingerprint(join(outside, 'keep.txt'))
+
+    const preview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'incremental', 1)
+    expect(preview.plan.update.count, 'symlink fidelity: link over a file is one update').toBe(1)
+    expect(preview.plan.update.items[0].linkTarget, 'symlink fidelity: the update carries the source link string').toBe('../outside/keep.txt')
+
+    const result = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(result.updated, 'symlink fidelity: link over a file counts as updated').toBe(1)
+    await expectSameLink(diskPath(left, 'link-over-file'), diskPath(right, 'link-over-file'), 'symlink fidelity: link replacing a file')
+    expect((await lstat(diskPath(right, 'link-over-file'))).isFile(), 'symlink fidelity: the target is a link, not a file').toBe(false)
+    expectSameFingerprint(keepBefore, await fingerprint(join(outside, 'keep.txt')), 'symlink fidelity: the link target was not written through')
+  }, 60_000)
+
+  it('materialises a scanned tree link as a link instead of its target body', async () => {
+    const root = await scratchRoot()
+    const source = join(root, 'source')
+    const target = join(root, 'materialised')
+    await mkdir(source, { recursive: true })
+    await writeStamped(join(source, 'plain.txt'), 'plain body\n', LINK_FIDELITY_STAMP)
+    await linkWithStamp('plain.txt', join(source, 'relative-link'), LINK_FIDELITY_STAMP + 1)
+    await linkWithStamp('missing.txt', join(source, 'dangling-link'), LINK_FIDELITY_STAMP + 2)
+
+    const tree = await scanDirectory(source, (path) => platform.listDirectory(path))
+    const copied = await copyScannedTree(tree, target, syncIo(platform))
+    expect(copied, 'symlink fidelity: every scanned entry was materialised').toBe(3)
+    await expectSameLink(diskPath(source, 'relative-link'), diskPath(target, 'relative-link'), 'symlink fidelity: materialised relative link')
+    await expectSameLink(diskPath(source, 'dangling-link'), diskPath(target, 'dangling-link'), 'symlink fidelity: materialised dangling link')
+    expect(await readFile(diskPath(target, 'plain.txt'), 'utf8')).toBe('plain body\n')
+    expect((await lstat(diskPath(target, 'plain.txt'))).isSymbolicLink(), 'symlink fidelity: an ordinary file stays a file').toBe(false)
+  }, 60_000)
+
+  it('deletes only the target-side links in mirror mode, and only when checked', async () => {
+    const { root, left, right } = await scratchSides()
+    const outside = join(root, 'outside')
+    await mkdir(join(outside, 'kept-dir'), { recursive: true })
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
+    await writeStamped(join(outside, 'kept-dir', 'child.txt'), 'child\n', LINK_FIDELITY_STAMP + 2)
+    await linkWithStamp('../outside/keep.txt', join(right, 'file-link'), LINK_FIDELITY_STAMP + 3)
+    await linkWithStamp('../outside/kept-dir', join(right, 'dir-link'), LINK_FIDELITY_STAMP + 4)
+    const keepBefore = await fingerprint(join(outside, 'keep.txt'))
+    const childBefore = await fingerprint(join(outside, 'kept-dir', 'child.txt'))
+
+    const preview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'mirror', 1)
+    expect(preview.plan.copy.count, 'symlink fidelity: nothing to copy').toBe(0)
+    expect(preview.plan.update.count).toBe(0)
+    expect(deletePathsOf(preview.plan).sort(), 'symlink fidelity: target-only links are delete items').toEqual(['dir-link', 'file-link'])
+    expect(canApplySyncPreview(preview), 'symlink fidelity: unchecked link deletions are not executable work').toBe(false)
+    expect(canApplySyncPreview(preview, ['dir-link', 'file-link']), 'symlink fidelity: checked link deletions are executable').toBe(true)
+
+    // Default run: nothing is checked, so both links stay and the dry-run
+    // still lists them with the same count.
+    const untouched = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(untouched.deleted, 'symlink fidelity: link deletes stay opt-in').toBe(0)
+    expect(await entryExistsOnDisk(diskPath(right, 'file-link'))).toBe(true)
+    expect(await entryExistsOnDisk(diskPath(right, 'dir-link'))).toBe(true)
+    const stillListed = await previewSync(platform, untouched.comparison, 'left-to-right', 'mirror', 2)
+    expect(stillListed.plan.delete.count, 'symlink fidelity: dry-run still lists both').toBe(2)
+
+    const checkedPreview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'mirror', 3)
+    const removed = await applySyncPreview(platform, checkedPreview, createComparisonCache(), ['dir-link', 'file-link'])
+    expect(removed.deleted, 'symlink fidelity: checked link deletions are counted').toBe(2)
+    expect(await entryExistsOnDisk(diskPath(right, 'file-link'))).toBe(false)
+    expect(await entryExistsOnDisk(diskPath(right, 'dir-link'))).toBe(false)
+    expectSameFingerprint(keepBefore, await fingerprint(join(outside, 'keep.txt')), 'symlink fidelity: a deleted link target file is untouched')
+    expectSameFingerprint(
+      childBefore,
+      await fingerprint(join(outside, 'kept-dir', 'child.txt')),
+      'symlink fidelity: a deleted directory link target is untouched'
+    )
+    expect((await readdir(join(outside, 'kept-dir'))).sort()).toEqual(['child.txt'])
+  }, 60_000)
+
+  it('rolls a link deletion back as a link with its own target and mtime', async () => {
+    const { root, left, right } = await scratchSides()
+    const outside = join(root, 'outside')
+    await mkdir(outside, { recursive: true })
+    await writeStamped(join(left, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(right, 'shared.txt'), 'shared\n', LINK_FIDELITY_STAMP)
+    await writeStamped(join(outside, 'keep.txt'), 'keep body\n', LINK_FIDELITY_STAMP + 1)
+    await linkWithStamp('../outside/keep.txt', join(right, 'stale-link'), LINK_FIDELITY_STAMP + 2)
+    const keepBefore = await fingerprint(join(outside, 'keep.txt'))
+    const linkTargetBefore = await readlink(diskPath(right, 'stale-link'))
+    const linkMtimeBefore = Math.floor((await lstat(diskPath(right, 'stale-link'))).mtimeMs / 1000)
+
+    const preview = await previewSync(platform, await comparePair(left, right), 'left-to-right', 'mirror', 1)
+    expect(preview.plan.delete.count, 'symlink fidelity: link is a delete item').toBe(1)
+
+    const failing: PlatformPort = {
+      ...platform,
+      deleteFile: async (path) => {
+        await platform.deleteFile(path)
+        if (path === diskPath(right, 'stale-link')) {
+          throw Object.assign(new Error('file is busy'), { code: 'EBUSY' })
         }
-      }
+      },
+    }
 
-      const error = await applySyncPreview(failing, preview, createComparisonCache(), []).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-      expect(
-        error,
-        'symlink fidelity: a failing link mtime is a write failure, not a soft check'
-      ).toBeInstanceOf(SyncTargetError)
-      expect((error as SyncTargetError).code).toBe('EACCES')
-      // The run rolled back: no link of this plan survives on the target.
+    const error = await settle(applySyncPreview(failing, preview, createComparisonCache(), ['stale-link']))
+    expect(error, 'symlink fidelity: a failed link delete is a target error').toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EBUSY')
+
+    const restored = await lstat(diskPath(right, 'stale-link'))
+    expect(restored.isSymbolicLink(), 'symlink fidelity: rollback rebuilt the link, not a plain file').toBe(true)
+    expect(await readlink(diskPath(right, 'stale-link'))).toBe(linkTargetBefore)
+    expect(Math.floor(restored.mtimeMs / 1000)).toBe(linkMtimeBefore)
+    expectSameFingerprint(
+      keepBefore,
+      await fingerprint(join(outside, 'keep.txt')),
+      'symlink fidelity: a link-delete rollback never touches the target'
+    )
+  }, 60_000)
+
+  it('treats a failed link-mtime alignment as a write failure and rolls the links back', async () => {
+    const fixture = await buildLinkFidelityFixture('left')
+    const preview = await previewSync(platform, await comparePair(fixture.left, fixture.right), 'left-to-right', 'incremental', 1)
+    const failing: PlatformPort = {
+      ...platform,
+      setSymbolicLinkModifiedMs: async (path, modifiedMs) => {
+        if (path.endsWith('link-rel')) {
+          throw new Error(`无法设置链接时间 ${path}：没有访问权限（EACCES）。`)
+        }
+        return platform.setSymbolicLinkModifiedMs(path, modifiedMs)
+      },
+    }
+
+    const error = await settle(applySyncPreview(failing, preview, createComparisonCache(), []))
+    expect(error, 'symlink fidelity: a failing link mtime is a write failure, not a soft check').toBeInstanceOf(SyncTargetError)
+    expect((error as SyncTargetError).code).toBe('EACCES')
+    // The run rolled back: no link of this plan survives on the target.
+    for (const relativePath of LINK_NAMES) {
+      expect(await entryExistsOnDisk(diskPath(fixture.right, relativePath)), `symlink fidelity: ${relativePath} was rolled back`).toBe(false)
+    }
+    // The retry on the real port lands the whole plan.
+    const retry = await applySyncPreview(platform, preview, createComparisonCache(), [])
+    expect(retry.copied, 'symlink fidelity: retry after rollback').toBe(3)
+  }, 60_000)
+
+  it('verifies links by form and rejects a wrong target or an unaligned link mtime', async () => {
+    const wrongTargetFixture = await buildLinkFidelityFixture('left')
+    const wrongTargetPreview = await previewSync(
+      platform,
+      await comparePair(wrongTargetFixture.left, wrongTargetFixture.right),
+      'left-to-right',
+      'incremental',
+      1
+    )
+    const wrongTarget: PlatformPort = {
+      ...platform,
+      // "Succeeded", but the link lands pointing somewhere else.
+      createSymbolicLink: async (_target, path) => platform.createSymbolicLink('wrong-target.txt', path),
+    }
+    const wrongTargetError = await settle(applySyncPreview(wrongTarget, wrongTargetPreview, createComparisonCache(), []))
+    expect(wrongTargetError, 'symlink fidelity: a wrong readlink must not resolve').toBeInstanceOf(SyncVerificationError)
+    expect(
+      (wrongTargetError as SyncVerificationError).paths.some((path) => path.endsWith('link-rel')),
+      'symlink fidelity: the wrong target is named'
+    ).toBe(true)
+
+    const unalignedFixture = await buildLinkFidelityFixture('left')
+    const unalignedPreview = await previewSync(
+      platform,
+      await comparePair(unalignedFixture.left, unalignedFixture.right),
+      'left-to-right',
+      'incremental',
+      1
+    )
+    const unaligned: PlatformPort = {
+      ...platform,
+      // "Succeeded", but the link keeps its creation time instead of the source's.
+      setSymbolicLinkModifiedMs: async () => undefined,
+    }
+    const unalignedError = await settle(applySyncPreview(unaligned, unalignedPreview, createComparisonCache(), []))
+    expect(unalignedError, 'symlink fidelity: an unaligned link mtime must not resolve').toBeInstanceOf(SyncVerificationError)
+    expect((unalignedError as SyncVerificationError).mismatched, 'symlink fidelity: every copied link is unaligned').toBe(3)
+  }, 120_000)
+
+  it('leaves an empty second dry-run and an all-same comparison after copying links', async () => {
+    const runs = [
+      { linkSide: 'left', direction: 'left-to-right' },
+      { linkSide: 'right', direction: 'right-to-left' },
+    ] as const
+
+    let sequence = 0
+    for (const run of runs) {
+      sequence += 1
+      const fixture = await buildLinkFidelityFixture(run.linkSide)
+      const target = run.linkSide === 'left' ? fixture.right : fixture.left
+      const { comparison, preview } = await previewPair(fixture.left, fixture.right, run.direction, 'mirror', sequence)
+      expect(preview.plan.delete.count, `symlink fidelity: ${run.direction} lists the target-only file`).toBe(1)
+      const checked = deletePathsOf(preview.plan)
+
+      const result = await applySyncPreview(platform, preview, createComparisonCache(), checked)
+      expect(result.copied, `symlink fidelity: ${run.direction} copied links`).toBe(3)
+      expect(result.deleted, `symlink fidelity: ${run.direction} deleted one file`).toBe(1)
+      // The returned comparison is the refreshed real-disk state, not the old object.
+      expect(result.comparison, `symlink fidelity: ${run.direction} refreshes`).not.toBe(comparison)
+
+      // Four-state truth: every entry is `same`, independently asserted.
+      expect(result.comparison.counts, `symlink fidelity: ${run.direction} four states`).toEqual({
+        same: result.comparison.fileCount,
+        added: 0,
+        removed: 0,
+        modified: 0,
+      })
+      expect(result.comparison.fileCount, `symlink fidelity: ${run.direction} file count`).toBe(4)
+
+      // Second dry-run on the same pair, same direction and mode: all empty.
+      const second = await previewSync(platform, result.comparison, run.direction, 'mirror', sequence + 100)
+      expect(second.plan.copy.count, `symlink fidelity: ${run.direction} second copy`).toBe(0)
+      expect(second.plan.update.count, `symlink fidelity: ${run.direction} second update`).toBe(0)
+      expect(second.plan.delete.count, `symlink fidelity: ${run.direction} second delete`).toBe(0)
+      expect(second.plan.totalCount, `symlink fidelity: ${run.direction} second total`).toBe(0)
+      expect(second.linkAlignments, `symlink fidelity: ${run.direction} second alignment`).toEqual([])
+      expect(canApplySyncPreview(second), `symlink fidelity: ${run.direction} second preview is not executable`).toBe(false)
+
       for (const relativePath of LINK_NAMES) {
         expect(
-          await entryExistsOnDisk(diskPath(fixture.right, relativePath)),
-          `symlink fidelity: ${relativePath} was rolled back`
-        ).toBe(false)
+          (await lstat(diskPath(target, relativePath))).isSymbolicLink(),
+          `symlink fidelity: ${run.direction} ${relativePath} stays a link`
+        ).toBe(true)
       }
-      // The retry on the real port lands the whole plan.
-      const retry = await applySyncPreview(platform, preview, createComparisonCache(), [])
-      expect(retry.copied, 'symlink fidelity: retry after rollback').toBe(3)
-    },
-    60_000
-  )
-
-  it(
-    'verifies links by form and rejects a wrong target or an unaligned link mtime',
-    async () => {
-      const wrongTargetFixture = await buildLinkFidelityFixture('left')
-      const wrongTargetPreview = await previewSync(
-        platform,
-        await comparePair(wrongTargetFixture.left, wrongTargetFixture.right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      const wrongTarget: PlatformPort = {
-        ...platform,
-        // "Succeeded", but the link lands pointing somewhere else.
-        createSymbolicLink: async (_target, path) =>
-          platform.createSymbolicLink('wrong-target.txt', path)
-      }
-      const wrongTargetError = await applySyncPreview(
-        wrongTarget,
-        wrongTargetPreview,
-        createComparisonCache(),
-        []
-      ).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-      expect(
-        wrongTargetError,
-        'symlink fidelity: a wrong readlink must not resolve'
-      ).toBeInstanceOf(SyncVerificationError)
-      expect(
-        (wrongTargetError as SyncVerificationError).paths.some((path) =>
-          path.endsWith('link-rel')
-        ),
-        'symlink fidelity: the wrong target is named'
-      ).toBe(true)
-
-      const unalignedFixture = await buildLinkFidelityFixture('left')
-      const unalignedPreview = await previewSync(
-        platform,
-        await comparePair(unalignedFixture.left, unalignedFixture.right),
-        'left-to-right',
-        'incremental',
-        1
-      )
-      const unaligned: PlatformPort = {
-        ...platform,
-        // "Succeeded", but the link keeps its creation time instead of the source's.
-        setSymbolicLinkModifiedMs: async () => undefined
-      }
-      const unalignedError = await applySyncPreview(
-        unaligned,
-        unalignedPreview,
-        createComparisonCache(),
-        []
-      ).then(
-        () => undefined,
-        (reason: unknown) => reason
-      )
-      expect(
-        unalignedError,
-        'symlink fidelity: an unaligned link mtime must not resolve'
-      ).toBeInstanceOf(SyncVerificationError)
-      expect(
-        (unalignedError as SyncVerificationError).mismatched,
-        'symlink fidelity: every copied link is unaligned'
-      ).toBe(3)
-    },
-    120_000
-  )
-
-  it(
-    'leaves an empty second dry-run and an all-same comparison after copying links',
-    async () => {
-      const runs = [
-        { linkSide: 'left', direction: 'left-to-right' },
-        { linkSide: 'right', direction: 'right-to-left' }
-      ] as const
-
-      let sequence = 0
-      for (const run of runs) {
-        sequence += 1
-        const fixture = await buildLinkFidelityFixture(run.linkSide)
-        const target = run.linkSide === 'left' ? fixture.right : fixture.left
-        const comparison = await comparePair(fixture.left, fixture.right)
-        const preview = await previewSync(
-          platform,
-          comparison,
-          run.direction,
-          'mirror',
-          sequence
-        )
-        expect(
-          preview.plan.delete.count,
-          `symlink fidelity: ${run.direction} lists the target-only file`
-        ).toBe(1)
-        const checked = preview.plan.delete.items.map((item) => item.relativePath)
-
-        const result = await applySyncPreview(
-          platform,
-          preview,
-          createComparisonCache(),
-          checked
-        )
-        expect(result.copied, `symlink fidelity: ${run.direction} copied links`).toBe(3)
-        expect(result.deleted, `symlink fidelity: ${run.direction} deleted one file`).toBe(1)
-        // The returned comparison is the refreshed real-disk state, not the old object.
-        expect(result.comparison, `symlink fidelity: ${run.direction} refreshes`).not.toBe(
-          comparison
-        )
-
-        // Four-state truth: every entry is `same`, independently asserted.
-        expect(result.comparison.counts, `symlink fidelity: ${run.direction} four states`).toEqual({
-          same: result.comparison.fileCount,
-          added: 0,
-          removed: 0,
-          modified: 0
-        })
-        expect(result.comparison.fileCount, `symlink fidelity: ${run.direction} file count`).toBe(4)
-
-        // Second dry-run on the same pair, same direction and mode: all empty.
-        const second = await previewSync(
-          platform,
-          result.comparison,
-          run.direction,
-          'mirror',
-          sequence + 100
-        )
-        expect(second.plan.copy.count, `symlink fidelity: ${run.direction} second copy`).toBe(0)
-        expect(second.plan.update.count, `symlink fidelity: ${run.direction} second update`).toBe(0)
-        expect(second.plan.delete.count, `symlink fidelity: ${run.direction} second delete`).toBe(0)
-        expect(second.plan.totalCount, `symlink fidelity: ${run.direction} second total`).toBe(0)
-        expect(second.linkAlignments, `symlink fidelity: ${run.direction} second alignment`).toEqual(
-          []
-        )
-        expect(
-          canApplySyncPreview(second),
-          `symlink fidelity: ${run.direction} second preview is not executable`
-        ).toBe(false)
-
-        for (const relativePath of LINK_NAMES) {
-          expect(
-            (await lstat(diskPath(target, relativePath))).isSymbolicLink(),
-            `symlink fidelity: ${run.direction} ${relativePath} stays a link`
-          ).toBe(true)
-        }
-      }
-    },
-    120_000
-  )
+    }
+  }, 120_000)
 })
 
 /* ------------------------------------------------------------------ */
@@ -2689,73 +1937,55 @@ describe('real-disk sync symlink fidelity', () => {
 /* ------------------------------------------------------------------ */
 
 describe('real-disk sync idempotent dry-run', () => {
-  it(
-    'lists only the pending deletion after applying, and nothing once it is deleted',
-    async () => {
-      const root = await scratchRoot()
-      const left = join(root, 'left')
-      const right = join(root, 'right')
-      await mkdir(left, { recursive: true })
-      await mkdir(right, { recursive: true })
-      await writeStamped(join(left, 'same.txt'), 'same\n', BINARY_STAMP)
-      await writeStamped(join(right, 'same.txt'), 'same\n', BINARY_STAMP)
+  it('lists only the pending deletion after applying, and nothing once it is deleted', async () => {
+    const { left, right } = await scratchSides()
+    await writeStamped(join(left, 'same.txt'), 'same\n', BINARY_STAMP)
+    await writeStamped(join(right, 'same.txt'), 'same\n', BINARY_STAMP)
 
-      const cache = createComparisonCache()
+    const cache = createComparisonCache()
 
-      /** One cycle: dry-run → apply copy/update → dry-run → delete all → dry-run. */
-      async function cycle(round: number): Promise<void> {
-        await writeStampedBytes(diskPath(left, `round-${round}/new.txt`), Buffer.from('new'), BINARY_STAMP + round)
-        await writeStampedBytes(diskPath(right, `round-${round}/stale.txt`), Buffer.from('stale'), BINARY_STAMP + round)
+    /** One cycle: dry-run → apply copy/update → dry-run → delete all → dry-run. */
+    async function cycle(round: number): Promise<void> {
+      await writeStampedBytes(diskPath(left, `round-${round}/new.txt`), Buffer.from('new'), BINARY_STAMP + round)
+      await writeStampedBytes(diskPath(right, `round-${round}/stale.txt`), Buffer.from('stale'), BINARY_STAMP + round)
 
-        const before = await comparePair(left, right, cache)
-        const first = await previewSync(platform, before, 'left-to-right', 'mirror', round * 10 + 1)
-        expect(first.plan.copy.count, `idempotent dry-run: round ${round} first copy`).toBe(1)
-        expect(first.plan.update.count, `idempotent dry-run: round ${round} first update`).toBe(0)
-        expect(first.plan.delete.count, `idempotent dry-run: round ${round} first delete`).toBe(1)
-        // Deletions stay opt-in: the preview lists them but nothing is checked.
-        expect(first.plan.delete.items.map((item) => item.relativePath)).toEqual([
-          `round-${round}/stale.txt`
-        ])
+      const before = await comparePair(left, right, cache)
+      const first = await previewSync(platform, before, 'left-to-right', 'mirror', round * 10 + 1)
+      expect(first.plan.copy.count, `idempotent dry-run: round ${round} first copy`).toBe(1)
+      expect(first.plan.update.count, `idempotent dry-run: round ${round} first update`).toBe(0)
+      expect(first.plan.delete.count, `idempotent dry-run: round ${round} first delete`).toBe(1)
+      // Deletions stay opt-in: the preview lists them but nothing is checked.
+      expect(deletePathsOf(first.plan)).toEqual([`round-${round}/stale.txt`])
 
-        const applied = await applySyncPreview(platform, first, cache, [])
-        expect(applied.copied, `idempotent dry-run: round ${round} applied copy`).toBe(1)
-        expect(applied.deleted, `idempotent dry-run: round ${round} default delete`).toBe(0)
+      const applied = await applySyncPreview(platform, first, cache, [])
+      expect(applied.copied, `idempotent dry-run: round ${round} applied copy`).toBe(1)
+      expect(applied.deleted, `idempotent dry-run: round ${round} default delete`).toBe(0)
 
-        // Dry-run after the copy: the pending deletion is still listed, no writes.
-        const pending = await previewSync(platform, applied.comparison, 'left-to-right', 'mirror', round * 10 + 2)
-        expect(pending.plan.copy.count, `idempotent dry-run: round ${round} pending copy`).toBe(0)
-        expect(pending.plan.update.count, `idempotent dry-run: round ${round} pending update`).toBe(0)
-        expect(pending.plan.delete.count, `idempotent dry-run: round ${round} pending delete`).toBe(1)
+      // Dry-run after the copy: the pending deletion is still listed, no writes.
+      const pending = await previewSync(platform, applied.comparison, 'left-to-right', 'mirror', round * 10 + 2)
+      expect(pending.plan.copy.count, `idempotent dry-run: round ${round} pending copy`).toBe(0)
+      expect(pending.plan.update.count, `idempotent dry-run: round ${round} pending update`).toBe(0)
+      expect(pending.plan.delete.count, `idempotent dry-run: round ${round} pending delete`).toBe(1)
 
-        const checked = pending.plan.delete.items.map((item) => item.relativePath)
-        const removed = await applySyncPreview(platform, pending, cache, checked)
-        expect(removed.deleted, `idempotent dry-run: round ${round} checked delete`).toBe(1)
+      const checked = deletePathsOf(pending.plan)
+      const removed = await applySyncPreview(platform, pending, cache, checked)
+      expect(removed.deleted, `idempotent dry-run: round ${round} checked delete`).toBe(1)
 
-        // Dry-run after the select-all deletion: all three groups are empty.
-        const last = await previewSync(platform, removed.comparison, 'left-to-right', 'mirror', round * 10 + 3)
-        expect(last.plan.copy.count, `idempotent dry-run: round ${round} final copy`).toBe(0)
-        expect(last.plan.update.count, `idempotent dry-run: round ${round} final update`).toBe(0)
-        expect(last.plan.delete.count, `idempotent dry-run: round ${round} final delete`).toBe(0)
-        // All three groups are empty item by item, not just counted as zero.
-        expect(last.plan.copy.items, `idempotent dry-run: round ${round} final copy items`).toEqual(
-          []
-        )
-        expect(
-          last.plan.update.items,
-          `idempotent dry-run: round ${round} final update items`
-        ).toEqual([])
-        expect(
-          last.plan.delete.items,
-          `idempotent dry-run: round ${round} final delete items`
-        ).toEqual([])
-        expect(last.plan.totalCount, `idempotent dry-run: round ${round} final total`).toBe(0)
-        expect(last.plan.totalBytes, `idempotent dry-run: round ${round} final bytes`).toBe(0)
-      }
+      // Dry-run after the select-all deletion: all three groups are empty.
+      const last = await previewSync(platform, removed.comparison, 'left-to-right', 'mirror', round * 10 + 3)
+      expect(last.plan.copy.count, `idempotent dry-run: round ${round} final copy`).toBe(0)
+      expect(last.plan.update.count, `idempotent dry-run: round ${round} final update`).toBe(0)
+      expect(last.plan.delete.count, `idempotent dry-run: round ${round} final delete`).toBe(0)
+      // All three groups are empty item by item, not just counted as zero.
+      expect(last.plan.copy.items, `idempotent dry-run: round ${round} final copy items`).toEqual([])
+      expect(last.plan.update.items, `idempotent dry-run: round ${round} final update items`).toEqual([])
+      expect(last.plan.delete.items, `idempotent dry-run: round ${round} final delete items`).toEqual([])
+      expect(last.plan.totalCount, `idempotent dry-run: round ${round} final total`).toBe(0)
+      expect(last.plan.totalBytes, `idempotent dry-run: round ${round} final bytes`).toBe(0)
+    }
 
-      await cycle(1)
-      // Repeating the same 1)–3) on the very same pair stays idempotent.
-      await cycle(2)
-    },
-    120_000
-  )
+    await cycle(1)
+    // Repeating the same 1)–3) on the very same pair stays idempotent.
+    await cycle(2)
+  }, 120_000)
 })

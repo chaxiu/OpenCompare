@@ -1,0 +1,11 @@
+covers: ac-line-budget, ac-no-new-test-file, ac-single-helper, ac-test-count, ac-assertion-parity, ac-no-skip-or-each, ac-helper-node-import-safe, ac-coverage-evidence, ac-sync-real-regression, ac-app-shell-regression, ac-code-gates-green, ac-scope-and-version, ac-no-browser-device
+标题: `App.test.tsx` 与 `sync-real-gate.test.ts` 去重压缩到唯一共享 harness，行为断言与用例声明零删减
+步骤: `wc -l src/renderer/src/App.test.tsx src/sync-real-gate.test.ts src/test/sharedHarness.tsx` → 核对两文件 `it(` / `test(` 声明数与 `describe` 分组 → `grep -c "expect("` 三文件 → 检查 harness 顶层是否访问 `document` / `window`、是否含 `describe` / `it` / `expect` → `git status --porcelain` 与 `git diff --name-only` 对照范围 → `git diff` 扫新增 `it.each` / `test.each` / `describe.each` / `.skip(` / `.only(` / `.todo(` / `.concurrent(` → 跑 `pnpm test:sync-real` 与 `pnpm test src/renderer/src/App.settings.test.tsx` → 跑全量 `pnpm test` 对照总数 → 按 `.munk/code-gates.json` 逐条过门
+期望: 两目标文件合计 ≤ 5,000 行（实测 2,959 + 1,991 = 4,950，基线 6,210）且各自 `describe` 分组仍在（8 / 7）；新增文件恰 1 个 `src/test/sharedHarness.tsx`、279 行、不匹配 `*.test.*`，三文件合计 5,229 ≤ 5,500；`it(` + `test(` 仍为 126（94 + 32）；`expect(` 仍为 924（537 + 387），harness 内 0 条且无 `describe` / `it` / `test`；harness 顶层不碰 `document` / `window`，node 侧 `sync-real-gate` 与 jsdom 侧 `App.test` 共用同一文件且 `pnpm test:sync-real` 退出码 0；`pnpm test` 总数 ≥ 1,745（实测 1,872 = 1,871 passed + 1 skipped / 115 files）；三条点名用例标题逐字仍在（`keeps 3 tabs resident and switches with zero scans or digests`、`rolls a mid-plan failure back to the exact previous disk and stays retryable`、`cancels mid-plan, rolls back and reports a cancellation distinct from failure`）且断言未删改；`App.settings.test.tsx` 零改动且全绿；无新增 `it.each` / `test.each` / `describe.each` / `.skip(` / `.only(` / `.todo(` / `.concurrent(`；`package.json` / `pnpm-lock.yaml` / 产品源码 / 其余测试文件零 diff；21 道门禁逐条 passed；不跑浏览器 / Electron / 实机
+
+## Recent execution
+
+- workItemId: wi_intake_335d0d0cbf0533bd
+- at: 2026-11-02
+- status: pass
+- note: `code_gates` passed（21 gates，attempt 001，`.munk/runs/run_intake_335d0d0cbf0533bd/code-gates/attempts/001`，`failedGateIds: []`）；门禁 `test` 115 files / 1,871 passed + 1 skipped（1,872）、31.29s，`sync-real-gate` 单跑通过。体量 6,210 → 4,950（净减 1,260），harness 279 行，三文件 5,229；`it(` 126 / `expect(` 924 前后不变，harness 内 0 条 `expect`。`ac-coverage-evidence` 的覆盖率前后对比未在本轮 code_gates 内产出（默认矩阵无 coverage gate，未新增依赖），按 prd 替代口径以「行为断言条数前后一致 + 关键路径逐条列举」记录。
