@@ -1,0 +1,6 @@
+.munk/baseline/domains/test-harness/product.md
+.munk/baseline/domains/test-harness/qa/shared-test-harness-dedup.md
+.munk/changes/wi_intake_335d0d0cbf0533bd/prd.md
+src/renderer/src/App.test.tsx
+src/sync-real-gate.test.ts
+src/test/sharedHarness.tsx
