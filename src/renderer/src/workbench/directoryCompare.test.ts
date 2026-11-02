@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PlatformPort } from '@shared/platform/types'
+import { probeTextBytes } from '@core/text/probe'
 import type { DirectoryComparison, DirectoryDiffNode } from '@core/directory/compare'
 import { createComparisonCache } from '@core/directory/compare'
 import { setLivenessEnabled, livenessCounts } from '@shared/perf/liveness'
@@ -96,10 +97,12 @@ describe('scene comes from the opened object', () => {
   })
 })
 
-/** Minimal read-only PlatformPort; only `readTextFile` is ever used here. */
+/** Minimal read-only PlatformPort over the same in-memory bodies. */
 function stubPlatform(files: Readonly<Record<string, string>>): PlatformPort {
+  const body = (path: string): Uint8Array => new TextEncoder().encode(files[path] ?? '')
   return {
-    readTextFile: async (path: string) => files[path] ?? ''
+    readTextFile: async (path: string) => files[path] ?? '',
+    probeTextFile: async (path: string) => ({ path, ...probeTextBytes(body(path)) })
   } as unknown as PlatformPort
 }
 

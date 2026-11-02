@@ -8,17 +8,19 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 42930
+    "repoTestLines": 43329
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1373
+    "repoTestCases": 1407
   },
   "harness": {
     "perFileMaxLines": 400,
     "totalMaxLines": 400,
-    "files": ["src/test/sharedHarness.tsx"]
+    "files": [
+      "src/test/sharedHarness.tsx"
+    ]
   },
   "literalWhitelist": {
     "sha256": [
@@ -29,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 42724,
-      "to": 42930,
-      "reason": "I#9 probe-core: deterministic newline/encoding probe functions + PlatformPort.probeTextFile L1/L2 coverage",
-      "addedCases": 25
+      "from": 42930,
+      "to": 43329,
+      "reason": "I#9 probe-status: file-pair open/drilldown probe facts + four-value status bar L1/L2 coverage",
+      "addedCases": 34
     }
   ]
 }

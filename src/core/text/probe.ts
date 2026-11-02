@@ -305,3 +305,12 @@ export function probeTextBytes(
     sha256: sha256Bytes(bytes)
   }
 }
+
+/**
+ * Probes in-memory text exactly as its UTF-8 encoding would be probed. Sample
+ * bodies and snapshot-inlined files have no original bytes, so they take this
+ * one path instead of a second detection rule set.
+ */
+export function probeTextString(text: string): TextBytesProbe {
+  return probeTextBytes(new TextEncoder().encode(text))
+}

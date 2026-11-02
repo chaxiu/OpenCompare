@@ -25,6 +25,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **顶栏 / 目录工作流 / 空态去 demo，示例统一收进设置**：顶栏不渲染 `samples` 按钮与 `samples-menu` 下拉（`data-shell-entry` 两个 id 从 DOM 消失），品牌区只有品牌图标 + `OpenCompare` 标题（品牌副标题与 `shell.header.brandSubtitle` 键删除）；常驻动作只剩 `new-compare` / `open-file` / `open-folder` / `settings`，空态下 `open-file` / `open-folder` 仍由空态 CTA 承担、可见性语义不变。`DirectoryView` 工作流工具栏删除「加载演示目录」与「演示：远端快照」两个按钮及 `onLoadSample` / `onLoadRemoteSnapshotSample` 两个 props（`Workbench` 与 `perf/PerfRunner.tsx` 同名传参一并删除），filter / sync / template / snapshot-import / snapshot-export / report-export 等真实 `data-shell-entry` 与三行工具栏结构不变；`directory.picker.unavailable` 文案改指「设置 → 示例与调试」或桌面端选择器。空态 action 区恰为「新建对比 / 打开文件 / 打开文件夹」三个真实操作，`shell.empty.hint` / `shell.empty.description` 只讲真实路径并文字指路设置分区。
 - **设置 →「示例与调试」分区（`SettingsDialog`，5 个场景入口 + 调试专用失败项）**：分区标题 / 说明 / 5 个入口描述 / 失败项全部走 `settings.samples.*` 中英成对键，标签优先复用 `shell.view.*` 与快照既有键，不硬编码中文。5 个入口（`data-sample-entry` = `directory` / `code` / `csv` / `structured` / `remote-snapshot`）分别复用既有路径 `load({ scene })` 与 `runSidesCompare(remoteSnapshotSides())`，不新增样本数据、不新增加载实现；点击后先关设置对话框再起会话（加载进度与会话不被模态遮挡），产生的会话成为活动会话，加载 / 错误态沿用既有 shell 行为。「演示：样本读取失败」只在显式调试开关（`Workbench` 的 `showDebugSamples`，生产入口注入 `import.meta.env.DEV`、默认 `false`）为真时渲染，用独立标识 `data-sample-failure`，不计入 5 个 `data-sample-entry`。
 - **会话标签文案由会话事实派生（单一真源）**：tab 标题 / 副标题不再沿用创建时冻结的 `title` / `subtitle`，而在渲染期由会话当前事实派生——目录会话取 `directory.leftName/rightName` 与 `leftRoot/rightRoot`，文件会话取 `adhoc.pair` 两侧路径（两侧同名 → 标题为该文件名，否则 `左名 ↔ 右名`，副标题两侧完整路径）与 `delimiter` / `format`；内置样本仍按 session id 走字典 key，缺失侧仍走 `missingSidePath` + 既有 missing 字典文案。任何换路径动作（目录换侧、代码 / CSV / 结构化视图内「打开左 / 右文件」、下钻、同 id 原位刷新）都必须先落到会话事实（`setSessions` 函数式更新），视图局部 state 不是真源；因此 tab 与面板永远同帧一致，切 tab 往返与异步读盘收尾都不会让文案回到旧文件。
+- **代码文件对原始探测事实 + 状态栏左右原始值（探测口径归 `text-probe` 域，归一同值属后续子项）**：`WorkbenchSession` 为代码文件对固化左右两侧事实（每侧 `TextFileFacts`：`path / encoding / newline / bytes / sha256`，**不复制正文**，避免与 `pair` 重复驻留大文件）；事实只在「该侧换成新文件」时更新，编辑工作副本、保存写回、归一结果、切 tab / 会话 / 下钻与 Diff↔合并往返都不得改写。代码文件对唯一读盘入口 `openFilePairSession` 用 `probeTextFile` 一次取得解码文本 + 原始事实（选择器 / 拖放 / 手工路径对话框 / 启动注入请求共用同一条路径）；真实目录树下钻按该侧真实路径探测、缺失侧不探测，快照侧读内联文本后走 `probeTextString` 内存 UTF-8 同口径（`/snapshots/**` 虚拟路径永不进入 `probeTextFile`），内置样本在 `loadSampleSessions` 构建期按 `CODE_SCENE.diff` 正文算一次。代码双栏 Diff 在 `status` 层追加四个条目「左换行 → 左编码 → 右换行 → 右编码」，标签走中英词典、值用固定技术字面量（`CRLF/LF/CR/Mixed/None`、`UTF-8/UTF-8 BOM/UTF-16LE/UTF-16BE/GBK/Unknown`），缺失侧显示 `—`，三向合并无左右语义故不渲染；读数只由 `workbench/probeStatus.ts` 纯函数按「会话固化事实 + 是否双栏 Diff」产出，不读 `codeBuffer` / `pair.text` / `composition`，因此后续接入「忽略编码」开关时结构上无法改写这四个值。不新增顶栏动作、`SHELL_ENTRIES` 仍 18 条。
 - **跨场景 tab 文案回归矩阵（App 级，锁死上面这条单一真源）**：在既有 App 级测试基建（`src/renderer/src/App.test.tsx` 的 `scriptedPort` / `dropPaths` / 「打开文件」「打开文件夹」/ 新建对比对话框 / `sessionTabs`）上补齐四条跨场景矩阵——① 路径 A→B 重建（同名文件不同目录）；② 文件会话内视图「打开左文件」「打开右文件」；③ 目录会话下钻文件再「返回上级目录视图」；④ 文件 / 目录 / 下钻三类会话并存时连续切换与关闭非活动邻居。矩阵对 tablist 内**每个** tab 读其完整可访问名（`aria-label`，`标题 — 副标题` 形态）拆出标题与副标题做逐项相等比较——可见 span 自 tab 截断项起只承载按档位裁剪后的文本，故比较必须走 `aria-label`（原始派生全文）而非可见文本；不用整 tab 合并 `textContent` 包含判断、不用跨会话 `getAllByText` 代替 tablist 内断言；每条用例还断言任一 tab 的标题 + 副标题不包含其它会话的路径片段。矩阵暴露的残留缺陷在本域内修到代码闭环（不放宽既有实现或断言来消除失败），作为会话文案派生纪律的常驻回归网。
 - **索引与路由**：`ux/design-baseline.md`（token 路径、组件清单、主屏路径、取舍）折入 `.munk/baseline/design/*`；`AGENTS.md` 增视觉基线路由。
 - **对标参照审计**：壳层六层归属与 18 条入口的「保留 / 合并 / 降级到菜单 / 明确不做」判定归 `domains/ui-reference-audit`（`docs/ui-phase1-reference-audit.md`，只读判断、不改本域事实）；本域的 `SHELL_ENTRY_IDS` / `SHELL_ENTRIES` / `SHELL_LEVEL_ORDER` 是那份审计的唯一事实源，改壳层结构时须先读审计里对应行的判定。
@@ -134,7 +135,7 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-entry-manifest-complete**：壳层布局模块声明的入口 id 集合与 18 条既有入口**完全相等**（多一条或少一条即红，`samples` / `samples-menu` 不在此列）；ready 态 DOM 中每个 id 恰好出现一次（`data-shell-entry` 计数 = 1），且元素可见。
 - **ac-entry-tier-visibility**：每条入口在三档下都有确定的呈现模式（`label` / `icon-only`）；`icon-only` 时元素可访问名非空且等于对应 i18n 文案；任何档位下入口数量与 id 集合不变。
 - **ac-drilldown-unchanged**：下钻态返回条仍位于 `view-toolbar` 级首位、与视图工具区同档高度；点击仍回到父目录会话；按钮文案键与 `title` 键不变；往返后过滤器、折叠集合、选中行、双栏滚动位置保持（沿用现有断言，不得放宽）。
-- **ac-statusbar-unchanged**：状态栏条目集合与顺序不变（会话 id → 平台 → 兼容图例 → 会话 stats），无新增 / 删除条目；文字仍为 `text-2xs` + `tabular` 数字。
+- **ac-statusbar-unchanged**：状态栏既有条目集合与顺序不变（会话 id → 平台 → 兼容图例 → 会话 stats），文字仍为 `text-2xs` + `tabular` 数字。**自 `wi_ws_424fd8747601b2c8` 起该口径更新**：代码双栏 Diff 在「平台」之后、「兼容图例」之前追加「左换行 → 左编码 → 右换行 → 右编码」四个条目（`ac-status-four-entries`），非代码会话与三向合并视图的条目集合仍与本节完全一致；新增条目不改变任何既有条目的位置相对顺序。
 - **ac-rows-not-reduced**：纯函数给出三档 ×（empty / ready）下的顶层 chrome 高度和与主内容可用高度；ready 态顶层 chrome 高度 ≤ 现状基线 `44 + 36 + 32 = 112px`；若任一视图可见行数较改动前减少，交付说明必须给「改前 / 改后 / 理由」对照表，否则视为未达成。
 - **ac-no-scope-drift**：`src/renderer/src/components/SessionTabs.tsx`、`src/renderer/src/components/DiffRuler.tsx`、`src/core/**` 零 diff；`src/renderer/src/assets/main.css` 中 `--color-diff-*` 与 `--color-surface-*` 取值零 diff；无新增 `src/renderer/src/assets/icons/**`；`package.json` 依赖零变化；界面无新增 emoji / 文字充当图标。
 - **ac-gates-green**：`.munk/code-gates.json` 全量绿（`install` / `lint` / `typecheck` / `build` / `build:web` / `test` / `test-compare-request` / `cancel-gate` / `memory-gate`）。
@@ -210,6 +211,26 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 - **ac-workflow-toolbar-no-sample-path**：目录视图工具栏所有按钮的可见文案与 `title` 都不含 `/samples`；模板按钮 tooltip 不再点名内置散乱树（词条口径归 `domains/i18n` 的 `ac-template-tooltip-copy-no-path`）。
 - **ac-settings-samples-load**：设置「示例与调试」在 zh / en 下列出 5 个用户入口（directory / code / csv / structured / remote-snapshot），点击任一入口关闭设置面板并激活对应会话；调试开关开启时失败演示入口（`data-sample-failure`）存在且不计入 5 条。既有 `ac-settings-samples-five-entries` / `ac-settings-entry-starts-session` / `ac-settings-failure-entry-debug-only` 口径不变。
 
+### 代码文件对原始探测事实与状态栏四值（2026-11-02，探测口径归 `text-probe` 域）
+
+- **ac-open-pair-probe-facts**：用 4 组真实临时文件（UTF-8 + CRLF、UTF-8 BOM + LF、UTF-16LE + CRLF、GBK + LF）调用 `openFilePairSession` 打开一对文件时，会话左右事实 `path / encoding / newline / bytes / sha256` 逐字段等于对同一路径调用 `platform.probeTextFile` 的结果，且 `pair.left.text` / `pair.right.text` 等于探测返回的解码文本（BOM 已剥离、GBK 已解码）。
+- **ac-open-single-read-path**：选择器、拖放、手工路径对话框、启动注入请求四条入口打开同一对路径后，得到的探测事实与状态栏四值完全一致；实现里不存在第二条读盘 / 探测路径（四条入口都落到 `openFilePairSession`）。
+- **ac-drilldown-real-probe**：从真实目录树双击下钻代码文件后，会话左右事实等于对应左右真实路径的 `probeTextFile` 结果；左右值相互独立，不随目录节点四态变化。
+- **ac-drilldown-snapshot-probe**：从快照侧下钻内联代码文件后，属于快照的一侧按内存 UTF-8 文本标注（编码 `UTF-8`，换行取内联文本实际终止符）；探测过程不对 `/snapshots/...` 虚拟路径调用 `probeTextFile`，也不出现 `Unknown` 或猜测值。
+- **ac-sample-memory-probe**：内置代码样本的左右正文按内存 UTF-8 文本探测：编码为 `UTF-8`、换行等于对该正文调用 `detectNewline` 的结果；该事实在会话构建时计算一次，渲染期不再重算。
+- **ac-status-four-entries**：代码双栏 Diff 状态栏按固定顺序出现四个条目「左换行 → 左编码 → 右换行 → 右编码」，值分别为该侧固化事实的 `newline` / `encoding` 字面量；条目位于 `data-shell-level="status"` 内。
+- **ac-status-missing-side**：下钻对某一侧不存在时，该侧两个条目显示 `—`，另一侧显示真实探测值；不会把空正文伪造成 `UTF-8` / `None`。
+- **ac-status-side-reopen**：在 Diff 视图换开左文件后，左换行 / 左编码变为新文件探测值，右换行 / 右编码逐字不变；换开右文件时对称成立。
+- **ac-status-edit-invariant**：在 Diff 视图执行逐块覆盖、编辑工作副本、重置、保存写回后，状态栏四个值文本与编辑前逐字相等；把工作副本改成任意内容也不改变读数（读数不从 `codeBuffer` / `pair` 正文反推）。
+- **ac-status-switch-invariant**：切换 tab、切换会话、下钻返回后重新下钻同一文件、样本在 Diff / 合并模式间往返后，同一文件对的四个值不变；这些操作不新增 `probeTextFile` 调用（首次打开后探测次数不再增长）。
+- **ac-status-values-literal**：zh 与 en 两种语言下四个标签取自词典，值始终是固定技术字面量（如 `CRLF`、`UTF-8`、`—`），切换语言不改变值文本。
+- **ac-merge-no-fabrication**：三向合并模式不渲染左右换行 / 编码条目（无左右语义），也不出现编造值；切到双栏 Diff 后条目出现且值等于该会话 diff 文本的探测事实。
+- **ac-status-layer-only**：新增内容只属于 `status` 层：`SHELL_ENTRIES` 仍为 18 条、app 顶栏动作集合不变、不新增多余的 `view-toolbar` 行。
+- **ac-regress-directory-four-state**：目录对比四态（same / added / removed / modified）口径与既有目录对比测试零回归；本项不修改 `src/core/directory/**` 的判定逻辑。
+- **ac-regress-snapshot-format**：快照导入 / 导出 / 序列化格式不变，既有快照 round-trip 与 `serializeSnapshot` 测试零回归；会话探测事实不写入快照。
+- **ac-regress-merge**：三向合并既有全部断言零回归（`splitLines`、merge 模型与渲染不改）。
+- **ac-suite-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 及既有全部 code-gates 全绿；新增测试行数只通过 `test-debt` 的 `growth[]` 声明计入，不改 floor / 不放宽断言。
+
 ## 非目标
 
 - **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域。各视图只读呈现内容，不做差异高亮与统计；除目录会话（其四态计数由运行时对比结果按过滤档派生，语义归 `directory` 域）外，其余视图的状态栏计数与标签取自样本自带 answer key（编辑期标注），非运行时计算。
@@ -248,6 +269,11 @@ OpenCompare 的视觉基线（token + 基础组件）、多会话工作台壳层
 
 ## 最近交付证明
 
+- WI：`wi_ws_424fd8747601b2c8`（代码文件对打开链路接入探测事实 + 状态栏左右原始值，`kind: feature`；`needSelfTest=false`）
+- 日期：2026-11-02
+- 结果：code_gates passed（22 gates，attempt 001，`.munk/runs/run_ws_101a350f511e5629/code-gates/attempts/001`；`pnpm test` 119 files / 1869 passed + 1 skipped / 1870）。本 change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 落档为 `qa/open-pair-probe-status.md`。
+- 覆盖摘要：① **会话事实**：`session.ts` 新增 `FilePairProbes` 与 `WorkbenchSession.probes`（每侧 `TextFileFacts`，不含正文），`shared/platform/types.ts` 导出 `TextFileFacts = Omit<TextFileProbe,'text'>`。② **唯一读盘入口**：`openFilePairSession` 对代码对改走 `platform.probeTextFile` 一次取文本 + 事实（CSV / 结构化仍走 `readTextFile`），选择器 / 拖放 / 手工路径 / 启动注入四条入口共用；`replaceFilePairSide` 只在换开侧带 `facts` 时替换该侧事实；`CodeView` 的「打开左 / 右文件」改走新 `pickProbedTextFile`。③ **下钻**：新增 `openDrilldownSession` + `snapshotOps.readSideFileProbe`——真实路径走平台探测、快照挂载侧读内联文本后走 `core/text/probe.ts` 新增的 `probeTextString`（内存 UTF-8 同口径），缺失侧不探测、事实为 `undefined`。④ **样本**：`loadSampleSessions` 的 code 分支在构建期用 `CODE_SCENE.diff` 正文各算一次事实。⑤ **状态栏**：新增零 DOM / 零 React 纯模块 `workbench/probeStatus.ts`（`codeProbeStatusEntries(probes, diffVisible)` 固定四序、缺失 `—`、非双栏 Diff 返回空），`Workbench` 以按会话的 `codeModes` 接收 `CodeView` 上报模式（tab 卸载重挂不出现陈旧合并态），在 `status` 层渲染四条目；`shell.status.{left,right}{Newline,Encoding}` 中英成对新增，值不本地化。⑥ **测试债**：`.munk/baseline/test-debt.json` 的 `growth[]` 声明 `repoTestLines 42930 → 43329`、`repoTestCases 1373 → 1407`（+34 条），未改 `floors` 之外的口径。
+- 注：① **被推翻的假设**：「代码文件对打开 = `readTextFile`」已不成立——一旦改为 `probeTextFile`，所有以 `readTextFile` 打桩的既有断言会静默失去覆盖（符号链接下钻正文、慢读盘竞态 gate、i18n 读失败、`App.ruler` 的零 IO 计数端口），本轮已逐处改到 `probeTextFile` 并把它加入 ruler 的 IO channel 名单；后续任何新增代码文件对读盘都必须走探测通道，否则状态栏会缺事实而测试仍绿。② **模式可见性是状态栏的前提**：`CodeView` 的 mode 必须由壳层按会话持有（`codeModes` + `onModeChange`），只用组件内 `useState` 会在 tab 卸载重挂后让合并视图重新显示左右值（样本 code 会话默认三栏）。③ 快照侧**永不**用 `/snapshots/...` 调 `probeTextFile`，内存文本统一 `probeTextString`；CSV / 结构化视图不要顺手接探测（PRD 明确非目标，且 `adhoc.tables` 依赖纯 UTF-8 读）。④ `ac-statusbar-unchanged` 已按本项改为「既有条目不变 + 代码双栏 Diff 追加四条目」，不要再以「状态栏条目集合绝对不变」为由隐藏新值。
 - 交叉引用（非本域 AC）：`wi_ws_dcf61d0392d48f0e`（2026-11-01，`kind: feature`）让模板归位入口在 `Workbench` 侧从「立即预览内置散乱树」改为「先开选根对话框」——快照左根在打开前拒绝（`directory.template.error.snapshotLeft` 通知），`templateOpen` 与 `templatePreview` 两个状态分离，确认时把对话框的 `TemplateResolvedPlan` 原样交给 `applyTemplatePlan`，完成通知改 `shell.notice.templateApplied` 并按 `failedCount > 0` 走 danger。模板入口 / Dry-run 的行为与词条 AC 归 `domains/directory`（`qa/template-entry-dryrun.md`）与 `domains/i18n`；本域既有 `ac-workflow-toolbar-no-sample-path` / `ac-directory-toolbar-real-entries-kept` 不变（模板工具栏入口与三行结构未改）。
 
 - WI：`wi_ws_2f5af7320d12ad9f`（样本入口归位补钉：首屏 / 目录工具栏零样本入口、零样本路径；同步失败本地化词条口径归 `domains/i18n`）

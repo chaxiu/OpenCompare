@@ -5,7 +5,7 @@
  * comparison lives in `snapshotOps` / `loadSampleSessions`.
  */
 import type { TextSample } from '@shared/fixtures'
-import type { PlatformPort } from '@shared/platform/types'
+import type { PlatformPort, TextFileFacts } from '@shared/platform/types'
 import { trackLive } from '@shared/perf/liveness'
 import type {
   ComparisonCache,
@@ -15,9 +15,10 @@ import type {
 import type { DrilldownTarget, FileKind } from './fileKinds'
 import { baseName, classifyFile } from './fileKinds'
 import { missingSidePath } from './sessionDisplay'
-import type { AdhocFilePair, WorkbenchSession } from './session'
+import type { AdhocFilePair, FilePairProbes, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
+import { readSideFile, readSideFileProbe } from './snapshotOps'
 
 /** Known file-pair failures the shell localizes from a stable code. */
 export type FilePairErrorCode = 'unsupported-type' | 'mixed-family'
@@ -219,7 +220,8 @@ export function createFilePairSession(
   title: string,
   target: DrilldownTarget,
   left: TextSample,
-  right: TextSample
+  right: TextSample,
+  probes?: FilePairProbes
 ): WorkbenchSession {
   const delimiter = target.delimiter ?? ','
   const adhoc: AdhocFilePair = {
@@ -245,7 +247,8 @@ export function createFilePairSession(
     subtitle: `${left.path} ↔ ${right.path} · ${target.label}`,
     columns: 2,
     stats: pairStats({ left, right }),
-    adhoc
+    adhoc,
+    probes
   }
 }
 
@@ -259,7 +262,7 @@ export function createFilePairSession(
 export function replaceFilePairSide(
   session: WorkbenchSession,
   side: 'left' | 'right',
-  file: { readonly path: string; readonly text: string }
+  file: { readonly path: string; readonly text: string; readonly facts?: TextFileFacts }
 ): WorkbenchSession {
   const adhoc = session.adhoc
   if (!adhoc) return session
@@ -292,7 +295,13 @@ export function replaceFilePairSide(
     ...session,
     adhoc: { ...adhoc, pair, delimiter, format, tables },
     stats: pairStats(pair),
-    codeBuffer
+    codeBuffer,
+    // Only the side that was actually re-opened gets new facts; the other side
+    // keeps exactly what it was opened with.
+    probes:
+      adhoc.scene === 'code' && file.facts !== undefined
+        ? { ...session.probes, [side]: file.facts }
+        : session.probes
   }
 }
 
@@ -302,7 +311,8 @@ export function createDrilldownSession(
   node: DirectoryDiffNode,
   target: DrilldownTarget,
   leftText: string,
-  rightText: string
+  rightText: string,
+  probes?: FilePairProbes
 ): WorkbenchSession {
   return {
     // The parent scope keeps two directory sessions' same-path drilldowns apart,
@@ -312,10 +322,43 @@ export function createDrilldownSession(
       node.name,
       target,
       { path: node.leftPath ?? missingSidePath(node.relativePath, 'left'), text: leftText },
-      { path: node.rightPath ?? missingSidePath(node.relativePath, 'right'), text: rightText }
+      { path: node.rightPath ?? missingSidePath(node.relativePath, 'right'), text: rightText },
+      probes
     ),
     parentDirectoryId: parentId
   }
+}
+
+/**
+ * Opens one directory-tree entry as a file session. A code file probes each
+ * real side exactly once (a mounted snapshot side is probed from its inlined
+ * body); a side that does not exist is never probed and keeps no facts.
+ */
+export async function openDrilldownSession(
+  platform: PlatformPort,
+  parentId: string,
+  node: DirectoryDiffNode,
+  target: DrilldownTarget,
+  sides: ComparisonSides
+): Promise<WorkbenchSession> {
+  const probe = target.kind === 'code'
+  const read = async (
+    path: string | undefined
+  ): Promise<{ readonly text: string; readonly facts?: TextFileFacts } | null> => {
+    if (path === undefined) return null
+    if (probe) return readSideFileProbe(platform, sides, path)
+    return { text: await readSideFile(platform, sides, path) }
+  }
+
+  const [left, right] = await Promise.all([read(node.leftPath), read(node.rightPath)])
+  return createDrilldownSession(
+    parentId,
+    node,
+    target,
+    left?.text ?? '',
+    right?.text ?? '',
+    probe ? { left: left?.facts, right: right?.facts } : undefined
+  )
 }
 
 /**
@@ -354,6 +397,27 @@ function requireComparableFile(path: string): { readonly target: DrilldownTarget
   return { target }
 }
 
+/** One opened side: its body plus the original facts for a code pair. */
+interface OpenedSide {
+  readonly text: string
+  readonly facts?: TextFileFacts
+}
+
+/**
+ * Reads one side of a pair. A code file goes through the single-read probe, so
+ * the body and its original facts come from the same buffer; CSV / structured
+ * files keep their existing plain-UTF-8 read.
+ */
+async function readOpenedSide(
+  platform: PlatformPort,
+  path: string,
+  probe: boolean
+): Promise<OpenedSide> {
+  if (!probe) return { text: await platform.readTextFile(path) }
+  const { text, ...facts } = await platform.probeTextFile(path)
+  return { text, facts }
+}
+
 /**
  * Opens two real absolute paths as one file-level session: the same model a
  * drilldown produces (code text / delimited table / structured document).
@@ -382,9 +446,10 @@ export async function openFilePairSession(
     )
   }
 
-  const [leftText, rightText] = await Promise.all([
-    platform.readTextFile(leftPath),
-    platform.readTextFile(rightPath)
+  const probe = left.target.kind === 'code'
+  const [leftSide, rightSide] = await Promise.all([
+    readOpenedSide(platform, leftPath, probe),
+    readOpenedSide(platform, rightPath, probe)
   ])
   const leftName = baseName(leftPath)
   const rightName = baseName(rightPath)
@@ -393,7 +458,8 @@ export async function openFilePairSession(
     `file:${leftPath} ↔ ${rightPath}`,
     leftName === rightName ? leftName : `${leftName} ↔ ${rightName}`,
     left.target,
-    { path: leftPath, text: leftText },
-    { path: rightPath, text: rightText }
+    { path: leftPath, text: leftSide.text },
+    { path: rightPath, text: rightSide.text },
+    probe ? { left: leftSide.facts, right: rightSide.facts } : undefined
   )
 }

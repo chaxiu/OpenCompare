@@ -7,6 +7,7 @@
  */
 import Papa from 'papaparse'
 import type { CsvSample, FixtureSession, SampleComposition, TextSample } from '@shared/fixtures'
+import type { TextFileFacts } from '@shared/platform/types'
 import type { DirectoryComparison } from '@core/directory/compare'
 import type { ComparisonSides } from './snapshotOps'
 
@@ -42,6 +43,12 @@ export interface CodeFileBuffer {
   readonly rightText: string
 }
 
+/** Original probe facts of a file pair, one per existing side. */
+export interface FilePairProbes {
+  readonly left?: TextFileFacts
+  readonly right?: TextFileFacts
+}
+
 /** Drilldown payload: file contents opened outside the sample library. */
 export interface AdhocFilePair {
   readonly scene: 'code' | 'csv' | 'structured'
@@ -58,6 +65,12 @@ export interface WorkbenchSession extends FixtureSession {
   /** Parsed CSV/TSV tables, present for the CSV scene only. */
   readonly tables?: CsvTables
   readonly adhoc?: AdhocFilePair
+  /**
+   * The original probe facts of both sides of a code file pair. They are fixed
+   * when a side is loaded and never re-derived from the working copy, so the
+   * status bar keeps reporting what was on disk.
+   */
+  readonly probes?: FilePairProbes
   /**
    * The full comparison tree of a directory tab. Every open directory tab keeps
    * its own tree, so switching tabs only changes which view is mounted.

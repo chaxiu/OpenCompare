@@ -6,6 +6,7 @@ import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fix
 import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
+import { probeTextBytes } from '@core/text/probe'
 import { zh } from './i18n/messages'
 import { App } from './App'
 import { createWebPlatformPort } from './platform/web-platform'
@@ -951,8 +952,7 @@ describe('real file workbench', () => {
     }
     const platform: PlatformPort = {
       ...base,
-      readTextFile: async (path) =>
-        path === `${DIRECTORY_SAMPLE_PATHS.left}/linked-engine.ts` ? 'LINKED TARGET BODY' : base.readTextFile(path),
+      probeTextFile: async (path) => path === `${DIRECTORY_SAMPLE_PATHS.left}/linked-engine.ts` ? { path, ...probeTextBytes(new TextEncoder().encode('LINKED TARGET BODY')) } : base.probeTextFile(path),
       listDirectory: async (path) => [...(await base.listDirectory(path)), ...(path === DIRECTORY_SAMPLE_PATHS.left ? [fileLink] : [])],
       listDirectories: async (paths) =>
         Promise.all(
@@ -1480,10 +1480,10 @@ describe('new compare dialog', () => {
     const reads: string[] = []
     const port: PlatformPort = {
       ...base,
-      readTextFile: async (path) => {
+      probeTextFile: async (path) => {
         reads.push(path)
         await gate
-        return base.readTextFile(path)
+        return base.probeTextFile(path)
       },
     }
     mountWorkbench(port)
@@ -1547,9 +1547,9 @@ describe('new compare dialog', () => {
         stats.push(path)
         return base.statPath(path)
       },
-      readTextFile: async (path) => {
+      probeTextFile: async (path) => {
         reads.push(path)
-        return base.readTextFile(path)
+        return base.probeTextFile(path)
       },
     }
     mountWorkbench(port)
@@ -2746,9 +2746,9 @@ describe('session tab labels follow the session facts', () => {
     const listeners = new Set<(payload: CompareRequestPayload) => void>()
     const port: PlatformPort = {
       ...base,
-      readTextFile: async (path) => {
+      probeTextFile: async (path) => {
         if (path.startsWith('/memory/slow/')) await gate
-        return base.readTextFile(path)
+        return base.probeTextFile(path)
       },
       onCompareRequest: (listener) => {
         listeners.add(listener)

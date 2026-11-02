@@ -18,7 +18,7 @@
  * in Electron and the web runtime and a jsdom component test can drive it.
  */
 import { REMOTE_SNAPSHOT, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
-import type { FileDialogFilter, PlatformPort } from '@shared/platform/types'
+import type { FileDialogFilter, PlatformPort, TextFileFacts } from '@shared/platform/types'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { scanDirectory } from '@core/directory/compare'
 import type {
@@ -38,6 +38,7 @@ import {
   serializeSnapshot
 } from '@core/directory/snapshot'
 import type { ComparisonSide } from '@core/directory/snapshot'
+import { probeTextString } from '@core/text/probe'
 import { classifyFile } from './fileKinds'
 import { aliasSideRoots } from './rootAliases'
 import { digestFilesForComparison } from '../platform'
@@ -236,6 +237,42 @@ export async function readSideFile(
   const mounted = findSnapshotMount(sides, path)
   if (mounted === null) return platform.readTextFile(path)
   return readSnapshotContent(mounted.snapshot, mounted.relativePath)
+}
+
+/** One drilled-down side: its body plus the original probe facts. */
+export interface SideFileFacts {
+  readonly text: string
+  readonly facts: TextFileFacts
+}
+
+/**
+ * Reads one side **and probes it once**. A real path goes through the
+ * platform's single-read probe; a snapshot-inlined body is probed as in-memory
+ * UTF-8 text, so its virtual `/snapshots/...` path is never handed to the
+ * file system seam.
+ */
+export async function readSideFileProbe(
+  platform: PlatformPort,
+  sides: ComparisonSides,
+  path: string
+): Promise<SideFileFacts> {
+  const mounted = findSnapshotMount(sides, path)
+  if (mounted !== null) {
+    const text = readSnapshotContent(mounted.snapshot, mounted.relativePath)
+    const probe = probeTextString(text)
+    return {
+      text,
+      facts: {
+        path,
+        encoding: probe.encoding,
+        newline: probe.newline,
+        bytes: probe.bytes,
+        sha256: probe.sha256
+      }
+    }
+  }
+  const { text, ...facts } = await platform.probeTextFile(path)
+  return { text, facts }
 }
 
 /* ------------------------------------------------------------------ */

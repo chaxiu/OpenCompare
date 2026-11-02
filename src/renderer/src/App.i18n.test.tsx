@@ -94,7 +94,7 @@ describe('runtime language switch', () => {
     const port: PlatformPort = {
       ...base,
       selectDirectory: answers([DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right]),
-      readTextFile: async () => {
+      probeTextFile: async () => {
         throw new Error(IO_DETAIL)
       }
     }
