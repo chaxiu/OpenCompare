@@ -41,9 +41,10 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 >
 > 录入完成后，推送 `v*` 标签（`package.json#version` 需与 tag 一致）即由 CI 产出签名 + 公证的 macOS 包，并发布为该版本唯一的公开 Release。
 
-## 三、正式版发布姿态（v0.2.16）
+## 三、正式版发布姿态（v0.2.17）
 
 - 发布已解冻：正式版经 **Developer ID 签名 + Apple 公证** 流程产出，由 `v*` tag 触发的 CI 发布为每个版本唯一的公开 Release（详见 `README.md` 的「发布流程」）。v0.2.0 从未公开发布，v0.2.1 以修正后的发布门测试首发，用户可见变化与 v0.2.0 相同。
+- v0.2.17 待发布：版本收敛已合入 `main`，发布说明见 `docs/release-notes/v0.2.17.md`；本版尚未打 tag、未写发布证据，公开事实仍以 v0.2.16 为准。
 - v0.2.16 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.16>，发布说明见 `docs/release-notes/v0.2.16.md`，发布证据见 `docs/release-evidence/v0.2.16.md`（tag 对象 `690358de07c309f73736055ad25c13b11731c6cd`、发布点 `3dab29c0b7039cc4f483e5a8d2955fe95ec079bf`、Release CI run `41376922492`、12 件公开资产与 L1 六腿结论）。同次 CI 的签名 / 公证原文：`Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY` 与 hardened runtime；electron-builder 报 `notarization successful`；`codesign --verify --deep --strict` 报 `valid on disk` 与 `satisfies its Designated Requirement`；`xcrun stapler validate` 报 `The validate action worked!`；`spctl -a -vv --type execute` 返回 0 且断言含 `accepted` / `Notarized Developer ID`，日志落 `Verified ... Gatekeeper acceptance.`。L1 下载件抽查同样得到 `Developer ID Application: Tao Zhu (3X4J53U6RY)`、`spctl accepted / Notarized Developer ID` 与 `stapler validate` OK。
 - v0.2.15 已发布（历史）：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.15>，发布说明见 `docs/release-notes/v0.2.15.md`，发布证据见 `docs/release-evidence/v0.2.15.md`。macOS 公证由 CI 执行，实际结果以那次 CI 为准。
 - v0.2.14 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.14>，发布说明见 `docs/release-notes/v0.2.14.md`，发布证据见 `docs/release-evidence/v0.2.14.md`（tag、公开 Release、Release CI run、11 件公开资产与 macOS 签名 / 公证结论）。macOS 公证由 CI 执行，实际结果以那次 CI 为准。
@@ -54,7 +55,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - v0.2.6 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6>，11 件资产；CI run `39890773909` 五 job（`Quality gates` / `Package win` / `Package linux` / `Package mac` / `Publish the GitHub Release`）全 success，签名与公证的实测原文见 `docs/release-evidence/v0.2.6.md`。macOS 公证由 CI 执行，实际结果以那次 CI 为准；公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接，不在研发侧写成已通过。
 - v0.2.5 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5>，11 件资产、签名与公证的实测原文见 `docs/release-evidence/v0.2.5.md`。公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接并回填该文件第六节；第六节目前仍是就绪条件，不在研发侧写成已通过。
 - 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。6 项 Secret 清单与录入方式见上文第一节。
-- 本版发布说明见 `docs/release-notes/v0.2.16.md`。
+- 本版发布说明见 docs/release-notes/v0.2.17.md。
 - 如需查看 Release：
   ```bash
   gh release list --repo chaxiu/OpenCompare
@@ -78,7 +79,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - 仅 tag 可达提交的 diff 若删除发布关键路径（`.github/workflows/`、`build/`、`electron-builder.yml`、`package.json`），即使 `git cherry` 判为 `-` 也非零退出。
 - 祖先门只做只读 git 查询，不创建、移动、删除任何 tag / ref，不 push，也不调用 `gh release` 写操作。
 
-**补发用法（不改 tag、不升版本）**：`v0.2.16` 的版本收敛已合入 `main`；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.16`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
+**补发用法（不改 tag、不升版本）**：`v0.2.17` 的版本收敛已合入 `main`；如需补发，从 `main` 手动触发 `Release` 工作流的 `workflow_dispatch`，输入目标 `tag`（默认 `v0.2.17`）。构建阶段显式 checkout `refs/tags/<tag>`，gates、打包矩阵与 finalize 原样复用同一套门与发布模型；push `v*` 行为不变。
 
 `v0.2.14` 的版本收敛（`package.json#version`、`CHANGELOG`、发布说明与默认 tag）已合入 `main` 并随 tag 发布，发布说明见 `docs/release-notes/v0.2.14.md`，发布证据见 `docs/release-evidence/v0.2.14.md`；最新公开 Release 为 v0.2.14，README 状态行与 `latestPublishedTag` 已跟随翻到该版本。
 

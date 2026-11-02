@@ -16,7 +16,6 @@ export interface VersionSourceFacts {
   pkgVersion: string
   changelogTopTag: string
   notesHeadingTag: string
-  readmeLine5Tag: string
   workflowDispatchDefault: string
   processDocDefault: string
 }
@@ -24,7 +23,6 @@ export interface VersionSourceFacts {
 const VERSION_SOURCE_FIELDS: ReadonlyArray<readonly [Exclude<keyof VersionSourceFacts, 'pkgVersion'>, string]> = [
   ['changelogTopTag', 'CHANGELOG.md#top-entry'],
   ['notesHeadingTag', 'release-notes#title'],
-  ['readmeLine5Tag', 'README.md#line-5'],
   ['workflowDispatchDefault', '.github/workflows/release.yml#workflow_dispatch.tag.default'],
   ['processDocDefault', 'docs/release-process.md#workflow_dispatch.default']
 ]
@@ -51,14 +49,47 @@ export const judgeVersionSources = (facts: VersionSourceFacts): GateVerdict => {
   return { ok: issues.length === 0, issues }
 }
 
+export interface PublishedAnchorFacts {
+  readmeLine5Tag: string
+  readmeZhLine5Tag: string
+  publishedTag: string
+}
+
+/**
+ * README line 5 announces what is already public, not what main is converging
+ * to: it must equal the newest verified release derived from the evidence
+ * ledger / evidence directory, never package.json#version.
+ */
+export const judgePublishedAnchor = (facts: PublishedAnchorFacts): GateVerdict => {
+  const issues: GateIssue[] = []
+  if (facts.publishedTag === '') {
+    issues.push({ path: 'docs/release-evidence#latest-verified', code: 'published-tag-missing' })
+    return { ok: false, issues }
+  }
+  const readmes: ReadonlyArray<readonly [string, string]> = [
+    ['README.md#line-5', facts.readmeLine5Tag],
+    ['README.zh-CN.md#line-5', facts.readmeZhLine5Tag]
+  ]
+  for (const [path, value] of readmes) {
+    if (value !== facts.publishedTag) {
+      issues.push({
+        path,
+        code: 'tag-mismatch',
+        detail: `expected ${facts.publishedTag}, got ${value}`
+      })
+    }
+  }
+  return { ok: issues.length === 0, issues }
+}
+
 export interface NotesPresenceFacts {
   tag: string
   notesHeadingTag: string
   englishExists: boolean
   chineseExists: boolean
-  evidenceExists: boolean
 }
 
+/** Evidence may be pending while the current tag has not shipped yet. */
 export const judgeNotesPresence = (facts: NotesPresenceFacts): GateVerdict => {
   const issues: GateIssue[] = []
   if (!facts.englishExists) {
@@ -66,9 +97,6 @@ export const judgeNotesPresence = (facts: NotesPresenceFacts): GateVerdict => {
   }
   if (!facts.chineseExists) {
     issues.push({ path: `docs/release-notes/${facts.tag}.zh-CN.md`, code: 'notes-missing' })
-  }
-  if (!facts.evidenceExists) {
-    issues.push({ path: `docs/release-evidence/${facts.tag}.md`, code: 'evidence-missing' })
   }
   if (facts.notesHeadingTag !== facts.tag) {
     issues.push({
@@ -116,6 +144,51 @@ export const judgeNotesOrder = (facts: NotesOrderFacts): GateVerdict => {
       (line, index) => index > switchIndex && line.trim() !== ''
     )
     if (bodyIndex === -1) issues.push({ path: 'release-notes#body', code: 'body-missing' })
+  }
+  return { ok: issues.length === 0, issues }
+}
+
+/** English H2 → Chinese H2, in document order. */
+export const NOTES_H2_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['What changed', '本次变化'],
+  ['Windows installer and portable zip', 'Windows 安装包与免安装 zip'],
+  ['macOS signing and notarization', 'macOS 签名与公证'],
+  ['Not in this release', '不做的事'],
+  ['Risk and verification scope', '风险与验证规模'],
+  ['Upgrade', '升级方式']
+]
+
+const H2 = /^##\s+(.+?)\s*$/
+export const h2Headings = (lines: readonly string[]): string[] =>
+  lines.flatMap((line) => {
+    const match = H2.exec(line)
+    return match === null ? [] : [match[1]]
+  })
+
+export interface NotesHeadingsFacts {
+  englishLines: readonly string[]
+  chineseLines: readonly string[]
+}
+
+/** Both languages carry the same H2 count and the same ordered section pairs. */
+export const judgeNotesHeadings = (facts: NotesHeadingsFacts): GateVerdict => {
+  const issues: GateIssue[] = []
+  const english = h2Headings(facts.englishLines)
+  const chinese = h2Headings(facts.chineseLines)
+  if (english.length !== chinese.length) {
+    issues.push({
+      path: 'release-notes#h2',
+      code: 'h2-count-mismatch',
+      detail: `english ${english.length}, chinese ${chinese.length}`
+    })
+  }
+  for (const [index, [en, zh]] of NOTES_H2_PAIRS.entries()) {
+    if (!english[index]?.includes(en)) {
+      issues.push({ path: 'release-notes#h2', code: 'h2-mismatch', detail: `en[${index}] ${en}` })
+    }
+    if (!chinese[index]?.includes(zh)) {
+      issues.push({ path: 'release-notes#h2', code: 'h2-mismatch', detail: `zh[${index}] ${zh}` })
+    }
   }
   return { ok: issues.length === 0, issues }
 }
@@ -171,7 +244,9 @@ export const judgeReleaseHistory = (facts: ReleaseHistoryFacts): GateVerdict => 
     if (index > 0 && compareTags(headings[index - 1], heading) <= 0) {
       issues.push({ path: 'CHANGELOG.md', code: 'changelog-order', detail: heading })
     }
-    if (heading !== 'v0.1.2' && !evidenceTags.has(heading)) {
+    // The current tag is still converging: evidence may be written after the
+    // tag ships. Every historical entry stays fail-closed.
+    if (heading !== 'v0.1.2' && heading !== facts.currentTag && !evidenceTags.has(heading)) {
       issues.push({ path: `docs/release-evidence/${heading}.md`, code: 'evidence-missing' })
     }
   }

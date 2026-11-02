@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
+import { compareTags } from './release-gate'
 
 export const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 
@@ -175,6 +176,21 @@ const evidenceFacts = readdirSync(evidenceDir)
     status: /^status:\s*(\w+)$/m.exec(readFileSync(join(evidenceDir, file), 'utf8'))?.[1] ?? ''
   }))
 
+const ledgerPath = join(repoRoot, 'docs/release-evidence-ledger.json')
+const ledgerFacts = existsSync(ledgerPath)
+  ? (JSON.parse(readFileSync(ledgerPath, 'utf8')) as {
+      versions?: Array<{ version?: string; status?: string }>
+    }).versions ?? []
+  : []
+
+/** Newest verified tag across the evidence ledger and the evidence directory. */
+export const publishedTag =
+  [...ledgerFacts.map((entry) => ({ tag: entry.version ?? '', status: entry.status ?? '' })), ...evidenceFacts]
+    .filter((entry) => entry.status === 'verified' && /^v\d+\.\d+\.\d+$/.test(entry.tag))
+    .map((entry) => entry.tag)
+    .sort(compareTags)
+    .at(-1) ?? ''
+
 // The single read of the real repository facts. Pure assertions consume this
 // object; no `expect` may live in this module.
 export const releaseFacts = {
@@ -182,18 +198,21 @@ export const releaseFacts = {
     pkgVersion: currentVersion,
     changelogTopTag: /^## (.+)$/m.exec(changelog)?.[1] ?? '',
     notesHeadingTag: tagIn(firstHeading(releaseNotes)),
-    readmeLine5Tag: tagIn(statusLine(readmeEn)),
     workflowDispatchDefault: workflow.on?.workflow_dispatch?.inputs?.tag?.default ?? '',
     processDocDefault: parseMarkdown(releaseProcessDoc).codeSpans
       .map((span) => /^default:\s*'([^']+)'$/.exec(span)?.[1] ?? '')
       .find((tag) => tag !== '') ?? ''
+  },
+  publishedAnchor: {
+    readmeLine5Tag: tagIn(statusLine(readmeEn)),
+    readmeZhLine5Tag: tagIn(statusLine(readmeZh)),
+    publishedTag
   },
   notes: {
     tag: currentTag,
     notesHeadingTag: tagIn(firstHeading(releaseNotes)),
     englishExists: releaseNotes !== '',
     chineseExists: bilingualNotes !== '',
-    evidenceExists: existsSync(join(evidenceDir, `${currentTag}.md`)),
     englishLines: releaseNotes.split(/\r?\n/),
     chineseLines: bilingualNotes.split(/\r?\n/)
   },
