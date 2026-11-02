@@ -26,6 +26,7 @@ function matched(relativePath: string, body: string): TemplateMatch {
     relativePath,
     templatePath: `/template/${relativePath}`,
     sourcePath: `/incoming/source-${relativePath.replace(/[^a-z0-9.]/gi, '_')}`,
+    sourceRelativePath: `source-${relativePath.replace(/[^a-z0-9.]/gi, '_')}`,
     size: body.length,
     hash: sha256Hex(body),
     modifiedMs: 1_600_000_000_000,
@@ -52,7 +53,8 @@ function executable(relativePath: string, targetPath: string, body: string): Tem
     targetPath,
     sourceHash: sha256Hex(body),
     modifiedMs: 1_600_000_000_000,
-    size: body.length
+    size: body.length,
+    action: 'copy'
   }
 }
 
@@ -109,6 +111,9 @@ describe('template gate: path containment', () => {
       counts: plan.counts,
       executable: [bad, good],
       executableCount: 2,
+      actions: { '../evil.txt': 'copy', 'a/b.png': 'copy' },
+      copyCount: 2,
+      moveCount: 0,
       rejected: [],
       rejectedCount: 0
     }
@@ -126,7 +131,9 @@ describe('template gate: path containment', () => {
       },
       ensureDirectory: async (path) => {
         directories.push(path)
-      }
+      },
+      listDirectory: async () => [],
+      deleteFile: async () => undefined
     })
 
     expect(execution.written.map((entry) => entry.relativePath)).toEqual(['a/b.png'])

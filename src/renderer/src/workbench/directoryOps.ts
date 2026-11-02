@@ -696,6 +696,9 @@ export async function previewTemplate(
     const slotPaths = new Set<string>()
     for (const item of result.matched) slotPaths.add(foldCase(item.relativePath))
     for (const item of result.conflicts) slotPaths.add(foldCase(item.relativePath))
+    // A moved slot has no source left in B; its output copy is what proves the
+    // slot placed on the next scan, so its digest must be read too.
+    for (const item of result.missing) slotPaths.add(foldCase(item.relativePath))
     const hashes: Record<string, string> = {}
     for (const relativePath of existingFiles) {
       if (!slotPaths.has(foldCase(relativePath))) continue
@@ -743,7 +746,11 @@ export async function applyTemplatePlan(
   const execution = await executeTemplatePlan(resolved, {
     readTextFile: (path) => platform.readTextFile(path),
     writeTextFile: (path, content, modifiedMs) => platform.writeTextFile(path, content, modifiedMs),
-    ensureDirectory: (path) => platform.ensureDirectory(path)
+    ensureDirectory: (path) => platform.ensureDirectory(path),
+    listDirectory: (path) => platform.listDirectory(path),
+    // A move removes exactly the source path the plan recorded, never a path
+    // rebuilt from the slot or anything under template A / the output root.
+    deleteFile: (path) => platform.deleteFile(path)
   })
   const verification = await verifyTemplatePlan(platform, execution.written)
   return { execution, verification }

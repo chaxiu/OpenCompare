@@ -502,10 +502,10 @@ describe('workbench shell', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
     expect(within(dialog).getByText('src/core/strings.ts')).toBeDefined()
-    expect(within(dialog).getByText('/ext/b/misc/deep/strings.ts')).toBeDefined()
+    expect(within(dialog).getByText('misc/deep/strings.ts')).toBeDefined()
     expect(within(dialog).getByText(/已存在/)).toBeDefined()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归位' }))
     // The dialog stays open on the result step and re-checks every written row.
     const result = await screen.findByRole('dialog', { name: zh['directory.template.result.title'] })
     expect(
@@ -578,7 +578,7 @@ describe('workbench shell', () => {
     const dialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
 
     refuseWrites = true
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认提取归位' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归位' }))
 
     // A refused write is never reported as an all-success run: the result step
     // keeps the dialog open and lists the failed row with its OS code.
@@ -2914,7 +2914,7 @@ describe('directory progress and cancel UI', () => {
     fireEvent.click(within(setupDialog).getByRole('button', { name: '生成 Dry-run' }))
     const templateDialog = await screen.findByRole('dialog', { name: '模板归位映射预览' })
     expect(progressBar()).toBeNull()
-    fireEvent.click(within(templateDialog).getByRole('button', { name: '确认提取归位' }))
+    fireEvent.click(within(templateDialog).getByRole('button', { name: '确认归位' }))
     await screen.findByRole('dialog', { name: zh['directory.template.result.title'] })
     expect(progressBar()).toBeNull()
   })

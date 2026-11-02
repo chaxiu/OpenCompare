@@ -89,6 +89,7 @@ function matched(relativePath: string, body: string): TemplateMatch {
     relativePath,
     templatePath: `/template/${relativePath}`,
     sourcePath: `/incoming/source/${relativePath}`,
+    sourceRelativePath: `source/${relativePath}`,
     size: body.length,
     hash: sha256Hex(body),
     modifiedMs: 1_600_000_000_000,
@@ -99,6 +100,7 @@ function matched(relativePath: string, body: string): TemplateMatch {
 function candidate(relativePath: string, body: string): TemplateConflictCandidate {
   return {
     path: `/incoming/source/${relativePath}`,
+    sourceRelativePath: `source/${relativePath}`,
     size: body.length,
     hash: sha256Hex(body),
     modifiedMs: 1_600_000_000_000
@@ -286,13 +288,25 @@ describe('template gate: case-only collision', () => {
         sourcePath: '/incoming/bucket/logo.png',
         targetPath: '/out/Logo.png',
         sourceHash: sha256Hex('NEW'),
-        modifiedMs: 1_600_000_000_100
+        modifiedMs: 1_600_000_000_100,
+        action: 'copy' as const
       }
     ]
 
     const verification = await verifyTemplateExtraction(written, {
       readTextFile: reader(output.bodies),
       listDirectory: async (path) => {
+        if (path === '/incoming/bucket') {
+          return [
+            {
+              name: 'logo.png',
+              path: '/incoming/bucket/logo.png',
+              isDirectory: false,
+              size: 3,
+              modifiedMs: 1_600_000_000_100
+            }
+          ]
+        }
         if (path !== '/out') throw new Error(`no directory ${path}`)
         return [...output.tree.index.values()].map((node) => ({
           name: node.name,
@@ -319,20 +333,32 @@ describe('template gate: case-only collision', () => {
           sourcePath: '/incoming/bucket/logo.png',
           targetPath: '/out/Logo.png',
           sourceHash: sha256Hex('NEW'),
-          modifiedMs: 1_600_000_000_100
+          modifiedMs: 1_600_000_000_100,
+          action: 'copy' as const
         }
       ],
       {
         readTextFile: reader(output.bodies),
-        listDirectory: async () => [
-          {
-            name: 'logo.png',
-            path: '/out/logo.png',
-            isDirectory: false,
-            size: 'OTHER'.length,
-            modifiedMs: 1_600_000_000_800
-          }
-        ]
+        listDirectory: async (path) =>
+          path === '/incoming/bucket'
+            ? [
+                {
+                  name: 'logo.png',
+                  path: '/incoming/bucket/logo.png',
+                  isDirectory: false,
+                  size: 3,
+                  modifiedMs: 1_600_000_000_100
+                }
+              ]
+            : [
+                {
+                  name: 'logo.png',
+                  path: '/out/logo.png',
+                  isDirectory: false,
+                  size: 'OTHER'.length,
+                  modifiedMs: 1_600_000_000_800
+                }
+              ]
       }
     )
 

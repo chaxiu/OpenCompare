@@ -55,10 +55,18 @@ const EXPECTED_GATES = [
   {
     id: 'template-path-contained',
     command: 'pnpm test src/template-gate-path-contained.test.ts'
+  },
+  {
+    id: 'template-move-actions',
+    command: 'pnpm test src/template-gate-move-actions.test.ts'
+  },
+  {
+    id: 'template-move-verify',
+    command: 'pnpm test src/template-gate-move-verify.test.ts'
   }
 ] as const
 
-/** The seven template placement gate files, mapped by gate id. */
+/** The nine template placement gate files, mapped by gate id. */
 const TEMPLATE_GATES = [
   {
     id: 'template-default-unchecked',
@@ -94,6 +102,16 @@ const TEMPLATE_GATES = [
     id: 'template-path-contained',
     file: 'src/template-gate-path-contained.test.ts',
     marker: 'relative path containment and path-escape refusal'
+  },
+  {
+    id: 'template-move-actions',
+    file: 'src/template-gate-move-actions.test.ts',
+    marker: 'per-row action column and explicit move'
+  },
+  {
+    id: 'template-move-verify',
+    file: 'src/template-gate-move-verify.test.ts',
+    marker: 'real-disk move write verify delete keeps the source'
   }
 ] as const
 
@@ -115,16 +133,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly eighteen pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(18)
+    expect(defaultManifest.gates).toHaveLength(20)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the eighteen commands verbatim with cwd "."', () => {
+  it('keeps the twenty commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
@@ -171,7 +189,7 @@ describe('default code-gates matrix', () => {
     }
   })
 
-  it('registers the seven template placement gates at the end of the matrix', () => {
+  it('registers the nine template placement gates at the end of the matrix', () => {
     const tail = defaultManifest.gates.slice(-TEMPLATE_GATES.length)
     expect(tail.map((gate) => gate.id)).toEqual(TEMPLATE_GATES.map((gate) => gate.id))
     for (const expected of TEMPLATE_GATES) {
@@ -190,7 +208,7 @@ describe('default code-gates matrix', () => {
     }
   })
 
-  it('maps the four template placement behaviours onto the template gates', () => {
+  it('maps every template placement behaviour onto the template gates', () => {
     const description = defaultManifest.description
     for (const expected of TEMPLATE_GATES) {
       expect(description.toLowerCase(), `manifest: marker "${expected.marker}"`).toContain(

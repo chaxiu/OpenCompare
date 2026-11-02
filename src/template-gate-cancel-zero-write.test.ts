@@ -46,7 +46,9 @@ function executeIo(port: PlatformPort): TemplateExecuteIo {
   return {
     readTextFile: (path) => port.readTextFile(path),
     writeTextFile: (path, content, modifiedMs) => port.writeTextFile(path, content, modifiedMs),
-    ensureDirectory: (path) => port.ensureDirectory(path)
+    ensureDirectory: (path) => port.ensureDirectory(path),
+    listDirectory: (path) => port.listDirectory(path),
+    deleteFile: (path) => port.deleteFile(path)
   }
 }
 
@@ -67,6 +69,7 @@ describe('template cancel gate', () => {
 
     expect(io.writes, 'template cancel: abandoned preview writes nothing').toEqual([])
     expect(io.directories, 'template cancel: abandoned preview creates nothing').toEqual([])
+    expect(io.deletes, 'template cancel: abandoned preview deletes nothing').toEqual([])
     const after = await snapshotTree(fixture.outputRoot)
     expect(after, 'template cancel: output tree unchanged').toEqual(before)
     expect(tempFiles(after), 'template cancel: no temporary files').toEqual([])
@@ -89,6 +92,7 @@ describe('template cancel gate', () => {
 
     expect(io.writes, 'template cancel: pre-aborted writes nothing').toEqual([])
     expect(io.directories, 'template cancel: pre-aborted creates nothing').toEqual([])
+    expect(io.deletes, 'template cancel: pre-aborted deletes nothing').toEqual([])
     const after = await snapshotTree(fixture.outputRoot)
     expect(after, 'template cancel: pre-aborted tree unchanged').toEqual(before)
     expect(tempFiles(after), 'template cancel: pre-aborted no temporary files').toEqual([])
@@ -115,6 +119,7 @@ describe('template cancel gate', () => {
 
     expect(io.writes, 'template cancel: missing root no writes').toEqual([])
     expect(io.directories, 'template cancel: missing root no directories').toEqual([])
+    expect(io.deletes, 'template cancel: missing root no deletes').toEqual([])
     expect(await platform.statPath(outputRoot), 'template cancel: missing root still missing').toBe(
       'missing'
     )

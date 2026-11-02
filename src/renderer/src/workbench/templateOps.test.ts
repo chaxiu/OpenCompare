@@ -321,35 +321,44 @@ describe('template apply', () => {
   })
 
   it('re-checks hash, presence and second mtime for every written row', async () => {
-    const port = await seededPort({})
+    const port = await seededPort({
+      '/src/ok.txt': 'OK',
+      '/src/hash.txt': 'HASH',
+      '/src/gone.txt': 'GONE',
+      '/src/mtime.txt': 'MTIME'
+    })
     const written: readonly TemplateWrittenEntry[] = [
       {
         relativePath: 'ok.txt',
         sourcePath: '/src/ok.txt',
         targetPath: '/ext/v/ok.txt',
         sourceHash: sha256Hex('OK'),
-        modifiedMs: 1_700_000_000_000
+        modifiedMs: 1_700_000_000_000,
+        action: 'copy'
       },
       {
         relativePath: 'hash.txt',
         sourcePath: '/src/hash.txt',
         targetPath: '/ext/v/hash.txt',
         sourceHash: sha256Hex('HASH'),
-        modifiedMs: 1_700_000_001_000
+        modifiedMs: 1_700_000_001_000,
+        action: 'copy'
       },
       {
         relativePath: 'gone.txt',
         sourcePath: '/src/gone.txt',
         targetPath: '/ext/v/gone.txt',
         sourceHash: sha256Hex('GONE'),
-        modifiedMs: 1_700_000_002_000
+        modifiedMs: 1_700_000_002_000,
+        action: 'copy'
       },
       {
         relativePath: 'mtime.txt',
         sourcePath: '/src/mtime.txt',
         targetPath: '/ext/v/mtime.txt',
         sourceHash: sha256Hex('MTIME'),
-        modifiedMs: 1_700_000_003_000
+        modifiedMs: 1_700_000_003_000,
+        action: 'copy'
       }
     ]
     await port.writeTextFile('/ext/v/ok.txt', 'OK', 1_700_000_000_000)
