@@ -10,6 +10,7 @@
 - **B 层（`--layer=local`）**：只对真实目录对 `/Users/zhutao/opencompare-fixtures/work/left` ↔ `right` 跑三轮四态 + 算术自洽 + 关闭会话后的 GC 保留堆判定；窗口布局 / 滚动 / 原生面板 / TCC 只进 `manual` 数组并标 `not-covered`，不得出现在 `checks` 的 pass 或 skip 中。
 - **per-step JSON 与日志**：每项检查写 `<out>/steps/<NN>-<id>.json`，字段固定 `id` / `name` / `command` / `expected` / `actual` / `status` / `evidence` / `startedAt` / `finishedAt`，`status` 仅 `pass|fail|skip`；stdout / stderr 落 `<out>/logs/<NN>-<id>.log`，`evidence` 必须指向真实存在的文件。
 - **fail-closed `summary.json`**：必含 `tag` / `layer` / `status` / `counts {pass,fail,skip,total,expected}` / `environment {ImageOS,ImageVersion,RUNNER_OS,GITHUB_RUN_ID}` / `evidenceDir`；缺字段、检查项数不等于期望、证据文件不存在 → `status=fail` 且非零退出。`tag` 动态枚举 Release 资产，不把「12 件」或任何资产名写死为唯一事实。
+- **终局判定单一来源**：最终 fail-closed 结论只由导出纯函数 `judgeReleaseGate(summary, { expectedIds, exists })` 产出（`ok === true` 当且仅当 `validateSummary` 无问题且 `summary.status === 'pass'`）；`runVerifyReleaseCli` 的 `--aggregate` 分支与普通执行分支共用该函数，退出码只由 `ok ? 0 : 1` 派生，失败时回写 `summary.status='fail'` 与 `summary.problems`，脚本内不再保留任何一份内联最终判定。
 - **只读 workflow**：`.github/workflows/post-release-verify.yml` 仅由 `release: types: [published]` 与 `workflow_dispatch`（输入 `tag`）触发，顶层 `permissions: contents: read`，零 `secrets.*`，只调 `gh api` / `gh release download`；`spike` job（ubuntu + macOS 起窗）先于平台矩阵，矩阵 `needs: spike`；每个 job 用 `actions/upload-artifact` 归档 `<out>`（artifact 名含 tag 与 run id）。
 - **门禁与教训沉淀**：`.munk/code-gates.json` 末尾追加 `verify-release-gate`（`pnpm test src/verify-release-gate.test.ts`）；`docs/lessons.md` 新增第 11 节记录 B 层内存口径、v0.2.16 证据与旧 `d1≥d2≥d3` 废止理由，并注明 CI 不跑内存腿。
 
@@ -37,6 +38,21 @@
 - **ac-b-local-only**：`--layer=local` 的 `summary.json` 只把真实目录对三轮四态 / 算术自洽 / GC 内存作为检查项；窗口布局、滚动、原生面板 / TCC 进 `manual` 并标 `not-covered`，不得出现在 `checks` 的 pass 或 skip；缺目录、缺一轮、四态和不等于该轮总行数、三轮计数不一致、第 3−第 2 保留堆 >16 MiB 均 fail。
 - **ac-threshold**：B 层内存阈值固定 `16 * 1024 * 1024` 字节；差值等于 16 MiB 时 pass、16 MiB+1 时 fail；脚本**不提供**放宽阈值的 CLI 开关。
 
+### 终局判定纯函数（WI `wi_intake_5907ad21fa9994e5`）
+
+- **ac-gate-exported / ac-gate-single-source / ac-types-declared**：`scripts/verify-release.mjs` 导出 `judgeReleaseGate(summary, { expectedIds = [], exists = existsSync } = {})`，返回 `{ ok: boolean, status: 'pass' | 'fail', problems: string[] }`；内部复用 `validateSummary`（不复制字段 / 证据判定）；`--aggregate` 与普通分支都只调该函数，退出码 `ok ? 0 : 1`，失败时回写 `summary.status='fail'` 与 `summary.problems`；`scripts/verify-release.d.mts` 声明入 / 出类型且 `pnpm typecheck` 通过。
+- **ac-gate-pass**：15 项 CI 检查全 `pass`、必需环境字段齐全、证据存在、`expectedIds` 为 15 项时返回 `ok=true`、`status='pass'`、`problems=[]`。
+- **ac-gate-missing-field**：删掉必需字段（至少覆盖 `environment`）时 `ok=false`、`status='fail'`，`problems` 含 `summary 缺字段 environment`。
+- **ac-gate-version-mismatch / ac-gate-asset-mismatch / ac-gate-skip-fails**：`mac-dmg-version` 或 `identity-asset-bytes-sha256` 为 `fail`、或任一检查为 `skip` 时，即使顶层 `status` 被篡改为 `pass` 仍 `ok=false`，`problems` 指出该失败检查或 `status` 与检查不一致，不放行。
+- **ac-test-lines / ac-test-tocontain / ac-test-readfilesync**：`src/verify-release-gate.test.ts` ≤600 行、`toContain`（含 `not.toContain`）≤6、`readFileSync` ≤4 且每处只作数据加载（fixture 字节 / summary.json / workflow yml / `.munk/code-gates.json` / `docs/lessons.md` / 脚本源码），不得承载断言语义。
+- **ac-baseline-measured / ac-coverage-not-lower**：改前在未修改测试上以 vitest JSON reporter 实测 `assertionResults` 总数为基线 B，改后同命令用例数 A ≥ `ceil(0.95 × B)`（不用源码 `it|test` 计数替代）；以 `@vitest/coverage-v8@5.0.5` 测 `scripts/verify-release.mjs` 行覆盖，改后不低于改前，命令与前后数字写入 delivery。
+- **ac-removed-assertion-mapping / ac-no-assertion-relocation**：每删除一条 `toContain` 必须给出“原断言 → 更强的替代断言（测试名 + 断言内容）”映射，给不出替代只能占用 ≤6 保留配额；断言不得迁往 `.munk/` 或其它测试文件，测试 diff 仅 `src/verify-release-gate.test.ts`。
+- **ac-structural-shared-call / ac-structural-no-drift / ac-no-wording-assertions**：以 `ts.createSourceFile` 解析脚本，断言模块导出 `judgeReleaseGate`、其函数体调用 `validateSummary`、`runVerifyReleaseCli` 调用 `judgeReleaseGate`、CLI 函数体内不再直接调 `validateSummary` 且无 `summary.status` 条件的 0/1 内联判定；对脚本不再断言中文文案 / 措辞，判定行为一律调用纯函数断言返回值。
+- **ac-cli-behavior-unchanged / ac-no-network**：参数解析、usage、退出码 0/1/2、`--aggregate` 合并、`--layer=ci` 15 项 / `--layer=local` 3 项、证据写入与 `--out` 不可写处理与基线一致；不新增 `fetch` / `node:http(s)` / `node:net` / 网络命令，`gh` 调用集合不变，测试仍以注入宿主离线运行。
+- **ac-version-frozen / ac-file-overlap**：`package.json#version` 保持 `0.2.16`，`docs/release-notes/*`、`CHANGELOG.md`、`.github/workflows/release.yml` 零 diff；生产 diff 仅 `scripts/verify-release.mjs` 与 `scripts/verify-release.d.mts`，不碰 `src/main/release-evidence.test.ts`。
+- **ac-full-code-gates / ac-injection-red**：按 `.munk/code-gates.json` 顺序全量 gate 退出码 0；把 `judgeReleaseGate` 临时改为无条件 pass 后 gate 用例必须变红（记录注入点、命令、退出码、失败用例），还原后复跑为绿。
+- **ac-delivery-numbers / ac-delivery-claims / ac-deadline**：delivery 给出改前 / 改后实测数字（测试行数、`toContain`、`readFileSync`、`describe(`、执行用例 A/B、全仓测试文件行数、非测试源码行数），不得出现“测试代码量已解决”或等价表述；未在全绿前交付则只交缺口清单，不降门、不删断言。
+
 ## 非目标
 
 - 不改 `release.yml` 的发布通道、门禁口径、双语组装、finalize 逻辑；不新增签名密钥；不修改已公开 tag / Release / 资产 / 正文。
@@ -53,13 +69,15 @@
 - **只读纪律**：公开件只读打开；macOS 挂载 `-readonly` 且 finally detach；Windows / Linux 只解压到干净临时目录；B 层真实目录对只读使用，不复制 / 修改 / 删除，缺目录或不可读判 fail 而非 skip。
 - **取消腿合成树规模固定并记入证据**（单侧 ≤500 MiB，远小于 6.4 GiB），规模由脚本保证取消点可命中，不为命中取消点引入产品侧延时或测试开关。
 - **spike 先于全量**：workflow 内置最小 spike job（ubuntu + macOS 起窗），全量矩阵 `needs: spike`；spike 失败时矩阵不运行。macOS 起不来时只记录静态断言范围与本机冷启动证据，退化不得写成 pass / skip / warn。
+- **终局判定只能有一处**：`buildSummary` 仍负责生成 `status`，最终 fail-closed 结论只由 `judgeReleaseGate` 给出；该函数必须纯（不读文件、不读 `process.env`、不发网络、不依赖时钟），`exists` 由调用方注入（CLI 默认 `existsSync`，测试传 `() => true/false`）；新增检查或字段时同步更新 `expectedIds` 与纯函数用例，禁止在 CLI 分支内再写一份判定。
 - **证据与断言落点**：`src/verify-release-gate.test.ts`（纯函数 + 注入 fixture，不连网、不启 Electron、不访问本机 6.4 GiB 路径）+ `.munk/code-gates.json` 的 `verify-release-gate`；`pnpm test` 必须包含该文件并通过。
 
 ## 最近交付证明
 
-- WI：`wi_intake_ab3a874c53d49528`（v0.2.16 L1 验收驱动收敛为仓内唯一实现 + 新增只读发布后复验流水线；`deliveryIntent: local merge`，`needSelfTest=false`）
+- WI：`wi_intake_5907ad21fa9994e5`（verify-release 终局门判定抽成纯函数 `judgeReleaseGate` + 压缩 gate 测试；`deliveryIntent: local merge`，`needSelfTest=false`，基线 HEAD `15a6313`）
 - 日期：2026-11-02
-- 结果：交付时 `code_gates` attempt 001 为 **17 gates**（本分支矩阵）全 exit 0，`.munk/runs/run_intake_ab3a874c53d49528/code-gates/attempts/001`；`pnpm test` 108 files / 1625 passed + 1 skipped（1626）、32.25s；`verify-release-gate` 单跑 1 file / 57 tests、17.61s；`build` / `build-web` / `typecheck` / `lint` 全 passed。合入 main tip 的四种模板门禁后矩阵为 **21 项**，post-merge `code_gates` 由 Host 在 `_merge` worktree 复跑。
-- 改动面：新增 `scripts/verify-release.mjs`（2,157 行）、`scripts/verify-release.d.mts`（277 行）、`src/verify-release-gate.test.ts`（1,291 行）、`.github/workflows/post-release-verify.yml`（123 行）；修改 `.munk/code-gates.json`（末尾追加 `verify-release-gate`、`description` 追加发布验收驱动覆盖映射）、`docs/lessons.md`（+9，第 11 节）、`src/munk-gates.test.ts`（期望矩阵与末位断言同步，合入 main tip 后 20 → 21）。零 diff：`.github/workflows/release.yml`、`package.json`、`pnpm-lock.yaml`、`electron-builder.yml`、`src/renderer/**`、`src/core/**`、`src/preload/**`、`src/shared/**`、`src/main/**`。
-- 覆盖摘要：① **A 层注册表实测**——`CI_CHECK_GROUPS` = identity 2 / mac 4 / linux 3 / windows 2 / cancel-log 2 / evidence 2，合计 **15**；`LOCAL_CHECKS` = `local-fixture` / `local-rounds-4state` / `local-retained-heap`。② **零内存腿**——CI 层注册表无 heap 项，`RETENTION_THRESHOLD_BYTES = 16 * 1024 * 1024` 仅在 B 层判定；终态 fail-closed 汇总与 `manual` 数组由纯函数与注入 runner 覆盖。③ **workflow 只读**——顶层 `permissions: contents: read`，无 `secrets.*`，`spike` job（ubuntu + macOS）先于矩阵，矩阵 `needs: spike`，各 job 归档 `verify-out`。④ **门禁与教训**——`verify-release-gate` 落在默认矩阵末位（合入 main tip 后 20 → 21），`docs/lessons.md` 第 11 节记录 B 层 GC 保留堆口径与旧 `d1≥d2≥d3` 废止。
-- 注：① 本 WI change pack **只有 `prd.md`**（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；QA 档案由 Delivery 按 prd AC 落档在 `qa/v0216-verify-release-driver.md`。② **未取得实机证据的三条 AC**：`ac-spike` / `ac-v0216-run` / `ac-local-ci-parity` 需要真实 GitHub runner 与已公开 v0.2.16，本 WI 未 push / 未 dispatch / 未打 tag，脚本层与门禁层已就位但**没有任何 run id 证据**，不得在后续汇报中写成已通过；首次真实发版后的 `workflow_dispatch` 是该流水线的首次实战。③ 默认矩阵基线由 **20 → 21**（本分支基于 16 时追加，合入 main tip 后为 21），`domains/quality-gates` 与 `.munk/baseline/tech/overview.md` 已同步；任何「16 / 20 项」旧表述只作历史。④ B 层真实 6.4 GiB 三轮长跑不在本 WI，执行归 product-qa 任务 `task_0194dba8b812d08b`。
+- 结果：`code_gates` attempt 001 **21 gates** 全 exit 0（`.munk/runs/run_intake_5907ad21fa9994e5/code-gates/attempts/001`）；`pnpm test` 114 files / 1776 passed + 1 skipped（1777）、32.74s；`verify-release-gate` 单跑 1 file / **71 tests**、17.86s；`lint` / `typecheck` / `build` / `build-web` 全 passed。
+- 实测压缩数字（改前 → 改后，均命令实测）：`src/verify-release-gate.test.ts` 1,352 → **599** 行；`toContain` 28 → **0**；`readFileSync` 13 → **3**；`describe(` 15 → **12**；执行用例 B=**63**（改前 `--reporter=json` 实测）→ A=**71**（阈值 `ceil(0.95×63)=60`）；`scripts/verify-release.mjs` 行覆盖 78.70%（743/944）→ **78.78%**（750/952，`@vitest/coverage-v8@5.0.5`）；全仓测试文件 47,367 行、非测试 `src`+`scripts` 31,848 行。
+- 改动面：`scripts/verify-release.mjs` 2,157 → 2,175 行（新增并导出 `judgeReleaseGate`，两个 CLI 出口共用）、`scripts/verify-release.d.mts` +11 行（类型声明）、`src/verify-release-gate.test.ts` 全量重写为表驱动 + AST 结构断言、`package.json` / `pnpm-lock.yaml` 新增 `@vitest/coverage-v8@5.0.5`。零 diff：`.github/workflows/release.yml`、`docs/release-notes/*`、`CHANGELOG.md`、`src/main/**`、`src/renderer/**`、`src/core/**`、`src/preload/**`、`src/shared/**`、`.munk/code-gates.json`。
+- 注入红：把 `judgeReleaseGate` 临时改为无条件 `return { ok: true, status: 'pass', problems: [] }` 后 `pnpm test src/verify-release-gate.test.ts` 非零退出、**26 failed / 45 passed**（失败含 `passes a complete 15-check CI summary`、`refuses a fail status even when every check passed`、`fails closed for non-object input`）；还原后同命令 **71 passed** 复绿。
+- 注：① 本 WI change pack **只有 `prd.md`**，无 `tests/cases/**` / `tech.md` / `ux/**`，故无 change-pack 用例 copy、无 tech / ux 手合；逐条 AC 与「原 `toContain` → 替代断言」映射落档在 `qa/release-gate-verdict-pure-function.md`。② 上一 WI（`wi_intake_ab3a874c53d49528`）的 A/B 层驱动与只读 workflow 证据保留在 `qa/v0216-verify-release-driver.md`，其中 `ac-spike` / `ac-v0216-run` / `ac-local-ci-parity` 仍**无实机证据**，本 WI 未改变该状态。
