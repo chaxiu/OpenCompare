@@ -8,7 +8,7 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 43599
+    "repoTestLines": 43999
   },
   "floors": {
     "appTestCases": 94,
@@ -29,10 +29,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 43329,
-      "to": 43599,
-      "reason": "I#9 probe-status: file-pair open/drilldown probe facts + four-value status bar L1/L2 coverage (main's diff-normalize growth already landed in the merged tip)",
-      "addedCases": 34
+      "from": 43599,
+      "to": 43999,
+      "reason": "I#9 diff-switches: default-on comparison switches, instant recompute, byte signal and cross-tab/runtime retention L1/L2 coverage",
+      "addedCases": 11
     }
   ]
 }
