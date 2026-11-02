@@ -805,6 +805,62 @@ jobs:
             exit 1
           fi
           echo "Verified the published ${RELEASE_TAG} body: zh-CN details block present and both language segments carry ${tag}."
+      # A Release body is rendered on the tag page, so a relative notes link
+      # (`./v0.2.16.zh-CN.md`) resolves against the repository root and 404s.
+      # Read-only: extract every markdown link target, fail on any relative one,
+      # and require both tag-pinned absolute language switch URLs.
+      - name: Assert the published release body links are absolute
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG}"
+          workdir="${RUNNER_TEMP}/release-body-links"
+          rm -rf "${workdir}"
+          mkdir -p "${workdir}"
+          body_file="${workdir}/body.md"
+          links_file="${workdir}/links.txt"
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq '.body // ""' > "${body_file}"
+          if [ ! -s "${body_file}" ]; then
+            echo "::error::Published release ${RELEASE_TAG} has an empty body; cannot verify its links." >&2
+            exit 1
+          fi
+          node -e '
+          const fs = require("node:fs")
+          const body = fs.readFileSync(process.argv[1], "utf8")
+          const pattern = /\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g
+          const targets = [...body.matchAll(pattern)].map((match) => match[1])
+          fs.writeFileSync(process.argv[2], targets.map((target) => target + "\n").join(""))
+          console.log("release body markdown links (" + process.argv[3] + "): " + targets.length)
+          for (const target of targets) console.log("link: " + target)
+          ' "${body_file}" "${links_file}" "${tag}"
+          relative=0
+          while IFS= read -r target; do
+            case "${target}" in
+              ./*|../*)
+                echo "::error::Published release ${RELEASE_TAG} body links to the relative path '${target}'; a Release body resolves against the tag page, so every link must be an absolute URL." >&2
+                relative=$((relative + 1))
+                ;;
+            esac
+            if [[ "${target}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "::error::Published release ${RELEASE_TAG} body links to the tag-relative path '${target}'; a Release body resolves against the tag page, so every link must be an absolute URL." >&2
+              relative=$((relative + 1))
+            fi
+          done < "${links_file}"
+          en_switch="https://github.com/chaxiu/OpenCompare/blob/${tag}/docs/release-notes/${tag}.md"
+          zh_switch="https://github.com/chaxiu/OpenCompare/blob/${tag}/docs/release-notes/${tag}.zh-CN.md"
+          missing=0
+          for wanted in "${en_switch}" "${zh_switch}"; do
+            if ! grep -Fqx "${wanted}" "${links_file}"; then
+              echo "::error::Published release ${RELEASE_TAG} body is missing the absolute language switch link ${wanted}; refusing a body whose language switch 404s." >&2
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "${relative}" -ne 0 ] || [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Verified the published ${RELEASE_TAG} body links: $(wc -l < "${links_file}" | tr -d ' ') links, 0 relative, both absolute language switch URLs present."
       # Enforce exactly one public release per tag across every API page: a
       # leftover duplicate (or a stray draft/prerelease) fails the run instead of
       # silently advertising two releases.
