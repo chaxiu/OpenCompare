@@ -15,6 +15,7 @@ import type {
   DirectoryDiffNode,
   ScannedTree
 } from '@core/directory/compare'
+import { sha256Hex } from '@core/directory/hash'
 import {
   buildSyncPlan,
   copyScannedTree,
@@ -676,6 +677,7 @@ export async function previewTemplate(
 
   let existingFiles: readonly string[] = []
   let existingDirectories: readonly string[] = []
+  let existingFileHashes: Readonly<Record<string, string>> = {}
   if (outputKind === 'directory') {
     const output = await scan(platform, outputRoot)
     existingFiles = [...output.index.entries()]
@@ -684,6 +686,26 @@ export async function previewTemplate(
     existingDirectories = [...output.index.entries()]
       .filter(([relativePath, node]) => relativePath !== '' && node.kind === 'directory')
       .map(([relativePath]) => relativePath)
+
+    // Only an existing file that sits exactly on a matched / conflict slot can
+    // be "already placed": its digest is compared with the slot's source. Every
+    // other output file stays untouched, and an unreadable target simply keeps
+    // its overwrite / conflict protection. Nothing is written here.
+    const slotPaths = new Set<string>()
+    for (const item of result.matched) slotPaths.add(item.relativePath)
+    for (const item of result.conflicts) slotPaths.add(item.relativePath)
+    const hashes: Record<string, string> = {}
+    for (const relativePath of existingFiles) {
+      if (!slotPaths.has(relativePath)) continue
+      try {
+        hashes[relativePath] = sha256Hex(
+          await platform.readTextFile(joinRelativePath(outputRoot, relativePath))
+        )
+      } catch {
+        // Unreadable target: leave the digest out so the row stays protected.
+      }
+    }
+    existingFileHashes = hashes
   }
 
   return {
@@ -691,7 +713,12 @@ export async function previewTemplate(
     incomingRoot,
     outputRoot,
     outputRootExists: outputKind === 'directory',
-    plan: createTemplatePlan(result, { outputRoot, existingFiles, existingDirectories })
+    plan: createTemplatePlan(result, {
+      outputRoot,
+      existingFiles,
+      existingDirectories,
+      existingFileHashes
+    })
   }
 }
 

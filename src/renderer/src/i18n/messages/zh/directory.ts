@@ -77,6 +77,7 @@ export const directory = {
   'directory.template.label.incoming': '散乱树 B：',
   'directory.template.label.output': '输出根：',
   'directory.template.section.matched': '已匹配',
+  'directory.template.section.placed': '已落位',
   'directory.template.section.missing': '缺失槽位',
   'directory.template.section.conflicts': '冲突项',
   'directory.template.section.unused': 'B 未使用文件',

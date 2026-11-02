@@ -95,7 +95,13 @@ describe('template dry-run plan', () => {
     )
 
     expect(preview.outputRootExists).toBe(true)
-    expect(preview.plan.counts).toEqual({ matched: 2, missing: 0, conflict: 0, unused: 0 })
+    expect(preview.plan.counts).toEqual({
+      matched: 2,
+      missing: 0,
+      conflict: 0,
+      placed: 0,
+      unused: 0
+    })
     const bySlot = new Map(preview.plan.matched.map((entry) => [entry.relativePath, entry]))
     expect(bySlot.get('src/a.ts')).toMatchObject({
       overwrite: true,
@@ -112,6 +118,91 @@ describe('template dry-run plan', () => {
     // A dry-run never creates a directory and never writes a file.
     expect(writeTextFile).not.toHaveBeenCalled()
     expect(ensureDirectory).not.toHaveBeenCalled()
+  })
+
+  it('marks an output file that already holds the source body as placed', async () => {
+    const port = await seededPort({
+      ...MATCHED_PAIR,
+      '/ext/out/src/a.ts': 'A',
+      '/ext/out/src/b.ts': 'stale',
+      '/ext/out/notes.txt': 'unrelated'
+    })
+    const readTextFile = vi.fn(port.readTextFile)
+    const writeTextFile = vi.fn(port.writeTextFile)
+    const ensureDirectory = vi.fn(port.ensureDirectory)
+    const preview = await previewTemplate(
+      { ...port, readTextFile, writeTextFile, ensureDirectory },
+      { templateRoot: '/ext/a', incomingRoot: '/ext/b', outputRoot: '/ext/out' }
+    )
+
+    expect(preview.plan.counts).toEqual({
+      matched: 1,
+      missing: 0,
+      conflict: 0,
+      placed: 1,
+      unused: 0
+    })
+    expect(preview.plan.placed.map((entry) => entry.relativePath)).toEqual(['src/a.ts'])
+    expect(preview.plan.placed[0]).toMatchObject({
+      outcome: 'placed',
+      overwrite: false,
+      defaultChecked: false,
+      targetPath: '/ext/out/src/a.ts'
+    })
+    // The different-content target keeps the overwrite guard.
+    expect(preview.plan.matched[0]).toMatchObject({
+      relativePath: 'src/b.ts',
+      overwrite: true,
+      defaultChecked: false
+    })
+
+    // A placed row is neither executable nor rejected, even when checked.
+    const resolved = resolveTemplatePlan(preview.plan, { checkedPaths: ['src/a.ts'] })
+    expect(resolved.executableCount).toBe(0)
+    expect(resolved.rejectedCount).toBe(0)
+
+    // Only slot targets are hashed; an unrelated output file is never read.
+    const readOutputPaths = readTextFile.mock.calls
+      .map(([path]) => path)
+      .filter((path) => path.startsWith('/ext/out/'))
+      .sort()
+    expect(readOutputPaths).toEqual(['/ext/out/src/a.ts', '/ext/out/src/b.ts'])
+    expect(writeTextFile).not.toHaveBeenCalled()
+    expect(ensureDirectory).not.toHaveBeenCalled()
+  })
+
+  it('marks a conflict slot as placed when the target matches a candidate body', async () => {
+    const port = await seededPort({
+      '/ext/a/src/c.ts': 'slot body',
+      '/ext/b/x/c.ts': 'candidate one',
+      '/ext/b/y/c.ts': 'candidate two',
+      '/ext/out/src/c.ts': 'candidate two'
+    })
+    const preview = await previewTemplate(
+      port,
+      { templateRoot: '/ext/a', incomingRoot: '/ext/b', outputRoot: '/ext/out' }
+    )
+
+    expect(preview.plan.counts).toEqual({
+      matched: 0,
+      missing: 0,
+      conflict: 0,
+      placed: 1,
+      unused: 2
+    })
+    expect(preview.plan.placed[0]).toMatchObject({
+      relativePath: 'src/c.ts',
+      outcome: 'placed',
+      overwrite: false,
+      defaultChecked: false,
+      conflictReason: 'ambiguous'
+    })
+    expect(preview.plan.placed[0].candidates).toHaveLength(2)
+    expect(preview.plan.conflicts).toEqual([])
+
+    const resolved = resolveTemplatePlan(preview.plan, { checkedPaths: ['src/c.ts'] })
+    expect(resolved.executableCount).toBe(0)
+    expect(resolved.rejectedCount).toBe(0)
   })
 
   it('previews a not-yet-existing output root without writing or marking overwrite', async () => {
@@ -147,10 +238,17 @@ describe('template dry-run plan', () => {
       { templateRoot: '/ext/a', incomingRoot: '/ext/b', outputRoot: '/ext/out' }
     )
 
-    expect(preview.plan.counts).toEqual({ matched: 1, missing: 1, conflict: 1, unused: 2 })
+    expect(preview.plan.counts).toEqual({
+      matched: 1,
+      missing: 1,
+      conflict: 1,
+      placed: 0,
+      unused: 2
+    })
     expect(preview.plan.counts.matched).toBe(preview.plan.matched.length)
     expect(preview.plan.counts.missing).toBe(preview.plan.missing.length)
     expect(preview.plan.counts.conflict).toBe(preview.plan.conflicts.length)
+    expect(preview.plan.counts.placed).toBe(preview.plan.placed.length)
     expect(preview.plan.counts.unused).toBe(preview.plan.unused.length)
     expect(preview.plan.matched[0]).toMatchObject({
       relativePath: 'src/a.ts',

@@ -296,7 +296,7 @@ describe('template placement on a real external tree', () => {
     expect(tempFiles(await outputFiles(fixture.outputRoot))).toEqual([])
   })
 
-  it('rescans the output root into overwrite slots that stay unchecked', async () => {
+  it('rescans the output root into placed slots that stay unchecked', async () => {
     const fixture = await buildFixture()
     const preview = await previewTemplate(platform, {
       templateRoot: fixture.templateRoot,
@@ -314,9 +314,11 @@ describe('template placement on a real external tree', () => {
       incomingRoot: fixture.incomingRoot,
       outputRoot: fixture.outputRoot
     })
-    const deep = rescanned.plan.matched.find((entry) => entry.relativePath === SLOT_DEEP)
-    expect(deep?.overwrite).toBe(true)
+    const deep = rescanned.plan.placed.find((entry) => entry.relativePath === SLOT_DEEP)
+    expect(deep?.outcome).toBe('placed')
+    expect(deep?.overwrite).toBe(false)
     expect(deep?.defaultChecked).toBe(false)
+    expect(rescanned.plan.matched.map((entry) => entry.relativePath)).not.toContain(SLOT_DEEP)
   })
 
   it('never writes a checked conflict that has no chosen candidate', async () => {

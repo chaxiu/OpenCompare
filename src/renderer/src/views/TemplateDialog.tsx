@@ -68,10 +68,11 @@ const CANDIDATE_CLASSES =
 /** Extra rows above and below the viewport so fast scrolling never shows gaps. */
 const ROW_OVERSCAN = 8
 
-type RowSection = 'matched' | 'missing' | 'conflicts' | 'unused'
+type RowSection = 'matched' | 'placed' | 'missing' | 'conflicts' | 'unused'
 
 const SECTION_TITLE_KEYS: Record<RowSection, MessageKey> = {
   matched: 'directory.template.section.matched',
+  placed: 'directory.template.section.placed',
   missing: 'directory.template.section.missing',
   conflicts: 'directory.template.section.conflicts',
   unused: 'directory.template.section.unused'
@@ -79,6 +80,7 @@ const SECTION_TITLE_KEYS: Record<RowSection, MessageKey> = {
 
 const SECTION_TONES: Record<RowSection, string> = {
   matched: 'text-diff-added',
+  placed: 'text-content-secondary',
   missing: 'text-diff-removed',
   conflicts: 'text-diff-conflict',
   unused: 'text-content-muted'
@@ -157,8 +159,9 @@ export function TemplateDialog({
     preview === null ? 'setup' : outcome !== null ? 'result' : 'dry-run'
   const blocked = busy || submitting || applying
 
-  // Default checks are the plan's own decision; conflict / missing / overwritten
-  // rows never start checked. A new preview (a rescan) starts a fresh selection.
+  // Default checks are the plan's own decision; conflict / missing / placed /
+  // overwritten rows never start checked. A new preview (a rescan) starts a
+  // fresh selection.
   useEffect(() => {
     setOutcome(null)
     setApplyFailure(null)
@@ -191,12 +194,14 @@ export function TemplateDialog({
     const plan = preview.plan
     const sections: readonly [RowSection, readonly TemplateRow[]][] = [
       ['matched', plan.matched.map((entry) => ({ kind: 'entry', entry }))],
+      ['placed', plan.placed.map((entry) => ({ kind: 'entry', entry }))],
       ['missing', plan.missing.map((entry) => ({ kind: 'entry', entry }))],
       ['conflicts', plan.conflicts.map((entry) => ({ kind: 'entry', entry }))],
       ['unused', plan.unused.map((item) => ({ kind: 'unused', item }))]
     ]
     const countOf: Record<RowSection, number> = {
       matched: plan.counts.matched,
+      placed: plan.counts.placed,
       missing: plan.counts.missing,
       conflicts: plan.counts.conflict,
       unused: plan.counts.unused

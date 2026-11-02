@@ -273,15 +273,17 @@ export interface TemplatePlanCounts {
   readonly matched: number
   readonly missing: number
   readonly conflict: number
+  /** Target already holds the same content as the slot's source; never writable. */
+  readonly placed: number
   /** Incoming files no slot consumed; never writable. */
   readonly unused: number
 }
 
-/** One template slot the plan can render: matched, missing or conflicting. */
+/** One template slot the plan can render: matched, placed, missing or conflicting. */
 export interface TemplatePlanEntry {
   /** Template slot, i.e. the relative path the file is restored to. */
   readonly relativePath: string
-  readonly outcome: 'matched' | 'missing' | 'conflict'
+  readonly outcome: 'matched' | 'placed' | 'missing' | 'conflict'
   readonly templatePath: string
   /** Absolute source when the slot has one; `null` for missing / open conflicts. */
   readonly sourcePath: string | null
@@ -308,9 +310,11 @@ export interface TemplatePlan {
   readonly templateRoot: string
   readonly incomingRoot: string
   readonly outputRoot: string
-  /** Template A file slots; equals `matched + missing + conflicts`. */
+  /** Template A file slots; equals `matched + placed + missing + conflicts`. */
   readonly templateFileCount: number
   readonly matched: readonly TemplatePlanEntry[]
+  /** Slots whose target already holds the same content as their source. */
+  readonly placed: readonly TemplatePlanEntry[]
   readonly missing: readonly TemplatePlanEntry[]
   readonly conflicts: readonly TemplatePlanEntry[]
   /** Incoming files no slot consumes; listed for the dry-run, never written. */
@@ -325,6 +329,11 @@ export interface TemplatePlanOptions {
   readonly existingFiles?: readonly string[]
   /** Root-relative paths already occupied by a directory under the output root. */
   readonly existingDirectories?: readonly string[]
+  /**
+   * Root-relative path → SHA-256 of the existing output file. A slot whose
+   * target digest equals its source digest is `placed` instead of an overwrite.
+   */
+  readonly existingFileHashes?: Readonly<Record<string, string>>
 }
 
 interface SlotInput {
@@ -340,9 +349,14 @@ interface SourceInput {
 }
 
 /**
- * Expands a match result into the four plan partitions. Every template slot
+ * Expands a match result into the five plan partitions. Every template slot
  * becomes exactly one row; `targetPath` is always derived from the slot, so the
  * renderer and the executor address the same destination.
+ *
+ * A slot whose target already holds the same body (equal SHA-256) as its
+ * source is `placed`: it is neither an overwrite nor a conflict, it never
+ * starts checked and it can never be executed. Only a digest equality counts;
+ * mtime is ignored and a directory on the slot keeps `occupiedByDirectory`.
  */
 export function createTemplatePlan(
   result: TemplateMatchResult,
@@ -350,6 +364,13 @@ export function createTemplatePlan(
 ): TemplatePlan {
   const existingFiles = new Set(options.existingFiles ?? [])
   const existingDirectories = new Set(options.existingDirectories ?? [])
+  const existingFileHashes = options.existingFileHashes ?? {}
+
+  function isPlaced(relativePath: string, sourceHashes: readonly string[]): boolean {
+    if (!existingFiles.has(relativePath) || existingDirectories.has(relativePath)) return false
+    const targetHash = existingFileHashes[relativePath]
+    return targetHash !== undefined && sourceHashes.includes(targetHash)
+  }
 
   function toEntry(
     outcome: TemplatePlanEntry['outcome'],
@@ -358,8 +379,8 @@ export function createTemplatePlan(
     candidates: readonly TemplateConflictCandidate[] = [],
     conflictReason?: TemplateConflict['reason']
   ): TemplatePlanEntry {
-    const overwrite = existingFiles.has(slot.relativePath)
     const occupiedByDirectory = existingDirectories.has(slot.relativePath)
+    const overwrite = outcome !== 'placed' && existingFiles.has(slot.relativePath)
     return {
       relativePath: slot.relativePath,
       outcome,
@@ -377,17 +398,29 @@ export function createTemplatePlan(
     }
   }
 
-  const matched = result.matched.map((item) =>
-    toEntry('matched', item, {
+  const matched: TemplatePlanEntry[] = []
+  const placed: TemplatePlanEntry[] = []
+  for (const item of result.matched) {
+    const source: SourceInput = {
       sourcePath: item.sourcePath,
       sourceHash: item.hash,
       modifiedMs: item.modifiedMs
-    })
-  )
+    }
+    if (isPlaced(item.relativePath, [item.hash])) {
+      placed.push(toEntry('placed', item, source))
+      continue
+    }
+    matched.push(toEntry('matched', item, source))
+  }
   const missing = result.missing.map((item) => toEntry('missing', item, null))
-  const conflicts = result.conflicts.map((item) =>
-    toEntry('conflict', item, null, item.candidates, item.reason)
-  )
+  const conflicts: TemplatePlanEntry[] = []
+  for (const item of result.conflicts) {
+    if (isPlaced(item.relativePath, item.candidates.map((candidate) => candidate.hash))) {
+      placed.push(toEntry('placed', item, null, item.candidates, item.reason))
+      continue
+    }
+    conflicts.push(toEntry('conflict', item, null, item.candidates, item.reason))
+  }
 
   return {
     templateRoot: result.templateRoot,
@@ -395,6 +428,7 @@ export function createTemplatePlan(
     outputRoot: options.outputRoot,
     templateFileCount: result.templateFileCount,
     matched,
+    placed,
     missing,
     conflicts,
     unused: result.unused,
@@ -402,6 +436,7 @@ export function createTemplatePlan(
       matched: matched.length,
       missing: missing.length,
       conflict: conflicts.length,
+      placed: placed.length,
       unused: result.unused.length
     }
   }
@@ -464,6 +499,8 @@ export interface TemplateResolvedPlan {
  * reads. Only a checked `matched` row and a checked conflict row whose chosen
  * source is one of its candidates become executable; a missing slot, an
  * unchecked row, an unresolved conflict and a directory-occupied target never do.
+ * A `placed` row is already on disk: it is neither executable nor rejected, even
+ * when it appears in `checkedPaths`.
  */
 export function resolveTemplatePlan(
   plan: TemplatePlan,
@@ -483,6 +520,7 @@ export function resolveTemplatePlan(
 
   const candidates: TemplateExecutableEntry[] = []
   for (const entry of slots) {
+    if (entry.outcome === 'placed') continue
     if (!checked.has(entry.relativePath)) continue
     if (entry.occupiedByDirectory) {
       reject(entry.relativePath, 'target-occupied-by-directory')
