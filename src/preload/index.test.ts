@@ -49,6 +49,7 @@ describe('preload bridge', () => {
         'listDirectory',
         'listDirectories',
         'readTextFile',
+        'probeTextFile',
         'readFileBytes',
         'writeFileBytes',
         'setSymbolicLinkModifiedMs',
@@ -73,6 +74,13 @@ describe('preload bridge', () => {
         'perf'
       ].sort()
     )
+  })
+
+  it('forwards the text probe over its single whitelisted channel', async () => {
+    await platform.probeTextFile('/tmp/a.txt')
+
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.probeTextFile, '/tmp/a.txt')
+    expect(PLATFORM_CHANNELS.probeTextFile).toBe('platform:probe-text-file')
   })
 
   it('forwards metric and cancellation capabilities over their whitelisted channels', async () => {

@@ -11,6 +11,7 @@ export const PLATFORM_CHANNELS = {
   listDirectory: 'platform:list-directory',
   listDirectories: 'platform:list-directories',
   readTextFile: 'platform:read-text-file',
+  probeTextFile: 'platform:probe-text-file',
   readFileBytes: 'platform:read-file-bytes',
   writeFileBytes: 'platform:write-file-bytes',
   setSymbolicLinkModifiedMs: 'platform:set-symbolic-link-modified-ms',

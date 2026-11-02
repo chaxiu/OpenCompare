@@ -23,17 +23,16 @@ import {
 } from '@core/directory/compare'
 import type { ListDirectory } from '@core/directory/compare'
 import { sha256Bytes, sha256Hex } from '@core/directory/hash'
+import { probeTextBytes } from '@core/text/probe'
+import { TEXT_PROBE_CASES, expectTextProbeFacts, ipcPort } from '../../test/sharedHarness'
 import { buildSyncPlan, SyncTargetError } from '@core/directory/sync'
 import { DIRECTORY_SCENE, DIRECTORY_SAMPLE_PATHS, SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
-import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
   FileDigest,
-  PathProbeKind,
-  PlatformPort,
-  UserSettings
+  PlatformPort
 } from '@shared/platform/types'
 import { applySyncPreview, previewSync } from '@renderer/workbench/directoryOps'
 import {
@@ -43,6 +42,7 @@ import {
   digestFiles,
   digestOperationCount,
   listDirectories,
+  probeLocalTextFile,
   registerPlatformIpc
 } from './electron-platform'
 import type { DigestReadStream, ListableStat } from './electron-platform'
@@ -91,51 +91,7 @@ async function coreDigest(request: Promise<DigestFilesResult>): Promise<readonly
   throw new OperationCancelledError()
 }
 
-const platform: PlatformPort = {
-  kind: 'electron',
-  homeDirectory: () => invoke(PLATFORM_CHANNELS.homeDirectory) as Promise<string>,
-  workingDirectory: () => invoke(PLATFORM_CHANNELS.workingDirectory) as Promise<string>,
-  selectDirectory: async () => null,
-  selectFile: (options) => invoke(PLATFORM_CHANNELS.selectFile, options) as Promise<string | null>,
-  // Drag & drop paths are resolved in preload (`webUtils`), not over IPC.
-  resolveDroppedPath: async () => '',
-  saveFile: (options) => invoke(PLATFORM_CHANNELS.saveFile, options) as Promise<string | null>,
-  listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
-  listDirectories: (paths, options) =>
-    invoke(PLATFORM_CHANNELS.listDirectories, paths, options) as Promise<
-      readonly DirectoryListing[]
-    >,
-  readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
-  readFileBytes: (path) =>
-    invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
-  writeFileBytes: (path, content, modifiedMs) =>
-    invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
-  setSymbolicLinkModifiedMs: (path, modifiedMs) =>
-    invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
-  readSymbolicLink: (path) =>
-    invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
-  createSymbolicLink: (target, path) =>
-    invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
-  digestFiles: (paths, options) =>
-    invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
-  cancelOperation: (operationId) =>
-    invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
-  writeTextFile: (path, content, modifiedMs) =>
-    invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
-  exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
-  statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
-  checkWritable: (path) => invoke(PLATFORM_CHANNELS.checkWritable, path) as Promise<void>,
-  ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
-  deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
-  removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
-  temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
-  realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
-  readUserSettings: () =>
-    invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
-  writeUserSettings: (settings) =>
-    invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
-  systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>
-}
+const platform = ipcPort(invoke)
 
 const roots: string[] = []
 
@@ -1620,5 +1576,46 @@ describe('electron user settings', () => {
     appState.locale = 'zh-Hant-TW'
 
     await expect(platform.systemLocale()).resolves.toBe('zh-Hant-TW')
+  })
+})
+
+describe('text file probe', () => {
+  it.each([...TEXT_PROBE_CASES])('probes real disk bytes: $name', async (item) => {
+    const path = join(await scratchRoot(), item.name)
+    await writeFile(path, item.bytes)
+    // The byte count is the real file size and the digest is recomputable.
+    expect((await stat(path)).size).toBe(item.bytes.length)
+    expectTextProbeFacts(await platform.probeTextFile(path), item, path)
+  })
+
+  it('probes a built-in sample through its UTF-8 bytes', async () => {
+    const sample = SAMPLE_FIXTURE_FILES.find((file) => file.path === '/samples/csv/orders.left.csv')
+    if (sample === undefined) throw new Error('expected the CSV sample to exist')
+    const expected = new TextEncoder().encode(sample.text)
+
+    const probe = await platform.probeTextFile(sample.path)
+
+    expect(probe.text).toBe(sample.text)
+    expect(probe.text).toBe(await platform.readTextFile(sample.path))
+    expect(probe.encoding).toBe('UTF-8')
+    expect(probe.bytes).toBe(expected.length)
+    expect(probe.sha256).toBe(sha256Bytes(expected))
+  })
+
+  it('reads a path exactly once per probe and derives every fact from that buffer', async () => {
+    const bytes = new TextEncoder().encode('alpha\r\nbeta\r\n')
+    const readBytes = vi.fn(async () => bytes)
+
+    const probe = await probeLocalTextFile('/virtual/once.txt', { readBytes })
+
+    expect(readBytes).toHaveBeenCalledTimes(1)
+    expect(readBytes).toHaveBeenCalledWith('/virtual/once.txt')
+    expect(probe).toEqual({ path: '/virtual/once.txt', ...probeTextBytes(bytes) })
+  })
+
+  it('keeps the readable read failure for a missing path', async () => {
+    const missing = join(await scratchRoot(), 'missing.txt')
+
+    await expect(platform.probeTextFile(missing)).rejects.toThrow(`无法读取文件 ${missing}`)
   })
 })

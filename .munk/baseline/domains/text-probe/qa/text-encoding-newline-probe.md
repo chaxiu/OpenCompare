@@ -1,0 +1,11 @@
+covers: ac-newline-crlf, ac-newline-lf, ac-newline-cr, ac-newline-mixed, ac-bom-detection, ac-utf16-no-bom, ac-strict-utf8, ac-gbk-detection, ac-encoding-unknown, ac-encoding-order, ac-gbk-decoder-degradation, ac-probe-single-call, ac-port-signature-parity, ac-sample-mount-probe, ac-external-file-probe, ac-single-read-per-probe, ac-readtextfile-unchanged, ac-suite-green
+标题: 同一份原始字节确定性导出编码 / 解码文本 / 换行 / 字节数 / SHA-256，并经 `probeTextFile` 在 Electron 与 Web 两平台同签名可用
+步骤: ① 对只含 `\r\n` / 只含 `\n` / 只含孤立 `\r` / 两种混合 / 空串与无终止符单行分别调用 `detectNewline` → ② 对 `EF BB BF`、`FF FE`、`FE FF`、无 BOM 的 `68 00 65 00 6C 00 6C 00 6F 00`、合法多字节 UTF-8、孤立 `0x80` 与截断序列、GBK「中文\n」、连续 `0xFF` 调用 `detectEncoding` / `decodeText`，并对同一输入重复调用 → ③ 注入对 `gbk` 抛错的解码器工厂重跑 GBK 用例 → ④ 对同一字节缓冲调用 `probeTextBytes`，把 `sha256` 与 `sha256Bytes` 及已知常量对拍、`bytes` 与缓冲长度对拍、`newline` 与 `detectNewline(text)` 对拍 → ⑤ 审阅 `PlatformPort.probeTextFile` / `TextFileProbe` / `PLATFORM_CHANNELS` 与 preload 键集合，断言只新增一项 → ⑥ 在真实临时目录写出 UTF-8+CRLF / UTF-8 BOM+LF / UTF-16LE+CRLF / GBK+LF 四个文件，经真实 IPC handler 探测并复算 sha256 与文件大小 → ⑦ 对内置样本路径探测并与 `readTextFile` 结果对照 → ⑧ 用可注入字节读取器断言单路径读取次数恰为 1
+期望: `detectNewline` 对 CRLF / LF / CR / Mixed / None 五态判定正确且 `\r\n` 不被拆成两个终止符；`detectEncoding` 按 BOM → 无 BOM UTF-16 → 严格 UTF-8 → GBK → Unknown 固定顺序给出标签，无 BOM UTF-16 与 UTF-8 的 NUL 阈值 / 合法性边界只在 core 定义一次；`decodeText` 剥离 BOM、`Unknown` 走 U+FFFD 替换不抛错且重复调用结果一致；`probeTextBytes` 一次调用五字段齐全且 `bytes` / `sha256` / `newline` 全部来自同一份缓冲；`PlatformPort.probeTextFile` 两实现同签名同形状，`platform:probe-text-file` 只在 `PLATFORM_CHANNELS` 单一来源出现、preload 仅白名单转发，`readTextFile` 既有行为零回归
+
+## 最近执行
+
+- workItemId: wi_ws_51573dd10dcee210
+- at: 2026-11-02T21:43:00+08:00
+- status: pass
+- note: 证据落在 `src/core/text/probe.test.ts`（五态换行；BOM 三态与剥离；无 BOM UTF-16 双边与「NUL 分布不达阈值不得判 UTF-16」；严格 UTF-8 含 overlong / 截断 / 代理区拒绝；GBK 正向与纯 ASCII 反向；Unknown 幂等且含 U+FFFD；判定顺序含 `68 00 65 00 6C 00 6C 00 6F 00` 判 UTF-16LE；注入 `gbk` 抛错工厂降级 Unknown；`probeTextBytes` 五字段与 `sha256Bytes` / 已知常量对拍）、`electron-platform.test.ts`（真实临时文件四组合 + 样本挂载 + 单次读取注入断言）、`web-platform.test.ts`（同签名 / 样本路径 / 目录拒绝）、`preload/index.test.ts` 与 channels 面量断言各 +1。门禁：`.munk/runs/run_ws_86525261fb4af0ab/code-gates/attempts/002` 22 条全绿，`pnpm test` 116 files / 1842 passed + 1 skipped。

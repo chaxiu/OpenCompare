@@ -6,6 +6,7 @@
  *  - Electron: main-process handlers + a `contextBridge` bridge exposed by preload.
  *  - Web: an in-memory virtual file system for browser / `--rendererOnly` runs.
  */
+import type { TextBytesProbe } from '@core/text/probe'
 import type { CompareRequestPayload } from '../compareRequest'
 import type { PerfBridge } from '../perf/types'
 
@@ -141,6 +142,15 @@ export interface DigestFilesCancelled {
  */
 export type DigestFilesResult = readonly FileDigest[] | DigestFilesCancelled
 
+/**
+ * One file's text probe: the decoded body plus the facts the same raw bytes
+ * yielded. `encoding` / `newline` are the original values, never a normalised
+ * or display-time re-derivation.
+ */
+export interface TextFileProbe extends TextBytesProbe {
+  readonly path: string
+}
+
 export interface DigestFilesOptions {
   /** In-flight streaming reads; defaults to the platform's bounded window. */
   readonly concurrency?: number
@@ -193,6 +203,14 @@ export interface PlatformPort {
    * invalid UTF-8, `0x00`) therefore survive a byte-for-byte copy unchanged.
    */
   readFileBytes(path: string): Promise<Uint8Array>
+  /**
+   * Probes one file in a **single read**: the decoded text, the detected
+   * original encoding, the detected original newline style, the byte length and
+   * the raw-byte SHA-256 all come from the same buffer. `readTextFile` keeps its
+   * plain UTF-8 semantics; this is the seam a caller uses when it needs the raw
+   * facts as well.
+   */
+  probeTextFile(path: string): Promise<TextFileProbe>
   /**
    * Writes **raw bytes** atomically. When `modifiedMs` is given the file's
    * modification time is set to it afterwards, exactly like {@link writeTextFile}.

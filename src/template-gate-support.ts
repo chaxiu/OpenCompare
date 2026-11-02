@@ -17,6 +17,7 @@ import type {
   DirectoryListing,
   PathProbeKind,
   PlatformPort,
+  TextFileProbe,
   UserSettings
 } from '@shared/platform/types'
 
@@ -67,6 +68,7 @@ export const platform: PlatformPort = {
     >,
   readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
   readFileBytes: (path) => invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
+  probeTextFile: (path) => invoke(PLATFORM_CHANNELS.probeTextFile, path) as Promise<TextFileProbe>,
   writeFileBytes: (path, content, modifiedMs) =>
     invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
   setSymbolicLinkModifiedMs: (path, modifiedMs) =>

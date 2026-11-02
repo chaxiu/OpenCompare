@@ -11,9 +11,11 @@ import type {
   PlatformPort,
   SaveFileOptions,
   SelectFileOptions,
+  TextFileProbe,
   UserSettings
 } from '@shared/platform/types'
 import { sha256Bytes } from '@core/directory/hash'
+import { probeTextBytes } from '@core/text/probe'
 
 declare global {
   interface Window {
@@ -314,6 +316,14 @@ export function createWebPlatformPort(): PlatformPort {
       const node = requireNode(path)
       if (node.isDirectory) throw new Error(`Cannot read a directory as bytes: ${path}`)
       return new TextEncoder().encode(node.content)
+    },
+    // Same signature and same pure-function path as the desktop probe: the
+    // memory text is UTF-8 encoded once and every fact comes from those bytes.
+    probeTextFile: async (path) => {
+      const node = requireNode(path)
+      if (node.isDirectory) throw new Error(`Cannot probe a directory as text: ${path}`)
+      const bytes = new TextEncoder().encode(node.content)
+      return { path, ...probeTextBytes(bytes) } satisfies TextFileProbe
     },
     writeFileBytes: async (path, content, modifiedMs) => {
       writeNode(path, new TextDecoder().decode(content), modifiedMs)

@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path'
 import { app, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
 import { OperationCancelledError, mapWithLimit, toReadableIoError } from '@core/io'
+import { probeTextBytes } from '@core/text/probe'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import { parseUserSettings, parseUserSettingsJson } from '@shared/platform/settings'
@@ -41,6 +42,7 @@ import type {
   LinkTargetKind,
   ListDirectoriesOptions,
   PathProbeKind,
+  TextFileProbe,
   UserSettings
 } from '@shared/platform/types'
 
@@ -510,6 +512,28 @@ async function readLocalFileBytes(path: string): Promise<Uint8Array> {
   }
 }
 
+/** Test seam replacing the single raw-byte read of one text probe. */
+export type TextFileByteReader = (path: string) => Promise<Uint8Array>
+
+export interface LocalProbeTextFileOptions {
+  /** Defaults to {@link readLocalFileBytes}: one read, samples UTF-8 encoded. */
+  readonly readBytes?: TextFileByteReader
+}
+
+/**
+ * Probes one file's raw bytes **once** and derives the decoded text, encoding,
+ * newline, byte length and SHA-256 from that same buffer. A built-in sample has
+ * no disk bytes, so its in-memory text is UTF-8 encoded and takes the identical
+ * path; a read failure keeps the existing readable error wrapping.
+ */
+export async function probeLocalTextFile(
+  path: string,
+  options: LocalProbeTextFileOptions = {}
+): Promise<TextFileProbe> {
+  const bytes = await (options.readBytes ?? readLocalFileBytes)(path)
+  return { path, ...probeTextBytes(bytes) }
+}
+
 /** Whole-second mtime with a sub-microsecond lift, so it stays on the whole ms. */
 function linkSeconds(modifiedMs: number): number {
   return Math.floor(modifiedMs) / 1000 + 1e-6
@@ -881,6 +905,9 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
   })
   ipcMain.handle(PLATFORM_CHANNELS.readFileBytes, (_event, path: unknown) =>
     readLocalFileBytes(assertPath(path))
+  )
+  ipcMain.handle(PLATFORM_CHANNELS.probeTextFile, (_event, path: unknown) =>
+    probeLocalTextFile(assertPath(path))
   )
   ipcMain.handle(
     PLATFORM_CHANNELS.setSymbolicLinkModifiedMs,

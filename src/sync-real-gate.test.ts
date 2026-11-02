@@ -25,12 +25,12 @@ import { en } from '@renderer/i18n/messages'
 import { digestFilesForComparison } from '@renderer/platform'
 import { syncPreviewGuidance } from '@renderer/views/directoryCopy'
 import { applySyncPreview, canApplySyncPreview, previewSync, syncPreviewAction } from '@renderer/workbench/directoryOps'
-import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import type { DigestFilesResult, DirectoryEntry, DirectoryListing, PathProbeKind, PlatformPort, UserSettings } from '@shared/platform/types'
+import type { PlatformPort } from '@shared/platform/types'
 import { registerPlatformIpc } from './main/platform/electron-platform'
 import {
   deletePathsOf,
   fingerprint,
+  ipcPort,
   type FileFingerprint,
   linkWithStamp,
   releaseScratchRoots,
@@ -68,37 +68,7 @@ function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   return Promise.resolve(handler({}, ...args))
 }
 
-const platform: PlatformPort = {
-  kind: 'electron',
-  homeDirectory: () => invoke(PLATFORM_CHANNELS.homeDirectory) as Promise<string>,
-  workingDirectory: () => invoke(PLATFORM_CHANNELS.workingDirectory) as Promise<string>,
-  selectDirectory: async () => null,
-  selectFile: async () => null,
-  resolveDroppedPath: async () => '',
-  saveFile: async () => null,
-  listDirectory: (path) => invoke(PLATFORM_CHANNELS.listDirectory, path) as Promise<DirectoryEntry[]>,
-  listDirectories: (paths, options) => invoke(PLATFORM_CHANNELS.listDirectories, paths, options) as Promise<readonly DirectoryListing[]>,
-  readTextFile: (path) => invoke(PLATFORM_CHANNELS.readTextFile, path) as Promise<string>,
-  readFileBytes: (path) => invoke(PLATFORM_CHANNELS.readFileBytes, path) as Promise<Uint8Array>,
-  writeFileBytes: (path, content, modifiedMs) => invoke(PLATFORM_CHANNELS.writeFileBytes, path, content, modifiedMs) as Promise<void>,
-  setSymbolicLinkModifiedMs: (path, modifiedMs) => invoke(PLATFORM_CHANNELS.setSymbolicLinkModifiedMs, path, modifiedMs) as Promise<void>,
-  readSymbolicLink: (path) => invoke(PLATFORM_CHANNELS.readSymbolicLink, path) as Promise<string>,
-  createSymbolicLink: (target, path) => invoke(PLATFORM_CHANNELS.createSymbolicLink, target, path) as Promise<void>,
-  digestFiles: (paths, options) => invoke(PLATFORM_CHANNELS.digestFiles, paths, options) as Promise<DigestFilesResult>,
-  cancelOperation: (operationId) => invoke(PLATFORM_CHANNELS.cancelOperation, operationId) as Promise<void>,
-  writeTextFile: (path, content, modifiedMs) => invoke(PLATFORM_CHANNELS.writeTextFile, path, content, modifiedMs) as Promise<void>,
-  exists: (path) => invoke(PLATFORM_CHANNELS.exists, path) as Promise<boolean>,
-  statPath: (path) => invoke(PLATFORM_CHANNELS.statPath, path) as Promise<PathProbeKind>,
-  checkWritable: (path) => invoke(PLATFORM_CHANNELS.checkWritable, path) as Promise<void>,
-  ensureDirectory: (path) => invoke(PLATFORM_CHANNELS.ensureDirectory, path) as Promise<void>,
-  deleteFile: (path) => invoke(PLATFORM_CHANNELS.deleteFile, path) as Promise<void>,
-  removeDirectory: (path) => invoke(PLATFORM_CHANNELS.removeDirectory, path) as Promise<void>,
-  temporaryDirectory: () => invoke(PLATFORM_CHANNELS.temporaryDirectory) as Promise<string>,
-  realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
-  readUserSettings: () => invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
-  writeUserSettings: (settings) => invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
-  systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>,
-}
+const platform = ipcPort(invoke)
 
 function syncIo(port: PlatformPort): SyncIo {
   return {
