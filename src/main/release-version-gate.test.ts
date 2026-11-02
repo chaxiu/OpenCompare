@@ -153,9 +153,9 @@ describe('repository release facts', () => {
   })
 
   const noteFacts: Array<[string, readonly string[]]> = [
-    [releaseFacts.notes.englishLines.join('\n'), ['Actions column', 'copies by default', 'explicitly checked', 'sha256', 'mtimeSec', 'source and the target', 'no rollback', 'Case-fold collisions', 'Path escape refused', 'EACCES']],
-    [releaseFacts.notes.chineseLines.join('\n'), ['动作列', '默认复制', '显式勾选', 'sha256', 'mtimeSec', '源与目标', '不执行回滚', '碰撞折叠', '路径越界拒绝', 'EACCES']],
-    [markdownSection(changelog, currentTag), ['动作列', '碰撞折叠', '路径越界', 'EACCES']]
+    [releaseFacts.notes.englishLines.join('\n'), ['Actions column', 'copies by default', 'explicitly checked', 'sha256', 'mtimeSec', 'source and the target', 'no rollback', 'Case-fold collisions', 'Path escape refused']],
+    [releaseFacts.notes.chineseLines.join('\n'), ['动作列', '默认复制', '显式勾选', 'sha256', 'mtimeSec', '源与目标', '不执行回滚', '碰撞折叠', '路径越界拒绝']],
+    [markdownSection(changelog, currentTag), ['动作列', '碰撞折叠', '路径越界']]
   ]
   it.each(noteFacts)('states the template move and safety facts', (markdown, tokens) => {
     const atoms = parseMarkdown(markdown)

@@ -55,7 +55,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - v0.2.6 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.6>，11 件资产；CI run `39890773909` 五 job（`Quality gates` / `Package win` / `Package linux` / `Package mac` / `Publish the GitHub Release`）全 success，签名与公证的实测原文见 `docs/release-evidence/v0.2.6.md`。macOS 公证由 CI 执行，实际结果以那次 CI 为准；公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接，不在研发侧写成已通过。
 - v0.2.5 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5>，11 件资产、签名与公证的实测原文见 `docs/release-evidence/v0.2.5.md`。公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接并回填该文件第六节；第六节目前仍是就绪条件，不在研发侧写成已通过。
 - 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。6 项 Secret 清单与录入方式见上文第一节。
-- 本版发布说明见 docs/release-notes/v0.2.17.md。
+- 本版发布说明见 `docs/release-notes/v0.2.17.md`。
 - 如需查看 Release：
   ```bash
   gh release list --repo chaxiu/OpenCompare
