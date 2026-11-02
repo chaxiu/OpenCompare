@@ -40,6 +40,10 @@ const EXPECTED_GATES = [
       'pnpm test src/core/text/normalize.test.ts src/core/text/diff.test.ts src/core/text/merge.test.ts'
   },
   {
+    id: 'diff-normalize-real',
+    command: 'pnpm test src/diff-normalize-real-gate.test.tsx'
+  },
+  {
     id: 'template-default-unchecked',
     command: 'pnpm test src/template-gate-default-unchecked.test.ts'
   },
@@ -139,16 +143,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly twenty-three pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty-four pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(23)
+    expect(defaultManifest.gates).toHaveLength(24)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the twenty-three commands verbatim with cwd "."', () => {
+  it('keeps the twenty-four commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
@@ -161,6 +165,19 @@ describe('default code-gates matrix', () => {
     expect(gateById(defaultManifest, 'cancel-gate')?.command).toBe('pnpm test:cancel')
     expect(gateById(defaultManifest, 'memory-gate')?.command).toBe('pnpm test:memory')
     expect(gateById(defaultManifest, 'sync-real-gate')?.command).toBe('pnpm test:sync-real')
+  })
+
+  it('adds one real-disk normalization evidence gate after diff-normalize', () => {
+    const ids = defaultManifest.gates.map((gate) => gate.id)
+    const index = ids.indexOf('diff-normalize-real')
+    expect(index).toBe(ids.indexOf('diff-normalize') + 1)
+    expect(defaultManifest.gates[index]?.command).toBe('pnpm test src/diff-normalize-real-gate.test.tsx')
+    expect(existsSync(resolve(process.cwd(), 'src/diff-normalize-real-gate.test.tsx'))).toBe(true)
+    const description = defaultManifest.description.toLowerCase()
+    for (const marker of ['default-on zero differences', 'strict-off newline and encoding differences', 're-enabled zero differences', 'status raw values that ignore the switches']) {
+      expect(description, `manifest: normalization marker "${marker}"`).toContain(marker)
+    }
+    expect(defaultManifest.description).toContain('src/diff-normalize-real-gate.test.tsx')
   })
 
   it('maps the four single-direction mirror sync behaviours onto real gate files', () => {
