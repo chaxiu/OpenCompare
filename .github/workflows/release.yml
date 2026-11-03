@@ -185,6 +185,33 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # Release-only coverage floor gate: `src/core/**` floors are pinned once
+      # per release and compared against a summary produced by this job. The
+      # gate is never part of the delivery matrix (.munk/code-gates.json).
+      - name: Coverage gate (src/core floors)
+        run: |
+          set -euo pipefail
+          summary_dir="${RUNNER_TEMP}/coverage-gate"
+          rm -rf "${summary_dir}"
+          mkdir -p "${summary_dir}"
+          include='src/core/**'
+          exclude=('**/*.test.ts' '**/*.test.tsx' '**/__fixtures__/**')
+          started_at="$(date +%s)"
+          pnpm exec vitest run --coverage \
+            --coverage.provider=v8 \
+            --coverage.include="${include}" \
+            --coverage.exclude="${exclude[0]}" \
+            --coverage.exclude="${exclude[1]}" \
+            --coverage.exclude="${exclude[2]}" \
+            --coverage.reporter=json-summary \
+            --coverage.reportsDirectory="${summary_dir}"
+          node scripts/coverage-gate.mjs \
+            --summary "${summary_dir}/coverage-summary.json" \
+            --started-at "${started_at}" \
+            --include "${include}" \
+            --exclude "${exclude[0]}" \
+            --exclude "${exclude[1]}" \
+            --exclude "${exclude[2]}"
       - run: pnpm build
       # Create the tag's GitHub Release exactly once, before the packaging
       # matrix starts. Letting each platform's electron-builder publish
