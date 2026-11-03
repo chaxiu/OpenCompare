@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 45384
+    "repoTestLines": 45623
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1472
+    "repoTestCases": 1497
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 45245,
-      "to": 45384,
-      "reason": "post-release-verify fix: linux AppRun launch and shared xvfb detached process-group teardown for the deb/directory-compare/cancel legs, launch diagnostics in step JSON and log, Authenticode NotSigned/Valid pass with everything-else fail",
-      "addedCases": 10
+      "from": 45384,
+      "to": 45623,
+      "reason": "verify-before-publish: draft transport mode, finalize publish gate and post-publish public L1 regression tests",
+      "addedCases": 25
     }
   ]
 }

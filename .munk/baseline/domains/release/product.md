@@ -1,6 +1,6 @@
 # Domain: release
 
-打包分发与 GitHub 开源发布：electron-builder 三平台打包、macOS Developer ID 签名 + Apple 公证、`v*` tag 触发的门禁前置 CI、版本对齐闸、唯一公开 Release、发布后验证与仓内发布证据。仓库门面（README / LICENSE / 元数据）与发布配置断言单测同属本域。本域不含应用业务功能与视觉基线。
+打包分发与 GitHub 开源发布：electron-builder 三平台打包、macOS Developer ID 签名 + Apple 公证、`v*` tag 触发的门禁前置 CI、版本对齐闸、唯一公开 Release、发布前验证（draft 15/15 后才公开）与仓内发布证据。仓库门面（README / LICENSE / 元数据）与发布配置断言单测同属本域。本域不含应用业务功能与视觉基线。
 
 ## 范围
 
@@ -11,11 +11,11 @@
 - **macOS 签名与公证**：`mac` 段启用 `hardenedRuntime` 与 `notarize`，声明 `build/entitlements.mac.plist`（`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation`）并钉住 `Developer ID Application: Tao Zhu (3X4J53U6RY)`；凭据经 `CSC_LINK` / `CSC_KEY_PASSWORD` 与 API Key 三件套，`APPLE_TEAM_ID = 3X4J53U6RY`，`appId = com.opencompare.app`。
 - **凭据 fail-closed**：打包前逐一检查 6 个 Secret，任一缺失即 `::error::` 列出缺失项并非零退出，无「跳过签名继续发版」分支；`APPLE_API_KEY` 的 base64 `.p8` 在 `$RUNNER_TEMP` 解码为 600 权限文件供 `notarytool --key` 使用，打包后清理且不打印内容。
 - **版本对齐闸**：`package.json#version` 等于 tag 语义版本（去 `v`），各平台产物旁 `latest*.yml#version` 亦等于 tag；不一致即失败且不产出 Release。
-- **单 Release 模型**：`gates` 末尾单点预建该 tag 的唯一 draft，三平台矩阵 `--publish never` 只打包到 `release/`，再 `gh release upload --clobber` 汇聚上传，`finalize` 以 `--draft=false --latest` 公开。
+- **单 Release 模型**：`gates` 末尾单点预建该 tag 的唯一 draft，三平台矩阵 `--publish never` 只打包到 `release/`，再 `gh release upload --clobber` 汇聚上传；draft 验证 aggregate PASS 之后，`finalize` 才以 `--draft=false --latest` 公开（顺序契约归 `domains/release-publish-gate`）。
 - **触发与 tag 单源**：`release.yml` 监听 `v*` tag push 并声明 `workflow_dispatch`（输入 `tag`）；工作流级 `RELEASE_TAG` 是唯一 tag 来源，断言、建单、上传、公开与校验全部引用它，dispatch 构建该 tag 源码。
 - **门禁与祖先门**：frozen install / lint / typecheck / test / build 先行，tag 格式、tag 可解析、严格 semver 与「`v0.1.2` 为祖先或仅 tag 可达提交补丁等价」内联在 `run` 中只读执行，任一不满足即 fail-closed。
 - **打包后硬校验**：上传前校验 `.app` 图标与版本身份、`codesign` / `stapler` / `spctl`、产物名与 `latest*.yml`；`finalize` 再断言唯一公开 Release、资产完整与本 tag 为最新公开 Release。
-- **发布说明与发布后验证**：`CHANGELOG.md` 与双语 notes 由 `package.json#version` 派生，预建 Release 经 `--notes-file` 写入并 fail-closed，`finalize` 反读公开 body 校验双语；公开后派发 `post-release-verify.yml` 并校验 run、`aggregate` 与 artifact。
+- **发布说明与发布前验证**：`CHANGELOG.md` 与双语 notes 由 `package.json#version` 派生，预建 Release 经 `--notes-file` 写入并 fail-closed，`finalize` 反读 body 校验双语；publish **之前**以当前 Release 状态（`mode=draft|published`）派发 `post-release-verify.yml`，校验 run、`aggregate` 与 artifact 通过后才公开，公开后再跑轻量 public L1。
 - **证据归档**：真实产物经只读就绪门、仓库外下载、字节 + sha256 与签名复核后写入 `docs/release-evidence/<tag>.md`（`verified` / `blocked`，产物不入库），台账登记版本、状态与资产数。
 - **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、两张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
 - **发布配置断言单测**：Node 环境读取仓库根配置与文档做断言，拆为 packaging（打包 / 发布配置 + 证据台账）、version-gate（版本门 / 祖先门 / 重跑入口 / 门面结构）、artifacts-and-brand（品牌 / 协议 / 产物名 / 单 Release）三层。
@@ -72,8 +72,8 @@
 - **ac-gates-green**：`code-gates.json` 全部门禁（install / lint / typecheck / build / build:web / test）通过，打包目标与 `v*` tag 触发条件不变。
 - **ac-code-gates**：`.munk/code-gates.json` 按顺序全量执行、退出码 0、无一跳过，不新增 gate 项、不新建测试门文件。
 - **ac-finalize-permissions**：`finalize` 声明 job 级 `permissions` 且同时含 `contents: write` 与 `actions: write`（两项 `toEqual` 钉死，job 级覆盖不丢 `contents`）。
-- **ac-finalize-dispatch**：发布完成后存在步骤执行 `gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}"`，步骤正文零版本字面量。
-- **ac-finalize-aggregate-gate**：派发后 300 s 内按 `displayTitle` 含 tag 且 `createdAt >= since` 匹配本次 run，查不到即失败；随后有界等待 `aggregate` 为 `success`（failure / cancelled / timed_out / 非 success / 超时均失败），artifact 名含 tag 与 `run_id`。
+- **ac-finalize-dispatch**：publish 之前存在步骤执行 `gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="$(cat "${RUNNER_TEMP}/release-state.txt")"`，步骤正文零版本字面量；mode 由只读的 `Resolve the tag's release state` 读出（draft / published）。
+- **ac-finalize-aggregate-gate**：派发后 300 s 内按 `displayTitle` 含 tag 且 `createdAt >= since` 匹配本次 run，查不到即失败；随后有界等待 `aggregate` 为 `success`（failure / cancelled / timed_out / 非 success / 超时均失败），artifact 名含 tag 与 `run_id`；该 gate 先于 `Make the tag's release public`，失败即保持 draft。
 
 ## 非目标
 

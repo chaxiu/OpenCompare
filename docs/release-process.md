@@ -37,9 +37,22 @@ macOS 对实际 `.app` 执行：
 
 同时断言图标、bundle 身份与版本，任一失败即终止且不上传。
 
-## 唯一公开 Release
+## 先验证后公开
 
-`finalize` 后断言该 tag 恰好一个公开（非 Draft、非预发布）Release，资产覆盖三平台与 `latest*.yml`，并且该 Release 是仓库最新的公开版本。每个版本只有一个公开 Release。
+`finalize` 的顺序写死为「draft 验证 → aggregate PASS → publish」，publish 之前验证、失败保持 draft：
+
+1. `Resolve the tag's release state` 只读确认该 tag 恰好一个 Release，并读出 `draft` 状态。
+2. 以 `mode=draft` dispatch `post-release-verify`：三平台各跑同一 `scripts/verify-release.mjs`，draft 元数据走 `releases/{id}`、资产按 asset id 鉴权下载，15 项检查一项不少。
+3. 只有 aggregate `success` 且 aggregate artifact 存在才继续；任一检查失败即非零退出并打印失败检查名与 `verify-out` 证据路径，Release 保持 `draft=true`，不公开、不回滚。
+4. `gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest` 是仓库里唯一的公开动作，且只在 aggregate PASS 之后执行。
+
+- 口径：publish 之前验证、失败保持 draft、不公开、不回滚，不做先公开再回滚。
+
+已公开 tag 的 `workflow_dispatch` 复跑会读到 `published` 状态、以 `mode=published` 做公开复验；publish 步骤对已公开 Release 是幂等 no-op。`finalize` 之后仍断言该 tag 恰好一个公开（非 Draft、非预发布）Release，资产覆盖三平台与 `latest*.yml`，并且该 Release 是仓库最新的公开版本。每个版本只有一个公开 Release。
+
+## 公开后 L1
+
+publish 之后 `finalize` 再跑轻量 public L1：公开 Release URL 返回 200、每个资产的 `browser_download_url` 返回 200、最小且带 digest 的资产下载后 sha256 与 Release 元数据 digest 一致。public L1 只证明公开面可得，独立于 publish 前的 15 项，不替代、不放宽 15 项门禁。
 
 ## Release-time performance evidence
 

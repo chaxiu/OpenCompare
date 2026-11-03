@@ -341,9 +341,9 @@ describe('workflow parity', () => {
     expect(steps[install]?.if).toBe("runner.os == 'Linux'")
   })
 
-  it('keeps the dispatch-only read-only posture and the spike gate before verify', () => {
+  it('keeps the dispatch-only get-only posture and the spike gate before verify', () => {
     expect(Object.keys(workflow.on ?? {})).toEqual(['workflow_dispatch'])
-    expect(workflow.permissions).toEqual({ contents: 'read' })
+    expect(workflow.permissions).toEqual({ contents: 'write' })
     expect([workflow.jobs?.verify?.needs].flat()).toContain('spike')
   })
 })

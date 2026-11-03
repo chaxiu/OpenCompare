@@ -312,6 +312,35 @@
       "absentPatterns": []
     },
     {
+      "id": "finalize-resolve-state",
+      "job": "finalize",
+      "name": "Resolve the tag's release state",
+      "tokens": [
+        "set -euo pipefail",
+        "releases",
+        "--paginate",
+        "jq -s --arg tag",
+        "tag_name == $tag",
+        "release-state.txt",
+        "draft",
+        "::error::",
+        "exit 1"
+      ],
+      "absent": [
+        "gh release edit",
+        "gh release upload"
+      ],
+      "patterns": [
+        "Expected exactly one release",
+        "non-boolean draft flag"
+      ],
+      "absentPatterns": [
+        "gh release (upload|edit|create|delete)",
+        "--method\\s+(POST|PATCH|PUT|DELETE)",
+        "continue-on-error"
+      ]
+    },
+    {
       "id": "finalize-dispatch-verify",
       "job": "finalize",
       "name": "Dispatch the post-release verification",
@@ -319,7 +348,9 @@
         "set -euo pipefail",
         "date -u -d '2 minutes ago'",
         "post-release-verify-since.txt",
-        "gh workflow run post-release-verify.yml -f tag=\"${RELEASE_TAG}\""
+        "release-state.txt",
+        "验证模式: ${mode}",
+        "gh workflow run post-release-verify.yml -f tag=\"${RELEASE_TAG}\" -f mode=\"${mode}\""
       ],
       "absent": [],
       "patterns": [],
@@ -361,6 +392,11 @@
         "actions/runs/${run_id}/artifacts",
         ".artifacts[].name",
         "post-release-verify-${RELEASE_TAG}-${run_id}-aggregate",
+        "gh run download",
+        "summary.json",
+        "verify-out",
+        "check: ",
+        "the release stays draft",
         "exit 1"
       ],
       "absent": [],
@@ -369,13 +405,47 @@
         "SECONDS \\+ 900",
         "grep -Fqx"
       ],
-      "absentPatterns": []
+      "absentPatterns": [
+        "continue-on-error"
+      ]
+    },
+    {
+      "id": "public-l1-after-publish",
+      "job": "finalize",
+      "name": "Run the public L1 checks after publishing",
+      "tokens": [
+        "set -euo pipefail",
+        "releases/tags/${RELEASE_TAG}",
+        "html_url",
+        "curl -sSIL -o /dev/null -w '%{http_code}'",
+        "browser_download_url",
+        "digest",
+        "openssl dgst -sha256",
+        "::error::",
+        "exit 1"
+      ],
+      "absent": [
+        "gh release edit",
+        "gh release upload"
+      ],
+      "patterns": [
+        "does not match release digest",
+        "returned HTTP"
+      ],
+      "absentPatterns": [
+        "gh release (upload|edit|create|delete)",
+        "continue-on-error"
+      ]
     }
   ],
   "stepOrder": [
     {
       "id": "finalize-order",
       "names": [
+        "Resolve the tag's release state",
+        "Dispatch the post-release verification",
+        "Find the post-release verification run for this tag",
+        "Assert the post-release verification aggregate passed",
         "Make the tag's release public",
         "Assert the published release body is bilingual",
         "Assert the published release body links are absolute",
@@ -383,9 +453,7 @@
         "Assert the public release has every platform asset",
         "Assert latest*.yml urls match the release assets",
         "Assert the tag is the latest published release",
-        "Dispatch the post-release verification",
-        "Find the post-release verification run for this tag",
-        "Assert the post-release verification aggregate passed"
+        "Run the public L1 checks after publishing"
       ],
       "mustBeLast": true,
       "job": "finalize"
@@ -409,7 +477,7 @@
     "aggregateStep": "Assert the post-release verification aggregate passed",
     "tagRequired": true,
     "permissions": {
-      "contents": "read"
+      "contents": "write"
     },
     "forbiddenTriggers": [
       "release",

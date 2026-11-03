@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -252,6 +253,123 @@ describe('post-release verification dispatch gates', () => {
     expectTokens(passed.output, [`post-release-verify-${currentTag}-4242-aggregate`], 'passed')
     expect(failed.status, 'failed').not.toBe(0)
     expectTokens(failed.output, ['concluded failure'], 'failed')
+  })
+})
+
+// The publish step may only be reached after the draft aggregate PASSed. The
+// five finalize steps run in order against a fake `gh` that logs every call, so
+// a failure leaves `gh release edit` out of the log entirely.
+describe('finalize publish gate', () => {
+  const resolveName = fixture.steps.find((row) => row.id === 'finalize-resolve-state')?.name ?? ''
+  const dispatchName = fixture.steps.find((row) => row.id === 'finalize-dispatch-verify')?.name ?? ''
+  const chainNames = [resolveName, dispatchName, fixture.postReleaseVerify.findStep, fixture.postReleaseVerify.aggregateStep, fixture.releaseBody.makePublicName]
+  const runChain = (conclusion: string, artifactPresent: boolean): { status: number; output: string; calls: string[] } => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencompare-finalize-chain-'))
+    try {
+      const calls = join(dir, 'gh-calls.log')
+      const gh = [
+        '#!/usr/bin/env bash', `echo "$*" >> "${calls}"`,
+        'if [ "$1" = "api" ]; then', '  shift',
+        '  case "$*" in',
+        `    *"releases --paginate"*) printf '%s\\n' '${JSON.stringify([{ id: 7, tag_name: currentTag, draft: true }])}' ;;`,
+        `    *"actions/runs/4242/artifacts"*) if [ ${artifactPresent ? 1 : 0} = 1 ]; then printf '%s\\n' 'post-release-verify-${currentTag}-4242-aggregate'; fi ;;`,
+        '  esac', '  exit 0', 'fi',
+        'if [ "$1" = "run" ]; then', '  case "$2" in',
+        `    list) printf '%s\\n' '${JSON.stringify([{ databaseId: 4242, displayTitle: `post-release-verify ${currentTag}`, createdAt: '2026-11-03T00:00:00Z' }])}' ;;`,
+        `    view) printf '%s\\n' '${JSON.stringify({ status: 'completed', jobs: [{ name: 'spike', conclusion: 'success' }, { name: 'aggregate', conclusion }] })}' ;;`,
+        '    download) dir=""; prev=""; for arg in "$@"; do if [ "$prev" = "--dir" ]; then dir="$arg"; fi; prev="$arg"; done',
+        '      mkdir -p "$dir/steps"',
+        '      printf \'%s\\n\' \'{"status":"fail","problems":["linux-directory-compare 失败"]}\' > "$dir/summary.json"',
+        '      printf \'%s\\n\' \'{"id":"linux-directory-compare","status":"fail"}\' > "$dir/steps/01-linux-directory-compare.json" ;;',
+        '  esac', '  exit 0', 'fi', 'exit 0'
+      ].join('\n')
+      writeFileSync(join(dir, 'gh'), `${gh}\n`, { mode: 0o755 })
+      writeFileSync(join(dir, 'date'), '#!/usr/bin/env bash\nprintf \'%s\\n\' \'1970-01-01T00:00:00Z\'\n', { mode: 0o755 })
+      let output = ''
+      let status = 0
+      for (const [index, name] of chainNames.entries()) {
+        const body = finalizeStep(name)?.run ?? ''
+        expect(body.length, name).toBeGreaterThan(0)
+        const script = join(dir, `step-${index}.sh`)
+        writeFileSync(script, body)
+        const result = spawnSync('bash', [script], {
+          cwd: dir, encoding: 'utf8',
+          env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag, GITHUB_REPOSITORY: 'chaxiu/OpenCompare' }
+        })
+        output += `${result.stdout ?? ''}${result.stderr ?? ''}`
+        if ((result.status ?? -1) !== 0) { status = result.status ?? -1; break }
+      }
+      const callsText = existsSync(calls) ? readFileSync(calls, 'utf8') : ''
+      return { status, output, calls: callsText.split('\n').filter((line) => line.length > 0) }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('publishes only after the dispatch, aggregate and artifact gate', () => {
+    const success = runChain('success', true)
+    expect(success.status, success.output).toBe(0)
+    const dispatch = success.calls.findIndex((line) => line.startsWith('workflow run'))
+    const view = success.calls.findIndex((line) => line.startsWith('run view'))
+    const artifact = success.calls.findIndex((line) => line.includes('actions/runs/4242/artifacts'))
+    const publish = success.calls.findIndex((line) => line.startsWith('release edit'))
+    expect(success.calls[dispatch], 'dispatch mode').toContain('-f mode=draft')
+    expect(dispatch).toBeGreaterThan(-1)
+    expect(view).toBeGreaterThan(dispatch); expect(artifact).toBeGreaterThan(view); expect(publish).toBeGreaterThan(artifact)
+    expectTokens(success.output, ['aggregate PASS'], 'success')
+  })
+
+  it('keeps the release draft and never publishes when a check failed', () => {
+    const failed = runChain('failure', true)
+    expect(failed.status, failed.output).not.toBe(0)
+    expect(failed.calls.some((line) => line.startsWith('release edit')), 'publish call').toBe(false)
+    expectTokens(failed.output, ['check: linux-directory-compare=fail', 'problem: linux-directory-compare', 'verify-out', 'the release stays draft'], 'failure')
+  })
+})
+
+// Public L1 is a post-publish smoke check over the public metadata and URLs.
+describe('public L1 after publish', () => {
+  const l1Name = fixture.steps.find((row) => row.id === 'public-l1-after-publish')?.name ?? ''
+  const payload = 'public-l1-payload'
+  const digestOf = (text: string): string => `sha256:${createHash('sha256').update(text).digest('hex')}`
+  const curl = [
+    '#!/usr/bin/env bash', 'out=""', 'prev=""', 'for arg in "$@"; do',
+    '  if [ "$prev" = "-o" ]; then out="$arg"; fi', '  prev="$arg"', 'done',
+    'if [ -n "$out" ] && [ "$out" != "/dev/null" ]; then printf "%s" "$FAKE_ASSET_PAYLOAD" > "$out"; fi',
+    'case "$*" in', '  *"-w"*) printf "%s" "${FAKE_HTTP_CODE:-200}" ;;', 'esac', 'exit 0'
+  ].join('\n')
+  const runL1 = (options: { httpCode?: string; digest?: string } = {}): { status: number; output: string } =>
+    runInTemp((dir) => {
+      const assets = [{ name: 'OpenCompare.dmg', browser_download_url: 'https://github.test/OpenCompare.dmg', size: payload.length, digest: options.digest ?? digestOf(payload) }]
+      const meta = JSON.stringify({ draft: false, html_url: `https://github.test/releases/tag/${currentTag}`, assets })
+      writeFileSync(join(dir, 'gh'), `#!/usr/bin/env bash\nprintf '%s\\n' '${meta}'\n`, { mode: 0o755 })
+      writeFileSync(join(dir, 'curl'), `${curl}\n`, { mode: 0o755 })
+      const script = join(dir, 'l1.sh')
+      writeFileSync(script, finalizeStep(l1Name)?.run ?? '')
+      return spawnSync('bash', [script], {
+        cwd: dir, encoding: 'utf8',
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag,
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare', FAKE_ASSET_PAYLOAD: payload, FAKE_HTTP_CODE: options.httpCode ?? '200' }
+      })
+    })
+
+  it('passes when the release URL, every asset URL and one digest are all present', () => {
+    const passed = runL1()
+    expect(passed.status, passed.output).toBe(0)
+    expect(passed.output).toContain('public L1 PASS')
+  })
+  it('fails closed on a non-200 asset URL and on a digest mismatch', () => {
+    const notFound = runL1({ httpCode: '404' })
+    expect(notFound.status, notFound.output).not.toBe(0)
+    expect(notFound.output).toContain('returned HTTP 404')
+    const mismatch = runL1({ digest: digestOf('other bytes') })
+    expect(mismatch.status, mismatch.output).not.toBe(0)
+    expect(mismatch.output).toContain('does not match release digest')
+  })
+  it('refuses to pass the sha256 leg when no asset carries a digest', () => {
+    const missing = runL1({ digest: '' })
+    expect(missing.status, missing.output).not.toBe(0)
+    expect(missing.output).toContain('carries a digest')
   })
 })
 

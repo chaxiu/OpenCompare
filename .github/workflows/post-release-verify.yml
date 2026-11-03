@@ -1,12 +1,24 @@
 name: post-release-verify
 
-# Read-only verification of an already published release. It drives the same
-# `scripts/verify-release.mjs` the maintainer runs locally, one job per
-# platform, and archives every per-step JSON, log and the fail-closed summary.
+# Verification of one tag's release, in either of two transport modes:
 #
-# It never holds a signing key and never writes a tag, a release, an asset or a
-# release body: `contents: read` is the whole permission set, `gh` is used for
-# `gh api` / `gh release download` only.
+#  - `mode=draft` (default) reads the release before it is public: metadata via
+#    `releases/{id}` and every asset via `releases/assets/{id}` with an
+#    authenticated octet-stream GET. `release.yml`'s `finalize` dispatches this
+#    mode first and publishes only after the aggregate is 15/15.
+#  - `mode=published` re-verifies an already public release through
+#    `releases/tags/{tag}` and `gh release download`.
+#
+# Both modes drive the same `scripts/verify-release.mjs`, one job per platform,
+# and archive every per-step JSON, log and the fail-closed summary. The check
+# registry, `expected=15` and every judgment are identical across modes.
+#
+# The workflow holds no signing key and writes nothing: `contents: write` is
+# only what GitHub requires to read a draft release and its assets; `gh` is used
+# for `gh api` / `gh release download` GETs only, and no step calls
+# `gh release edit|upload|create|delete`, `git tag` or `git push`. Publishing is
+# owned by `release.yml`'s `finalize` and happens after this run's aggregate
+# passes, never before.
 #
 # Ordering: `verify` needs `spike`, so a runner that cannot boot Electron and
 # expose a DevTools page stops the matrix before any platform leg runs.
@@ -23,14 +35,23 @@ on:
       tag:
         description: Release tag to verify (vX.Y.Z)
         required: true
+      mode:
+        description: Release transport mode (draft before publish / published re-check)
+        required: true
+        default: 'draft'
+        type: choice
+        options:
+          - draft
+          - published
 
 run-name: post-release-verify ${{ inputs.tag }}
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   TAG: ${{ inputs.tag }}
+  MODE: ${{ inputs.mode }}
 
 jobs:
   spike:
@@ -93,11 +114,11 @@ jobs:
       - name: Install xvfb
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
-      - name: Verify the published artifacts
+      - name: Verify the release assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --platform=${{ matrix.platform }} --out=verify-out
+        run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --release-state="$MODE" --platform=${{ matrix.platform }} --out=verify-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
