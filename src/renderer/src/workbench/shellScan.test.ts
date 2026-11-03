@@ -12,6 +12,7 @@ const SHELL_COPY_FILES = [
   'src/renderer/src/workbench/Workbench.tsx',
   'src/renderer/src/workbench/SettingsDialog.tsx',
   'src/renderer/src/workbench/NewCompareDialog.tsx',
+  'src/renderer/src/workbench/mergeSession.ts',
   'src/renderer/src/i18n/languageLabel.ts',
   'src/renderer/src/workbench/sessionDisplay.ts',
   'src/renderer/src/workbench/fileKinds.ts',

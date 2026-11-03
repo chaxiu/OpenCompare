@@ -8,7 +8,7 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 47355
+    "repoTestLines": 47723
   },
   "floors": {
     "appTestCases": 94,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46959,
-      "to": 47355,
-      "reason": "add the new-page recent-history suites: the pure helper and HistoryHome component contract (order, cap pass-through, path title, localized time, reopen / remove / busy) plus the Workbench integration evidence for establish writes, excluded sources, write failure, directory rescan reopen, file re-read with restored switches, same-path dedupe, restrained reopen failure, single remove, switch sync / isolation and console path privacy",
-      "addedCases": 47
+      "from": 47355,
+      "to": 47723,
+      "reason": "add the real three-way merge entry suites: shared path normalisation + per-side probe ordering and stable error codes, renderer session build / identity / display text / read-failure localisation / ordered history upsert and reopen plan, and the jsdom workbench evidence for dialog modes, invalid-side no-tab, three real panes with real conflict counts, status-bar conflict decrement, accept / save, title-subtitle paths, same-trio tab reuse, ordered history write, fresh disk reopen and restrained missing-side failure with console path privacy",
+      "addedCases": 14
     }
   ]
 }

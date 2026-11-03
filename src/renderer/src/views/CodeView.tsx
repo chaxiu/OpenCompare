@@ -36,7 +36,7 @@ import {
   levelRowClasses
 } from '@renderer/workbench/shellLayout'
 import { useWidthTier } from '@renderer/workbench/useWidthTier'
-import type { CodeFileBuffer, FilePair, FilePairProbes } from '@renderer/workbench/session'
+import type { CodeFileBuffer, FilePair, FilePairProbes, MergeFileSides } from '@renderer/workbench/session'
 
 export type CodeMode = 'diff' | 'merge'
 
@@ -1074,6 +1074,7 @@ export function CodeView({
   mode: controlledMode,
   onModeChange,
   pair,
+  mergeSides: controlledMergeSides,
   buffer,
   probes,
   switches: controlledSwitches,
@@ -1096,6 +1097,12 @@ export function CodeView({
   readonly onModeChange?: (mode: CodeMode) => void
   /** Ad-hoc left/right bodies coming from a directory-tree drilldown. */
   readonly pair?: FilePair
+  /**
+   * Real three merge inputs. When present the view is a merge-only session: the
+   * diff/merge mode switch is not rendered and the model is built from these
+   * bodies instead of the sample fixture.
+   */
+  readonly mergeSides?: MergeFileSides
   /** Working copies kept on the session, used when the view remounts. */
   readonly buffer?: CodeFileBuffer
   /** Probe facts of both sides fixed when they were loaded. */
@@ -1127,8 +1134,10 @@ export function CodeView({
   )
   const switches = controlledSwitches ?? localSwitches
   const adhoc = pair !== undefined
+  /** A real merge session has no pair body, so it can only render the merge. */
+  const mergeOnly = controlledMergeSides !== undefined
   const selectedMode = controlledMode ?? localMode
-  const effectiveMode: CodeMode = adhoc ? 'diff' : selectedMode
+  const effectiveMode: CodeMode = adhoc ? 'diff' : mergeOnly ? 'merge' : selectedMode
   const diffPair = pair ?? fixture?.diff
 
   /** One mode mutation for both the local fallback and the shell's per-session record. */
@@ -1146,9 +1155,15 @@ export function CodeView({
   // The merge inputs are editable: opening a local file replaces one side and
   // the model (conflicts included) is rebuilt from the new bodies.
   const [mergeSides, setMergeSides] = useState<MergeSides | null>(() =>
-    fixture
-      ? { base: fixture.merge.base, ours: fixture.merge.ours, theirs: fixture.merge.theirs }
-      : null
+    controlledMergeSides
+      ? {
+          base: controlledMergeSides.base,
+          ours: controlledMergeSides.ours,
+          theirs: controlledMergeSides.theirs
+        }
+      : fixture
+        ? { base: fixture.merge.base, ours: fixture.merge.ours, theirs: fixture.merge.theirs }
+        : null
   )
   const model = useMemo(
     () =>
@@ -1159,6 +1174,21 @@ export function CodeView({
   )
   const [resolutions, setResolutions] = useState<MergeResolutions>({})
   const [activeConflict, setActiveConflict] = useState(0)
+
+  // Reopening a merge session keeps the same tab id, so the view is not
+  // remounted: adopt the freshly read bodies and drop stale acceptances. The
+  // setState here is the intended one-shot prop adoption, not a render loop.
+  useEffect(() => {
+    if (!controlledMergeSides) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMergeSides({
+      base: controlledMergeSides.base,
+      ours: controlledMergeSides.ours,
+      theirs: controlledMergeSides.theirs
+    })
+    setResolutions({})
+    setActiveConflict(0)
+  }, [controlledMergeSides])
 
   const unresolved = model ? countUnresolved(model, resolutions) : 0
   const total = model ? model.conflictIds.length : 0
@@ -1183,7 +1213,7 @@ export function CodeView({
       {toolbarLeading}
       {adhoc ? (
         <span className="text-2xs text-content-muted">{t('files.code.drilldown')}</span>
-      ) : (
+      ) : mergeOnly ? null : (
         <>
           <SegmentedControl
             label={t('files.code.modeLabel')}

@@ -163,6 +163,12 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.compare.rightPath': 'Right path',
   'shell.compare.leftPlaceholder': '/Users/you/left a.txt or ~/project/a.txt',
   'shell.compare.rightPlaceholder': '/Users/you/right b.txt or a.txt',
+  'shell.compare.modeLabel': 'Session type',
+  'shell.compare.mode.pair': 'Two-way compare',
+  'shell.compare.mode.merge': '3-way merge',
+  'shell.compare.basePlaceholder': 'Base file path, e.g. ~/project/base.txt',
+  'shell.compare.oursPlaceholder': 'Ours file path, e.g. ~/project/ours.txt',
+  'shell.compare.theirsPlaceholder': 'Theirs file path, e.g. ~/project/theirs.txt',
   'shell.compare.hint': 'Enter to compare · Esc to close',
   'shell.compare.pickFiles': 'Open file',
   'shell.compare.pickFilesTitle': 'Choose the left and right files in order',
@@ -185,6 +191,16 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Unsupported file type: {side} "{path}". Supported files are code/text, CSV/TSV and JSON/YAML.',
   'shell.compare.error.ACCESS_DENIED':
     'Cannot access the {side} path: {path} (permission denied or unreadable).',
+  'shell.merge.error.EMPTY_PATH': 'The {side} path is empty. Enter a valid path.',
+  'shell.merge.error.NOT_FOUND': 'The {side} path does not exist: {path}',
+  'shell.merge.error.ACCESS_DENIED':
+    'Cannot access the {side} path: {path} (permission denied or unreadable).',
+  'shell.merge.error.NOT_A_FILE':
+    'The {side} path is not a file: {path} (a 3-way merge needs three files).',
+  'shell.merge.error.UNSUPPORTED_FILE_TYPE':
+    'Unsupported file type: {side} "{path}". Supported files are code/text, CSV/TSV and JSON/YAML.',
+  'shell.merge.error.READ_FAILED':
+    'Could not read the {side} file. Check that it still exists and is readable.',
   'shell.history.title': 'Recent comparisons',
   'shell.history.kind.directory': 'Folder',
   'shell.history.kind.file': 'File',

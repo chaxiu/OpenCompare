@@ -3,11 +3,19 @@ import type { FormEvent, JSX, KeyboardEvent } from 'react'
 import { SHELL_ENTRY_ICONS } from '@renderer/assets/icons'
 import { isSupportedComparisonFile } from '@shared/fileExtensions'
 import { parseManualPaths, resolveCompareRequest } from '@shared/compareRequest'
-import type { CompareErrorCode, ComparePaths, CompareRequest } from '@shared/compareRequest'
+import type {
+  CompareErrorCode,
+  ComparePaths,
+  CompareRequest,
+  PathContext
+} from '@shared/compareRequest'
+import { parseMergeManualPaths, resolveMergeRequest } from '@shared/mergeRequest'
+import type { MergeErrorCode, MergePaths, MergeSide } from '@shared/mergeRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import { ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
+import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { useI18n } from '@renderer/i18n/context'
 import type { Translate } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
@@ -36,13 +44,40 @@ const COMPARE_ERROR_KEYS: Record<CompareErrorCode, MessageKey> = {
   ACCESS_DENIED: 'shell.compare.error.ACCESS_DENIED'
 }
 
+const MERGE_ERROR_KEYS: Record<MergeErrorCode, MessageKey> = {
+  EMPTY_PATH: 'shell.merge.error.EMPTY_PATH',
+  NOT_FOUND: 'shell.merge.error.NOT_FOUND',
+  ACCESS_DENIED: 'shell.merge.error.ACCESS_DENIED',
+  NOT_A_FILE: 'shell.merge.error.NOT_A_FILE',
+  UNSUPPORTED_FILE_TYPE: 'shell.merge.error.UNSUPPORTED_FILE_TYPE'
+}
+
+const MERGE_SIDE_KEYS: Record<MergeSide, MessageKey> = {
+  base: 'files.merge.side.base',
+  ours: 'files.merge.side.ours',
+  theirs: 'files.merge.side.theirs'
+}
+
 type Side = 'left' | 'right'
+
+/** The two session shapes the manual entry can establish. */
+type CompareMode = 'pair' | 'merge'
+
+const MODE_OPTIONS: ReadonlyArray<{ readonly value: CompareMode; readonly key: MessageKey }> = [
+  { value: 'pair', key: 'shell.compare.mode.pair' },
+  { value: 'merge', key: 'shell.compare.mode.merge' }
+]
 
 /** A validation failure kept as data so the alert always follows the language. */
 type CompareIssue =
   | {
       readonly kind: 'compare'
       readonly code: CompareErrorCode
+      readonly params: Record<string, string>
+    }
+  | {
+      readonly kind: 'merge'
+      readonly code: MergeErrorCode
       readonly params: Record<string, string>
     }
   | { readonly kind: 'detail'; readonly message: string }
@@ -57,6 +92,7 @@ function kindKey(kind: 'file' | 'directory'): MessageKey {
 
 function issueText(issue: CompareIssue, t: Translate): string {
   if (issue.kind === 'detail') return issue.message
+  if (issue.kind === 'merge') return t(MERGE_ERROR_KEYS[issue.code], issue.params)
   return t(COMPARE_ERROR_KEYS[issue.code], issue.params)
 }
 
@@ -171,6 +207,7 @@ export function NewCompareDialog({
   platform,
   onClose,
   openRequest,
+  openMergeRequest,
   onPickFiles,
   onPickDirectories
 }: {
@@ -181,18 +218,69 @@ export function NewCompareDialog({
     request: CompareRequest,
     onError: (message: string) => void
   ) => Promise<boolean>
+  /** Builds a real three-way merge session; resolves `false` on failure. */
+  readonly openMergeRequest: (
+    request: MergePaths,
+    onError: (message: string) => void
+  ) => Promise<boolean>
   readonly onPickFiles: () => Promise<CompareOpenOutcome>
   readonly onPickDirectories: () => Promise<CompareOpenOutcome>
 }): JSX.Element {
   const { t } = useI18n()
+  const [mode, setMode] = useState<CompareMode>('pair')
   const [left, setLeft] = useState('')
   const [right, setRight] = useState('')
+  const [base, setBase] = useState('')
+  const [ours, setOurs] = useState('')
+  const [theirs, setTheirs] = useState('')
   const [issue, setIssue] = useState<CompareIssue | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const leftInput = useRef<HTMLInputElement>(null)
 
   function detailOf(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause)
+  }
+
+  /** Normalises + probes the three merge inputs, then asks the shell to build. */
+  async function submitMerge(context: PathContext): Promise<void> {
+    const parsed = parseMergeManualPaths(base, ours, theirs, context)
+    if (!parsed.ok) {
+      setIssue({
+        kind: 'merge',
+        code: parsed.error.code,
+        params: {
+          side: t(MERGE_SIDE_KEYS[parsed.error.side]),
+          path: parsed.error.path
+        }
+      })
+      return
+    }
+
+    const resolved = await resolveMergeRequest(parsed.paths, {
+      ...context,
+      probe: { statPath: (path) => platform.statPath(path) }
+    })
+    if (!resolved.ok) {
+      setIssue({
+        kind: 'merge',
+        code: resolved.error.code,
+        params: {
+          side: t(MERGE_SIDE_KEYS[resolved.error.side]),
+          path: resolved.error.path
+        }
+      })
+      return
+    }
+
+    const feedback = { message: null as string | null }
+    const built = await openMergeRequest(resolved.paths, (message) => {
+      feedback.message = message
+    })
+    if (built) {
+      onClose()
+      return
+    }
+    if (feedback.message !== null) setIssue({ kind: 'detail', message: feedback.message })
   }
 
   async function submit(): Promise<void> {
@@ -203,6 +291,10 @@ export function NewCompareDialog({
       const context = {
         homeDir: await platform.homeDirectory(),
         baseDir: await platform.workingDirectory()
+      }
+      if (mode === 'merge') {
+        await submitMerge(context)
+        return
       }
       const parsed = parseManualPaths(left, right, context)
       if (!parsed.ok) {
@@ -303,39 +395,106 @@ export function NewCompareDialog({
       }
     >
       <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="new-compare-left" className="text-2xs text-content-secondary">
-            {t('shell.compare.leftPath')}
-          </label>
-          <input
-            id="new-compare-left"
-            ref={leftInput}
-            type="text"
-            className={INPUT_CLASSES}
-            value={left}
-            spellCheck={false}
-            autoComplete="off"
-            placeholder={t('shell.compare.leftPlaceholder')}
-            onChange={(event) => setLeft(event.target.value)}
-            onKeyDown={submitOnEnter}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="new-compare-right" className="text-2xs text-content-secondary">
-            {t('shell.compare.rightPath')}
-          </label>
-          <input
-            id="new-compare-right"
-            type="text"
-            className={INPUT_CLASSES}
-            value={right}
-            spellCheck={false}
-            autoComplete="off"
-            placeholder={t('shell.compare.rightPlaceholder')}
-            onChange={(event) => setRight(event.target.value)}
-            onKeyDown={submitOnEnter}
-          />
-        </div>
+        <SegmentedControl
+          label={t('shell.compare.modeLabel')}
+          options={MODE_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.key)
+          }))}
+          value={mode}
+          onChange={(next) => {
+            setMode(next)
+            setIssue(null)
+          }}
+        />
+        {mode === 'pair' ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-compare-left" className="text-2xs text-content-secondary">
+                {t('shell.compare.leftPath')}
+              </label>
+              <input
+                id="new-compare-left"
+                ref={leftInput}
+                type="text"
+                className={INPUT_CLASSES}
+                value={left}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t('shell.compare.leftPlaceholder')}
+                onChange={(event) => setLeft(event.target.value)}
+                onKeyDown={submitOnEnter}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-compare-right" className="text-2xs text-content-secondary">
+                {t('shell.compare.rightPath')}
+              </label>
+              <input
+                id="new-compare-right"
+                type="text"
+                className={INPUT_CLASSES}
+                value={right}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t('shell.compare.rightPlaceholder')}
+                onChange={(event) => setRight(event.target.value)}
+                onKeyDown={submitOnEnter}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-compare-base" className="text-2xs text-content-secondary">
+                {t('files.merge.side.base')}
+              </label>
+              <input
+                id="new-compare-base"
+                type="text"
+                className={INPUT_CLASSES}
+                value={base}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t('shell.compare.basePlaceholder')}
+                onChange={(event) => setBase(event.target.value)}
+                onKeyDown={submitOnEnter}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-compare-ours" className="text-2xs text-content-secondary">
+                {t('files.merge.side.ours')}
+              </label>
+              <input
+                id="new-compare-ours"
+                type="text"
+                className={INPUT_CLASSES}
+                value={ours}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t('shell.compare.oursPlaceholder')}
+                onChange={(event) => setOurs(event.target.value)}
+                onKeyDown={submitOnEnter}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-compare-theirs" className="text-2xs text-content-secondary">
+                {t('files.merge.side.theirs')}
+              </label>
+              <input
+                id="new-compare-theirs"
+                type="text"
+                className={INPUT_CLASSES}
+                value={theirs}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t('shell.compare.theirsPlaceholder')}
+                onChange={(event) => setTheirs(event.target.value)}
+                onKeyDown={submitOnEnter}
+              />
+            </div>
+          </>
+        )}
 
         {issue ? (
           <p role="alert" className="text-2xs text-danger">
@@ -343,25 +502,27 @@ export function NewCompareDialog({
           </p>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <ToolbarButton
-            icon={<Icon name={SHELL_ENTRY_ICONS['open-file']} />}
-            onClick={() => void pick(onPickFiles)}
-            disabled={submitting}
-            title={t('shell.compare.pickFilesTitle')}
-          >
-            {t('shell.compare.pickFiles')}
-          </ToolbarButton>
-          <ToolbarButton
-            icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
-            onClick={() => void pick(onPickDirectories)}
-            disabled={submitting}
-            title={t('shell.compare.pickFoldersTitle')}
-          >
-            {t('shell.compare.pickFolders')}
-          </ToolbarButton>
-          <span className="ml-auto text-2xs text-content-muted">{t('shell.compare.hint')}</span>
-        </div>
+        {mode === 'pair' ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <ToolbarButton
+              icon={<Icon name={SHELL_ENTRY_ICONS['open-file']} />}
+              onClick={() => void pick(onPickFiles)}
+              disabled={submitting}
+              title={t('shell.compare.pickFilesTitle')}
+            >
+              {t('shell.compare.pickFiles')}
+            </ToolbarButton>
+            <ToolbarButton
+              icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
+              onClick={() => void pick(onPickDirectories)}
+              disabled={submitting}
+              title={t('shell.compare.pickFoldersTitle')}
+            >
+              {t('shell.compare.pickFolders')}
+            </ToolbarButton>
+            <span className="ml-auto text-2xs text-content-muted">{t('shell.compare.hint')}</span>
+          </div>
+        ) : null}
       </form>
     </Dialog>
   )

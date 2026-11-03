@@ -14,6 +14,7 @@ import type { InterpolationParams } from '@renderer/i18n/interpolate'
 import type { MessageKey } from '@renderer/i18n/messages'
 import { baseName } from './fileKinds'
 import type { FileKind } from './fileKinds'
+import { mergeSessionText } from './mergeSession'
 import type { WorkbenchSession } from './session'
 
 /** One fragment of a display text: literal user data or a dictionary key. */
@@ -86,6 +87,9 @@ const RUNTIME_DIRECTORY_STATS: readonly MessageKey[] = [
 ]
 
 const FILE_PAIR_STATS: readonly MessageKey[] = ['shell.stat.linesLeft', 'shell.stat.linesRight']
+
+/** The only stat a merge session shows; `activeMerge` overrides its value. */
+const MERGE_STATS: readonly MessageKey[] = ['shell.stat.conflicts']
 
 const MISSING_SUFFIX = {
   left: '::opencompare-missing-left',
@@ -218,6 +222,15 @@ export function describeSession(session: WorkbenchSession): SessionDisplay {
       title: [{ key: SAMPLE_KEYS[id].title }],
       subtitle: sampleSubtitle(id),
       stats: statEntries(session, SAMPLE_STAT_KEYS[id])
+    }
+  }
+
+  if (session.merge !== undefined) {
+    const text = mergeSessionText(session.merge)
+    return {
+      title: [{ text: text.title }],
+      subtitle: [{ text: text.subtitle }],
+      stats: statEntries(session, MERGE_STATS)
     }
   }
 
