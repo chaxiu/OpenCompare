@@ -34,6 +34,12 @@ export interface ComparisonHistoryEnvelope {
   readonly entries: readonly ComparisonHistoryEntry[]
 }
 
+/**
+ * Stable codes a history row persists after a failed reopen. Paths and raw
+ * platform messages are never stored, so these three codes are the whole set.
+ */
+export type ComparisonHistoryErrorCode = 'missing' | 'unreadable' | 'type-changed'
+
 /** Stable reasons a stored entry cannot be turned back into reopen arguments. */
 export type ComparisonHistoryReopenError =
   | 'invalid-entry'

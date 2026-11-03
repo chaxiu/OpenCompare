@@ -151,16 +151,18 @@ describe('workbench history home', () => {
     await waitFor(() => expect(tabs()).toHaveLength(1))
     await waitFor(async () => expect((await port.readComparisonHistory()).map((e) => [e.id, e.paths])).toEqual([[first?.id, [FILE_LEFT, FILE_RIGHT]]]))
   }, 60_000)
-  it('reports a reopen failure without leaking paths or touching the list', async () => {
+  it('reports a reopen failure without leaking paths and marks the row', async () => {
     const port = await memoryPort()
     const seeded = await seedEntry(port, 'directory', [GONE_LEFT, GONE_RIGHT])
     mount(port)
     fireEvent.click(await screen.findByRole('button', { name: reopenName(GONE_LEFT, GONE_RIGHT) }))
     const alert = await screen.findByRole('alert', {}, { timeout: 30_000 })
-    expect(alert.textContent).toContain(zh['shell.history.reopenFailed'])
+    expect(alert.textContent).toContain(
+      zh['shell.history.errorNotice.missing'].replace('{side}', zh['shell.history.side.left'])
+    )
     for (const path of [GONE_LEFT, GONE_RIGHT]) expect(alert.textContent).not.toContain(path)
     expect(tabs()).toHaveLength(0)
-    await expect(port.readComparisonHistory()).resolves.toEqual(seeded)
+    await expect(port.readComparisonHistory()).resolves.toEqual([{ ...seeded[0], error: 'missing' }])
   }, 60_000)
   it('removes one entry and hides the section after the last one, across a remount', async () => {
     const port = await memoryPort()
@@ -222,7 +224,7 @@ describe('workbench history home', () => {
       await screen.findByRole('alert', {}, { timeout: 30_000 })
       const output = calls.join('\n')
       for (const path of [DIR_LEFT, DIR_RIGHT, FILE_LEFT, FILE_RIGHT, GONE_LEFT, GONE_RIGHT]) expect(output).not.toContain(path)
-      await expect(port.readComparisonHistory()).resolves.toEqual(seeded)
+      await expect(port.readComparisonHistory()).resolves.toEqual([{ ...seeded[0], error: 'missing' }])
     } finally {
       restore()
     }

@@ -37,6 +37,10 @@ const LATIN_ONLY_KEYS = new Set([
   'files.merge.side.base',
   'files.merge.side.ours',
   'files.merge.side.theirs',
+  // History rows name the same three merge sides with the same technical words.
+  'shell.history.side.base',
+  'shell.history.side.ours',
+  'shell.history.side.theirs',
   // Format identifiers stay JSON / YAML in both dictionaries.
   'files.structured.format.json',
   'files.structured.format.yaml'

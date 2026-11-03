@@ -180,5 +180,19 @@ export const shell = {
   'shell.history.reopenTitle': '重开 {paths}',
   'shell.history.removeTitle': '移除 {paths}',
   'shell.history.reopenFailed':
-    '无法重开这条对比：路径可能已删除、不可读或类型已变化。'
+    '无法重开这条对比：路径可能已删除、不可读或类型已变化。',
+  'shell.history.error.missing': '缺失',
+  'shell.history.error.unreadable': '不可读',
+  'shell.history.error.typeChanged': '类型变化',
+  'shell.history.errorNotice.missing': '无法重开：{side}路径已不存在或已被删除。',
+  'shell.history.errorNotice.unreadable': '无法重开：{side}路径不可读。',
+  'shell.history.errorNotice.typeChanged': '无法重开：{side}路径的类型已变化。',
+  'shell.history.side.left': '左侧',
+  'shell.history.side.right': '右侧',
+  'shell.history.side.base': 'base',
+  'shell.history.side.ours': 'ours',
+  'shell.history.side.theirs': 'theirs',
+  'shell.history.clear': '清空历史',
+  'shell.history.clearConfirm': '确认清空',
+  'shell.history.clearTitle': '清空全部最近对比'
 } as const
