@@ -100,3 +100,9 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 4. **唯一公开正式 Release**：`finalize` 后用 `gh api --paginate` 统计该 tag 的 Release，要求恰好 1 个且 `draft=false`、`prerelease=false`；该 Release 资产必须覆盖 `.dmg`、`.zip`、`.exe`、`.AppImage`、`.deb` 与 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`，版本化资产名均含 tag 版本。
 
 上述校验步骤与上传步骤没有 `continue-on-error` / `|| true` 等绕行路径；6 项 Secret 仍由人类录入，缺失即 fail-closed。
+
+## 七、Windows Authenticode 口径（未签名发布姿态）
+
+- `electron-builder.yml` 的 `win` 段没有签名配置，Windows 安装包按**未签名发布姿态**发布，`scripts/verify-release.mjs` 的 `windows-authenticode` 记录原始 `Status`：`NotSigned` 判 pass 并写明「Windows 未签名发布姿态」，`Valid` 判 pass（将来补证书不改代码），`UnknownError` / `HashMismatch` / 空值 / 其他值与 pwsh 非零退出一律 fail（fail-closed）。
+- `release.yml` 的 `Build installers` 只在 `matrix.target == 'mac'` 时注入 `CSC_LINK` / `CSC_KEY_PASSWORD`。修复 v0.2.17 复验暴露的缺陷：此前三平台矩阵共用该 env，Windows PE 被 macOS Developer ID 证书污染成不可信签名，`Get-AuthenticodeSignature` 返回 `UnknownError`（见 `docs/lessons.md` §14）。
+- 补签时机：取得 Windows 代码签名证书后，在 `electron-builder.yml` 的 `win` 段与 CI Secrets 接线，届时 `Valid` 自然通过；在此之前不得把断言写成 `Valid`、不得跳过或降级 warn。

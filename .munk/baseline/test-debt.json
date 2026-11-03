@@ -1,14 +1,14 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "ed3116efcb8ebe3bf33ee30c67eb829b577e30df",
+    "commit": "db82de3e4c215b412bc110de7cd74d5c8bb3ea8d",
     "date": "2026-11-03"
   },
   "ceilings": {
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 45245
+    "repoTestLines": 45384
   },
   "floors": {
     "appTestCases": 94,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 44854,
-      "to": 45245,
-      "reason": "spike process-tree gate: linux detached process group, SIGTERM then SIGKILL escalation, released stdout/stderr pipes, success/failure reap, deterministic CLI exit",
-      "addedCases": 11
+      "from": 45245,
+      "to": 45384,
+      "reason": "post-release-verify fix: linux AppRun launch and shared xvfb detached process-group teardown for the deb/directory-compare/cancel legs, launch diagnostics in step JSON and log, Authenticode NotSigned/Valid pass with everything-else fail",
+      "addedCases": 10
     }
   ]
 }

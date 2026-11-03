@@ -88,7 +88,7 @@
 - fixture 自包含：显式 `git init -b`、`GIT_AUTHOR_*` / `GIT_COMMITTER_*`、`GIT_CONFIG_*=/dev/null`，丢弃继承的 `GIT_*` 并指向独立 HOME。
 - 祖先门脚本内联在 `release.yml` 步骤 `run` 中（旧 tag checkout 无仓库脚本），测试执行真实步骤文本；`gates` checkout 配 `fetch-depth: 0`。
 - 预建 / 上传 / finalize 统一 `GH_TOKEN` + `GH_REPO` 并显式 `--repo`；聚合上传设 `shell: bash` 以兼容 pwsh，`--clobber` 保证可重跑。
-- 凭据只经 Secrets / 环境变量注入；`::error::` 只列缺失名称；fail-closed 优先于继续发版，缺凭据即升级而非交付裸包。
+- 凭据只经 Secrets / 环境变量注入；`::error::` 只列缺失名称；fail-closed 优先于继续发版，缺凭据即升级而非交付裸包。**`Build installers` 的 `CSC_LINK` / `CSC_KEY_PASSWORD` 只对 `matrix.target == 'mac'` 注入**——Developer ID 证书泄漏到 win 矩阵会把 Windows PE 签成不可信签名（`Get-AuthenticodeSignature` 返回 `UnknownError`），该口径的验收与判定表归 `domains/release-verify`。
 - 品牌资产唯一入库位置为 `build/`，生成脚本只用 Node 标准库与本机系统工具；`electron-builder.yml` 只加必需字段、不重排既有配置。
 - 版本单一来源 `package.json#version`；`currentTag` 派生、`latestPublishedTag` 单独钉住，发布通道在收敛 / 收尾 / 取证轮全程只读（不打 tag、不 push、不 dispatch、不写 Release）。
 - 门禁命令为单条 argv；提交前 `pnpm lint && pnpm typecheck && pnpm test`；`.munk/code-gates.json` 全绿且不新增 gate 项。

@@ -11,6 +11,9 @@
 - **per-step 证据**：每项检查写 `<out>/steps/<NN>-<id>.json`（`id` / `name` / `command` / `expected` / `actual` / `status` / `evidence` / `startedAt` / `finishedAt`，`status` 仅 `pass|fail|skip`），stdout / stderr 落 `<out>/logs/<NN>-<id>.log`，`evidence` 必须指向真实存在的文件。
 - **单一终局判定**：最终 fail-closed 结论只由导出纯函数 `judgeReleaseGate(summary, { expectedIds, exists })` 产出（`ok === true` 当且仅当 `validateSummary` 无问题且 `status === 'pass'`）；`--aggregate` 与普通分支共用，退出码只由 `ok ? 0 : 1` 派生，脚本内不保留第二份内联判定。
 - **只读 workflow**：`.github/workflows/post-release-verify.yml` 仅由 `workflow_dispatch`（输入 `tag`，`required: true`）触发，`run-name: post-release-verify ${{ inputs.tag }}`，`permissions: contents: read`，零 `secrets.*`，只调 `gh api` / `gh release download`；`spike` job 先于平台矩阵，各 job 用 `actions/upload-artifact` 归档 `<out>`。
+- **Linux GUI 腿统一启动与收尾**：`linux-deb-version` / `linux-directory-compare` / `cancel-leg` 与 spike 共用 `buildXvfbAppLaunch`（`xvfb-run -a <exe> --no-sandbox --disable-dev-shm-usage … --remote-debugging-port=<port>`）与 `processGroup: spikeUsesProcessGroup('linux')`，收尾走同一 `stopChild`（整组 SIGTERM→SIGKILL + 管道 / 监听解绑）。AppImage 腿执行解包根 `AppRun`（导出 `APPDIR` / `LD_LIBRARY_PATH`），**缺 `AppRun` 直接 fail**，不得退回裸二进制或 skip。
+- **启动诊断进 step JSON 与 step log**：`launchApp` 失败时不再只留 `error.message`；`stepDiagnostics(error)` 把 `reason` / `exitCode` / `signal` / `stdout` / `stderr` / `portProbe` 写进 `actual.diagnostics`，`formatStepDiagnostics` 写 step log；stdout / stderr 按 `STEP_DIAGNOSTIC_TEXT_LIMIT=8000` 截断并记 `truncated` / `originalChars`，未超限原样保留。
+- **Windows Authenticode 口径**：始终记录原始 `Status`；`NotSigned`（证据含「Windows 未签名发布姿态」）与 `Valid` pass，`UnknownError` / `HashMismatch` / 空值 / 其他值 / 非零 pwsh 退出全 fail。发布侧配套：`release.yml` 的 `Build installers` 只在 `matrix.target == 'mac'` 注入 `CSC_*`，避免 macOS 证书把 Windows PE 签成不可信签名。
 
 ## 验收
 
@@ -22,9 +25,9 @@
 - **ac-ci-no-b-layer**：`--layer=ci` 不读 `/Users/zhutao/opencompare-fixtures`、不生成 / 下载 6.4 GiB 夹具、不执行 L3；单测用 sentinel 路径与注入 fs 断言零访问。
 - **ac-identity**：给定资产元数据 fixture 与同字节文件，逐资产断言存在 / 字节数相等 / sha256 相等；缺失、字节不等、sha 不等或元数据缺 sha256 时该步 fail、非零退出，`actual` 写出资产名与期望 / 实测值。
 - **ac-mac**：对下载 dmg 执行 `hdiutil attach -nobrowse -readonly`，`.app` 拷干净临时目录，断言 `CFBundleShortVersionString` 等于 tag 去 `v`、`codesign --verify --deep --strict` 退出 0、`spctl -a -t exec` 含 `accepted` 与 `Notarized Developer ID`、`xcrun stapler validate` 退出 0；无论成败都 detach；任一断言失败即 fail。
-- **ac-linux**：在 `xvfb-run` 下展开 / 启动 AppImage 与 deb，版本等于 tag 版本；用脚本生成的合成左右树（每侧 ≤2,000 文件、总量 ≤50 MiB）跑一次目录对比，四态计数与 fixture 期望相等；启动失败、版本不等或计数不等即 fail。
-- **ac-windows**：解压 `OpenCompare-<ver>-win-x64.zip` 断言规范化版本等于 tag 版本；对 `OpenCompare-Setup-<ver>.exe` 执行 `Get-AuthenticodeSignature` 断言 `Status=Valid`；不驱动原生对话框；失败即 fail。
-- **ac-cancel-log**：取消腿在 Linux xvfb 用合成树启动对比，观察到进度后取消，断言回可操作态且无残留临时文件；随后扫描本次全部 stdout / stderr 与可定位日志，`OperationCancelledError|ECANCELED` 命中 0 次；取消点未命中或命中噪声即 fail，不得 skip。
+- **ac-linux**：Linux 腿一律经 `buildXvfbAppLaunch` 在 `xvfb-run` 下启动（deb 可执行文件 / AppImage 解包根 `AppRun`），版本等于 tag 版本；用脚本生成的合成左右树（每侧 ≤2,000 文件、总量 ≤50 MiB）跑一次目录对比，四态计数与 fixture 期望相等；缺 `AppRun`、启动失败、版本不等或计数不等即 fail，不得 skip / warn。
+- **ac-windows**：解压 `OpenCompare-<ver>-win-x64.zip` 断言规范化版本等于 tag 版本；对 `OpenCompare-Setup-<ver>.exe` 执行 `Get-AuthenticodeSignature` 并记录原始 `Status`：`NotSigned` pass（证据写「Windows 未签名发布姿态」）、`Valid` pass、其余值与非零 pwsh 退出 fail；不驱动原生对话框。
+- **ac-cancel-log**：取消腿按同一 `buildXvfbAppLaunch` + 进程组启动（AppImage 用解包根 `AppRun`），观察到进度后取消，断言回可操作态且左右树无残留文件 / `.tmp`；随后扫描本次全部 stdout / stderr 与可定位日志，`OperationCancelledError|ECANCELED` 命中 0 次；取消点未命中、有残留或命中噪声即 fail，不得 skip。
 - **ac-fail-closed-evidence**：`summary.json` 必含 `tag` / `layer` / `status` / `counts {pass,fail,skip,total,expected}` / `environment {ImageOS,ImageVersion,RUNNER_OS,GITHUB_RUN_ID}` / `evidenceDir`；缺字段、检查项数不等于期望或证据不存在即 `status=fail` 且非零退出。
 - **ac-workflow-trigger**：`.github/workflows/post-release-verify.yml` 只在 `workflow_dispatch`（输入 `tag`，`required: true`）触发，`on` 的键集合恰为 `['workflow_dispatch']`（`release` / `push` / `schedule` 均不得出现——`GITHUB_TOKEN` 公开 Release 不触发新 run）；`run-name` 等于 `post-release-verify ${{ inputs.tag }}`；`permissions: contents: read`；不引用 `secrets.*`，不出现 `gh release upload|edit|create|delete`、`git tag`、`git push` 或任何写 Release / tag / 资产的命令。
 - **ac-workflow-artifact**：每个 job 用 `actions/upload-artifact` 归档 `<out>`，artifact 名含 tag 与 run id；归档至少含 `summary.json`、全部 `steps/*.json`、`logs/*.log`；上传步骤可用 `if: always()`，但不得用 `continue-on-error` 掩盖检查失败。
@@ -74,6 +77,15 @@
 - **ac-repro-before-fix / ac-lessons-updated**：改动前在真实 run 证据上复核，并用假进程树在旧代码上复现「stop 后孙进程存活、父进程不退出」；`docs/lessons.md` 新增第 13 节记录 run / artifact / 根因 / 收尾契约，由门禁 markers 断言。
 - **ac-real-run-closed**：合入 main 后再 dispatch 一次 `post-release-verify`，双 OS spike job success 且正常结束、三条 verify 腿真跑、aggregate `total>0` 含真实 pass/fail；新 run 链接回填。截至本轮仍未执行。
 
+### v0.2.17 三条红腿修复：Linux 启动/收尾与 Windows Authenticode 口径（WI `wi_intake_2e3f11bbcc75fdc2`）
+
+- **ac-run-evidence-rechecked**：改动前用 `gh run download 41564533825` 复核 Linux / Windows 的 step JSON 与 job log，并在交付记录引用 artifact / step（两条 Linux 腿 0.5 s / 2.2 s 秒退、orphan `Xvfb` + 6 个 `opencompare`、`windows-authenticode` 实测 `UnknownError` + exit 0）。
+- **ac-diagnostics-on-step / ac-diagnostics-asserted**：启动失败时 step JSON 的 `actual.diagnostics` 与 step log 都含 `reason` / `exitCode` / `signal` / `stdout` / `stderr` / `portProbe`；超限按 `STEP_DIAGNOSTIC_TEXT_LIMIT` 截断并标注，未超限原样保留；门禁用注入的失败 `launchApp` 断言，非启动类失败不带空诊断。
+- **ac-linux-directory-compare-starts / ac-cancel-leg-starts / ac-linux-process-group-teardown / ac-no-new-orphans**：两条腿用与 spike 同源的 xvfb + `AppRun` 启动真正起窗口（四态计数与合成树期望完全相等；取消后回可操作态且左右树无残留）；三条 Linux 腿全部 `detached` 进程组 + 整组 SIGTERM→SIGKILL + 管道 / 监听解绑（复用 `spawnCapturedChild` / `stopChild`），结束后不残留 `Xvfb` / `opencompare`，预算不延长。
+- **ac-authenticode-status-branch / ac-authenticode-gate**：始终记录原始 `Status`；`NotSigned`（附未签名姿态）与 `Valid` pass，`UnknownError` / `HashMismatch` / 空值 / 未知值与非零 pwsh 退出 fail；门禁覆盖每个分支并断言 `release.yml` 的 `CSC_*` 只对 mac 注入，替换旧「`NotSigned` 必 fail」用例。
+- **ac-expected-15 / ac-code-gates**：`expectedCheckIds` / `expected=15` / leg 数量与 `judgeReleaseGate` / `validateSummary` 语义不变；`pnpm test` / `typecheck` / `lint` 与受影响的 `spike-process-tree-gate` / `spike-launch-gate` / `verify-release-gate` 全绿。
+- **ac-docs-synced / ac-no-history-rewrite**：`AGENTS.md` 硬约束 +≤2 行（Linux GUI 腿同源启动 / 收尾 + step 证据；未签名 Windows 只断言 `NotSigned`）；`docs/lessons.md` 记 run / 根因 / 口径 / 断言位置；`release-signing.md` 与 `verify-release.d.mts` 同代码一致。不改已公开 tag / Release / 资产；交付须写明「合入 main 后重 dispatch、双 spike success + 三平台 verify 全 pass + aggregate total=15」为外部验证条件。
+
 ## 非目标
 
 - 不改 `release.yml` 的发布通道、门禁口径、双语组装、finalize 逻辑；不新增签名密钥；不修改已公开 tag / Release / 资产 / 正文。
@@ -92,11 +104,14 @@
 - **收尾一次性、可注入、不延长预算**：Linux 组信号 + SIGTERM→SIGKILL 升级 + 管道释放只在 `stopChild` / `spawnCapturedChild` 一处实现，成功与失败路径共用；`process.exit` 只在脚本入口经 `exitAfterFlush` 使用，库函数不得退出进程；`SPIKE_PROCESS_EXIT_BUDGET_MS` / `SPIKE_TARGET_TIMEOUT_MS` / `SPIKE_APP_SHELL_TIMEOUT_MS` 不得为「治挂起」调大。
 - **终局判定只能有一处**：`buildSummary` 只负责生成 `status`，最终 fail-closed 结论只由 `judgeReleaseGate` 给出；该函数必须纯（不读文件 / `process.env` / 不发网络 / 不依赖时钟），`exists` 由调用方注入（CLI 默认 `existsSync`，测试传常量）；新增检查或字段时同步更新 `expectedIds` 与纯函数用例。
 - **证据与断言落点**：`src/verify-release-gate.test.ts`（纯函数 + 注入 fixture，不连网、不启 Electron、不访问本机 6.4 GiB 路径）与 `.munk/code-gates.json` 的 `verify-release-gate`；`pnpm test` 必须包含该文件并通过。
+- **Linux 启动只有一份描述、收尾只有一处实现**：spike 与三条 verify 腿都必须经 `buildXvfbAppLaunch` / `buildSpikeLaunchDescriptor` 取得 `command` + `args`，脚本内不得出现第二份 `xvfb-run` 拼装；`detached` 进程组、SIGTERM→SIGKILL 升级、管道释放只在 `spawnCapturedChild` / `stopChild` 一处实现，成功与失败路径共用。
+- **诊断可注入、结论优先于消息**：`stepDiagnostics` / `formatStepDiagnostics` 是 step `actual.diagnostics` 与 step log 的唯一入口，截断上限以导出常量表达；门禁用抛 `diagnostics` 的假 `launchApp` 驱动，禁止启真实 Electron / xvfb。只把 `error.message` 写进 step 视为回归。
+- **Authenticode 判定表固定且 fail-closed**：`NotSigned`（附未签名姿态说明）与 `Valid` pass，其余值与非零退出全 fail；不接受「任何状态都 pass」，也不得改回 `Valid` 单值或跳过。`CSC_*` 只对 mac 注入。
 
 ## 最近交付证明
 
-- WI：`wi_intake_b3be192f93d073b2`（**Linux spike 成功启动后不退出与孤儿进程收尾**：Linux 起窗进独立进程组，stop 对 `-pid` 整组 SIGTERM→SIGKILL 并有界 resolve，随后无条件 destroy `stdout`/`stderr` 与解绑监听；成功与失败路径共用同一 stop；证据落盘后 `exitAfterFlush` drain-aware 退出，`process.exit` 只在模块入口；`deliveryIntent: local merge`，`needSelfTest=false`）
+- WI：`wi_intake_2e3f11bbcc75fdc2`（**v0.2.17 复验三条红腿：Linux 两条 verify 腿秒退 / 孤儿进程与 Windows Authenticode `UnknownError`**：三条 Linux GUI 腿改用 `buildXvfbAppLaunch` 起 `xvfb-run -a <deb 可执行文件|解包根 AppRun>` 并进 `detached` 进程组，收尾复用 spike 的 `stopChild` 整组 SIGTERM→SIGKILL + 管道解绑；`launchApp` 失败时把 `reason` / `exitCode` / `signal` / `stdout` / `stderr` / `portProbe` 写进 step JSON 与 log（截断上限 8000 字符并标注）；Authenticode 改为 `NotSigned` / `Valid` pass、其余 fail-closed，并在 `release.yml` 收窄 `CSC_*` 只注入 mac 以消除 Windows PE 被 macOS 证书污染；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-11-03
-- 结果：`code_gates` passed（26 gates，attempt 001 全 exit 0，`latest.json` `ok: true`、`failedGateIds: []`）；`test` 门 125 files / 1961 passed + 1 skipped；新增 `spike-process-tree-gate` 单跑 11 tests / 830ms（不启真实窗口、不联网）。
-- 改动面（本域相关）：`scripts/verify-release.mjs` +279/−50（`spikeUsesProcessGroup` / `spawnCapturedChild` / `stopChild` / `exitAfterFlush` 与 3 个新预算常量）；`scripts/verify-release.d.mts` +44；`src/spike-process-tree-gate.test.ts` 新增 386 行；`.munk/code-gates.json` 新门禁（紧跟 `spike-launch-gate`）；`src/munk-gates.test.ts` pin 25 → 26；`.munk/baseline/test-debt.json` `growth` 44,854 → 45,245（+391 ≤400）、`repoTestCases` floor 1461 → 1472；`docs/lessons.md` 第 13 节。零 diff：`package.json#version`（0.2.18）、`post-release-verify.yml`、`release.yml`、`expectedCheckIds`（仍 15 项）、任何 `SPIKE_*` 预算值。
-- 注：根因是「只杀直接子进程 + 不释放管道」——旧 `stopChild` 在 leader 已退出时直接返回，孙进程持 `stdout`/`stderr` 写端钉住父事件循环，故 `conclusion=window-booted` 的成功路径同样中招，后续不得只在 catch 分支收尾、也不得以延长 `SPIKE_*` 预算掩盖；`ac-real-run-closed`（修复后双 OS spike success、三 verify 腿真跑、aggregate `total>0`）与合入 main 后的 dispatch 取证尚未执行，不得据此声称发布验收已恢复。
+- 结果：`code_gates` passed（**26 gates**，attempt 001 全 exit 0，`.munk/runs/run_intake_2e3f11bbcc75fdc2/code-gates/attempts/001`，`latest.json` `ok: true`、`failedGateIds: []`）；`test` 门 125 files / **1972 passed + 1 skipped**、30.24 s；`verify-release-gate` 单跑 56 tests / 17.96 s。
+- 改动面（本域相关）：`scripts/verify-release.mjs`（新增 `buildXvfbAppLaunch` / `stepDiagnostics` / `formatStepDiagnostics` / `STEP_DIAGNOSTIC_TEXT_LIMIT` / `AUTHENTICODE_*` 导出，三条 Linux 腿共用启动描述与进程组，catch 改走 `launchFailureActual`）；`scripts/verify-release.d.mts` +30；`src/verify-release-gate.test.ts` +177；`src/main/release-artifacts-and-brand.test.ts` +8（`CSC_*` 只对 mac）；`release.yml` 9 行；`AGENTS.md` +2；`docs/release-signing.md` +6；`docs/lessons.md` +10；两版 README 各 1 行（Linux 需 `libfuse2`）；`.munk/baseline/test-debt.json` `growth` 45,245 → 45,384、`addedCases: 10`。零 diff：`package.json#version`（0.2.18）、`.munk/code-gates.json`（26 门）、`post-release-verify.yml`、`expectedCheckIds`（15 项）、`SPIKE_*` 预算、已公开 `v0.2.17` tag / Release / 资产。
+- 注：① 本 WI change pack **只有 `prd.md`**，逐条 AC 与证据复核落档在 `qa/post-release-verify-red-legs-fix.md`。② **根因不是「未签名」而是签名污染**：Setup PE 证书主体是 Apple `Developer ID Application: Tao Zhu (3X4J53U6RY)`，旧 `release.yml` 把 macOS `CSC_*` 注入 win / linux 矩阵；Linux 侧不是产物起不来（同 job deb 腿通过），而是旧收尾只杀 `xvfb-run` 直接子进程，Electron 孙进程持单实例锁与 Xvfb，导致后续实例秒退。③ **Windows 口径要等下次重新打包才可能转绿**：当前 `v0.2.17` 资产仍是 Apple 证书签名，按 fail-closed 继续 fail，不得放宽或跳过。④ **实机证据仍缺**：`ac-real-run-closed` 需合入 main 后重 dispatch 取证，本项不得声称发布验收已恢复。

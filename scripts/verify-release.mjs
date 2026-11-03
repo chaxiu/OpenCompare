@@ -89,6 +89,22 @@ export const SPIKE_PROCESS_KILL_WAIT_MS = 1_000
 export const SPIKE_PROCESS_POLL_INTERVAL_MS = 25
 export const SPIKE_EXIT_FLUSH_TIMEOUT_MS = 1_000
 
+/**
+ * Startup diagnostics are recorded in full up to this many characters per
+ * stream. A longer stdout / stderr is cut here and the step JSON / log say so;
+ * anything shorter is kept byte-for-byte (Electron stderr included).
+ */
+export const STEP_DIAGNOSTIC_TEXT_LIMIT = 8_000
+
+/**
+ * Authenticode is fail-closed: the Windows installer is published unsigned
+ * (`electron-builder.yml` has no win signing config), so `NotSigned` is the
+ * expected posture and `Valid` stays accepted for a future certificate. Every
+ * other value is a failure.
+ */
+export const AUTHENTICODE_PASS_STATUSES = ['NotSigned', 'Valid']
+export const AUTHENTICODE_UNSIGNED_NOTE = 'Windows 未签名发布姿态'
+
 /** Closed set of spike failure reasons; no other value may reach `spike.json`. */
 export const SPIKE_FAILURE_REASONS = ['process-exited', 'no-page-target', 'app-shell-timeout']
 
@@ -251,7 +267,7 @@ export const CI_CHECK_GROUPS = [
       {
         id: 'linux-directory-compare',
         name: 'A synthetic directory pair compares to the expected four-state counts',
-        command: 'xvfb-run -a <AppImage> <left> <right>',
+        command: 'xvfb-run -a <AppImage AppRun> <left> <right>',
         run: runLinuxDirectoryCompare
       }
     ]
@@ -268,7 +284,7 @@ export const CI_CHECK_GROUPS = [
       },
       {
         id: 'windows-authenticode',
-        name: 'Get-AuthenticodeSignature reports Valid for the installer',
+        name: 'Get-AuthenticodeSignature reports NotSigned or Valid for the installer',
         command: 'pwsh -NoProfile -Command Get-AuthenticodeSignature',
         run: runWindowsAuthenticode
       }
@@ -281,7 +297,7 @@ export const CI_CHECK_GROUPS = [
       {
         id: 'cancel-leg',
         name: 'Cancelling during progress returns to an operable state without leftovers',
-        command: 'xvfb-run -a <AppImage> <left> <right>',
+        command: 'xvfb-run -a <AppImage AppRun> <left> <right>',
         run: runCancelLeg
       },
       {
@@ -1005,6 +1021,31 @@ async function probeDevToolsTargets(port) {
 }
 
 /**
+ * The one Linux xvfb command shape. The repo spike and the packaged verify legs
+ * (AppImage `AppRun`, deb binary) all start this way, so the sandbox / dev-shm
+ * flags and the debug port can never drift between them.
+ */
+export function buildXvfbAppLaunch({ executable, args = [], port } = {}) {
+  if (typeof executable !== 'string' || executable.length === 0) {
+    throw new Error('Linux 启动需要一个可执行文件')
+  }
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw new Error(`Linux 端口非法: ${port}`)
+  }
+  return {
+    command: 'xvfb-run',
+    args: [
+      '-a',
+      executable,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      ...args,
+      `--remote-debugging-port=${port}`
+    ]
+  }
+}
+
+/**
  * One platform launch descriptor. macOS stays byte-for-byte the old command;
  * Linux owns its own xvfb and the two Chromium flags its verify legs already
  * use. Everything else launches the same Electron entry directly.
@@ -1023,11 +1064,7 @@ export function buildSpikeLaunchDescriptor({
   }
   const debugging = `--remote-debugging-port=${port}`
   if (platform === 'linux') {
-    return {
-      command: 'xvfb-run',
-      args: ['-a', electronBinary, '.', '--no-sandbox', '--disable-dev-shm-usage', debugging],
-      cwd: root
-    }
+    return { ...buildXvfbAppLaunch({ executable: electronBinary, args: ['.'], port }), cwd: root }
   }
   return { command: electronBinary, args: ['.', debugging], cwd: root }
 }
@@ -1124,6 +1161,58 @@ export function formatSpikeLaunchLog(record) {
     )
   }
   return `${lines.join('\n')}\n`
+}
+
+/**
+ * One startup failure flattened into step evidence. `stdout` / `stderr` are cut
+ * at an explicit cap and the record carries the truncation flag plus the real
+ * length; below the cap the text survives unchanged, Electron stderr included.
+ */
+export function stepDiagnostics(error, { limit = STEP_DIAGNOSTIC_TEXT_LIMIT } = {}) {
+  const detail = error?.diagnostics ?? {}
+  const bounded = (value) => {
+    const text = typeof value === 'string' ? value : ''
+    if (text.length <= limit) return { text, chars: text.length, truncated: false }
+    return { text: text.slice(0, limit), chars: text.length, truncated: true }
+  }
+  const stdout = bounded(detail.stdout)
+  const stderr = bounded(detail.stderr)
+  return {
+    reason: detail.reason ?? null,
+    exitCode: detail.exitCode ?? null,
+    signal: detail.signal ?? null,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    portProbe: Array.isArray(detail.portProbe) ? detail.portProbe : [],
+    textLimit: limit,
+    truncated: { stdout: stdout.truncated, stderr: stderr.truncated },
+    originalChars: { stdout: stdout.chars, stderr: stderr.chars }
+  }
+}
+
+/** The same diagnostics as a plain-text log block, without JSON escaping. */
+export function formatStepDiagnostics(diagnostics) {
+  const lines = [
+    '--- launch diagnostics ---',
+    `reason=${diagnostics.reason ?? 'none'} exitCode=${diagnostics.exitCode ?? 'null'} ` +
+      `signal=${diagnostics.signal ?? 'null'} textLimit=${diagnostics.textLimit}`,
+    `stdoutChars=${diagnostics.originalChars.stdout} ` +
+      `stderrChars=${diagnostics.originalChars.stderr} stdoutTruncated=${diagnostics.truncated.stdout} ` +
+      `stderrTruncated=${diagnostics.truncated.stderr}`,
+    '--- launch stdout ---',
+    diagnostics.stdout ?? '',
+    '--- launch stderr ---',
+    diagnostics.stderr ?? '',
+    '--- launch /json/list probes ---'
+  ]
+  for (const probe of diagnostics.portProbe ?? []) {
+    lines.push(
+      `[${probe.at}] ok=${probe.ok} pageTargets=${probe.pageTargets}` +
+        `${probe.url === null || probe.url === undefined ? '' : ` url=${probe.url}`}` +
+        `${probe.error === null || probe.error === undefined ? '' : ` error=${probe.error}`}`
+    )
+  }
+  return lines.join('\n')
 }
 
 /** Minimal DevTools-protocol client over the global WebSocket (Node 22+). */
@@ -1379,6 +1468,22 @@ function pass(expected, actual, extraEvidence = []) {
 
 function fail(expected, actual, extraEvidence = []) {
   return { status: 'fail', expected, actual, extraEvidence }
+}
+
+/**
+ * A launch failure keeps its whole diagnostics record on the step, not only
+ * `error.message`: reason / exit / signal / stdout / stderr / portProbe are the
+ * evidence a maintainer needs to tell a broken artifact from a broken runner.
+ */
+function launchFailureActual(error, extra = {}) {
+  const actual = {
+    ...extra,
+    error: error instanceof Error ? error.message : String(error)
+  }
+  // Non-launch failures (a missing cancel button, a DOM wait) carry no
+  // diagnostics; only a failed launch gets the full record on the step.
+  if (error?.diagnostics !== undefined) actual.diagnostics = stepDiagnostics(error)
+  return actual
 }
 
 function createCheckContext({ world, tag, outDir, workRoot, state, environment }) {
@@ -1688,16 +1793,27 @@ function findLinuxBinary(ctx, root, depth = 3) {
 }
 
 async function runLinuxAppImage(ctx) {
-  const expected = { version: normalizeVersion(ctx.tag), binary: 'resolved from the unpacked AppImage' }
+  const expected = {
+    version: normalizeVersion(ctx.tag),
+    binary: 'resolved from the unpacked AppImage',
+    appRun: 'unpacked AppRun launcher'
+  }
   const extracted = await extractAppImage(ctx, expected)
   if (!extracted.ok) return extracted.failure
   const version = readBundledVersion(ctx, extracted.root)
   const binary = findLinuxBinary(ctx, extracted.root)
-  const actual = { version, root: extracted.root, binary }
+  // The AppImage runtime starts `AppRun`, which exports APPDIR / LD_LIBRARY_PATH
+  // (and friends) before exec'ing the binary. The verify legs must use it too.
+  const appRun = join(extracted.root, 'AppRun')
+  const hasAppRun = ctx.world.exists(appRun)
+  const actual = { version, root: extracted.root, binary, appRun: hasAppRun ? appRun : null }
   if (binary === null) {
     return fail(expected, { ...actual, error: '解包后找不到 Linux 可执行文件' })
   }
-  ctx.state.linuxAppImage = { binary, root: extracted.root }
+  if (!hasAppRun) {
+    return fail(expected, { ...actual, error: '解包后找不到 AppImage 启动器 AppRun' })
+  }
+  ctx.state.linuxAppImage = { binary, appRun, root: extracted.root }
   if (!versionEqualsTag(version, ctx.tag)) {
     return fail(expected, { ...actual, error: 'AppImage 内 package.json 版本与 tag 不等' })
   }
@@ -1731,17 +1847,14 @@ async function runLinuxDeb(ctx) {
   let launch
   try {
     launch = await ctx.world.launchApp({
-      command: 'xvfb-run',
-      args: ['-a', binary, '--no-sandbox', `--remote-debugging-port=${port}`],
+      ...buildXvfbAppLaunch({ executable: binary, port }),
       port,
+      processGroup: spikeUsesProcessGroup('linux'),
       timeoutMs: 120_000
     })
     await launch.cdp.waitFor(APP_SHELL_EXPRESSION, 'deb app shell', { timeoutMs: 60_000 })
   } catch (error) {
-    return fail(expected, {
-      controlVersion,
-      error: error instanceof Error ? error.message : String(error)
-    })
+    return fail(expected, launchFailureActual(error, { controlVersion }))
   } finally {
     if (launch !== undefined) await launch.stop()
   }
@@ -1784,16 +1897,9 @@ async function runLinuxDirectoryCompare(ctx) {
   let counts
   try {
     launch = await ctx.world.launchApp({
-      command: 'xvfb-run',
-      args: [
-        '-a',
-        appImage.binary,
-        '--no-sandbox',
-        tree.left,
-        tree.right,
-        `--remote-debugging-port=${port}`
-      ],
+      ...buildXvfbAppLaunch({ executable: appImage.appRun, args: [tree.left, tree.right], port }),
       port,
+      processGroup: spikeUsesProcessGroup('linux'),
       timeoutMs: 120_000
     })
     await launch.cdp.waitFor(READY_DIRECTORY_EXPRESSION, 'synthetic comparison to settle', {
@@ -1801,7 +1907,7 @@ async function runLinuxDirectoryCompare(ctx) {
     })
     counts = await launch.cdp.evaluate(FOUR_STATE_EXPRESSION)
   } catch (error) {
-    return fail(expected, { error: error instanceof Error ? error.message : String(error) })
+    return fail(expected, launchFailureActual(error, { tree }))
   } finally {
     if (launch !== undefined) await launch.stop()
   }
@@ -1856,8 +1962,16 @@ async function runWindowsZipVersion(ctx) {
   return pass(expected, actual)
 }
 
+/**
+ * Fail-closed Authenticode: the raw `Status` is always recorded. `NotSigned` is
+ * the current unsigned Windows posture, `Valid` stays accepted for a future
+ * certificate, and every other value (or a non-zero pwsh exit) fails.
+ */
 async function runWindowsAuthenticode(ctx) {
-  const expected = { status: 'Valid', nativeDialog: 'never driven' }
+  const expected = {
+    status: AUTHENTICODE_PASS_STATUSES,
+    nativeDialog: 'never driven'
+  }
   const picked = singleAsset(ctx.state.release, /-Setup-.*\.exe$/, 'installer exe')
   if (!picked.ok) return fail(expected, { error: picked.reason })
   const exe = assetPath(ctx, picked.asset)
@@ -1867,9 +1981,20 @@ async function runWindowsAuthenticode(ctx) {
     `$s = Get-AuthenticodeSignature -LiteralPath '${exe.replace(/'/g, "''")}'; $s.Status`
   ])
   const actual = { status: result.stdout.trim(), exe, exit: result.status }
-  if (result.status !== 0) return fail(expected, actual)
-  if (actual.status !== 'Valid') return fail(expected, actual)
-  return pass(expected, actual)
+  if (result.status !== 0) {
+    return fail(expected, { ...actual, error: `Get-AuthenticodeSignature 退出 ${result.status}` })
+  }
+  if (!AUTHENTICODE_PASS_STATUSES.includes(actual.status)) {
+    return fail(expected, {
+      ...actual,
+      error: `Authenticode Status=${actual.status === '' ? '(空)' : actual.status} 不在 NotSigned / Valid`
+    })
+  }
+  return pass(expected, {
+    ...actual,
+    signingPose:
+      actual.status === 'NotSigned' ? AUTHENTICODE_UNSIGNED_NOTE : '已签名且签名有效'
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -1931,16 +2056,9 @@ async function runCancelLeg(ctx) {
   let cancelledAt = null
   try {
     launch = await ctx.world.launchApp({
-      command: 'xvfb-run',
-      args: [
-        '-a',
-        appImage.binary,
-        '--no-sandbox',
-        tree.left,
-        tree.right,
-        `--remote-debugging-port=${port}`
-      ],
+      ...buildXvfbAppLaunch({ executable: appImage.appRun, args: [tree.left, tree.right], port }),
       port,
+      processGroup: spikeUsesProcessGroup('linux'),
       timeoutMs: 120_000
     })
     await launch.cdp.waitFor(PROGRESS_EXPRESSION, 'progress to appear', {
@@ -1976,10 +2094,7 @@ async function runCancelLeg(ctx) {
     if (leftovers.length > 0) return fail(expected, { ...actual, leftovers })
     return pass(expected, actual)
   } catch (error) {
-    return fail(expected, {
-      cancelledAt,
-      error: error instanceof Error ? error.message : String(error)
-    })
+    return fail(expected, launchFailureActual(error, { cancelledAt }))
   } finally {
     if (launch !== undefined) {
       ctx.state.cancelOutput = launch.output.join('')
@@ -2181,7 +2296,7 @@ async function runLocalRounds(ctx) {
     ctx.state.rounds = rounds
     return fail(
       expected,
-      { rounds: rounds.length, error: error instanceof Error ? error.message : String(error) },
+      launchFailureActual(error, { rounds: rounds.length }),
       rounds.map((round) => join(ctx.outDir, 'evidence', `round-${round.index}.json`))
     )
   } finally {
@@ -2258,14 +2373,14 @@ async function executeChecks({ checks, world, outDir, workRoot, tag, environment
     try {
       outcome = await check.run(ctx)
     } catch (error) {
-      outcome = fail(
-        { note: '检查未完成' },
-        { error: error instanceof Error ? error.message : String(error) }
-      )
+      // Last-resort net: a launch that escapes its own check still keeps its
+      // reason / exit / signal / stdout / stderr / portProbe on the step.
+      outcome = fail({ note: '检查未完成' }, launchFailureActual(error))
     }
     const finishedAt = new Date().toISOString()
     const number = String(index + 1).padStart(2, '0')
     const logPath = join(logsDir, `${number}-${check.id}.log`)
+    const diagnostics = outcome.actual?.diagnostics
     const body = [
       `# ${check.id} — ${check.name}`,
       `status: ${outcome.status}`,
@@ -2273,7 +2388,8 @@ async function executeChecks({ checks, world, outDir, workRoot, tag, environment
       `expected: ${JSON.stringify(outcome.expected)}`,
       `actual: ${JSON.stringify(outcome.actual)}`,
       '',
-      ...ctx.log
+      ...ctx.log,
+      ...(diagnostics === undefined ? [] : ['', formatStepDiagnostics(diagnostics)])
     ].join('\n')
     writeFileSync(logPath, `${body}\n`, 'utf8')
     const stepPath = join(stepsDir, `${number}-${check.id}.json`)

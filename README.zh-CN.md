@@ -16,7 +16,7 @@ OpenCompare 是面向 Beyond Compare 5 Pro 使用场景的现代跨平台桌面�
 
 - **macOS arm64**：从 [Releases](https://github.com/chaxiu/OpenCompare/releases) 下载 `.dmg`，打开后将 OpenCompare 拖入 Applications，再从 Applications 启动。
 - **Windows**：运行 `.exe` 安装包，按向导完成安装后从开始菜单启动。
-- **Linux**：先 `chmod +x` 再运行 `.AppImage`；或用 `sudo apt install ./opencompare_amd64.deb` 安装 `.deb`。
+- **Linux**：先 `chmod +x` 再运行 `.AppImage`；或用 `sudo apt install ./opencompare_amd64.deb` 安装 `.deb`。`.AppImage` 通过 FUSE 2 挂载运行，需先安装 `libfuse2`（Ubuntu 24.04+ 为 `libfuse2t64`）；没有 FUSE 2 时可用 `APPIMAGE_EXTRACT_AND_RUN=1 ./OpenCompare-*.AppImage` 运行，或直接安装 `.deb`。
 
 所有已发布版本都在 [Releases 页](https://github.com/chaxiu/OpenCompare/releases)。
 
