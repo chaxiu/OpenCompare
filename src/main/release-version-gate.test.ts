@@ -153,9 +153,9 @@ describe('repository release facts', () => {
   })
 
   const noteFacts: Array<[string, readonly string[]]> = [
-    [releaseFacts.notes.englishLines.join('\n'), ['Ignore newline differences', 'Ignore encoding differences', 'on by default', 'byte-for-byte', 'one comparison result', 'status bar', 'Left newline', 'Left encoding', 'Right newline', 'Right encoding', 'not written back', 'three-way merge']],
-    [releaseFacts.notes.chineseLines.join('\n'), ['忽略换行符差异', '忽略编码差异', '默认开启', '逐字节', '同一份比较结果', '状态栏', '左侧换行符', '左侧编码', '右侧换行符', '右侧编码', '不写回', '三向合并']],
-    [markdownSection(changelog, currentTag), ['忽略换行符差异', '忽略编码差异', '默认开启', '状态栏']]
+    [releaseFacts.notes.englishLines.join('\n'), ['ignore whitespace', 'off by default', 'spaces', 'tabs', 'one comparison result', 'status bar', 'same session', 'scroll position and switches', 'keeps the previous result', 'swap', 'ruler and counts', 'restores']],
+    [releaseFacts.notes.chineseLines.join('\n'), ['忽略空白差异', '默认关闭', '空格', '制表符', '同一份比较结果', '状态栏', '不新建会话', '滚动位置与开关状态', '保留上一次结果', '交换', '指示条与计数', '复原']],
+    [markdownSection(changelog, currentTag), ['忽略空白差异', '默认关闭', '重载', '交换']]
   ]
   it.each(noteFacts)('states the current release facts', (markdown, tokens) => {
     const atoms = parseMarkdown(markdown)
