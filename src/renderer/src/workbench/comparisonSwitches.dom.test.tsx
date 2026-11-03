@@ -65,8 +65,18 @@ function countText(): string {
   return document.querySelector('[data-code-diff-count]')?.textContent ?? ''
 }
 
+/**
+ * Every persisted key except the recent-history store, which a real establish
+ * writes by design (covered by `historyHome.dom.test.tsx`). A switch toggle must
+ * not touch anything else.
+ */
 function storageSnapshot(): string {
-  return JSON.stringify(Object.keys(localStorage).sort().map((key) => [key, localStorage.getItem(key)]))
+  return JSON.stringify(
+    Object.keys(localStorage)
+      .filter((key) => key !== 'opencompare.comparisonHistory')
+      .sort()
+      .map((key) => [key, localStorage.getItem(key)])
+  )
 }
 
 /** The four original probe values of the status layer, in DOM order. */

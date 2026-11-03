@@ -184,5 +184,15 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.compare.error.UNSUPPORTED_FILE_TYPE':
     'Unsupported file type: {side} "{path}". Supported files are code/text, CSV/TSV and JSON/YAML.',
   'shell.compare.error.ACCESS_DENIED':
-    'Cannot access the {side} path: {path} (permission denied or unreadable).'
+    'Cannot access the {side} path: {path} (permission denied or unreadable).',
+  'shell.history.title': 'Recent comparisons',
+  'shell.history.kind.directory': 'Folder',
+  'shell.history.kind.file': 'File',
+  'shell.history.kind.merge': '3-way merge',
+  'shell.history.reopen': 'Reopen',
+  'shell.history.remove': 'Remove',
+  'shell.history.reopenTitle': 'Reopen {paths}',
+  'shell.history.removeTitle': 'Remove {paths}',
+  'shell.history.reopenFailed':
+    'Could not reopen this comparison: a path may be missing, unreadable or a different type.'
 }
