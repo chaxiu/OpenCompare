@@ -5,6 +5,7 @@ import {
 import type {
   ComparisonHistoryEntry,
   ComparisonHistoryEnvelope,
+  ComparisonHistoryErrorCode,
   ComparisonHistoryKind,
   ComparisonHistoryReopenResult,
   ComparisonHistorySwitches
@@ -18,6 +19,13 @@ const PATH_COUNT: Readonly<Record<ComparisonHistoryKind, number>> = {
 }
 
 type MutableEntry = { -readonly [K in keyof ComparisonHistoryEntry]: ComparisonHistoryEntry[K] }
+
+/** Narrows a persisted error string to the only three codes the app writes. */
+export function isComparisonHistoryErrorCode(
+  value: unknown
+): value is ComparisonHistoryErrorCode {
+  return value === 'missing' || value === 'unreadable' || value === 'type-changed'
+}
 
 /** Narrows an unknown value to a supported kind. */
 export function isComparisonHistoryKind(value: unknown): value is ComparisonHistoryKind {

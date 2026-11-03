@@ -1,7 +1,8 @@
-import { comparisonHistoryId } from '@shared/history/model'
+import { comparisonHistoryId, isComparisonHistoryErrorCode } from '@shared/history/model'
 import type { ComparisonHistoryCandidate } from '@shared/history/model'
 import type {
   ComparisonHistoryEntry,
+  ComparisonHistoryErrorCode,
   ComparisonHistoryKind,
   ComparisonHistorySwitches
 } from '@shared/history/types'
@@ -15,6 +16,39 @@ export const HISTORY_KIND_KEYS = {
   file: 'shell.history.kind.file',
   merge: 'shell.history.kind.merge'
 } satisfies Record<ComparisonHistoryKind, MessageKey>
+
+/** Short inline marker shown on a row whose last reopen failed. */
+export const HISTORY_ERROR_BADGE_KEYS = {
+  missing: 'shell.history.error.missing',
+  unreadable: 'shell.history.error.unreadable',
+  'type-changed': 'shell.history.error.typeChanged'
+} satisfies Record<ComparisonHistoryErrorCode, MessageKey>
+
+/** The in-place notice the shell shows when preflight rejects one row. */
+export const HISTORY_ERROR_NOTICE_KEYS = {
+  missing: 'shell.history.errorNotice.missing',
+  unreadable: 'shell.history.errorNotice.unreadable',
+  'type-changed': 'shell.history.errorNotice.typeChanged'
+} satisfies Record<ComparisonHistoryErrorCode, MessageKey>
+
+const MERGE_SIDE_KEYS: readonly MessageKey[] = [
+  'shell.history.side.base',
+  'shell.history.side.ours',
+  'shell.history.side.theirs'
+]
+
+/** Localized side label of the failing path; never a path itself. */
+export function historySideKey(kind: ComparisonHistoryKind, side: number): MessageKey {
+  if (kind === 'merge') return MERGE_SIDE_KEYS[side] ?? MERGE_SIDE_KEYS[0] ?? 'shell.history.side.base'
+  return side === 0 ? 'shell.history.side.left' : 'shell.history.side.right'
+}
+
+/** The known error code of one row, or `null` when it has none / an unknown one. */
+export function historyErrorCode(
+  entry: Pick<ComparisonHistoryEntry, 'error'>
+): ComparisonHistoryErrorCode | null {
+  return isComparisonHistoryErrorCode(entry.error) ? entry.error : null
+}
 
 /** The full path text one row shows (and keeps in its `title`). */
 export function historyPathsText(entry: Pick<ComparisonHistoryEntry, 'paths'>): string {
@@ -81,6 +115,34 @@ export function withHistorySwitches(
       ignoreNewline: switches.ignoreNewline,
       ignoreEncoding: switches.ignoreEncoding
     }
+  })
+  return changed ? next : entries
+}
+
+type MutableHistoryEntry = {
+  -readonly [K in keyof ComparisonHistoryEntry]: ComparisonHistoryEntry[K]
+}
+
+/**
+ * Sets or clears (`null`) the persisted error of exactly one entry. Unknown
+ * stored codes normalize to "no error"; an unchanged row keeps the same array so
+ * the caller can skip a redundant write.
+ */
+export function withHistoryError(
+  entries: readonly ComparisonHistoryEntry[],
+  id: string,
+  code: ComparisonHistoryErrorCode | null
+): readonly ComparisonHistoryEntry[] {
+  let changed = false
+  const next = entries.map((entry) => {
+    if (entry.id !== id) return entry
+    const current = historyErrorCode(entry)
+    if (current === code) return entry
+    changed = true
+    const copy: MutableHistoryEntry = { ...entry }
+    if (code === null) delete copy.error
+    else copy.error = code
+    return copy
   })
   return changed ? next : entries
 }

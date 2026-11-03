@@ -343,14 +343,16 @@ describe('merge history switch fidelity', () => {
       await port.writeComparisonHistory(seeded)
       mount(port)
       await waitFor(() => expect(rows()).toHaveLength(1))
-      const before = JSON.stringify(await readHistory(port))
       await port.deleteFile(THEIRS)
 
       await clickReopen(ordered)
-      const alert = await screen.findByText(copy('shell.history.reopenFailed'))
+      const alert = await screen.findByText(
+        copy('shell.history.errorNotice.missing').replace('{side}', copy('shell.history.side.theirs'))
+      )
       expect(alert.textContent).not.toContain(THEIRS)
       expect(tabs()).toHaveLength(0)
-      expect(JSON.stringify(await readHistory(port))).toBe(before)
+      const afterFailure = await readHistory(port)
+      expect(afterFailure).toEqual([{ ...seeded[0], error: 'missing' }])
       expect(historyKeys()).toEqual(['opencompare.comparisonHistory'])
 
       // The stored combination (whitespace on, newline / encoding off) must not

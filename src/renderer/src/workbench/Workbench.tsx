@@ -7,11 +7,13 @@ import type { SampleComposition, SceneId } from '@shared/fixtures'
 import type { CompareRequest, CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
 import {
+  clearComparisonHistory,
   removeComparisonHistoryEntry,
   resolveComparisonHistoryReopen,
   trimComparisonHistory,
   upsertComparisonHistory
 } from '@shared/history/model'
+import { preflightComparisonHistory } from '@shared/history/preflight'
 import type { ComparisonHistoryEntry, ComparisonHistoryKind } from '@shared/history/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
@@ -107,7 +109,14 @@ import {
 import type { ComparisonSides, SidePosition } from './snapshotOps'
 import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import { syncRefreshReasonCopy, syncTargetFailureCopy } from './syncFailureCopy'
-import { historyCandidate, historyIdFor, withHistorySwitches } from './historyHomeModel'
+import {
+  historyCandidate,
+  historyIdFor,
+  historySideKey,
+  HISTORY_ERROR_NOTICE_KEYS,
+  withHistoryError,
+  withHistorySwitches
+} from './historyHomeModel'
 import { HistoryHome } from './historyHome'
 import { buildMergeSession, mergeSessionErrorMessage } from './mergeSession'
 import type { MergePaths } from '@shared/mergeRequest'
@@ -890,10 +899,20 @@ export function Workbench({
   }
 
   /**
+   * Explicit clear: writes the empty list back and leaves open sessions,
+   * settings and every other storage key untouched.
+   */
+  function clearHistory(): void {
+    applyHistoryWrite(() => clearComparisonHistory())
+  }
+
+  /**
    * Rebuilds one stored pair through the normal builders. Directory pairs get a
    * brand-new comparison cache (and the shared cache loses their roots); file
-   * pairs re-read both sides. The shell switches are applied only after success,
-   * and a failure leaves every tab / row as it was.
+   * pairs re-read both sides. Every side is preflighted first, so a bad row stops
+   * before any builder call: no tab, no partial tree, no residual legend or
+   * count. A rejection also persists the stable code on exactly that row, and a
+   * later successful reopen clears it.
    */
   async function reopenHistoryEntry(entry: ComparisonHistoryEntry): Promise<void> {
     const plan = resolveComparisonHistoryReopen(entry)
@@ -903,6 +922,19 @@ export function Workbench({
     }
     const switches = plan.switches
     const fail = (): void => report(copyNotice('shell.history.reopenFailed'))
+    const preflight = await preflightComparisonHistory(plan.kind, plan.paths, platform)
+    if (!preflight.ok) {
+      report(
+        copyNotice(HISTORY_ERROR_NOTICE_KEYS[preflight.reason], {
+          side: { message: historySideKey(plan.kind, preflight.side) }
+        })
+      )
+      applyHistoryWrite((before) => withHistoryError(before, entry.id, preflight.reason))
+      return
+    }
+    const succeed = (): void => {
+      applyHistoryWrite((before) => withHistoryError(before, entry.id, null))
+    }
     if (plan.kind === 'merge') {
       // The merge view itself ignores the three switches, but the entry still
       // carries the combination it was established with; a successful reopen
@@ -916,7 +948,10 @@ export function Workbench({
         fail,
         switches
       )
-      if (opened) setComparisonSwitches(switches)
+      if (opened) {
+        succeed()
+        setComparisonSwitches(switches)
+      }
       return
     }
     if (plan.kind === 'directory') {
@@ -925,14 +960,20 @@ export function Workbench({
         fail,
         { recordHistory: true, freshCache: true, historySwitches: switches }
       )
-      if (opened) setComparisonSwitches(switches)
+      if (opened) {
+        succeed()
+        setComparisonSwitches(switches)
+      }
       return
     }
     const opened = await openFilePair(plan.paths[0] ?? '', plan.paths[1] ?? '', fail, {
       recordHistory: true,
       historySwitches: switches
     })
-    if (opened) setComparisonSwitches(switches)
+    if (opened) {
+      succeed()
+      setComparisonSwitches(switches)
+    }
   }
 
   /**
@@ -2032,6 +2073,7 @@ export function Workbench({
                   busy={directoryBusy}
                   onReopen={(entry) => void reopenHistoryEntry(entry)}
                   onRemove={removeHistoryEntry}
+                  onClear={clearHistory}
                 />
               ) : null
             }

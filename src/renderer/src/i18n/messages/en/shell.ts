@@ -210,5 +210,19 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.history.reopenTitle': 'Reopen {paths}',
   'shell.history.removeTitle': 'Remove {paths}',
   'shell.history.reopenFailed':
-    'Could not reopen this comparison: a path may be missing, unreadable or a different type.'
+    'Could not reopen this comparison: a path may be missing, unreadable or a different type.',
+  'shell.history.error.missing': 'Missing',
+  'shell.history.error.unreadable': 'Unreadable',
+  'shell.history.error.typeChanged': 'Type changed',
+  'shell.history.errorNotice.missing': 'Could not reopen: the {side} path no longer exists.',
+  'shell.history.errorNotice.unreadable': 'Could not reopen: the {side} path is unreadable.',
+  'shell.history.errorNotice.typeChanged': 'Could not reopen: the {side} path changed type.',
+  'shell.history.side.left': 'left',
+  'shell.history.side.right': 'right',
+  'shell.history.side.base': 'base',
+  'shell.history.side.ours': 'ours',
+  'shell.history.side.theirs': 'theirs',
+  'shell.history.clear': 'Clear history',
+  'shell.history.clearConfirm': 'Confirm clear',
+  'shell.history.clearTitle': 'Clear all recent comparisons'
 }

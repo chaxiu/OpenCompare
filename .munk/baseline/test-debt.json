@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 47937
+    "repoTestLines": 48335
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1609
+    "repoTestCases": 1630
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 47723,
-      "to": 47937,
-      "reason": "extend the merge-session jsdom evidence for switch fidelity: non-default shell switches recorded on the merge row, restart reopen keeping the entry switches while restoring the shell, fresh disk reread with a changed conflict count, reused tab id and single row across repeated reopens, failed reopen leaving tabs / history / shell switches untouched, merge rows coexisting with directory and file rows, single localStorage history key and console path privacy",
-      "addedCases": 3
+      "from": 47937,
+      "to": 48335,
+      "reason": "add the history safety evidence: pure preflight side ordering and stable error codes, DOM coverage for missing / unreadable / type-changed reopen refusals with no tab or four-state residue, localized error notices and row badges, error scoped write failures, error removal and clearing on success, inline clear-history confirmation, mixed-kind 20-entry cap trimming and console path privacy",
+      "addedCases": 21
     }
   ]
 }
