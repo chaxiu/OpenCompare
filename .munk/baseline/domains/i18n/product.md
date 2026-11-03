@@ -1,356 +1,129 @@
 # Domain: i18n
 
-renderer 双语（zh / en）链路：五个表面的成对词典、`I18nProvider` / `useI18n()` 语言上下文、首启语言解析的纯函数与只读 loader、两个测试辅助（`renderWithI18n`、中文硬编码扫描器）、**应用外壳接入**——`App` 启动解析 + Provider 挂载、工作台壳层 / 新建对比 / 共享展示组件的可见文案、会话标题·副标题·统计标签的渲染期解析、**目录对比视图面接入**——`DirectoryView` / `TreeView` / 同步与模板对话框的可见文案与共享键映射 `views/directoryCopy.ts`、**设置面板与语言即时切换**——顶栏齿轮入口、`SettingsDialog`（唯一分区为语言）、自指语言标签 helper、串行写盘 / 失败就地提示、已显示通知条的渲染期重译，以及**文件级视图接入**——`views/CodeView`（双栏 Diff 与三向合并）、`views/CsvView`、`views/StructuredView` 的可见文案、通知与平台对话框 `title`，`components/DiffPane|MergePane|CodeBlock` 核对无文案后仅纳入扫描清单，以及**主链路收口**——`components/SplitPane` 分隔条可访问名、`workbench/fileIO.ts` 与 `workbench/snapshotOps.ts` 的平台对话框 filter 名称工厂（按调用点语言构造）、`workbench/directoryCompare.ts` 的统计稳定标识与 `FilePairError` 英文诊断、`workbench/snapshotOps.ts` / `loadSampleSessions.ts` 的稳定失败 code + `workbench/snapshotCopy.ts` 的 code→词典键映射、`workbench/session.ts` 注释英文化，并新增全主链路 0 汉字扫描钉板 `i18n/mainScan.test.ts`、`i18n/messages.test.ts` 的术语表 / 禁用变体断言与 `App.smoke.test.tsx` 中英双语冒烟。平台侧设置读写与系统语言通道（`readUserSettings` / `writeUserSettings` / `systemLocale`）归 `foundation` 域，本域只消费其契约；主链路 renderer 源码已零硬编码汉字，未覆盖目录仅 `perf/**` 与 `platform/**`（带理由登记），以及**`<html lang>` 跟随界面语言**——`i18n/htmlLang.ts` 单一映射 + `I18nProvider` 共享路径同步、`src/renderer/index.html` 静态兜底改为英文默认 `en`。
+renderer 双语（zh / en）能力边界：五个表面成对词典、`I18nProvider` / `useI18n()` 语言上下文与首启语言解析、渲染期 `t()` 文案解析、`<html lang>` 跟随界面语言、主链路零汉字扫描钉板。平台侧设置读写与系统语言通道（`readUserSettings` / `writeUserSettings` / `systemLocale`）归 `foundation` 域，本域只消费其契约。
 
 ## 范围
 
-- **renderer 词典与 i18n 模块（`src/renderer/src/i18n/`）**：`messages/zh/{common,shell,directory,files,settings}.ts` 与 `messages/en/{…}.ts` **同名成对**；`messages/index.ts` 固定聚合五个表面，对外只暴露合并后的 `zh` / `en` 词典与 `messages: Record<Language, …>`。
-- **zh 为键的单一事实源**：键用命名空间点号（`common.cancel`、`shell.empty.title`、`settings.language` 这类形状）；`en` 每个文件用 `Record<keyof typeof zh同类, string>` 声明，缺键 / 多键在 `pnpm typecheck` 报错。底座 WI 只放各表面通用键（语言名 `English` / `简体中文`、公共确定 / 取消 / 关闭 / 错误外壳等）；外壳接入 WI 在此基础上成对补齐工作台壳与新建对比的键（`common` 27 键 / `shell` 128 键）。
-- **`I18nProvider` + `useI18n()`**：值形状 `{ language, setLanguage, t }`；`t(key, params?)` 只支持 `{name}` 简单字符串插值（单一正则，缺失占位符原样保留，值里的标记按纯文本返回）；词典值只允许字符串，不接受 HTML / React 节点。
-- **无 Provider 回落**：`useI18n()` 在 Provider 外不抛错，返回 `language: 'zh'` 与 zh 的 `t`，保证既有叶组件单测断言不变；生产入口 `App.tsx` 已在首启解析完成后挂载 Provider（语言值只作 `initialLanguage`）。
-- **首启语言解析（纯函数 + 薄 loader）**：`resolveInitialLanguage({ storedLanguage, systemLocale })` 为纯函数——`storedLanguage` 为 `zh` / `en` 时以记录为准；无记录（`null` / `undefined` / 非法值 / 空串）时 `systemLocale` 以 `zh` 开头（大小写不敏感，覆盖 `zh`、`zh-CN`、`zh-Hant`、`ZH-cn`）→ `zh`，其余（`en-US`、`fr-FR`、`''`、未知）→ `en`。`loadInitialLanguage(platform)` 只调用 `platform.readUserSettings()` 与 `platform.systemLocale()` 后交给该纯函数，**从不写记录**（读失败按无记录处理，不抛）。
-- **测试辅助（`testing.tsx`）**：`renderWithI18n(ui, language?)` 在 `I18nProvider` 下渲染，允许强制 `zh` / `en`，默认 `zh`。
-- **中文硬编码扫描辅助（`src/shared/i18n/scanHardcodedChinese.ts`）**：接受显式路径清单（文件或目录，目录递归取源码文件），返回 `{ file, line, text }` 命中；`\p{Script=Han}` 直接匹配源码文本（注释、`aria-label`、`title`、`data-testid` 不豁免），支持排除 `*.test.*` 与 `i18n/messages/**`。外壳接入 WI 起用于本域显式清单的 0 命中断言。
-- **启动接线（`src/renderer/src/App.tsx`）**：启动时用 `loadInitialLanguage(platform)` 解析语言（记录优先；无记录时 `zh*` 系统语言 → 中文，其余 → 英文），解析期间只渲染**无文字的品牌引导帧**（仅图标 / 骨架，无文本节点、无 heading / button / tablist），settle 后以解析结果作为 `I18nProvider` 的 `initialLanguage` 挂载 `<Workbench platform={platform} />`，工作台只挂载一次（平台订阅与 `compareRequestsReady` 各一次，不出现先中文后英文两批渲染）。语言值**只**作为 `initialLanguage` 传入，不得作为 `Workbench` / 视图的 React `key`（切语言不重挂载）。`?perf=1` 的测量窗口分支保持同步直渲：不读设置、不挂 Provider、不加启动门。
-- **工作台外壳可见文案（`workbench/Workbench.tsx`）**：顶栏（`新建对比 / 打开文件 / 打开文件夹 / 设置` 及其 `title`；**无品牌副标题、无样本入口、无 scene 分段控件**——`shell.viewSwitcher.label` 中英已删）、空态 / 载入态 / 错误态（`StateView` 的 title / description / hint / 动作按钮与重试）、会话标签条入参、通知条（拖拽单项与多项、取消、已跳过、快照导出 / 导入结果、下钻不支持、符号链接指向目录、返回上级目录的两种结果、`来源目录对比：…` 行）、关闭未保存修改确认对话框（标题 / 描述 / 两按钮 / 正文说明）、目录对比进度条（`role="status"` 的 `aria-label`、阶段文案、已扫描 / 已校验 / 累计三个计数句、已处理字节、取消按钮与取消完成通知）、状态栏标签（会话 / 运行平台）与 `CompositionLegend` 差异语义标签、平台选择器与保存对话框 `title`（`selectFile` / `selectDirectory` / `saveFile`）。全部在渲染期经 `t(key, params)` 取当前语言。
-- **会话显示渲染期化（`workbench/sessionDisplay.ts`）**：新增 renderer 侧纯函数（不 import DOM / Electron），输入 `WorkbenchSession` 输出 `{ title, subtitle, stats: readonly { key, value, tone? }[] }` 的 key + 参数片段；分支只按会话**身份**（样本 id、`scene`、`adhoc`、`directory`、`sides`）决定，不读 `session.stats[i].label`。四个内置样本（`session-directory` / `session-code` / `session-csv` / `session-structured`）的标题 / 副标题改为词典键，**离线（无运行时会话对象）不得直接展示 fixture 中文标题 / 副标题**；运行时会话标题 / 副标题由两侧名称 / 真实根路径 / 文件名组成（用户数据不翻译）+ 本地化文件类型名；统计条目改为稳定角色 key（源文件 / 目标文件 / 差异 / 左行数 / 右行数 / 冲突块 / 主键列 / JSON 节点 / 样本文件），值仍取会话现有数值，代码视图冲突数覆盖按稳定统计 key 判断；下钻「某侧缺失」用稳定侧标记，渲染期取词典文案。
-- **新建对比对话框（`workbench/NewCompareDialog.tsx`）**：标题 / 描述 / 左右路径标签 / 两个输入占位 / `Enter 提交 · Esc 关闭` 提示 / `取消` / `建立对比` / 打开文件与打开文件夹按钮及其 `title` 全部走词典；校验失败按 `compareRequest` 的稳定错误码（`MISSING_SIDE`、`DUPLICATE_SIDE`、`EMPTY_PATH`、`UNKNOWN_SCHEME`、`UNKNOWN_ACTION`、`NOT_FOUND`、`TYPE_MISMATCH`、`UNSUPPORTED_FILE_TYPE`、`ACCESS_DENIED`）取当前语言文案并保留路径 / 名称参数（`parseManualPaths` / `resolveCompareRequest` 本身不改）；`role="alert"` 外壳始终当前语言，未知底层 I/O 失败只允许错误**详情**沿用原始 message。
-- **共享展示组件文案**：`Dialog` 关闭按钮可访问名；`SessionTabs` 的 `tablist` 可访问名、未保存修改标记（`title` + `sr-only`）、关闭按钮可访问名（`关闭 {title}` → en `Close {title}`）；`StatusBar` / `DiffBadge` / `diffSemantics` 的差异语义标签改为 `DIFF_LABEL_KEYS: Record<DiffStatus, MessageKey>`，`CompositionLegend` 与 `DiffBadge` 渲染期解析，`DIFF_STATUSES` 与颜色类不变。`StateView` 自身不含文案，不改。
-- **文件类型稳定标识（`workbench/fileKinds.ts` 最小改动）**：`DrilldownTarget.label` 由中文文案改为稳定标识 `FileKind = 'code' | 'csv' | 'tsv' | 'json' | 'yaml'`，显示名渲染期取词典（zh 仍为「代码 / 文本」，`CSV` / `TSV` / `JSON` / `YAML` 不变）；「两侧文件类型不一致」按稳定标识判断（结构化按 `json` / `yaml` 区分），该错误与「暂不支持对比」改为带稳定 code 的错误（`mixed-family` / `unsupported-type`），由外壳按当前语言渲染；`directoryCompare.ts` 拼接副标题与比较类型处同步改用该标识，会话 id / `sides` / 比较结果 / 缓存调用序列不变。
-- **本域词典面纪律（外壳接入轮）**：只往既有 `common` 与 `shell` 两个表面成对加键（`messages/{zh,en}/*` 同名文件），不新增表面文件、不改既有键语义；zh 值逐字沿用当前界面中文（含标点、全角括号与「」），en 为句子式产品措辞，插值只用 `{name}`；多变量句子（进度、已跳过、导出 / 导入结果等）用整句模板 + 占位符，不按中文语序逐段拼接，计数单复数用最小 `one` / `other` 键。
-- **目录对比视图面文案（`views/DirectoryView.tsx`）**：过滤组可访问名（`差异过滤`）与五档过滤项改为 `DirectoryFilter → MessageKey` 映射（`FILTER_LABEL_KEYS`）渲染期 `t()` 解析，选项顺序仍由 `DIRECTORY_FILTERS` 决定、`value` 与 `onFilterChange` 行为不变；八个工具栏按钮（选择左右目录 / 预览并同步 / 模板归位 / 导出·导入左右快照）的可见文本与 `title` 全部走词典（`加载演示目录` / `演示远端快照` 两个按钮已删，见下方交付证明），两个隐藏 file input 的 `aria-label`（选择左 / 右侧快照文件）走词典；`pickerAvailable === false` 时选择按钮 `title` 为空并渲染 Web 预览提示，`true` 时提示不渲染、`title` 为当前语言说明句；左右 Panel 的 `meta` 来源标识（`源目录` / `目标目录` / `快照`）走词典，而 Panel 的 `title` / `subtitle` 与 `TreeView` 的 `label` 仍是根名与真实路径（用户数据不翻译）；单侧过滤后 0 行的空态句、`leftSkipped + rightSkipped > 0` 的持久提示行（`已跳过：左 {left} / 右 {right}`）、底部下钻说明长句均走词典；视图内差异图例由既有已本地化的 `CompositionLegend` 渲染，本项不改其代码。
-- **目录树展开/折叠可访问名（`components/TreeView.tsx`）**：目录行展开 / 折叠按钮 `aria-label` 走词典（`展开 {name}` / `折叠 {name}` → `Expand {name}` / `Collapse {name}`），`node.name` 原样插入；树的 `aria-label`（根名）、行 `title`（相对路径 / 名称）与 `CountSummary` 前缀与数字保持不变。
-- **同步预览对话框（`views/DirectorySyncDialog.tsx`）**：标题（方向 · 模式 + `同步预览`）、描述（`目标根：` + 路径 + 只读样本树说明 + 合计 `{count} 项 / {size}`）、三个分组标题（`待新增拷贝` / `待覆盖修改` / `待删除（镜像）`）、分组计数（`{count} 个 · {size}`）、空分组 `无`、空计划整句、取消 / 确认 / 进行中按钮文案、镜像删除项复选框 `aria-label`（`删除 {path}`），以及 2026-10-31 新增的组级「全选 / 清空」、底部「本次将执行」汇总（`新增 {copy} · 覆盖 {update} · 删除 {delete}`）与「无执行项原因」句全部走词典；**2026-11-01 增**第四类分组标题 `directory.sync.group.align`（zh `待对齐链接时间` / en `Link times to align`，无占位符、值非空），汇总句 `directory.sync.summary` 扩为四占位符（zh `本次将执行：新增 {copy} · 覆盖 {update} · 删除 {delete} · 对齐链接 {align}` / en `This run: {copy} copy · {update} overwrite · {delete} delete · {align} link time aligned`），「无执行项原因」`directory.sync.noExecutable` 文案扩为含「待对齐」（zh `待删除项默认不勾选；勾选至少一项删除，或存在新增/覆盖/待对齐项后才能执行。` / en 同步补 `link times to align`）；`SYNC_DIRECTION_KEYS` / `SYNC_MODE_KEYS` 取代对话框内自带的 `DIRECTION_LABELS` / `MODE_LABELS`，`incremental` 仍不渲染删除分组；确认按钮禁用条件已由 `plan.totalCount === 0` 改为**可执行条目数 = copy + update + 已勾选 delete 为 0**（镜像模式下只有未勾选删除项时渲染原因句；2026-11-01 起该内联判定被删除，改由 `workbench/directoryOps.ts` 的 `canApplySyncPreview(preview, deletePaths)` 单点决定 `disabled`，空态 / 原因句由 `views/directoryCopy.ts` 的 `syncPreviewGuidance` 派生，待对齐链接计入可执行项），`deletePaths` 仍按当前勾选计算（默认空集）；忙碌态「取消」不再是禁用态，点击调 `onAbort` 中止执行并回滚，失败 / 取消通知条另用 `shell.notice.syncCancelled`（`同步已取消：目标侧已回滚到执行前状态，可再次预览或重试。` / `Sync cancelled: …`）。**写入已完成但刷新对比失败**另用 `shell.notice.syncRefreshFailed`（zh `同步写入已完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}；但刷新对比失败：{reason}。目标侧已是写入后的状态，请重新预览获取最新对比。` / en 同结构整句，占位符 `copied` / `updated` / `deleted` / `reason` 两侧一致），由 `Workbench` 在 `SyncRefreshError` 分支渲染（danger 语气），该分支下预览弹窗关闭、错误详情不再走通用 `detailNotice`。**写入已落盘但事后校验不通过**（与源不一致 ≥1 个目标）另用 `shell.notice.syncVerifyFailed`（zh `同步写入后校验未通过：{count} 个目标与源不一致（如 {paths}）。写入结果已保留，请重新预览后再同步。` / en 同结构整句，占位符 `count` / `paths` 两侧一致），由 `Workbench` 在 `SyncVerificationError` 分支渲染（danger 语气），该分支下预览弹窗关闭、会话被刷新后的比较替换、失败详情不再走通用 `detailNotice`；`{paths}` 承接的是已截断的路径样例（最多 3 条、`、` 连接），不得在词典层做截断或格式化。
-- **模板归位对话框（`views/TemplateDialog.tsx`）**：标题、描述三段标签（`模板 A：` / `散乱树 B：` / `输出根：`）、四个分区标题（`已匹配` / `缺失槽位` / `冲突项` / `B 未使用文件`）、分区计数、空分组 `无`、冲突原因（`同名多候选` / `同名内容不同`）、取消 / 确认 / 进行中按钮文案全部走词典；候选路径仍以 ` · ` 连接，`result.matched.length === 0` 时确认按钮 `disabled`。
-- **目录面共享键映射（`views/directoryCopy.ts`，纯常量 / 纯函数、无 React / DOM）**：只导出 `FILTER_LABEL_KEYS: Record<DirectoryFilter, MessageKey>`、`SYNC_DIRECTION_KEYS: Record<SyncDirection, MessageKey>`、`SYNC_MODE_KEYS: Record<SyncMode, MessageKey>` 与 `countKey(one, other, count)`（仅 `count === 1` 取单数），由视图、两个对话框与测试共同引用，避免三处各写一份中文映射。
-- **本域词典面纪律（目录视图轮）**：只往既有 `directory` 表面成对加键（`messages/{zh,en}/directory.ts`），不新增表面文件、不改既有键与 `common` / `shell` 键；`zh/directory.ts` 与 `en/directory.ts` 键集相等、值 `trim()` 非空、同键占位符集合一致、en 无 `\p{Script=Han}`；既有 `directory.filter.label` / `filter.clear` / `tree.empty` / `action.refresh` / `summary.files` 五个键原样保留（不使用、不删除）；单复数只拆同步合计、同步分组、模板分区三处 `one` / `other`，zh 两条值相同。
-- **顶栏设置入口（`workbench/Workbench.tsx`）**：顶栏右侧动作群组最后一个位置常驻 `Settings` 齿轮 `IconButton`，可访问名 / `title` 取既有 `shell.settings.open`，键盘可聚焦；**任何 workbench 状态（空态、已打开会话、目录扫描进行中）都不接 `directoryBusy` 的 disabled**。点击以本地 `settingsOpen` state 打开面板，`onClose` 关闭后可再次打开。
-- **设置面板（`workbench/SettingsDialog.tsx`）**：复用既有 `Dialog`（标题 `settings.title`、头部关闭按钮 `common.close`）与 `SegmentedControl`，不新增模态原语、不做第二套表单样式。唯一分区：可见标签与分组可访问名都用既有 `settings.language`。两个选项顺序固定 `English`、`简体中文`（`SUPPORTED_LANGUAGES = ['en','zh']`），当前项 `aria-selected="true"`、另一项 `false`。props 至少 `platform` 与 `onClose`。
-- **自指语言标签（`src/renderer/src/i18n/languageLabel.ts`）**：`languageSelfLabel(language)` 读 `messages[target]['settings.language.name']`，语言名不随界面语言翻译；组件内不出现任何中文字面量，也不为标签新增词典键（会同时违反 en 零汉字与 zh 汉字约束）。
-- **切换时序与串行写盘**：`choose(next)` 先同步 `setLanguage(next)`（同一渲染批次整窗换文案），再把 `platform.writeUserSettings({ language: next })` 链到 `useRef` 的串行 promise 队列；写盘不阻塞 UI、不关面板、不显示 loading 文案，最后一次选择必然最后落盘（读回等于最后一次选择）。写盘失败**不回滚**语言、不重新 `readUserSettings`，只把原始 `cause.message` 存进本地 `saveError` state，渲染期用 `t('settings.saveError', { reason })` 生成面板内 `role="alert"`；下一次成功写盘清空该提示，关闭再打开不残留。语言状态唯一来源仍是 `I18nProvider`：不新增 Provider / context / 语言 state，不重载窗口，不把语言值用作 `Workbench` / 视图 / 对话框的 React `key`。
-- **通知条渲染期解析（`workbench/Workbench.tsx`）**：`Notice = { kind: 'copy'; key: MessageKey; params?: NoticeParams } | { kind: 'detail'; text: string }`，`copyNotice` / `detailNotice` 两个构造器；`params` 值可为 `string | number | { message: MessageKey }`（嵌套片段如文件 / 文件夹类型名），渲染时 `noticeText(notice, t)` 统一解析——所以**已显示中的通知条随切语言立即重译**。由非本地化模块（`snapshotOps` / `loadSampleSessions` / `src/core` / 主进程 / `openCompareRequest`）产出的原始错误 message 仍走 `detail` 原样展示（已知边界，不翻译）。`info` / `danger` 语气与清除时机不变。
-- **同步失败原因本地化（`workbench/syncFailureCopy.ts`，纯映射模块）**：Renderer 边界把目录同步的两类失败映射成词典身份——`syncTargetFailureCopy(error)` 只认 `SyncTargetError`，取 `error.path` + `error.code` 给出 `shell.sync.error.target`（`{path}` + 嵌套 `{reason}` 片段）；`syncRefreshReasonCopy(error)` 从 `SyncRefreshError.reason` 用稳定系统码正则提取后用同一张表映射。系统码只在 `REASON_KEYS` 一处映射（`EACCES` / `EPERM` / `EISDIR` / `EROFS` / `EBUSY` / `ENOTDIR` / `ENOENT` / `ENOTEMPTY` / `EEXIST` / `ENOSPC` → `shell.sync.reason.<CODE>`，每条值原样带出 `{code}`），缺失或不认识一律 `shell.sync.reason.fallback`（中性兜底，仍带目标路径）；**主进程中文 detail / IPC 包装串 / 未映射 message 一律不渲染给用户**。为此 `NoticeMessage` 支持嵌套 `params`，`noticeText` 先解析片段再拼整句，已显示通知随切语言重译。核心 `SyncTargetError` / `SyncRefreshError` 的既有中文 message 与字段语义不变（`sync-real-gate` 依赖）。
-
-- **文件级代码视图文案（`views/CodeView.tsx`，文件级接入轮）**：双栏 Diff 的差异块导航可访问名 / 块计数、覆写到右·左、重置、保存左·右文件（含 `title`）、三种未保存状态（左 / 右 / 两侧）、打开左·右文件与对应 picker `title`、两侧面板 `subtitle` 与「已修改（未保存）」标记、`已写回 {path}` / `已打开 {path}` 通知（失败分支保留平台原始 message 作为详情）、模式切换 `双栏 Diff` / `三向合并 base · ours · theirs` 两个选项与分段控件可访问名 `代码视图`、两种模式的行内说明、下钻说明 `本地文件 · 双栏字符级 Diff`。
-- **文件级三向合并文案（`views/CodeView.tsx` 合并模式）**：冲突块导航（上一个 / 下一个冲突块）、`待决冲突 {n}/{total}`、四个采纳按钮（`Accept Ours/Theirs/Both/Base` 中英同值）、三个侧输入按钮 `打开 {side}` 与 picker `title`、冲突侧栏 `冲突 {n}` / `已采纳 {choice}` / `未解决` / `无冲突块。` 与块内联采纳按钮、结果栏 `合并结果预览` 与已解决 / 未解决副标题、`复制`、`导出合并文本`、保存对话框 `title` `保存合并结果`、`已打开 {path}` / `已保存到 {path}` / `已复制到剪贴板` / `复制失败，请手动选择预览文本` 通知、三侧面板副标题 `base` / `ours` / `theirs`。
-- **文件级 CSV 视图文案（`views/CsvView.tsx`）**：`主键列` 标签与分组可访问名、`CSV 对齐工具` 工具栏可访问名、状态过滤可访问名与六个选项（全部 / 仅差异 / 新增 / 删除 / 修改 / 相同，后四复用 `common.diff.*`）、重复主键徽标（可访问名 + `重复主键 {count}` + 多行 `title` 详情 `{key}（左 {left} · 右 {right}）`）、`{visible} / {total} 行`、`仅左` / `仅右` 列头、`对齐 {rows} 行 · 主键 {keys}` / `未选择` 面板副标题、打开左 / 右文件与 picker `title`、`已打开 {path}` 通知、三句互不串用的空态（未选主键列 / 当前主键零行 / 当前过滤零行）。
-- **文件级结构化视图文案（`views/StructuredView.tsx`）**：JSON / YAML 格式切换（技术标识中英同值）与 `结构化格式` 可访问名、`状态过滤` 可访问名与六个选项（`类型变更` 单独成键，其余复用 `common.diff.*`）、下钻说明 `本地文件 · {format} 原文 · 语义归一化对比`、样本模式说明、`结构化计数` 分组可访问名与五个状态标签、`共 {count} 个节点 · 计数为运行时对比结果`、`节点路径变更` 面板与 `解析失败` / `显示 {visible} / {total}` 副标题、`左原文` / `右原文`、解析错误外壳（标题 `结构化解析失败` + 本会话影响提示，`description` 仍为 core 原始 message）、无数据空态标题与描述、过滤空态、打开左 / 右文件与 picker `title`、`已打开 {path}` 通知。
-- **纯渲染组件核对（`components/DiffPane.tsx` / `MergePane.tsx` / `CodeBlock.tsx`）**：三者只渲染行号与行文本（占位符 `\u00a0`），无可翻译文案；本域**不改实现**，只把它们纳入文件级扫描清单证明覆盖，避免为「顺手加文案参数」扩大改面。
-- **本域词典面纪律（文件级接入轮）**：一切新键放既有 `files` 表面成对文件，按视图分组 `files.code.*` / `files.merge.*` / `files.csv.*` / `files.structured.*` / `files.notice.*`；能被多视图复用的语义词复用 `common.diff.*` / `common.kind.*` / `files.action.copy`；当前就是英文技术词的（`Accept Ours/Theirs/Both/Base`、`base` / `ours` / `theirs`、`JSON` / `YAML`）中英同值并在 `messages.test.ts` 的 `LATIN_ONLY_KEYS` 登记理由；纯符号占位（`∅`、`—`、`#`、`\u00a0`）、路径 / 文件名 / 正文、`merged.txt` 默认名与 core 冲突标记不建键；千分位沿用 `toLocaleString('en-US')`，词典只承接单位与句子模板。
-- **分栏分隔条可访问名（`components/SplitPane.tsx`）**：接入 `useI18n()`，`role="separator"` 的 `aria-label` 改为 `t('common.splitPane.divider')`（zh `调整分栏宽度` / en `Resize panes`）；指针拖拽、`setPointerCapture`、键盘方向键步进与 `MIN_RATIO` 夹取逻辑一行不改，`panes` 变化时的等分回退不变。
-- **平台对话框 filter 名称工厂（`workbench/fileIO.ts` / `workbench/snapshotOps.ts`）**：`TEXT_FILE_FILTER` / `SNAPSHOT_FILE_FILTER` 两个模块级常量被撤销，改为 `textFileFilter(name)` / `snapshotFileFilter(name)` 纯工厂——`extensions` 常量原样保留（代码 / 文本 28 项、快照 `['ocsnap.json','json']`），名称由调用点在渲染期传入 `t(...)` 结果；调用点（`views/CodeView.tsx` 打开左 / 右文件与保存合并结果、`workbench/Workbench.tsx` 导出快照）用 `t('common.fileKind.code')` / `t('shell.filter.snapshot')`，**不缓存译文到模块级常量**。
-- **会话统计稳定标识（`workbench/directoryCompare.ts`）**：`comparisonStats` 的 `SessionStat.label` 改为稳定标识 `sourceFiles` / `targetFiles` / `differences`，`createFilePairSession` 用 `linesLeft` / `linesRight`；显示文案唯一来源仍是 `describeSession` 的词典键，`stat.label` 不再被渲染、也不再被用于分支判断；数值、`tone`、会话 id 与冲突块覆盖逻辑不变。
-- **文件对错误的英文诊断（`workbench/directoryCompare.ts`）**：`FilePairError` 的兜底 `message` 由中文改为英文诊断句（`Unsupported file type: {name}.` / `Mixed file types: …`），`code`（`unsupported-type` / `mixed-family`）与参数形状不变；界面文案仍由 `Workbench` 按 code 取键，`message` 只作未知错误详情透传。
-- **快照失败的身份化（`workbench/snapshotOps.ts` + `workbench/snapshotCopy.ts`）**：`describeSnapshotImportError` / `describeSnapshotContentError` 两个产出中文句子的函数删除，改为 `snapshotImportFailure(error)` → `SnapshotImportFailure`（7 个已知 code，`invalid-path` / `duplicate-path` / `invalid-hash` 带可选 `path`）与 `snapshotContentFailure(error)` → `SnapshotContentFailure`（`content-not-inlined` / `missing` + `path`），非已知错误返回 `null`；`workbench/snapshotCopy.ts` 是纯映射模块（无 React / DOM / 语言），把 code + 参数映射到 `shell.snapshot.error.*` 键，由 `Workbench` 在渲染期 `t(...)` 解析，因此已显示通知随切语言重译。`readFileText` 的通用失败 `message` 改为英文诊断。
-- **样本库失败的身份化（`workbench/loadSampleSessions.ts`）**：`simulateFailure` 不再抛中文 `Error`，改抛 `SampleLibraryError('read-failed')`（`message` 为英文诊断句）；`Workbench` 用 `sampleErrorNotice(cause)` 映射到 `shell.error.sampleRead`，未知错误仍走 `detailNotice` 原文透传；`error` state 由 `string | null` 改为 `Notice | null`，错误态 `description` 经 `noticeText(error, t)` 渲染期解析。
-- **全主链路扫描钉板（`i18n/mainScan.test.ts`）**：`SCAN_ROOTS` 常量数组覆盖 `src/renderer/src/workbench` / `views` / `components` / `i18n` / `App.tsx` / `main.tsx` / `env.d.ts`，`scanHardcodedChinese([...SCAN_ROOTS])` 断言 `[]`；第二组断言「清单递归枚举到的源码文件集合 == `src/renderer/src` 下除未覆盖目录外的实际源码文件集合」，新增主链路文件不入清单即失败；`UNCOVERED` 常量逐条登记 `{ path, reason }`（`perf/**` 测量探针窗口、`platform/**` Web 运行时平台层原始诊断），并断言路径真实存在、`reason` trim 后非空、且与扫描根互不覆盖。
-- **术语表与英文文案卫生（`i18n/messages.test.ts`）**：`GLOSSARY` 常量锁定 8 个核心概念的 canonical 美式词形（`comparison` / `difference` / `conflict` / `snapshot` / `sync` / `template` / `key column` / `session`），断言 en 值中每个词形至少命中一次；`BANNED_VARIANTS` 断言 `Synchronisation` / `Snap shot` / `Comparision` / `Cancelation` / `colour` / `behaviour` 命中为 0；`DIFFERENCE_ONLY_KEYS` 断言变更块 / 差异统计一律 `difference(s)` 且不出现 `diff`，`DIFF_VIEW_KEYS` 断言 `diff` 只用于视图 / 模式名；新增 en 文案卫生断言（非空、无 `TODO` / `未翻译`、无汉字、无双空格、除 `INLINE_COPY_KEYS` 允许单侧边界空格外的值必须已 trim）。
-- **中英双语冒烟（`App.smoke.test.tsx`）**：en（无设置记录 + `systemLocale='en-US'`）与 zh（预置 `{ language: 'zh' }`）各一条，覆盖首屏（品牌副标题、空态标题 / 描述 / 主按钮）、新建对比对话框、目录过滤五档与组名、代码 / CSV / 结构化三视图标题与主按钮、设置面板，断言 `en` / `zh` 词典值逐字渲染且指定表面汉字计数为 0。
-- **`<html lang>` 跟随界面语言（`i18n/htmlLang.ts` + `I18nProvider` + `index.html`）**：新增纯模块 `src/renderer/src/i18n/htmlLang.ts`（`htmlLang(language)` 单一映射 `en` → `en`、`zh` → `zh-CN`，`applyHtmlLang(language)` 在 DOM 存在时写 `document.documentElement.lang`、否则 no-op）；`I18nProvider` 用 `useLayoutEffect` 在首帧与每次 `language` 变化后同步该值，因此 `App` 启动（含无文字品牌帧 settle 后的首帧）与 `renderWithI18n(ui, 'en' | 'zh')` 测试挂载都得到正确 `lang`；`src/renderer/index.html` 的 `<html>` 静态 `lang` 由 `zh-CN` 改为英文默认 `en`，不再出现 `zh-CN`。回归断言落在既有三个测试文件（`App.i18n.test.tsx` 默认英文首屏 / `zh-CN` 系统语言首屏各一条，`I18nProvider.test.tsx` 挂载映射 + 切 zh 再切回 en + `htmlLang` 映射三条，`i18n/mainScan.test.ts` 一条 index.html 静态断言），不新建测试基建。
-- **i18n 渲染层测试的单一来源（locale 表助手）**：`src/renderer/src/i18n/localeTable.ts`（32 行、测试专用，产品运行时代码不得 import）只做派生——`LOCALE_ROWS` 恒等于 `Object.keys(zh)` 的逐键 `{ key, zh: zh[key], en: en[key] }` 行，`localeText(language, key, params?)` 复用既有 `interpolate` 按当前语言取值并插值；四个测试文件共用该助手取期望文案，禁止再提交手抄的 locale JSON 或逐键文案。`App.i18n.test.tsx`（234 行）与 `views/directoryI18n.test.tsx`（581 行）合计 815 行（基线 2,245），两文件只保留 5 条关键路径用例：运行时语言切换（含已显示通知条同节点重译）、`?perf=1` 测量窗口分支、locale 表单源与缺键 fail-closed、目录视图 + 同步 / 模板对话框同源取值、EACCES / EPERM 写入拒绝与「写入完成但刷新对比失败」双语等值断言。`views/TemplateDialog.test.tsx` 只把文案类断言（`directory.template.failure.writeFailed`、`shell.sync.reason.EACCES`）改为词典取值，`App.theme.test.tsx` 只把 1 条 `settings.saveError` 硬编码英文提示改为插值取值，`theme/themeSources.test.ts` 实测零文案断言、结构断言原样保留。产品词典、键集、运行时行为零 diff。
+- **词典与键集**：五个表面（`common` / `shell` / `directory` / `files` / `settings`）在 `messages/{zh,en}` 同名成对，`messages/index.ts` 固定聚合并只暴露 `zh` / `en` / `messages`；zh 为键的单一事实源（命名空间点号），en 每文件按 `Record<keyof typeof zh同类, string>` 声明，缺键 / 多键由 `pnpm typecheck` 报错。
+- **语言上下文**：`I18nProvider` 值形状 `{ language, setLanguage, t }`；`t(key, params?)` 只支持 `{name}` 单正则插值，缺失占位符原样保留，值按纯文本返回；词典值只允许字符串，不接受 HTML / React 节点。
+- **无 Provider 回落**：Provider 外 `useI18n()` 不抛错，返回 `language: 'zh'` 与 zh 的 `t`；测试辅助 `renderWithI18n(ui, language?)` 默认 `zh`。
+- **首启语言解析**：`resolveInitialLanguage({ storedLanguage, systemLocale })` 为纯函数——记录为 `zh` / `en` 时以记录为准；无记录（含非法值 / 空串）时 `systemLocale` 以 `zh` 开头（大小写不敏感）→ `zh`，其余 → `en`；`loadInitialLanguage(platform)` 只读不写。
+- **启动接线**：`App.tsx` 解析期间只渲染无文字品牌引导帧（无文本节点、无 heading / button / tablist），settle 后以解析结果作 `initialLanguage` 挂载工作台且只挂载一次；语言值不作任何 React `key`；`?perf=1` 分支同步直渲测量窗口。
+- **渲染期解析**：会话标题 / 副标题 / 统计由 `workbench/sessionDisplay.ts` 按会话身份产出 key + 参数（不读 `stat.label`），统计与 `fileKinds` 改用稳定标识；通知条 `Notice`（`copy` 存 key + params、`detail` 存原文）经 `noticeText` 统一解析，已显示通知随切语言重译。
+- **失败本地化**：已知失败在边界按稳定 code 产出（同步 `syncFailureCopy`、快照 `snapshotCopy`、样本 `sampleErrorNotice`、文件对 `unsupported-type` / `mixed-family`），由 `Workbench` 渲染期取键；未知底层错误仍走 `detail` 原样透传。
+- **词条覆盖表面**：顶栏 / 空态 / 会话标签条 / 通知 / 进度与取消 / 状态栏 / 图例 / 平台对话框 `title`、新建对比对话框、目录视图（过滤、工具栏、面板 `meta`、空态、跳过行、下钻说明、树展开折叠）、同步与模板归位对话框、设置面板与语言即时切换、代码（双栏 Diff + 三向合并）/ CSV / 结构化三视图、`SplitPane` 分隔条可访问名、`fileIO` / `snapshotOps` 的 filter 名称工厂。
+- **`<html lang>` 跟随界面语言**：`i18n/htmlLang.ts` 单一映射（`en` → `en`、`zh` → `zh-CN`），`I18nProvider` 用 `useLayoutEffect` 作唯一写入点；`index.html` 静态 `lang` 为首帧兜底 `en`。
+- **扫描与钉板**：`scanHardcodedChinese` 接受显式清单扫 `\p{Script=Han}`（注释 / `aria-label` / `title` 不豁免）；`i18n/mainScan.test.ts` 覆盖全主链路，未覆盖目录仅 `perf/**` 与 `platform/**`（逐条登记理由）；`i18n/messages.test.ts` 守术语表 / 禁用变体 / 文案卫生；`App.smoke.test.tsx` 中英双语冒烟。
+- **测试文案单一来源**：测试专用 `i18n/localeTable.ts`（`LOCALE_ROWS` + `localeText`）派生期望文案，产品运行时代码不得 import。
 
 ## 验收
 
 - **ac-dict-pairs**：`messages/zh` 与 `messages/en` 的五个表面文件名一一对应，无单边文件。
-- **ac-dict-keyset**：合并后的 zh 与 en 顶层键集合完全相等，无缺键、无多余键。
-- **ac-dict-per-surface**：对每个表面分别比较，zh 与 en 的键集合相等（防止靠跨表撞键掩盖缺失）。
+- **ac-dict-per-surface**：逐表面比较，zh 与 en 键集合完全相等（合并后顶层键集随之相等），防止跨表撞键掩盖缺失。
 - **ac-dict-nonempty**：所有词典值 `trim()` 后非空，且不含 `TODO` / `未翻译` 占位串。
 - **ac-dict-placeholders**：同一键在 zh 与 en 中的 `{placeholder}` 名称集合完全相同。
-- **ac-dict-en-no-han**：en 词典所有值 `/\p{Script=Han}/u` 命中数为 0。
-- **ac-dict-zh-keeps-text**：zh 词典每个值（除纯占位符值外）至少含一个汉字，防止把英文值抄进 zh。
-- **ac-t-interpolate**：`t('…', { name: 'x' })` 替换全部同名占位符；缺失的占位符原样保留 `{name}`；含 `<b>` 的值按纯文本返回，不解析标记。
-- **ac-t-provider-language**：Provider 初始 `language` 等于传入值；`setLanguage('en')` 后同一组件重渲染，`language` 与 `t` 返回值同步切到 en。
-- **ac-t-no-provider-zh**：Provider 外调用 `useI18n()` 不抛错，`language` 为 `zh`，`t` 返回 zh 词条。
-- **ac-render-helper**：`renderWithI18n(<Probe />, 'en')` 中 `useI18n().language` 为 `en`；不传第二参时为 `zh`。
+- **ac-dict-en-no-han**：en 词典所有值 `\p{Script=Han}` 命中数为 0。
+- **ac-dict-zh-keeps-text**：zh 每个值（纯占位符值除外）至少含一个汉字。
+- **ac-t-interpolate**：`t` 替换全部同名占位符；缺失占位符原样保留 `{name}`；含标记的值按纯文本返回，不解析。
+- **ac-t-provider-language**：初始 `language` 等于传入值；`setLanguage('en')` 后同一组件 `language` 与 `t` 同步切 en。
+- **ac-t-no-provider-zh**：Provider 外 `useI18n()` 不抛错，`language` 为 `zh`，`t` 返回 zh 词条。
+- **ac-render-helper**：`renderWithI18n(<Probe />, 'en')` 中 `language` 为 `en`；不传第二参为 `zh`。
 - **ac-resolve-zh-locale**：无记录 + `zh` / `zh-CN` / `zh-Hant` / `ZH-cn` → `zh`。
-- **ac-resolve-default-en**：无记录 + `en-US` / `fr-FR` / `''` / `undefined` → `en`。
+- **ac-resolve-default-en**：无记录 + `en-US` / `fr-FR` / 空串 / `undefined` → `en`。
 - **ac-resolve-stored-wins**：记录 `zh` + 系统 `en-US` → `zh`；记录 `en` + 系统 `zh-CN` → `en`。
-- **ac-resolve-invalid-stored**：记录为 `de` / `''` / 非字符串 → 按「无记录」处理，结果与系统语言矩阵一致。
-- **ac-resolve-no-write**：`loadInitialLanguage(platform)` 只调用 `readUserSettings` 与 `systemLocale`，`writeUserSettings` 调用次数为 0；`readUserSettings` 拒绝时返回按系统语言判定的值且不抛。
-- **ac-scan-han**：扫描辅助对含中文注释 / `aria-label` 的文件给出命中（行号与片段），对纯英文文件返回空；排除规则生效（`*.test.*`、`i18n/messages/**` 不计入）。
-- **ac-no-business-text**：底座 WI 内 `src/renderer/src/workbench/**`、`src/renderer/src/views/**`、`src/renderer/src/components/**`、`App.tsx` 无文案改写（现有 spec 断言不变，`pnpm test` 全绿）；该约束只约束底座 WI，外壳接入 WI 按下方 ac-* 定义改写这些文件。
-- **ac-gates-green**：`pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm build:web` 全绿，`code_gates.json` 不改。
-- **ac-app-startup-en**：平台无设置记录且 `systemLocale` 为 `en-US`（或 `fr-FR`）时渲染 `App`，首屏出现英文顶栏副标题、英文空态标题与英文主按钮，且不存在当前中文空态标题。
-- **ac-app-startup-zh**：平台无设置记录且 `systemLocale` 为 `zh-CN` / `zh-Hant` 时渲染 `App`，首屏为现有中文空态标题与按钮。
-- **ac-app-startup-stored-wins**：记录 `en` + 系统 `zh-CN` → 首屏英文；记录 `zh` + 系统 `en-US` → 首屏中文。
-- **ac-app-startup-gate**：设置读取未 settle 时可见 DOM 中没有任何文本节点（品牌帧无文字）、没有 heading / button / tablist；settle 后工作台出现且启动期间只挂载一次（平台订阅与 `compareRequestsReady` 各调用一次，不出现先中文后英文两批渲染）。
-- **ac-app-perf-branch**：`?perf=1` 时仍直接渲染测量窗口，不读设置、不显示启动帧、DOM 中无工作台。
-- **ac-shell-header-copy**：en 下顶栏可见 `New comparison` / `Open file` / `Open folder` 与 `Open settings` 的可访问名，zh 下与现状逐字一致，对应 `title` 也随语言切换；顶栏**不再有**品牌副标题、`Load demo samples` / `Demo samples` 按钮或样本下拉（`shell.header.brandSubtitle`、`shell.toolbar.samples*` / `sampleMenu.*` 中英键同批删除），示例入口收进设置 →「示例与调试」（`settings.samples.*` 中英成对）。
-- **ac-view-switcher-key-gone**：zh / en 词典均不含 `shell.viewSwitcher.label`（顶栏 scene 分段控件已退场），两语言键集合仍完全相等；`shell.view.directory` / `code` / `csv` / `structured` 四键在中英同时存在且值非空（`SessionTabs` 类型归属与设置「示例与调试」入口仍在使用，不得为凑对新增同义键）。
-- **ac-empty-state-copy**：空态标题 / 描述 / hint / `新建对比` / `打开文件` / `打开文件夹` 在中英下均为当前语言；`shell.empty.hint` 中英同批改写为「真实路径叙事 + 文字指路设置 → 示例与调试」，不再指向顶栏样本、不含「加载样本」动词，`shell.empty.description` 只描述真实文件 / 文件夹 / 拖拽路径。
-- **ac-session-tabs-copy**：en 下 `tablist` 可访问名为 `Sessions`，关闭按钮可访问名为 `Close {title}`；zh 下为「会话」「关闭 {title}」；带未保存修改的标签在两种语言下都有当前语言的未保存提示（`title` 与 `sr-only`）。
-- **ac-sample-session-display**：加载演示样本后，en 下四个标签的标题 / 副标题均为英文（不出现 fixture 中文标题）；zh 下与现状逐字一致；两种语言的会话 id 集合与标签顺序完全相同。
-- **ac-runtime-session-display**：打开真实文件对与目录对后，en 下副标题的路径 / 文件名保持原样、文件类型名为英文，zh 下与现状一致；会话 id 与 `file:` / `directory:` 前缀不变。
-- **ac-stat-conflict-by-key**：代码会话的冲突统计在中英下都显示运行时未解决冲突数（不是 fixture 常量），且源码中不再存在 `stat.label` 与中文字面量的比较（扫描断言 `stat.label ===` / `=== '冲突块'` 命中为 0）。
-- **ac-close-unsaved-dialog**：关闭含未保存修改的会话时，en 对话框标题 / 描述（含会话标题插值）/ `Continue editing` / `Discard and close` / 正文说明为英文；zh 与现状逐字一致；两种语言下「继续编辑」不关闭会话、「放弃修改并关闭」关闭该会话。
-- **ac-progress-and-cancel**：目录对比进行中，en 下进度条 `aria-label`、阶段文案、`已扫描 / 已校验 / 累计` 三个计数句、`已处理 {size}` 与 `Cancel` 均为英文且计数与字节仍随真实批次增长；zh 与现状一致。
-- **ac-cancel-notice**：en 下点击取消后出现英文取消通知，工作台会话 / 状态栏 / 视图 DOM 与取消前一致；zh 下通知为现有文案。
-- **ac-drag-notices**：拖入 1 个路径、3 个路径、1 文件 + 1 文件夹三种情况在中英下分别得到当前语言提示（含路径 / 数量参数），且都不创建会话。
-- **ac-notice-skipped-and-snapshot**：「已跳过 左 {l} / 右 {r}」与快照导出 / 导入成功通知、`来源目录对比：…` 与返回上级目录的两种结果在中英下均为当前语言（会话标题作为参数原样插入）。
-- **ac-picker-titles**：打开文件 / 打开文件夹 / 导出快照传给平台的对话框 `title` 为当前语言（用 fake port 断言收到的 title）。
-- **ac-new-compare-copy**：en 下对话框标题、描述、左右路径标签、`Enter to compare · Esc to close` 提示、`Cancel` / `Compare` / `Open file` / `Open folder` 与 `title` 全为英文且不含汉字；zh 与现状逐字一致。
-- **ac-new-compare-validation**：空右侧 / 两侧同路径 / 文件与目录混合 / 不支持的扩展名四种输入，分别按 `EMPTY_PATH`、`DUPLICATE_SIDE`、`TYPE_MISMATCH`、`UNSUPPORTED_FILE_TYPE` 在中英下给出当前语言文案并保留涉及的路径 / 文件名；对话框保持打开、不产生会话、不触发目录扫描。
-- **ac-new-compare-unknown-io**：让打开过程抛出不带错误码的底层失败时，alert 内保留原始详情文本，而对话框标题、标签、按钮、Enter/Esc 提示仍为当前语言。
-- **ac-shared-component-copy**：en 下对话框关闭按钮可访问名为 `Close`、差异语义标签为 `Same/Added/Removed/Modified/Conflict`（`DiffBadge` 与状态栏图例一致），zh 下为「关闭」与「相同/新增/删除/修改/冲突」；zh 值不变使既有组件 / 视图测试保持通过。
-- **ac-han-scan-shell**：用 `scanHardcodedChinese` 扫描本范围显式清单（`App.tsx`、`workbench/Workbench.tsx`、`workbench/NewCompareDialog.tsx`、`workbench/sessionDisplay.ts`、`workbench/fileKinds.ts`、`components/Dialog.tsx`、`components/SessionTabs.tsx`、`components/StatusBar.tsx`、`components/DiffBadge.tsx`、`components/diffSemantics.ts`）命中数为 0（注释、`aria-label`、`title` 不豁免）。
-- **ac-en-smoke-no-han**：en 下空态 + 新建对比对话框 + 演示样本标签条 + 状态栏的可见文本不含汉字（`{Script=Han}` 计数为 0，ASCII 测试路径除外）。
-- **ac-no-extra-work**：同一会话在中英两种渲染下，`listDirectory/listDirectories/digestFiles/readTextFile` 的调用次数相同，标签数量、会话 id、顺序与活动标签一致（本地化不引入重新扫描或新建会话）。
-- **ac-existing-suite**：`pnpm test` 全绿，其中既有 App / snapshot / Workbench 行为断言除「启动前需预置 zh 记录并等待首屏」外不变。
-- **ac-filter-copy**：zh 下五个过滤项与组可访问名与现状逐字一致（`全部/仅差异/左独有/右独有/相同`、`差异过滤`）；en 下分别为 `All / Differences only / Left only / Right only / Same` 与 `Difference filter`，且五个 `value` 顺序仍为 `DIRECTORY_FILTERS` 顺序。
-- **ac-toolbar-copy**：en 下八个按钮可见文本分别为 `Choose left folder` / `Choose right folder` / `Preview & sync` / `Place from template` / `Export left snapshot` / `Import left snapshot` / `Export right snapshot` / `Import right snapshot`，且各自 `title` 为英文；zh 下文本与 `title` 与现状逐字一致；同一按钮在 zh 与 en 两次渲染中文本不同、`title` 不同。（`Load demo folder` / `Demo: remote snapshot` 两个按钮与对应键已随「去 demo」项删除。）
-- **ac-picker-title-gate**：`pickerAvailable === false` 时左右选择按钮 `title` 为空且渲染 Web 预览提示；`true` 时提示不渲染、`title` 为当前语言的说明句。两种语言下均成立。
-- **ac-snapshot-input-aria**：两个隐藏 file input 的 `aria-label` 在 zh 下为 `选择左侧快照文件` / `选择右侧快照文件`，en 下为 `Choose left snapshot file` / `Choose right snapshot file`。
-- **ac-panel-meta**：真实目录对 en 下左侧 `meta` 为 `Source folder`、右侧为 `Target folder`；任一侧挂载快照时该侧 `meta` 为 `Snapshot`；zh 下分别为 `源目录` / `目标目录` / `快照`。
-- **ac-panel-title-user-data**：无论 zh 还是 en，两侧 Panel 的 `title`/`subtitle` 与两个 `role="tree"` 的 `aria-label` 都等于比较结果的根名与真实路径（用含中文名的比较结果验证不被翻译、不被替换）。
-- **ac-empty-filter-copy**：单侧过滤后 0 行时，该侧渲染当前语言空态句且另一侧行数不受影响；en 空态句不含汉字；zh 与现状逐字一致。
-- **ac-skipped-line**：`leftSkipped=2, rightSkipped=1` 时 en 渲染 `Skipped: left 2 / right 1`，zh 渲染 `已跳过：左 2 / 右 1`；两者均为 0 时该行不渲染。
-- **ac-drilldown-hint**：en 底部说明含 `Double-click` 与 `CSV / TSV / JSON / YAML` 且不含汉字；zh 与现状逐字一致。
-- **ac-tree-toggle-aria**：折叠目录行按钮可访问名为 `Expand {name}`、展开后为 `Collapse {name}`（en），zh 为 `展开 {name}` / `折叠 {name}`；点击按钮仍只切换折叠、不改变 `selectedPath`。
-- **ac-legend-en**：en 下 DirectoryView 内 `CompositionLegend` 的语义标签为 `Same/Added/Removed/Modified`，zh 下为 `相同/新增/删除/修改`；计数数字与 `visibleCounts` 一致。
-- **ac-sync-dialog-copy**：en 下标题形如 `Left → Right · Incremental sync preview`（方向、模式均为英文）、描述含 `Target root:` 与目标根原文、处理中文本为 `Syncing…`、空闲为 `Apply changes`、取消为 `Cancel`；zh 下与现状逐字一致；`Cancel` 调用 `onCancel` 一次，`Apply changes` 以当前勾选后的 `deletePaths` 调用 `onConfirm`。
-- **ac-sync-dialog-groups**：en 下分组标题为 `Files to copy` / `Files to overwrite` / `Files to delete (mirror)`，分组计数按 `{count} item(s) · {size}` 渲染；`mode === 'incremental'` 时不渲染删除分组；空分组渲染 `None`（zh 为 `无`）。
-- **ac-sync-dialog-empty**：`plan.totalCount === 0` 时 en 渲染 `This direction has no changes to sync; the target already matches the source.` 且确认按钮 `disabled`；zh 与现状逐字一致，同样 `disabled`（`totalCount > 0` 但无勾选删除项时的禁用见 `ac-sync-dialog-executable-copy`）。
-- **ac-sync-delete-aria**：mirror 模式 en 下删除项复选框 `aria-label` 为 `Delete {path}`（path 原样），zh 为 `删除 {path}`；复选框**初始未勾选**，未勾选项不出现在传给 `onConfirm` 的 `deletePaths` 中，勾选后出现。
-- **ac-sync-dialog-executable-copy**：en 下组级按钮为 `Select all` / `Clear`，底部汇总为 `This run: {copy} copy · {update} overwrite · {delete} delete`，只有未勾选删除项时可执行数为 0 → `Apply changes` `disabled` 且渲染以 `Delete items are unchecked by default` 开头的原因句；勾选任一项后汇总计数与勾选集合一致且按钮可点击；zh 下分别为 `全选` / `清空` / `本次将执行：新增 {copy} · 覆盖 {update} · 删除 {delete}` 与对应原因句；两侧键集相等、en 值零汉字且经 `messages.test.ts` 卫生断言。
-- **ac-sync-dialog-busy-disabled**：`busy` 时确认按钮 `disabled` 并显示当前语言进行中文案，删除项复选框与组级「全选 / 清空」一并 `disabled`；空闲恢复可交互。忙碌态「取消」按钮**不再禁用**，点击调用 `onAbort`（中止执行并回滚），空闲时调用 `onCancel`（关闭弹窗、不写任何文件），文案仍复用 `common.cancel`。
-- **ac-sync-cancel-notice-bilingual**：同步被中止后的通知条走新增成对键 `shell.notice.syncCancelled`（zh `同步已取消：目标侧已回滚到执行前状态，可再次预览或重试。` / en `Sync cancelled: the target was rolled back to its previous state; preview or retry again.`），无占位符；`messages.test.ts` 的键集相等、占位符一致、en 零汉字断言全绿；失败原因句的**写入拒绝**分支自 2026-11-01 起改由词典本地化（见 `ac-sync-write-failure-localized`），取消分支仍不带系统码。
-- **ac-sync-verify-failed-copy**：同步写入后校验未通过的通知走新增成对键 `shell.notice.syncVerifyFailed`（zh `同步写入后校验未通过：{count} 个目标与源不一致（如 {paths}）。写入结果已保留，请重新预览后再同步。` / en `Sync verification failed: {count} target(s) do not match the source (e.g. {paths}). The written state was kept; preview again before retrying.`），占位符 `count` / `paths` 两侧一致、键集相等、en 值零汉字；渲染层按 danger 语气展示，文案含不一致条数与路径样例，且断言不出现 `shell.notice.syncComplete` 的成功句；词典层不截断路径、不拼系统码。
-- **ac-template-dialog-copy**（2026-11-01 随两步入口改写）：选根步 en 标题 `Template placement · Choose roots`、说明含 `Template A` / `Scattered tree B` / `output root` 与 `~` 提示、A 根只读标 `Current left root · read-only`、两个根输入标签 `Scattered tree B root` / `Output root`、按钮 `Choose tree B` / `Choose output root`、拖入提示 `You can also drop a folder here`、继续按钮 `Build dry run`（处理中 `Scanning the roots…`）；Dry-run 步保留 `Matched` / `Already placed` / `Missing slots` / `Conflicts` / `Unused files in B` 分区标题（`directory.template.section.placed`，zh `已落位`；已落位分区无勾选框、无覆盖提示）与处理中 `Placing…`、空闲 `Place files`（zh `确认归位`；2026-11-02 起旧 `Extract and place` / `确认提取归位` 作废），输出根状态为 `Will be created` / `Exists`，列表 `aria-label` 为 `Template placement rows`、逐行勾选可访问名 `Check {path}`、覆盖 / 目录占用标记与 `{count} executable` / `{count} rejected` 计数句；zh 为对应成对文案；确认按钮 `disabled` 只由 `resolveTemplatePlan(...).executableCount === 0` 决定（不再是 `result.matched.length === 0`）。
-- **ac-template-entry-copy**：选根与 Dry-run 的全部新增键（`directory.template.setupTitle` / `setupHint` / `readonly` / `incoming.input` / `output.input` / `pickIncoming` / `pickOutput` / `pickIncomingTitle` / `pickOutputTitle` / `dropHint` / `preview` / `previewing` / `output.willCreate` / `output.exists` / `rows` / `checkSlot` / `overwrite` / `occupied` / `executableCount` / `rejectedCount`，以及 `error.snapshotLeft` / `incomingEmpty` / `outputEmpty` / `previewFailed` / `incomingMissing` / `incomingNotDirectory` / `incomingEqualsTemplate` / `outputEqualsTemplate` / `outputEqualsIncoming` / `outputNotDirectory` 共 30 条）zh / en 键集合相等、占位符一致、en 值零 `\p{Script=Han}`；拒绝句按 `TemplateRootError` 稳定码一一对应，不含平台或 `compareRequest` 的中文 `message`、不含 IPC 包装；模板完成通知由 `shell.notice.templateApplied`（en `Template placement complete: {written} written, {failed} failed.`）取代已删除的 `shell.notice.templateComplete`，占位符 `written` / `failed` 两侧一致。en 下选根步与 Dry-run 步整屏渲染文本不匹配 `\p{Script=Han}`。
-- **ac-template-reason-copy**：en 下 `ambiguous` 冲突原因为 `Multiple candidates with the same name`、内容不同为 `Same name, different content`；zh 为 `同名多候选` / `同名内容不同`；两种语言下候选路径仍以 ` · ` 连接。
-- **ac-template-move-copy**（2026-11-02）：模板归位逐条动作与显式移动的 17 条新增键 zh / en 成对、占位符集合一致、en 值零 `\p{Script=Han}`——行内动作 `directory.template.action.copy` / `action.move`（`Copy` / `Move`、`复制` / `移动`）、移动勾选 `moveCheck`（`Move {path}` / `将 {path} 设为移动`）与整批 `moveChecked`（`Set checked rows to move` / `已勾选项设为移动`）、底部计数 `copyCount` / `moveCount`（`{count} copy` / `{count} move`），移动失败五键 `failure.moveTargetMissing` / `moveTargetHash` / `moveTargetMtime` / `moveTargetUnreadable` / `moveDeleteFailed`（英文均带 `source kept` 语义），结果四键 `result.moved` / `result.rescanHint` / `result.sourceDeleted` / `result.sourceKept`，复核两键 `verify.sourceRetained` / `verify.sourceMissing`；`directory.template.place` 空闲文案同时改为 `Place files` / `确认归位`，不新增同义第三动作词（无 `Extract` / `提取`）。en 下 Dry-run 与结果步骤整屏渲染文本不匹配 `\p{Script=Han}`；失败提示按当前界面语言显示，路径与 OS 码保持原样。
-- **ac-count-plural**：en 下计数 1 用单数（`1 item`）、0 与 3 用复数（`0 items` / `3 items`），覆盖同步合计、同步分组和模板分区三处；zh 下恒为 `合计 {count} 项` / `{count} 个`，不随数量变化。
-- **ac-dict-directory**：`zh/directory.ts` 与 `en/directory.ts` 键集相等、所有值 `trim()` 非空、同键占位符集合一致、en 值无 `\p{Script=Han}`（并入既有 `messages.test.ts` 断言后全绿）；既有 `directory` 键不被改名或删除。
-- **ac-han-scan-directory**：`scanHardcodedChinese` 对本范围清单（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx`、`views/directoryCopy.ts`）命中数为 0（注释、`aria-label`、`title` 不豁免）。
-- **ac-existing-tests-by-key**：`DirectoryView.test.tsx` 中不再出现 `全部/仅差异/左独有/右独有/相同` 与 `展开 {name}`/`折叠 {name}` 字面量（改为经 `zh[FILTER_LABEL_KEYS[...]]` / zh 键取值），`DirectoryView.test.tsx` 与 `TreeView.test.tsx` 全部断言仍通过。
-- **ac-translation-is-render-only**：同一比较结果分别以 zh 与 en 渲染 DirectoryView，两侧渲染出的行路径序列、`role="treeitem"` 数量、当前过滤 tab 的 `aria-selected`、折叠后不可见路径与 `onTogglePath`/`onSelectPath` 调用序列完全相同（本地化不改变行模型、过滤、展开与选中）。
-- **ac-en-smoke-no-han-directory**：en 下上述视图与两个对话框的指定表面（五个过滤项、十个按钮及其 `title`、两侧 `meta`、提示行、空态句、下钻说明、图例、两个对话框标题/描述标签/分组标题/按钮/空态句）文本 `\p{Script=Han}` 命中数为 0（路径、文件名、`Left → Right` 箭头等用户数据/符号除外）。
-- **ac-settings-entry**：空态、已打开会话、目录扫描进行中三种情况下，顶栏都有可访问名 `打开设置`（zh）/ `Open settings`（en）且未禁用的按钮；点击后出现可访问名 `设置` / `Settings` 的 `role="dialog"`；`Esc` 关闭后按钮仍在且可再次打开。
-- **ac-settings-options**：面板内恰好两个语言选项，顺序为 `English`、`简体中文`；在 zh 与 en 两种界面下这两个选项的可访问名完全相同；语言分组可访问名为 `语言` / `Language`；当前语言选项 `aria-selected="true"`、另一个为 `false`。
-- **ac-settings-copy**：zh 界面面板显示标题 `设置`、分区标签 `语言`、关闭按钮可访问名 `关闭`；en 界面为 `Settings` / `Language` / `Close`，且 en 面板可见文本在剔除 `简体中文` 这一自指标签后 `\p{Script=Han}` 计数为 0。
-- **ac-switch-instant**：en 界面打开面板点 `简体中文`（不等写盘 settle），顶栏动作、会话标签条可访问名、状态栏标签、面板标题与分区标签在同一次点击后全部为中文，且无空文本 / 占位；再点 `English` 同样立即全部回英文。
-- **ac-switch-before-write**：`writeUserSettings` 返回永不 settle 的 promise 时，点击语言整窗已切到目标语言，`writeUserSettings` 恰被调用一次且参数为 `{ language: 目标 }`，`readUserSettings` 调用次数不增加。
-- **ac-write-order-last-wins**：连续切换 `简体中文` → `English`，`writeUserSettings` 收到参数序列 `['zh','en']`，第二次调用只在第一次 promise settle 之后发生；两次完成后经平台读回的记录为 `{ language: 'en' }`。
-- **ac-write-failure-no-rollback**：`writeUserSettings` 以 `EACCES: permission denied` reject 时，语言仍为目标语言、会话与标签不变、面板不关闭；面板内 `role="alert"` 文本为当前语言的 `settings.saveError` 且包含原始 reason；随后一次成功写盘后该提示消失；关闭再打开面板不出现旧失败提示。
-- **ac-switch-notice-live**：en 界面出现一条由词典生成的提示（如拖入单路径的 `Using … as the left baseline`）后打开设置切到中文，同一 `role="alert"` 文本立即变为对应中文、语气与参数（路径 / 数量）不变，且不产生额外平台调用。
-- **ac-switch-keeps-state**：目录会话已设置非 `all` 过滤、选中一行并改变两侧滚动偏移，另有一个未保存修改的代码会话时切换语言：会话数量 / id / 顺序 / 活动标签不变，过滤选中值、选中行路径、两侧 `scrollTop`、dirty 标记与未保存提示均不变。
-- **ac-switch-no-rework**：上述切换前后 `listDirectory` / `listDirectories` / `digestFiles` / `readTextFile` 调用次数完全相同；`onCompareRequest` 与 `compareRequestsReady` 各只调用一次（工作台未重挂载）。
-- **ac-persistence-restart**：在 en 界面切到中文后卸载，并以 `systemLocale = 'en-US'` 重新挂载 `App`：首屏仍为中文，且启动阶段 `writeUserSettings` 调用次数为 0（有记录以记录为准、系统语言不改写记录）。
-- **ac-settings-han-scan**：`scanHardcodedChinese` 扫描本项显式清单（`src/renderer/src/workbench/SettingsDialog.tsx`、`src/renderer/src/workbench/Workbench.tsx`、`i18n/languageLabel.ts`）命中数为 0（注释、`aria-label`、`title`、`data-testid` 不豁免）。
-
-- **ac-files-dict-surface**（文件级接入轮）：`messages/zh/files.ts` 与 `messages/en/files.ts` 键集合相等，新增键全部以 `files.` 前缀并落在 `files` 表面（`messages/zh`、`messages/en` 仍各只有五个文件），无既有键被删除或改名（`files.action.save/revert/copy`、`files.empty`、`files.unsavedChanges` 仍在）。
-- **ac-code-diff-copy-en**：`renderWithI18n(<CodeView fixture defaultMode="diff" platform>, 'en')` 下可见 `Previous difference` / `Next difference` / `Difference blocks`、`Overwrite to right` / `Overwrite to left`、`Reset`、`Save left file` / `Save right file` 及其英文 `title`、`Unsaved: left` / `right` / `both`、`Open left file` / `Open right file`、面板副标题 `left` / `right` 与 `Modified (unsaved)`。
-- **ac-code-diff-copy-zh**：同一渲染在 zh 下逐字出现 `上一个差异块`、`覆写到右`、`重置`、`保存左文件`、`打开左文件`、`未保存：左`、`已修改（未保存）`，既有 `CodeView.test.tsx` 断言不改即通过。
-- **ac-code-dirty-status**：覆写使两侧产生不同脏状态时，zh 与真实脏侧一一对应显示三种之一（`未保存：左` / `未保存：右` / `未保存：左、右`），en 对应 `Unsaved: left` / `right` / `both`；无脏侧时不渲染该节点。
-- **ac-code-save-notice**：保存成功后 `role="status"` 文案为当前语言并含被写回路径（en 形如 `Wrote back {path}`），`writeTextFile` 恰好一次；写入失败时通知为平台原始 message 原文（中英相同），不出现「未翻译」占位。
-- **ac-code-picker-titles**：打开左 / 右文件传给 `platform.selectFile` 的 `title` 为当前语言（en `Open left local file` / `Open right local file`；zh `打开左侧本地文件` / `打开右侧本地文件`），传 `TEXT_FILE_FILTER`，取消时视图状态不变。
-- **ac-merge-copy-en**：合并模式 en 可见 `Previous conflict` / `Next conflict`、`Pending conflicts`、`Accept Ours` / `Accept Theirs` / `Accept Both` / `Accept Base`、`Open base` / `Open ours` / `Open theirs`、`Merge result preview`、`Copy`、`Export merged text`；未解决数 `{n}/{total}` 为真实计数。
-- **ac-merge-conflict-list**：en 冲突侧栏为 `Conflict {n}`，未采纳 `Unresolved`、采纳后 `Accepted {choice}`（choice ∈ ours / theirs / both / base），按钮高亮跟随 `resolutions`；无冲突时英文 `No conflict blocks.`；zh 为 `冲突 {n}` / `未解决` / `已采纳 ours` / `无冲突块。`。
-- **ac-merge-actions-notice**：en 复制成功通知 `Copied to clipboard`、失败为英文失败提示；导出调用 `platform.saveFile` 的 `title` 为当前语言（en `Save merged result`），成功后通知为当前语言并含返回路径；存在未解决冲突时复制 / 导出按钮 disabled。
-- **ac-csv-copy**：en 下 `Key columns`、`Key column selection`、`CSV alignment tools`、`Status filter`、`All` / `Differences only` / `Added` / `Removed` / `Modified` / `Same`、`Only left` / `Only right`、`{visible} / {total} rows`、`Aligned {rows} rows · key {keys}`、`Open left file` / `Open right file` 均为英文；zh 为 `主键列` / `仅左` / `{visible} / {total} 行` 等现有文案；数字仍用 `en-US` 千分位。
-- **ac-csv-duplicate-keys**：存在重复主键时徽标可访问名为当前语言（en `Duplicate keys` / zh `重复主键`）并带计数，`title` 每行形如当前语言模板且含左右出现次数；无重复时不渲染该徽标。
-- **ac-csv-empty-states**：未选主键列（`align.columns` 为空）、有主键但零对齐行、过滤后零行三种情况在中英下分别给出各自的空态句（三个不同键，en `No key columns selected…` / `No rows to align under the current keys.` / `No rows under the current filter.`），不互相串用。
-- **ac-structured-copy**：en 下 `Structured format`、`Status filter`、`All` / `Added` / `Removed` / `Modified` / `Type changed` / `Same`、`structured counts` 分组可访问名、`{count} nodes · counts reflect the runtime comparison`、`Node path changes`、`Showing {visible} / {total}`、`Left source` / `Right source`、`Open left file` / `Open right file` 为英文；zh 为 `类型变更`、`共 {count} 个节点 · 计数为运行时对比结果`、`节点路径变更`、`左原文` / `右原文`；切到 YAML 后下钻说明为 `Local file · YAML source · semantic comparison`。
-- **ac-structured-error-frame**：输入无法解析的 JSON 时错误外壳在中英下分别显示本地化标题 / 提示（en `Structured parsing failed`，zh `结构化解析失败`），`description` 保留 core 抛出的原始 message（中英渲染同一字符串），面板副标题为当前语言的 `Parse failed` / `解析失败`。
-- **ac-structured-empty**：无 source 时 en 显示 `No structured data to compare` 与英文描述、zh 显示现有文案；过滤后零变更时显示当前语言过滤空态句（en 含 `All`，zh 含「全部」）。
-- **ac-switch-keeps-code-state**：双栏 Diff 中覆写产生脏状态后由 zh 切 en，块计数、左右行文本、脏标记语义与保存按钮 disabled 状态不变，`writeTextFile` / `readTextFile` 调用次数为 0；合并模式采纳一个冲突后切语言，待决冲突数值与各块采纳结果不变。
-- **ac-switch-keeps-csv-state**：CSV 视图切换主键列与状态过滤后切语言，`onAlignStateChange` 上报的 counts、当前过滤值、已选主键集合与可见行数不变，`alignCsvTables` 不因语言切换重算（`onAlignStateChange` 调用次数不增加）。
-- **ac-switch-keeps-structured-state**：结构化视图切到 YAML + `类型变更` 过滤后切语言，`diffStructured` 结果条目数、过滤值、计数条数值与可见变更行不变。
-- **ac-files-han-scan**：`scanHardcodedChinese` 扫描显式清单（`views/CodeView.tsx`、`views/CsvView.tsx`、`views/StructuredView.tsx`、`components/DiffPane.tsx`、`components/MergePane.tsx`、`components/CodeBlock.tsx`）命中数为 0（注释、`aria-label`、`title` 不豁免）；清单写成常量数组 `FILES_COPY_FILES`（`views/filesScan.test.ts`），新增文件必须入列。
-- **ac-files-en-smoke**：三个视图在 en 下的 `container.textContent` 中 `\p{Script=Han}` 命中为 0（样本路径、文件名与文件正文均为 ASCII；用户数据不翻译）。
-- **ac-files-existing-view-suite**：`pnpm test` 全绿；`CodeView.test.tsx`、`CsvView.test.tsx`、`StructuredView.test.tsx` 的既有 zh 断言（含 `Accept Ours` / `Accept Both`、`类型变更`、`结构化计数`、`主键列`）不改即通过；`workbench/shellScan.test.ts` 与词典测试不改逻辑仍通过（仅允许在 `LATIN_ONLY_KEYS` 增补本项新增拉丁文键）。
-- **ac-files-gates-green**（prd `ac-gates-green`）：`pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm build:web` 全绿；`code_gates.json` 不改、不新增专用 gate。
-
-### 收口轮（主链路全量扫描、双语冒烟与交付收口）
-
-- **ac-scan-zero**：用 `@shared/i18n/scanHardcodedChinese` 扫描显式根清单（`src/renderer/src/workbench`、`views`、`components`、`i18n`、`App.tsx`、`main.tsx`），排除仅限 `*.test.*` 与 `i18n/messages/**`，命中数组为 `[]`；注释、`aria-label`、`title` 不豁免。
-- **ac-scan-roots-complete**：扫描根清单是常量数组（`SCAN_ROOTS`），测试对每个根递归枚举现存源码文件后断言「清单覆盖到的文件集合 == 实际文件集合」，新增主链路文件未入清单时测试失败。
-- **ac-uncovered-listed**：未覆盖目录以 `{ path, reason }` 常量（`UNCOVERED`）登记，至少包含 `src/renderer/src/perf/**`（测量探针窗口，主链路不加载，且其自身不面向用户文案）与 `src/renderer/src/platform/**`（Web 运行时回退错误，属平台层原始诊断信息）；每条 `path` 在仓库中真实存在、`reason` trim 后非空，且这些目录不被扫描根覆盖。
-- **ac-splitpane-aria**：`SplitPane` 分隔条可访问名在 zh 为 `调整分栏宽度`、en 为 `Resize panes`；指针拖拽与键盘方向键调整的比例变化序列与改动前一致。
-- **ac-file-filter-lang**：打开左 / 右文件与保存合并结果传给 `selectFile` / `saveFile` 的 `filters[0].name` 随当前语言切换（zh `代码 / 文本`、en `Code / text`），`extensions` 数组逐项不变，调用次数与取消后的视图状态不变；`textFileFilter(name)` 不缓存语言。
-- **ac-snapshot-filter-lang**：导入 / 导出快照传给平台的 filter 名称随当前语言（zh `OpenCompare 快照`、en `OpenCompare snapshot`），`extensions` 仍为 `['ocsnap.json','json']`。
-- **ac-snapshot-error-localized**：快照导入的 7 个已知失败（`invalid-json` / `invalid-schema` / `invalid-metadata` / `invalid-path` / `duplicate-path` / `invalid-hash` / `invalid-entry`）与内容失败的 2 个已知 code（`content-not-inlined` / `missing`）在 zh 与 en 下分别渲染当前语言的通知文案，并保留 `error.path` / `displayPath` 参数；同一 code 在切语言后已显示的通知同步重译。
-- **ac-snapshot-error-unknown-passthrough**：非 `SnapshotFormatError` / `SnapshotContentError` 的底层错误仍原样展示原始 `message`（中英一致），不出现「未翻译」占位。
-- **ac-sample-error-localized**：演示样本库读取失败（`simulateFailure` → `SampleLibraryError`）的错误态标题 / 说明为当前语言，en 下该区域可见文本无汉字；错误详情不泄漏中文。
-- **ac-session-stat-stable**：`comparisonStats` 与文件对会话产生的 `SessionStat.label` 不再是可见文案（用稳定标识），状态栏统计显示仍由 `describeSession` 的词典键决定；同一次目录比较 / 文件对打开的统计数值、`tone`、会话 id 与「冲突块」覆盖逻辑与改动前一致。
-- **ac-no-behavior-drift**：上述改写前后，同一操作的 `listDirectory` / `listDirectories` / `digestFiles` / `readTextFile` / `selectFile` 调用次数与参数、会话数量与 id、过滤 / 选中 / 滚动、错误 code 完全相同（既有测试不改断言即通过，新增断言只补语言维度）。
-- **ac-smoke-en**：平台无设置记录且 `systemLocale='en-US'` 时，首屏（品牌副标题、空态标题 / 描述 / 主按钮）、新建对比对话框（标题 / 左右标签 / 占位 / Enter·Esc 提示 / 按钮）、目录过滤五档与组名、代码 / CSV / 结构化三视图的标题与主按钮、设置面板（标题 / 分区 / 关闭名）均渲染为 `en` 词典值；这些指定表面的可见文本 `\p{Script=Han}` 计数为 0。
-- **ac-smoke-zh**：预置 `{ language: 'zh' }` 记录后，同一批表面逐字渲染 `zh` 词典值（五档过滤仍为 `全部 / 仅差异 / 左独有 / 右独有 / 相同`），无空白文本、无占位串，信息量与改动前一致。
-- **ac-smoke-no-mixing**：两条冒烟中，en 表面不出现任何 `zh` 词典独有值，zh 表面不出现 `en` 独有句子；中英同值的技术标识（`CSV` / `TSV` / `JSON` / `YAML` / `base` / `ours` / `theirs`）、自指标签 `English` / `简体中文`、路径与文件名为唯一例外。
-- **ac-glossary-canonical**：术语表常量（`GLOSSARY`）至少登记 8 个核心概念（comparison / difference / conflict / snapshot / sync / template / key column / session）的唯一英文词形；`en` 词典中每个 canonical 词形至少出现一次，且禁用变体 `Synchronisation`、`Snap shot`、`Comparision`、`Cancelation`、`colour`、`behaviour` 命中数为 0。
-- **ac-glossary-diff-vs-difference**：`diff` 只用于视图 / 模式名（`shell.view.code`、`files.code.*` 的 `diff` 视图与 `Code diff` 措辞），变更块 / 差异统计一律用 `difference(s)`；`DIFFERENCE_ONLY_KEYS` / `DIFF_VIEW_KEYS` 逐个断言不交叉混用。
-- **ac-en-copy-clean**：`en` 词典所有值 trim 后非空、无首尾空白、无双空格、无 `TODO` / `未翻译` 类占位、无汉字（并入既有 `messages.test.ts` 断言；`INLINE_COPY_KEYS` 的单个边界空格是整句模板的一部分）。
-- **ac-gates-green**：`pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm build:web` 全绿；`code_gates.json` 不新增、不改条目。
-- **ac-delivery-note**：交付说明写明：扫描命中 0、扫描根清单、未覆盖目录及逐条理由、术语表 canonical 词形、双语冒烟覆盖的六个表面。
-
-### html lang 跟随界面语言（随 v0.2.7 发版）
-
-- **ac-default-en-lang**：默认英文启动（无持久化语言记录 + `systemLocale` 非 `zh*`）渲染完成后 `document.documentElement.lang === 'en'`。
-- **ac-switch-zh-lang**：从上状态切到中文后 `document.documentElement.lang === 'zh-CN'`。
-- **ac-switch-back-en-lang**：再切回英文后 `document.documentElement.lang === 'en'`。
-- **ac-shared-provider-sync**：`renderWithI18n(ui, 'en')` / `renderWithI18n(ui, 'zh')` 挂载时 `document.documentElement.lang` 分别为 `'en'` / `'zh-CN'`——同步逻辑在 `I18nProvider` 共享路径上，不是 App 特例。
-- **ac-html-lang-single-source**：`htmlLang()` 对每个 `Language` 返回固定 BCP 47 tag（`en` → `en`、`zh` → `zh-CN`），映射只存在 `i18n/htmlLang.ts` 一处，组件内不出现散落三元字面量；无 DOM 环境调用 `applyHtmlLang` 不抛错（no-op）。
-- **ac-index-no-zh-lang**：`src/renderer/index.html` 的 `<html>` 不再声明 `zh-CN`，静态 `lang` 为与英文默认一致的确定值 `en` 且非空（`i18n/mainScan.test.ts` 断言 `not.toContain('zh-CN')` + `/<html lang="en">/`），文件内无其它中文静态文案。
-- **ac-tests-in-suite**：至少两条新断言落在 `pnpm test` 既有套件内（`App.i18n.test.tsx` 的默认英文 / `zh-CN` 系统语言首屏两条，`I18nProvider.test.tsx` 的挂载映射 / 切 zh 再切回 en / `htmlLang` 映射三条），复用 `renderWithI18n` 与 `installPlatform` / `withLocale` / `setRecord`，不新建测试基建或新目录。
-- **ac-gates-green**（本轮）：全量 `code_gates`（install / lint / typecheck / build / build:web / test / test-compare-request / cancel-gate / memory-gate）全绿，既有 i18n 断言（`App.i18n.test.tsx` / `I18nProvider.test.tsx` / `mainScan.test.ts`）不改口径、不放宽。
-
-### 同步链接对齐词条（2026-11-01）
-
-- **ac-sync-align-copy-keys**：`messages/{zh,en}/directory.ts` 成对新增 `directory.sync.group.align`（zh `待对齐链接时间` / en `Link times to align`），`directory.sync.summary` 与 `directory.sync.noExecutable` 就地扩写为含待对齐口径，`messages/{zh,en}/shell.ts` 的 `shell.notice.syncComplete` 扩为四占位符（`copied` / `updated` / `deleted` / `aligned`）；同键 zh / en 占位符集合逐项一致、en 值零 `\p{Script=Han}`、键集相等，`messages.test.ts` 的键完整性 / 占位符 parity / en 零汉字 / 卫生断言全绿；既有键未改名、未删除。
-- **ac-sync-align-copy-rendered**：`views/directorySyncDialog.test.tsx` 与 `workbench/directoryI18n.test.tsx` 在 zh / en 下断言摘要句含对齐数（en `… · 0 link time aligned`）、完成提示含对齐数（zh `对齐链接时间 1`），且仅含对齐项的一轮不出现「该方向没有需要同步的变更」类空态句。
-
-### 同步预览「已选」词条（2026-11-01）
-
-- **ac-sync-summary-selected-key**：`messages/{zh,en}/directory.ts` 成对新增 `directory.sync.groupCountSelected`（zh ` · 已选 {selected}` / en ` · {selected} selected`）；同键 zh / en 占位符集合一致（仅 `{selected}`）、en 值零 `\p{Script=Han}`、键集相等，`messages.test.ts` 的键完整性 / 占位符 parity / en 零汉字 / 卫生断言全绿；既有 `directory.sync.groupCount.*` 未改名、未删除。
-- **ac-sync-summary-selected-rendered**：`views/directoryI18n.test.tsx` 与 `views/directorySyncDialog.test.tsx` 断言删除组头在 zh / en 下都同时读出计划总数与已选数（zh `1 个 · 20 B · 已选 0`、en `0 items · 0 B · 0 selected`），勾选后该后缀随 `syncPreviewAction(...).delete` 变化为 1；新增 / 覆盖组头不出现该后缀（仍为计划数）。
-
-### 样本入口文案去路径 + 同步失败本地化（2026-11-01）
-
-- **ac-sample-error-copy-no-path**：zh `shell.error.sampleRead` 不再写出任何样本路径（不含 `/samples`），保留「无法读取内置样本库 + 缺失 / 不可读」的行文；en 对应句不再点名 `/samples/csv/orders.left.csv`，en 值零汉字。
-- **ac-template-tooltip-copy-no-path**：`directory.toolbar.templateTitle` 中英都不再点名内置散乱树（zh 不含「内置」、en 不含 `built-in`）或 `/samples` 路径，同时保留「以左（源）目录为结构模板、从散乱目录树归位文件」的语义。
-- **ac-sync-write-failure-localized**：同步因 EACCES / EPERM / EROFS / EBUSY / ENOSPC 失败时，zh 渲染对应中文原因、en 渲染对应英文原因，两者都含出错目标路径与该 OS code（原样大写），且都不含 `Error invoking remote method`。
-- **ac-en-sync-failure-no-han**：en 下上述五类写入拒绝与「写入已完成但刷新对比失败」两条提示的渲染文本 `\p{Script=Han}` 命中数为 0（整句与嵌套 reason 片段都零汉字）。
-- **ac-sync-failure-code-fallback**：失败不带可识别系统码（`code` 缺失或不在 `REASON_KEYS`）时，zh / en 都渲染中性兜底句（以 `系统错误码` / `without a recognizable system error code` 标识）并保留目标路径，不回退主进程中文 detail 原文，也不得为空串。
-- **ac-sync-failure-dict-parity**：`shell.sync.error.target` 与全部 `shell.sync.reason.*`（10 个系统码 + fallback）在 zh / en 成对存在，同键占位符集合一致（`target` 为 `{path}` / `{reason}`，每条 reason 为 `{code}`），键集相等、en 零汉字、卫生断言全绿；既有 `shell.notice.sync*` 键未改名未删除。
-- **ac-sync-failure-refresh-reason**：`SyncRefreshError.reason` 中的稳定码被提取并渲染成本地化 reason（不再整段透传），无码时落到兜底句；`shell.notice.syncRefreshFailed` 的 `{reason}` 仍是单句片段，三项计数与「写入已完成」语义不变。
-
-### locale 表测试收敛轮（2026-11-02）
-
-- **ac-two-files-lines**：`App.i18n.test.tsx` 与 `views/directoryI18n.test.tsx` 合计 ≤900 行（实测 234 + 581 = 815，基线 928 + 1,317 = 2,245）。
-- **ac-locale-table-single-source**：四个测试文件的期望文案全部经 `i18n/localeTable.ts` 从 zh / en 词典取值；`LOCALE_ROWS.length === Object.keys(zh).length` 且每行值与 `messages.zh[key]` / `messages.en[key]` 全等（有用例断言该单一来源）；两文件 TS 内不出现手抄的界面文案句（仅允许路径、OS 码、IPC 包装串、`/samples`、`built-in` 等非文案字面量）。
-- **ac-key-paths-3-to-5**：两文件合计只保留 3–5 条关键路径用例（实测 5 条），且覆盖运行时语言切换、缺 key 回落、EACCES / EPERM 同步失败提示双语本地化。
-- **ac-language-switch**：en → zh → en 运行时切换后顶栏、空态、目录视图的文案逐字等于当前语言词典值（按命名 key 断言），en 侧可见文本命中 `\p{Script=Han}` 为 0。
-- **ac-missing-key-fail-closed**：删掉任一被关键路径引用的词典键（或让 en 值缺失）时，locale 表单源用例立即变红（缺键 / `undefined` 不再静默通过），恢复后全绿；断言用「渲染文本 === 词典插值结果」的等值比较，不用片段查找。
-- **ac-sync-eacces-eperm**：en 下 EACCES / EPERM 写入拒绝与「写入完成但刷新失败」提示逐字等于 `shell.sync.error.target`（`{path}` + 嵌套 `shell.sync.reason.<CODE>`）/ `shell.notice.syncRefreshFailed` 的插值结果，含目标路径与 OS code、零汉字、不含 `Error invoking remote method`；zh 下为对应中文词典值。
-- **ac-sync-notice-retranslate**：同一已显示的通知条在切换语言后按新语言重译（同一 DOM 节点文本从 en 词典值变为 zh 词典值），不要求重新触发同步。
-- **ac-template-theme-copy**：`TemplateDialog.test.tsx` 的文案断言改为词典键取值（`the write failed` → `directory.template.failure.writeFailed`，`permission denied` 由 `shell.sync.reason.EACCES` 派生）；`theme/themeSources.test.ts` 保留全部结构断言、0 条文案断言迁移；`App.theme.test.tsx` 的 1 条硬编码英文提示改为 `localeText('en','settings.saveError',{ reason })`；三者用例数与行为断言不变。
-- **ac-tocontain-budget**：两文件 `.toContain(` 调用点合计 ≤17（实测 2，基线 57），且参数中没有硬编码界面文案。
-- **ac-readfilesync-budget**：两文件 `readFileSync` 出现次数 ≤2（实测 0），不得用源码扫描取代真实渲染断言。
-- **ac-case-count**：`pnpm test` 汇总用例总数 ≥1,710（实测 1,744 passed + 1 skipped = 1,745，基线 1,800，降幅 3.1% 仍在 ≤5% 内）。
-- **ac-coverage-not-lower**：全仓覆盖 Statements ≥89.94%、Branches ≥82.74%、Functions ≥89.38%、Lines ≥92.54%（同一 `vitest run --coverage --reporter=text-summary` 命令；实测 89.94 / 82.74 / 89.39 / 92.54）。
-- **ac-deletion-mapping**：回执逐条给出「删除的文本断言 → 替代断言」映射（两文件 + TemplateDialog / App.theme 文案断言），替代断言不搬进 `.munk/` 或新增文件凑数；测试总行数 46,955 → 45,533。
-- **ac-inject-missing-key**：删一条 locale 键 → 相关用例变红（贴原始输出与失败用例名）→ 恢复 → 全绿，最终 `git diff` 无注入残留。
-- **ac-inject-hardcoded-zh**：把 en 侧同步失败提示临时改回中文 → en 用例必须红 → 恢复 → 全绿，最终 `git diff` 无注入残留。
-- **ac-no-locale-drift**：`src/renderer/src/i18n/messages/**` 最终 diff 为空（键、值、键集与 `e93a1d8` 一致）；`i18n/messages.test.ts` 的键集 / 占位符 / 无汉字断言仍全绿。
-- **ac-no-product-behavior-change**：除允许文件外 `src/**` 无运行时 diff；同步 / 模板 / 快照 / 算法行为与通知语气、清除时机不变；`App.smoke.test.tsx`、`i18n/messages.test.ts`、`i18n/mainScan.test.ts` 不改且全绿。
-- **ac-version-single-point**：`package.json#version` 仍为 `0.2.16`；不改 `CHANGELOG.md`、README 版本表与发布文件。
-- **ac-gates-green**：`.munk/code-gates.json` 全部 21 项门禁 passed，`code-gates.json` 不被修改。
+- **ac-resolve-invalid-stored**：记录为 `de` / 空串 / 非字符串按「无记录」处理，结果与系统语言矩阵一致。
+- **ac-resolve-no-write**：`loadInitialLanguage` 只调 `readUserSettings` 与 `systemLocale`，`writeUserSettings` 调用 0 次；读失败按系统语言判定且不抛。
+- **ac-scan-han**：扫描辅助对含中文注释 / `aria-label` 的文件给出命中（行号与片段），纯英文文件返回空；排除 `*.test.*` 与 `i18n/messages/**` 生效。
+- **ac-scan-zero**：全主链路扫描根命中数组为 `[]`（注释、`aria-label`、`title` 不豁免），排除仅限 `*.test.*` 与 `i18n/messages/**`。
+- **ac-scan-roots-complete**：`SCAN_ROOTS` 为常量数组，递归枚举到的文件集合等于 `src/renderer/src` 实际源码文件集合，新增文件未入清单即失败。
+- **ac-uncovered-listed**：`UNCOVERED` 逐条登记 `perf/**`（测量探针）与 `platform/**`（Web 原始诊断），路径真实存在、理由非空、与扫描根互不覆盖。
+- **ac-app-startup-en**：无记录 + `systemLocale` 为 `en-US` / `fr-FR` 时首屏出现英文顶栏、英文空态标题与主按钮，无中文空态标题。
+- **ac-app-startup-zh**：无记录 + `systemLocale` 为 `zh-CN` / `zh-Hant` 时首屏为现有中文空态标题与按钮。
+- **ac-app-startup-gate**：读取未 settle 时可见 DOM 无任何文本节点、无 heading / button / tablist；settle 后工作台出现且启动期只挂载一次（平台订阅与 `compareRequestsReady` 各一次）。
+- **ac-app-perf-branch**：`?perf=1` 仍直渲测量窗口，不读设置、不显示启动帧，DOM 中无工作台。
+- **ac-shell-header-copy**：en 顶栏 `New comparison` / `Open file` / `Open folder` 与 `Open settings` 可访问名及 `title` 为英文，zh 与现状逐字一致；顶栏无品牌副标题与样本入口，示例收进设置「示例与调试」（`settings.samples.*`）。
+- **ac-view-switcher-key-gone**：zh / en 词典均不含 `shell.viewSwitcher.label`；`shell.view.directory` / `code` / `csv` / `structured` 四键两侧存在且非空。
+- **ac-empty-state-copy**：空态标题 / 描述 / hint 与三个动作按钮中英均为当前语言；hint 指向设置 → 示例与调试，description 只描述真实文件 / 文件夹 / 拖拽。
+- **ac-session-tabs-copy**：en `tablist` 名为 `Sessions`、关闭名 `Close {title}`，zh 为「会话」「关闭 {title}」；未保存修改标签两语言都有当前语言 `title` + `sr-only` 提示。
+- **ac-sample-session-display**：加载演示样本后 en 四个标签标题 / 副标题为英文（不出现 fixture 中文），zh 逐字一致；两语言会话 id 集合与顺序相同。
+- **ac-runtime-session-display**：真实文件对与目录对 en 副标题的路径 / 文件名保持原样、类型名为英文，会话 id 与 `file:` / `directory:` 前缀不变。
+- **ac-stat-conflict-by-key**：代码会话冲突统计中英都显示运行时未解决冲突数，源码无 `stat.label` 与中文字面量比较。
+- **ac-close-unsaved-dialog**：关闭未保存会话时 en 标题 / 描述（含会话标题插值）/ `Continue editing` / `Discard and close` / 正文为英文，zh 逐字一致；继续编辑不关闭、放弃则关闭该会话。
+- **ac-progress-and-cancel**：目录对比进行中 en 进度条 `aria-label`、阶段文案、三个计数句、`已处理 {size}` 与 `Cancel` 为英文且数值随真实批次增长。
+- **ac-cancel-notice**：en 取消后出现英文取消通知，工作台会话 / 状态栏 / 视图 DOM 与取消前一致。
+- **ac-notice-skipped-and-snapshot**：跳过行、快照导出 / 导入结果、`来源目录对比：…` 与返回上级目录两种结果中英均为当前语言（会话标题原样插入）。
+- **ac-picker-titles**：打开文件 / 打开文件夹 / 导出快照传给平台的对话框 `title` 为当前语言（fake port 断言）。
+- **ac-new-compare-copy**：en 标题 / 描述 / 路径标签 / `Enter to compare · Esc to close` / `Cancel` / `Compare` / 打开按钮与其 `title` 全英文无汉字，zh 逐字一致。
+- **ac-new-compare-validation**：空右侧 / 两侧同路径 / 类型混合 / 不支持扩展名分别按 `EMPTY_PATH` / `DUPLICATE_SIDE` / `TYPE_MISMATCH` / `UNSUPPORTED_FILE_TYPE` 给当前语言文案并保留路径，对话框不关、不建会话、不扫描。
+- **ac-shared-component-copy**：en 对话框关闭名为 `Close`、差异语义标签 `Same/Added/Removed/Modified/Conflict`（`DiffBadge` 与图例一致），zh 为「关闭」与「相同/新增/删除/修改/冲突」。
+- **ac-existing-suite**：`pnpm test` 全绿，既有 App / snapshot / Workbench 行为断言除「预置 zh 记录并等待首屏」外不变。
+- **ac-filter-copy**：zh 五档过滤与组名逐字（`全部/仅差异/左独有/右独有/相同`、`差异过滤`），en 为 `All / Differences only / Left only / Right only / Same` 与 `Difference filter`，`value` 顺序仍按 `DIRECTORY_FILTERS`。
+- **ac-toolbar-copy**：en 八个工具栏按钮（选择左右目录 / 预览同步 / 模板归位 / 导出·导入左右快照）文本与 `title` 为英文，zh 逐字一致；同一按钮两语言文本与 `title` 均不同。
+- **ac-picker-title-gate**：`pickerAvailable === false` 时选择按钮 `title` 为空且渲染 Web 预览提示；`true` 时提示不渲染、`title` 为当前语言说明句。
+- **ac-panel-title-user-data**：中英下两侧 Panel 的 `title` / `subtitle` 与两个 `role="tree"` 的 `aria-label` 都等于根名与真实路径（含中文名不被翻译）。
+- **ac-tree-toggle-aria**：折叠按钮名为 `Expand {name}`、展开后 `Collapse {name}`（zh `展开 {name}` / `折叠 {name}`），点击只切换折叠、不改 `selectedPath`。
+- **ac-sync-dialog-copy**：en 标题形如 `Left → Right · Incremental sync preview`、描述含 `Target root:`、处理中 `Syncing…`、空闲 `Apply changes`、`Cancel`；`Cancel` 调 `onCancel` 一次，`Apply changes` 以当前勾选 `deletePaths` 调 `onConfirm`。
+- **ac-sync-dialog-groups**：en 分组标题 `Files to copy` / `Files to overwrite` / `Files to delete (mirror)`，计数按 `{count} item(s) · {size}`；`incremental` 不渲染删除分组；空分组 `None`（zh `无`）。
+- **ac-sync-dialog-empty**：`plan.totalCount === 0` 时 en 渲染 `This direction has no changes to sync; …` 且确认 `disabled`，zh 逐字一致。
+- **ac-sync-delete-aria**：mirror 下删除项复选框 `aria-label` 为 `Delete {path}` / `删除 {path}`，初始未勾选，未勾选项不进 `deletePaths`。
+- **ac-sync-dialog-executable-copy**：en 组级 `Select all` / `Clear` 与汇总 `This run: {copy} copy · {update} overwrite · {delete} delete`；仅未勾选删除项时可执行数为 0 → `disabled` 且渲染以 `Delete items are unchecked by default` 开头的原因句；勾选后计数与集合一致且可点；zh 为 `全选` / `清空` / `本次将执行：…` 与对应原因句。
+- **ac-sync-dialog-busy-disabled**：`busy` 时确认 `disabled` 并显示进行中文案，删除复选框与全选 / 清空一并 `disabled`；忙碌态 `Cancel` 可点并调 `onAbort`，空闲调 `onCancel`。
+- **ac-sync-cancel-notice-bilingual**：中止后通知走 `shell.notice.syncCancelled`（无占位符、成对、en 零汉字），info 语气且不带系统码。
+- **ac-sync-verify-failed-copy**：校验未通过走 `shell.notice.syncVerifyFailed`（`{count}` / `{paths}` 两侧一致），danger 语气，含不一致条数与路径样例，不出现成功句，词典层不截断路径。
+- **ac-sync-write-failure-localized**：EACCES / EPERM / EROFS / EBUSY / ENOSPC 失败时中英各渲染对应原因，含出错目标路径与原始 OS code，且不含 `Error invoking remote method`。
+- **ac-sync-failure-code-fallback**：无可识别系统码时中英都渲染中性兜底句并保留目标路径，不回退主进程中文 detail，不为空串。
+- **ac-template-dialog-copy**：选根步 en 标题 `Template placement · Choose roots`、说明含 `Template A` / `Scattered tree B` / `output root`、只读标 `Current left root · read-only`、`Choose tree B` / `Choose output root`、`Build dry run`；Dry-run 步五个分区标题、`Placing…` / `Place files`、`Will be created` / `Exists`、`Check {path}`、`{count} executable` / `{count} rejected`；确认 `disabled` 只由 `resolveTemplatePlan(...).executableCount === 0` 决定；zh 为对应成对文案（`已落位` / `确认归位` 等）。
+- **ac-template-entry-copy**：选根与 Dry-run 的 30 条 `directory.template.*` 键 zh / en 成对、占位符一致、en 零汉字；十个拒绝句按 `TemplateRootError` 稳定码一一对应、不含平台中文 message 与 IPC 包装；完成通知为 `shell.notice.templateApplied`（`{written}` / `{failed}`）。
+- **ac-template-move-copy**：17 条移动键（`action.copy` / `action.move`、`moveCheck`、`moveChecked`、`copyCount` / `moveCount`、五条 `failure.move*` 带 source kept 语义、四条 `result.*`、两条 `verify.*`）成对、占位符一致、en 零汉字；`place` 空闲为 `Place files` / `确认归位`，无 `Extract` / `提取` 同义词。
+- **ac-count-plural**：en 计数 1 用单数（`1 item`）、0 与 3 用复数，覆盖同步合计 / 分组 / 模板分区；zh 恒为 `合计 {count} 项` / `{count} 个`。
+- **ac-translation-is-render-only**：同一比较结果中英渲染的行路径序列、`role="treeitem"` 数、过滤 `aria-selected`、折叠后不可见路径与 `onTogglePath` / `onSelectPath` 调用序列完全相同。
+- **ac-settings-entry**：空态 / 已打开会话 / 扫描进行中三种状态顶栏都有可访问名 `打开设置` / `Open settings` 的未禁用按钮；点击出现 `role="dialog"`（`设置` / `Settings`），`Esc` 后可再次打开。
+- **ac-settings-options**：面板恰两个选项，顺序 `English`、`简体中文`，两种界面下可访问名相同；分组名 `语言` / `Language`；当前项 `aria-selected="true"`、另一项 `false`。
+- **ac-switch-instant**：en 面板点 `简体中文`（不等写盘）后顶栏、标签条可访问名、状态栏、面板标题与分区标签同批变中文且无空文本；再点 `English` 立即回英文。
+- **ac-write-order-last-wins**：连续切 `简体中文` → `English` 时参数序列为 `['zh','en']`，第二次在第一次 settle 后发生；读回记录为 `{ language: 'en' }`。
+- **ac-write-failure-no-rollback**：写盘 `EACCES` reject 时语言仍为目标、面板不关，面板 `role="alert"` 为当前语言 `settings.saveError` 且含原始 reason；随后成功写盘清空，重开不残留。
+- **ac-switch-notice-live**：已显示的词典通知在切语言后同一 `role="alert"` 立即重译，语气与参数不变，不产生额外平台调用。
+- **ac-switch-keeps-state**：目录会话已设过滤、选中行、改滚动偏移，另有未保存代码会话时切语言：会话数量 / id / 顺序 / 活动标签、过滤值、选中路径、两侧 `scrollTop`、dirty 与未保存提示均不变。
+- **ac-switch-no-rework**：切换前后 `listDirectory` / `listDirectories` / `digestFiles` / `readTextFile` 次数相同，`onCompareRequest` 与 `compareRequestsReady` 各只 1 次（工作台未重挂载）。
+- **ac-language-switch**：en → zh → en 运行时切换后顶栏、空态、目录视图文案逐字等于当前语言词典值（按命名 key 断言），en 侧汉字为 0。
+- **ac-missing-key-fail-closed**：删掉任一被关键路径引用的键（或 en 值缺失）时表单源用例立即变红，恢复后全绿；断言用渲染文本与词典插值等值比较。
+- **ac-locale-table-single-source**：测试期望文案全部经 `i18n/localeTable.ts` 取词典值，`LOCALE_ROWS.length === Object.keys(zh).length` 且逐行与 `messages.zh` / `messages.en` 全等。
+- **ac-code-diff-copy-en**：`renderWithI18n(<CodeView …/>, 'en')` 可见 `Previous difference` / `Next difference` / `Difference blocks`、`Overwrite to right` / `Overwrite to left`、`Reset`、`Save left file` / `Save right file` 及英文 `title`、`Unsaved: left/right/both`、`Open left file` / `Open right file`、面板副标题与 `Modified (unsaved)`。
+- **ac-code-dirty-status**：脏状态与真实侧一一对应（zh `未保存：左/右/左、右`，en `Unsaved: left/right/both`），无脏侧不渲染。
+- **ac-code-save-notice**：保存成功 `role="status"` 为当前语言且含路径（en `Wrote back {path}`），`writeTextFile` 恰 1 次；失败时通知为平台原始 message 原文。
+- **ac-merge-copy-en**：合并模式 en 可见 `Previous conflict` / `Next conflict`、`Pending conflicts`、四个 `Accept *`、`Open base/ours/theirs`、`Merge result preview`、`Copy`、`Export merged text`；未解决数 `{n}/{total}` 为真实计数。
+- **ac-csv-copy**：en `Key columns` / `Key column selection` / `CSV alignment tools` / `Status filter` 六档 / `Only left` / `Only right` / `{visible} / {total} rows` / `Aligned {rows} rows · key {keys}` / 打开左右文件；zh 为 `主键列` / `仅左` / `{visible} / {total} 行` 等现有文案；数字仍用 `en-US` 千分位。
+- **ac-structured-copy**：en `Structured format` / `Status filter` 六档（`Type changed` 单独成键）/ `structured counts` / `{count} nodes · counts reflect the runtime comparison` / `Node path changes` / `Showing {visible} / {total}` / `Left source` / `Right source`；zh 为 `类型变更` / `共 {count} 个节点 · 计数为运行时对比结果` / `节点路径变更` / `左原文` / `右原文`；切 YAML 后下钻说明为 `Local file · YAML source · semantic comparison`。
+- **ac-structured-error-frame**：解析失败时中英各显本地化标题 / 提示（en `Structured parsing failed`），`description` 保留 core 原始 message，副标题为当前语言 `Parse failed` / `解析失败`。
 
 ## 非目标
 
-- 不做设置面板的更多分区（主题 / 快捷键）、持久化草稿或批量保存、成功 toast（`settings.saved` 保持未使用）；不发成功提示不改 `settings.saved` 语义。
-- 目录视图面（`views/DirectoryView.tsx`、`components/TreeView.tsx`、`views/DirectorySyncDialog.tsx`、`views/TemplateDialog.tsx`、`views/directoryCopy.ts`）已在「目录对比视图与同步/模板对话框双语化」轮接入；设置面板 / 齿轮入口 / 语言即时切换与写盘已在「设置面板与即时切换」轮接入；代码 / CSV / 结构化三视图已由「文件级视图双语化」轮接入；`components/SplitPane.tsx` 分隔条与 `workbench/fileIO.ts` / `workbench/snapshotOps.ts` 的 filter 名称已由「收口」轮接入；`components/Panel.tsx` / `SegmentedControl.tsx` 核对后无用户可见文案（`label` 只出现在英文注释），不需要词典键。这些区域切换语言后必须整块换文案。
-- 不改 `workbench/snapshotOps.ts`、`workbench/loadSampleSessions.ts`、`workbench/session.ts`、`workbench/fileIO.ts` 的行为契约（调用序列、错误 code、`extensions`、会话 id、快照协议）：收口轮只把这些模块里的中文提示 / 注释改为稳定 code + 英文诊断，已知错误文案由 `Workbench` 渲染期按 code 取键。
-- 不改 `src/core/**`、`src/main/**`、`src/preload/**`、`src/shared/compareRequest.ts`、`src/shared/platform/**` 的任何文案或行为。
-- 不改 `src/shared/fixtures/**` 的数据与 `FixtureSession` / `SessionStat` 类型语义（`SessionStat.label` 保留，但 `Workbench` 不再渲染它、也不再据它判断）；不把 fixture 中文改成英文。
-- 不改会话 id 生成规则、对比 / 扫描 / 摘要 / 缓存 / 取消逻辑、四态语义、差异色、布局与字号；不新增或修改 `code_gates.json` 条目。
-- 不做浏览器 / 真机 / 桌面点选验收（`needSelfTest=false`）；不做 `src/renderer/src/perf/**` 与 `src/renderer/src/platform/**` 的 i18n 改造，只把两者作为未覆盖目录登记理由；不改布局 / 视觉 / 差异语义色 / 字号 / 四态语义 / 快捷键。
-- 不引入 i18next / react-intl 等第三方框架，不新增运行时依赖、不新增专用 code gate；不做机翻。
-- 不新建第二套存储：不写 electron-store、不加第二个 localStorage key、不新增配置文件（存储实现归 `foundation` 域）。
-- 不改词典结构：不新增第三种语言、不新增第六个表面，不改 `en` / `zh` 键集对齐与自指标签约定；词条只能按各轮范围在既有五个表面成对扩充（外壳接入轮 `common` / `shell`，目录视图轮 `directory`，文件级轮 `files`，收口轮仅 `common.splitPane.divider` 与 `shell.snapshot.error.*` / `shell.error.sampleRead` / `shell.filter.snapshot`），不改既有键语义；不改 `PlatformPort`、`main` / `preload` / `web-platform` 的存储实现。
-- 不改 `App.tsx` 的启动解析、无文字品牌帧与 Provider 挂载；不改 `loadInitialLanguage` / `resolveInitialLanguage` 语义；不做系统语言实时跟随或系统语言变化触发切换。
-- 本轮（`<html lang>`）不新增语言、不做 RTL、不写 `<html dir>`、不改 `<title>` / meta 与任何视觉样式；不改语言解析规则、`Language` 类型、i18n 词典与设置面板文案；`index.html` 的静态 `lang` 只是首帧兜底，不在 `App.tsx` / `Workbench` / `SettingsDialog` 里重复写入；不新建测试基建或新测试目录。
-- 不碰 `package.json#version`、`CHANGELOG.md`、发布工作流与发布证据、`README.md` / `README.zh-CN.md` / `AGENTS.md` / `docs/**`；不发版、不打 tag、不 push。
+- 不做第三种语言、第六个表面、RTL / `<html dir>`、`<title>` 与 meta 改写；不改词典结构与既有键语义，不为凑对新增同义键。
+- 不引入 i18next / react-intl 等框架、不新增运行时依赖、不新增专用 code gate、不做机翻。
+- 不新建第二套存储：不写 electron-store、不加第二个 localStorage key / 配置文件（实现归 `foundation` 域）。
+- 不改 `src/core/**`、`src/main/**`、`src/preload/**`、`src/shared/**`（含 `compareRequest`、fixtures 数据、`FixtureSession` / `SessionStat` 类型语义）的文案或行为；fixture 中文不改英文。
+- 不改启动解析、无文字品牌帧与 Provider 挂载语义；不做系统语言实时跟随或系统语言变化触发切换。
+- 不改会话 id / 扫描 / 摘要 / 缓存 / 取消逻辑、四态语义、差异色、布局与字号；`code_gates.json` 不新增或改条目。
+- 不做浏览器 / 真机 / 桌面点选验收（`needSelfTest=false`）；不改造 `perf/**` 与 `platform/**`，只作未覆盖目录登记。
+- 不碰 `package.json#version`、`CHANGELOG.md`、发布工作流与发布证据、`README` / `AGENTS.md` / `docs/**`。
 
 ## 实现约束
 
-- 词典语言值类型 `Language = 'zh' | 'en'`（`src/shared/platform/types.ts`），默认 `en`；`UserSettings` 只含 `language` 一个字段（不保留 version 字段），读取时忽略未知字段、非法语言值视为 `null`。
-- 五个表面固定为 `common` / `shell` / `directory` / `files` / `settings`；新增表面必须成对新增并进 `messages/index.ts` 固定聚合，禁止把新键散落到别人文件。
-- 插值仅 `{name}` 形态，单一正则实现，不引入模板引擎；`t` 的键参数类型为合并后 zh 键的联合类型（`MessageKey`）。
-- Web 设置单键固定为 `opencompare.userSettings`；内存回退是模块级变量，同一运行期同构读回；不写其它 key（实现归 `foundation` 域）。
-- 新通道只加在 `src/shared/platform/channels.ts`；preload 只转发，renderer 不得 import electron（既有 `no-restricted-imports` 已覆盖）。
-- 既有 `src/preload/index.test.ts` 的 surface 断言与 `src/main/platform/electron-platform.test.ts` 的电子模块 mock 需按新方法集更新；`app.getPath('userData')` 在测试中用临时目录注入，不依赖真实用户目录。
-- renderer 侧 DOM / localStorage 测试用 `// @vitest-environment jsdom`；纯解析与词典测试保持 node 环境。
-- 注释与代码风格沿用仓库现有英文注释；`i18n/messages/**` 自身不受「无中文」扫描约束，业务源码必须零汉字。
-- 词典归属：跨表面共享键（差异语义、文件类型名、通用按钮、`Sessions`、`Close`、`Close {title}`）放 `common`，工作台壳与新建对比专属键放 `shell`；键名沿用命名空间点号（如 `shell.toolbar.newCompare`、`shell.progress.cancel`、`shell.session.sample.code.title`、`common.diff.conflict`、`common.fileKind.code`）。
-- `SessionStat.label` 字段保留（fixtures 与既有类型不动），但 `Workbench` 不再渲染、也不再据它判断分支；`DIFF_LABELS` 改为 `DIFF_LABEL_KEYS`，只同步改 `TreeView.test.tsx`、`DirectoryView.test.tsx` 两处断言取 zh 词典值。
-- 文件对的两类已知失败用带 `code` 的错误（`unsupported-type`、`mixed-family`）承载参数，`Workbench` 与 `NewCompareDialog` 按 code 取键，未知错误仍显示原始 message。
-- 扫描清单写成一个常量数组供测试直接遍历；新增 shell 文件必须同时加入清单，否则视为未覆盖。`App.tsx` / `workbench/**` / `views/**` / `components/**` / `i18n/**` 已由收口轮 `i18n/mainScan.test.ts` 的 `SCAN_ROOTS` 整目录覆盖（默认包含 `main.tsx` / `env.d.ts`），逐文件清单 `shellScan` / `directoryScan` / `filesScan` 作为分层钉板保留。
-- 设置面板写法：`SettingsDialog.tsx` 放 `workbench/`，props 至少 `platform` + `onClose`；语言选项标签只允许来自 `messages[target]['settings.language.name']`（可经 `languageSelfLabel`），禁止写 `'简体中文'` / `'English'` 字面量，也禁止为标签新增词典键；入口按钮放顶栏右侧群组最后一位且不接 `directoryBusy` 的 disabled。
-- 切换处理顺序固定：`setLanguage(next)` → 串行队列里 `platform.writeUserSettings({ language: next })`；面板只存失败 `reason` 字符串，文案在渲染期用 `t('settings.saveError', { reason })` 生成（失败提示本身也随语言切换）。写盘串行用 `useRef` 链式 promise，不需要 debounce / 取消；失败不得回滚语言、不得重新 `readUserSettings`。
-- 通知条状态用最小结构 `Notice`（`copy` 存 key + params，`detail` 存原文），`report` 接受该结构；词典文案在渲染期解析，原始错误 detail 原样输出。嵌套片段（文件 / 文件夹类型名、同步失败 reason 等）在 `NoticeParams` 里用 `{ message: MessageKey, params? }` 表达，渲染期递归解析（片段允许自带插值，如 `shell.sync.reason.*` 的 `{code}`）。
-- 不要给 `Workbench`、视图组件或设置对话框加语言相关的 `key`；切换只允许触发 context 消费组件重渲染。
-- 既有 `App.test.tsx` / `App.snapshot.test.tsx` 的适配方式：`beforeEach` 写入 `localStorage['opencompare.userSettings'] = '{"language":"zh"}'`（`afterEach` 清理），首屏断言改为 `await screen.findByRole(...)`；不得为通过测试把生产默认语言改成中文。`Workbench` 直连渲染的测试因无 Provider 回落 zh，不改断言。新增设置 / 切换测试以既有 `App.test.tsx` / `App.i18n.test.tsx` 写法为模板（预置 `opencompare.userSettings`、`await screen.findByRole(...)`、`renderWithI18n`、`countingPort`），测试环境 jsdom，`cleanup()` / `localStorage.clear()` 保持既有 `beforeEach` / `afterEach` 习惯。
-- renderer 仍不得 import Electron；不引入 `@core` 之外的新依赖、不引入 i18next / react-intl；新代码注释用英文（扫描不豁免注释）。
-- **目录视图轮接线纪律**：四个组件用 `useI18n()`；无 Provider 时既有 zh 回落保证 `DirectoryView.test.tsx` / `TreeView.test.tsx` 的 `render()` 调用方式不需要包 Provider 即可继续断言中文；不得把 `language` 用作组件或 `TreeView` 的 `key`，不得改 `DirectoryViewProps` 形状。`DIRECTORY_FILTERS` 顺序、`buildDirectoryRowModel` 入参、`trackLive('rowModel')` 注册、`useLayoutEffect` 滚动恢复、`selectedPath` / `collapsedPaths` 受控语义、隐藏 input 的 `accept` 与 `onChange` 重置逻辑、`Dialog` 的 `onClose` busy 行为、`deletePaths` 计算全部保持原样。
-- **目录视图轮测试写法**：en 场景统一用 `@renderer/i18n/testing` 的 `renderWithI18n(ui, 'en')`；zh 断言用 `zh[key]` 取值；扫描清单写成常量数组（四个页面文件 + `directoryCopy.ts` 全列），不得把 `.test.*` 加进扫描清单靠排除规则蒙混；en 无汉字断言按「指定表面文本」逐个元素校验，不对含随机临时目录名的整棵 DOM 做全量汉字扫描。`views/directoryI18n.test.tsx`（中英双语冒烟：DirectoryView + 两个对话框直接构造 `SyncPreview` / `TemplatePreview`）、`views/directoryScan.test.ts`（5 文件 0 命中 + 两个既有测试文件不再含被本地化字面量）为本轮回归钉板。
-- **插值限制（目录面）**：只用 `{name}` 占位；`Dialog` 的 `description` 允许由「词典片段 + `<span className="font-mono">` 用户数据」拼成，片段自身必须整句可用（en 语序由模板决定，不把中文语序逐段拼英文），词典值内不得出现 HTML / JSX。
-- **文件级接入轮的实现约束**：`MODE_OPTIONS` / `ACCEPT_OPTIONS` / `FILTER_OPTIONS` / `STATUS_LABELS` 等常量数组只承载稳定 `value` + 词典键，`t()` 结果不得缓存进模块级常量、不得在渲染期之外解析语言；`useMemo` 若引入语言相关渲染必须把 `language` 纳入依赖，禁止把中文字符串存进会话 / 状态对象；平台 dialog `title`、按钮 `title`、`aria-label` 同样走词典（扫描不豁免注释与属性），错误通知详情 `cause.message` 原样透传；扫描测试放 `src/renderer/src/views/filesScan.test.ts` 并以 `FILES_COPY_FILES` 常量列举六个文件；en 用例用 `renderWithI18n(..., 'en')`，既有 zh 用例保持无 Provider 的 `render`（回落 zh），语言切换用例在测试文件内用 `I18nProvider` + 探针按钮驱动 `setLanguage`，不新增生产 API；不改 `src/core/**`、`src/main/**`、`src/preload/**`、`src/shared/**`，不改布局 / 差异语义色 / 字号 / 虚拟化行为，不把 `DiffPane` / `MergePane` / `CodeBlock` 改造成带文案参数的组件。
-- **`<html lang>` 接线纪律（本轮）**：`Language → lang` 映射只在 `src/renderer/src/i18n/htmlLang.ts` 定义一次（禁止组件内散落三元字面量），`I18nProvider` 是唯一写入点——`useLayoutEffect` 保证首帧即生效、切换语言同步更新，生产路径与 `renderWithI18n` 共用同一同步点，不在 `App.tsx` / `Workbench` / `SettingsDialog` 重复写；`applyHtmlLang` 必须先判 `typeof document === 'undefined'` 再访问 `documentElement`，Node / SSR 形态下 no-op 不抛；`document.documentElement.lang` 是外壳状态，不进 React 渲染树、不作组件 `key`；`index.html` 静态 `lang` 取 `en`（产品英文默认，仅首帧兜底），不得回退 `zh-CN` 或留空，也不留其它中文静态文案；测试写进既有 `App.i18n.test.tsx` / `I18nProvider.test.tsx` / `mainScan.test.ts`，不新增测试文件或目录。
-- **收口轮接线纪律**：本 WI 允许改动的只有「文案载体」——词典值、`key + params` 映射、错误 code → 词典键的映射、注释语言、测试；不得改行为契约（调用序列、会话身份、过滤 / 选中 / 滚动、错误 code、平台 filter 的 `extensions`）。非 React 模块（`snapshotOps` / `loadSampleSessions` / `directoryCompare` / `fileIO`）不得自己解析语言：已知错误按「稳定 code + 参数」产出，由 `Workbench` 在渲染期用 `t(...)` 生成文案；未知错误仍走 `detailNotice` 原样展示。平台对话框 filter 名称由调用点按当前语言构造（纯工厂函数），`TEXT_FILE_FILTER` 的 `extensions` 与 `SNAPSHOT_FILE_FILTER` 的 `extensions` 保持不变；不得把 `t()` 结果缓存进模块级常量。因本轮把 `SplitPane` 接上 `useI18n()`，无 Provider 时仍回落 zh，既有组件单测断言不变；不得把 `language` 用作任何组件 / 视图的 `key`。视图 / 壳层文案变化会连带既有测试里的中文 selector 失效：如确需更新，改为词典取值或 en 真实文案，不允许放宽断言或删除用例。冒烟写法沿用既有约定：en 用 `renderWithI18n(ui, 'en')`，App 级用 `localStorage['opencompare.userSettings']` 预置记录 + `await screen.findByRole(...)`；zh 断言取 `zh[key]` 值；不对含临时路径的整棵 DOM 做全量汉字扫描，只对指定表面元素断言。术语表以测试常量呈现（不改生产 i18n API），canonical 词形与 en 词典现状一致（美式拼写）。
+- `Language = 'zh' | 'en'`（`src/shared/platform/types.ts`）默认 `en`；`UserSettings` 只含 `language`，非法语言值视为 `null`。
+- 五个表面固定；新增表面须成对新增并进 `messages/index.ts`；新键只落既有表面成对文件，禁止散落到别人文件。
+- 插值仅 `{name}` 单一正则实现，不引入模板引擎；`t` 的键类型为合并后 zh 键联合（`MessageKey`）；词典值内不得出现 HTML / JSX。
+- 词典归属：跨表面共享键（差异语义、文件类型名、通用按钮、`Sessions` / `Close {title}`）放 `common`，壳层与新建对比放 `shell`，目录面共享映射集中 `views/directoryCopy.ts`，文件级按 `files.code.*` / `files.merge.*` / `files.csv.*` / `files.structured.*` 分组。
+- 不得把 `t()` 结果缓存进模块级常量；常量数组只承载稳定 `value` + 词典键；`useMemo` 若含语言相关渲染必须把 `language` 纳入依赖；不得把中文字符串存进会话 / 状态对象。
+- 非 React 模块（`snapshotOps` / `loadSampleSessions` / `directoryCompare` / `fileIO`）不得自己解析语言，按「稳定 code + 参数」产出；`NoticeParams` 以 `{ message: MessageKey, params? }` 表达嵌套片段，渲染期递归解析。
+- 切换时序固定：`setLanguage(next)` → `useRef` 串行 promise 队列里 `writeUserSettings({ language: next })`；失败不回滚、不重读记录，只存 `reason` 由 `t('settings.saveError', { reason })` 渲染；不得给组件 / 视图加语言 `key`。
+- 设置面板放 `workbench/SettingsDialog.tsx`（props 至少 `platform` + `onClose`），语言标签只允许来自 `messages[target]['settings.language.name']`（可经 `languageSelfLabel`），禁止字面量与新增标签键；齿轮入口常驻顶栏且不接 `directoryBusy` 的 `disabled`。
+- 门禁：`pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm build:web` 全绿；新增主链路文件必须入 `SCAN_ROOTS`；任何新语言入口必须复用 `htmlLang()`，不得再写 `documentElement.lang`。
+- 测试：renderer DOM 用 `@vitest-environment jsdom`，纯解析与词典保持 node；en 用例用 `renderWithI18n(ui, 'en')`，zh 断言取词典值；期望文案经 `localeText()`，不新建测试基建、不把 `.munk/` 或新文件当收口容器。
 
 ## 最近交付证明
 
 - WI：`wi_intake_a2dec1ffa5a717f2`（renderer i18n 测试收敛为 locale 表单一来源 + 同步失败提示双语复核；`kind: test/refactor`）
-- 日期：2026-11-02
-- 结果：`code_gates` passed（21 门，attempt 001，`.munk/runs/run_intake_a2dec1ffa5a717f2/code-gates/attempts/001`；`pnpm test` 114 files / 1,744 passed + 1 skipped / 1,745，Duration 31.57s）。交付前在同一 worktree 复测覆盖：Statements 89.94%（7,686/8,545）· Branches 82.74%（4,394/5,310）· Functions 89.39%（1,678/1,877）· Lines 92.54%（6,924/7,482），四项均不低于基线。
-- 覆盖摘要：① 新增测试专用派生模块 `src/renderer/src/i18n/localeTable.ts`（32 行）——`LOCALE_ROWS` 按 `Object.keys(zh)` 逐键生成 `{ key, zh, en }`，`localeText(language, key, params?)` 复用既有 `interpolate`；产品运行时代码不 import，四个测试文件共用同一来源。② 两文件 2,245 → 815 行（`App.i18n.test.tsx` 928→234、`views/directoryI18n.test.tsx` 1,317→581），用例 60 → 5 条关键路径：运行时语言切换（含同一通知条 DOM 节点重译）、`?perf=1` 测量窗口分支、locale 表单源 + 缺键 fail-closed、目录视图与同步 / 模板对话框同源取值、EACCES·EPERM 写入拒绝与刷新失败的双语等值断言。③ `.toContain(` 57 → 2（只剩路径与 OS code 片段）、`readFileSync` 0。④ `TemplateDialog.test.tsx` 两个文案断言改 `directory.template.failure.writeFailed` / `shell.sync.reason.EACCES`，`App.theme.test.tsx` 一条改 `settings.saveError` 插值，`theme/themeSources.test.ts` 零文案断言未动，三者用例数与行为断言不变。⑤ 全仓用例 1,800 → 1,745（−3.1%，≤5% 内），测试总行数 46,955 → 45,533。⑥ `i18n/messages/**`、`package.json#version`（0.2.16）、`.munk/code-gates.json`、`vitest.config.mts` 零 diff；`App.smoke.test.tsx` / `messages.test.ts` / `mainScan.test.ts` 未改。
-- 注：① **被推翻的假设**：这两个文件原先被当作 i18n 的产品行为回归网，实际 60 条里绝大多数是逐键抄写文案——它们只在词典成批改动时一起变红，对「语言切换 / 缺键回落 / 同步失败本地化」三条真回归没有区分度；收敛到 5 条等值断言后覆盖未掉点（两文件原贡献仅约 0.3pp）。② 缺键 fail-closed 靠的是表本身：任何「按语言取名字典值」的 helper 都必须保留 `LOCALE_ROWS.length === Object.keys(zh).length` 与逐行等值断言，否则删键后会静默跳过。③ EACCES / EPERM 的 en 文案由 `shell.sync.error.target` + 嵌套 `shell.sync.reason.<CODE>` 渲染期解析，断言必须与词典插值结果 `toBe` 等值比较，不要退回 `toContain('permission denied')` 这类片段（中文 detail 的英文尾巴也会命中）。④ 后续新增 i18n 断言直接用 `localeText()`，不要再往两文件加逐键用例——900 行 / 5 条是硬上限，需要更多覆盖时加深这 5 条关键路径。⑤ 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；本域验收落档为 `qa/locale-table-tests.md`。
-
-- 历史（上一轮）：WI：`wi_ws_dcf61d0392d48f0e`（交叉引用：模板归位选根 / Dry-run 两步文案与完成通知；`kind: feature`）
-- 日期：2026-11-01
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_10c60d152fac2135/code-gates/attempts/001/manifest.json`；`pnpm test` 100 files / 1506 passed + 1 skipped、`pnpm test:sync-real` 33 tests；模板入口行为 AC 归 `domains/directory`，`qa/template-entry-dryrun.md`）。
-- 覆盖摘要：`messages/{zh,en}/directory.ts` 成对新增 30 个 `directory.template.*` 键（选根标题 / 说明 / 只读标、B 与输出根输入标签、四个选择按钮与 title、拖入提示、`Build dry run` 与扫描中、`Will be created` / `Exists`、列表 `aria-label` 与逐行勾选名、覆盖 / 目录占用标记、可执行 / 拒绝计数句、十个入口拒绝句）；`messages/{zh,en}/shell.ts` 删除 `shell.notice.templateComplete`，改为 `shell.notice.templateApplied`（`{written}` / `{failed}`），完成通知按 `failedCount > 0` 走 danger 语气（分支归 `domains/workbench`）。`views/directoryI18n.test.tsx` 的 `makeTemplatePreview` 与四段断言改为携带 `plan` 的新 `TemplatePreview`；`views/TemplateDialog.test.tsx` 断言 zh / en 键集合相等与 en 两步整屏无汉字；`messages.test.ts` 键集 / 占位符 / en 卫生断言全绿。
-- 注：① 拒绝文案只能消费 `TemplateRootError.code`，十个 `directory.template.error.*` 与稳定码一一对应——新增拒绝分支必须同时补码与中英词，不要在组件里写 `cause.message`。② `ac-template-dialog-copy` 的确认按钮禁用口径已从 `result.matched.length === 0` 改为 `executableCount === 0`，改写对话框时不要退回旧判据。③ `shell.notice.templateComplete` 已删除，任何残留引用会在键集相等断言里立刻失败（`App.test.tsx` / `perfShell` 已改走新键）。④ 模板分区计数仍走 `ac-count-plural` 的 `{count} items` / `{count} 个`，新增的「可执行 / 拒绝」句另用 `{count} executable` / `{count} rejected`，不要把两种量词混进同一个键。
-
-- WI：`wi_ws_2f5af7320d12ad9f`（交叉引用：样本入口文案去路径 + 同步写入失败按系统码本地化；`kind: fix`）
-- 日期：2026-11-01
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_2c5dead54f30bd31/code-gates/attempts/001`）。样本入口归位与 DOM 零命中断言归 `domains/workbench`（`qa/` 无新增用例，本 change pack 仅 `prd.md`）。
-- 覆盖摘要：新增纯映射模块 `src/renderer/src/workbench/syncFailureCopy.ts`——`REASON_KEYS` 把 10 个稳定系统码映射到 `shell.sync.reason.*`，`syncTargetFailureCopy` 只认 `SyncTargetError` 并用 `{path}` + 嵌套 `{reason}` 组成 `shell.sync.error.target`，`syncRefreshReasonCopy` 以 `\b(E[A-Z]{2,})\b` 从 `SyncRefreshError.reason` 提取码后复用同一张表；`Workbench` 的 `noticeText` 改为支持片段自带 `params`，dry-run 预览失败与确认执行失败都先试 `syncTargetNotice(...)`、未命中才回落 `detailNotice`，刷新失败分支把 `{reason}` 换成 `syncRefreshReasonCopy(cause)`。`messages/{zh,en}/shell.ts` 成对新增 12 键（`shell.sync.error.target` + 10 个 `shell.sync.reason.<CODE>` + `shell.sync.reason.fallback`）；`shell.error.sampleRead` 与 `directory.toolbar.templateTitle` 中英同批去掉 `/samples` 与「内置散乱树 / built-in scattered tree」点名。测试：`workbench/syncFailureCopy.test.ts`（五码中英渲染含路径与码、无 IPC 包装、缺码 / 未知码落兜底、非 `SyncTargetError` 返回 `null`、刷新原因提码）、`workbench/directorySyncFailureI18n.test.tsx`（en 下写入拒绝与刷新失败均无汉字）、`App.i18n.test.tsx` 与 `views/directoryI18n.test.tsx` 改为「无 `/samples`」口径。
-- 注：① **核心 message 不动、只在渲染边界翻译**：`SyncTargetError` / `SyncRefreshError` 的中文句与字段仍被 `sync-real-gate` 直接断言，本地化只能消费 `path` / `code` / `reason`，不要试图改核心文案或把中文 detail 塞进词典。② `shell.sync.reason.*` 的 `{code}` 是**原样系统码**，不要翻译或改写大小写；`shell.sync.error.target` 的 `{reason}` 必须由渲染期嵌套解析，直接传字符串会丢掉 `{code}` 插值。③ 兜底句是安全默认：陌生码比中文原文更可接受，任何「识别不了就显示 `cause.message`」的回退都会让 en 界面重新漏汉字。④ `shell.notice.syncRefreshFailed` 的 `{reason}` 语义已从「原始 detail」收紧为「本地化片段」，其后任何新失败分支都要走 reason 映射，不要直接传 `cause.reason`。
-
-- WI：`wi_intake_5f07e9ba2c93369b`（交叉引用：同步预览删除分组标题的「已选 N」词条；`kind: fix`）
-- 日期：2026-11-01
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_5f07e9ba2c93369b/code-gates/attempts/001`；`pnpm test` 96 files / 1435 passed + 1 skipped，`pnpm test:sync-real` 33 tests / 2.54s）。摘要 / Apply 同源语义与 AC 归 `domains/directory`（`qa/sync-summary-selection-sync.md`），本域只同步词条口径。
-- 覆盖摘要：`messages/{zh,en}/directory.ts` 成对新增一键 `directory.sync.groupCountSelected`（zh ` · 已选 {selected}` / en ` · {selected} selected`，单占位符 `{selected}`，无句末标点，供组头「N 个 · X 字节」后缀拼接）；`en` 侧仍由 `Record<keyof typeof zhDirectory, string>` 编译期兜住漏补，`messages.test.ts` 的键集相等 / 占位符一致 / en 无汉字断言全绿，并把该键登记进 `INLINE_COPY_KEYS` 白名单（组头文案是插值片段而非独立句子）。渲染断言：`views/directoryI18n.test.tsx`（en `0 items · 0 B · 0 selected`、zh `1 个 · 20 B · 已选 0`）、`views/directorySyncDialog.test.tsx`（勾选后 `已选 1` 与摘要 / Apply 同屏同步）。
-- 注：① **该键是后缀片段**（以空格 + 分隔符开头、无独立主语），只能接在 `directory.sync.groupCount.*` 之后；当成独立句使用会读成「已选 1」孤句，所以它进了 `INLINE_COPY_KEYS` 白名单。② 只有删除组（opt-in 组）渲染这个后缀——给新增 / 覆盖组也加上会让「计划数」与「勾选数」两套语义并存，本轮 prd 明确禁止。③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。
-
-- WI：`wi_intake_bdc57b0abb1db652`（交叉引用：同步「待对齐链接时间」分组与摘要 / 完成提示的对齐计数词条；`kind: fix`）
-- 日期：2026-11-01
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_bdc57b0abb1db652/code-gates/attempts/001`；`pnpm test` 96 files / 1420 passed + 1 skipped，`pnpm test:sync-real` 21 tests / 2.30s）。可执行判定与链接对齐语义、AC 与 qa 归 `domains/directory`（`qa/sync-link-align-visibility.md`、`qa/sync-symlink-metadata.md`），本域只同步词条口径。
-- 覆盖摘要：`messages/{zh,en}/directory.ts` 成对新增一键 `directory.sync.group.align`（`待对齐链接时间` / `Link times to align`，无占位符）；`directory.sync.summary` 由三占位符扩为四（新增 `{align}`，zh `本次将执行：新增 {copy} · 覆盖 {update} · 删除 {delete} · 对齐链接 {align}` / en `This run: {copy} copy · {update} overwrite · {delete} delete · {align} link time aligned`）；`directory.sync.noExecutable` 文案补「待对齐」（en 补 `link times to align`）；`messages/{zh,en}/shell.ts` 的 `shell.notice.syncComplete` 由三占位符扩为四（新增 `{aligned}`，zh `同步完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted} · 对齐链接时间 {aligned}。`）。`en` 侧仍由 `Record<keyof typeof zhXxx, string>` 编译期兜住漏补；`messages.test.ts` 键集 / 占位符 parity / en 零汉字断言全绿。渲染断言：`views/directorySyncDialog.test.tsx`（zh 分组标题与待对齐计数）、`workbench/directoryI18n.test.tsx`（en 摘要句含 `0 link time aligned`）、`workbench/directorySyncLinkAlign.test.tsx`（完成提示含 `对齐链接时间 1`）。
-- 注：① **占位符扩写是硬合同**：`{align}` / `{aligned}` 只有加了词典键却没有渲染点，`messages.test.ts` 不会红但界面会丢数字——改这三处时必须同步看 `DirectorySyncDialog` 的 `t('directory.sync.summary', {…align})` 与 `Workbench` 的 `copyNotice('shell.notice.syncComplete', {…aligned})`。② 分组标题的「待对齐链接时间」刻意不并入「待删除（镜像）」一类的动作句，它是**元数据对齐**而非文件搬运，文案区分能避免用户以为会重写内容。③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例（`qa/sync-link-align-visibility.md` 落在 `domains/directory`）。
-
-- WI：`wi_intake_654321843130fa1f`（交叉引用：同步「写入后校验未通过」通知词条；`kind: fix`）
-- 日期：2026-11-01
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_intake_654321843130fa1f/code-gates/attempts/001`）。`SyncVerificationError` 语义与 AC 归 `domains/directory`（`qa/sync-completion-consistency.md`），本域只同步词条口径。
-- 覆盖摘要：`messages/{zh,en}/shell.ts` 成对新增一键 `shell.notice.syncVerifyFailed`（两个占位符 `count` / `paths`，en 侧 `Record<keyof typeof zhShell, string>` 编译期兜住漏补，en 值零汉字、句式完整成句）；zh 侧逐字为 `同步写入后校验未通过：{count} 个目标与源不一致（如 {paths}）。写入结果已保留，请重新预览后再同步。`；既有 `shell.notice.syncComplete` / `shell.notice.syncCancelled` / `shell.notice.syncRefreshFailed` 未改名未删除。`messages.test.ts` 的键集相等 / 占位符一致 / en 无汉字 / 卫生断言全绿（新键随既有断言自动覆盖）。
-- 注：本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。**后续注意**：① 新句必须明确「写入结果已保留」——它与 `syncCancelled`（已回滚）语义相反，两者文案不能互换，否则用户会按错误前提决定下一步；② `{paths}` 的截断（最多 3 条 + `、` 连接）在 `Workbench` 侧完成，词典层不要再加省略号或换行；③ 该键目前只有词典与类型层证据，渲染层 danger 断言随 `directorySyncRefresh.test.tsx` / 未来 `SyncVerificationError` 渲染用例补齐（本轮渲染分支无专属组件用例）。
-
-- WI：`wi_ws_77594c69557dbc7f`（交叉引用：同步「写入已完成、仅刷新失败」通知词条；`kind: fix`）
-- 日期：2026-10-31
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_7e10c6ecc83eea17/code-gates/attempts/001`）。`SyncRefreshError` 语义与 AC 归 `domains/directory`（`qa/sync-write-recovery.md`），本域只同步词条口径。
-- 覆盖摘要：`messages/{zh,en}/shell.ts` 成对新增一键 `shell.notice.syncRefreshFailed`（四个占位符 `copied` / `updated` / `deleted` / `reason`，en 侧 `Record<keyof typeof zhShell, string>` 编译期兜住漏补，en 值零汉字、句式完整成句）；zh 侧逐字为 `同步写入已完成：新增拷贝 {copied} · 覆盖 {updated} · 删除 {deleted}；但刷新对比失败：{reason}。目标侧已是写入后的状态，请重新预览获取最新对比。`；既有 `shell.notice.syncComplete` / `shell.notice.syncCancelled` 未改名未删除。`messages.test.ts` 的键集相等 / 占位符一致 / en 无汉字 / 卫生断言全绿；`workbench/directorySyncRefresh.test.tsx` 以 zh 词典值断言通知含「写入已完成」「新增拷贝 1」与原因、不含 IPC 前缀。
-- 注：① 该键的 `{reason}` 承接的是**已剥掉 IPC 前缀**的刷新原因（剥前缀在 `directoryOps`，不在词典层），别在词典或组件里再塞 `Error invoking remote method` 的原文；② 句子必须同时含「写入已完成」与三项计数——只写「同步失败」会让用户误以为需要重试整次写入；③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。
-
-- WI：`wi_ws_08b7067f448f263b`（交叉引用：同步失败安全收口的取消提示词条与忙碌态取消语义；`kind: feature`）
-- 日期：2026-10-31
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_f06a7d04d430ead2/code-gates/attempts/001`）。同步失败安全语义与 AC 归 `domains/directory`（`qa/sync-failure-safety.md`），本域只同步词条与禁用语义口径。
-- 覆盖摘要：`messages/{zh,en}/shell.ts` 成对新增一键 `shell.notice.syncCancelled`（zh `同步已取消：目标侧已回滚到执行前状态，可再次预览或重试。` / en `Sync cancelled: the target was rolled back to its previous state; preview or retry again.`），无占位符、en 零汉字，`en` 侧 `Record<keyof typeof zhShell, string>` 编译期兜住漏补；既有 `common.cancel` / `shell.notice.syncComplete` 未改名未删除。`DirectorySyncDialog` 忙碌态「取消」由 `disabled` 改为可点并调 `onAbort`（空闲仍调 `onCancel`），`directoryI18n.test.tsx` 的对话框用例随新 `onAbort` prop 更新；失败原因句不走词典（核心 `SyncTargetError` 已是中文可读句）。
-- 注：① **忙碌态「取消」= 中止执行**，不是关闭弹窗——改文案或加二次确认时别把它重新变回禁用，否则执行中取消入口消失；② `shell.notice.syncCancelled` 是 info 语气，失败原因（danger）仍由 `detailNotice` 承载原始中文错误，不要用一句「失败」覆盖掉可定位的路径与系统码；③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。
-
-- WI：`wi_ws_7efd09ed8abe2eda`（交叉引用：真实目录镜像同步的删除安全默认与真实磁盘门禁；`kind: feature`）
-- 日期：2026-10-31
-- 结果：code_gates passed（11 gates，attempt 001，`.munk/runs/run_ws_ad95f49955770496/code-gates/attempts/001`）。同步语义与 AC 归 `domains/directory`，本域只同步词条与禁用语义口径。
-- 覆盖摘要：`messages/{zh,en}/directory.ts` 成对新增四键——`directory.sync.selectAll`（`全选` / `Select all`）、`directory.sync.clearSelection`（`清空` / `Clear`）、`directory.sync.summary`（`本次将执行：新增 {copy} · 覆盖 {update} · 删除 {delete}` / `This run: {copy} copy · {update} overwrite · {delete} delete`）、`directory.sync.noExecutable`（`待删除项默认不勾选；勾选至少一项删除，或存在新增/覆盖项后才能执行。` / `Delete items are unchecked by default. …`）；占位符集合 zh / en 一致，en 零汉字，`messages.test.ts` 卫生断言与键集相等断言全绿，既有 `directory.sync.*` 键未改名未删除。`directoryI18n.test.tsx` 的同步对话框用例改写为断言「复选框初始未勾」「全选 / 清空可用」「仅未勾选删除项时 Apply changes disabled + 原因句」「勾选单项后汇总 1 delete 且可确认」，zh 侧断言对应键存在。
-- 注：① 禁用条件从 `empty` 改为可执行条目数后，`ac-sync-dialog-empty` 只覆盖「计划确实为空」，非空但仅未勾选删除项由新 AC `ac-sync-dialog-executable-copy` 覆盖——后续改文案时两条一起看，别把原因句删成静默禁用。② 新增键全部落在既有 `directory` 表面，不新增表面文件；中英占位符名必须逐字一致（`copy` / `update` / `delete` 与文案顺序无关）。③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域无新增 qa 折叠用例。
-
-- WI：`wi_ws_e93fdbef0443dbcf`（交叉引用：scene 由打开对象决定，移除顶栏分段控件；`kind: feature`）
-- 日期：2026-10-31
-- 结果：`code_gates` passed（10 门，attempt 001，`.munk/runs/run_ws_1283bf9218f9c721/code-gates/attempts/001`）。AC 定义与实现细节归 `domains/workbench`（`qa/scene-auto-routing.md`），本域只同步词条口径与新增本域 AC。
-- 覆盖摘要：中英同批删除 `shell.viewSwitcher.label`（`messages/zh/shell.ts` 与 `messages/en/shell.ts` 各 −1 行，`en` 侧 `Record<keyof typeof zhShell, string>` 编译期兜住漏删）；`shell.view.directory` / `code` / `csv` / `structured` 四键原样保留（`SessionTabs` 类型归属与设置示例入口仍引用）。`messages.test.ts` 新增用例断言该键在 zh / en `undefined`、四个 `shell.view.*` 两侧 `toBeTruthy`；键集合相等 / 占位符 / 英文无汉字 / glossary 既有断言全部保持绿。`App.i18n.test.tsx` 的英文外壳用例由「Switch view 四标签正向断言」改为 `queryByRole('tablist', { name: 'Switch view' }) === null` 与 `queryByRole('tablist') === null`；`App.settings.test.tsx` 切语言后的视图切换标签顺序断言改为缺席断言 + 会话 tablist 恰 4 个 tab。`shellScan.test.ts`（`Workbench.tsx` 在显式清单内）零硬编码中文仍绿。
-- 注：① **`shell.view.*` 四键不能跟着删**：它们已从「视图切换标签」转为「会话 tab 类型归属 + 设置示例入口标签」的共用键，删掉会让 `SessionTabs` 与设置分区失去文案或逼出同义新键。② 键删除后 `Workbench.tsx` 不能再有任何依赖 `t('shell.viewSwitcher.label')` 的 `aria-label`——顶栏分段控件是唯一消费者，整块删除后不留空壳。③ 本 WI change pack 仅 `prd.md`，无 `tests/cases/**`，无 change-pack 用例可 copy；本域验收落档为 `qa/no-view-switcher-key.md`。
-
-- WI：`wi_ws_8959816f18ce7acf`（交叉引用：顶栏 / 目录工作流 / 空态去 demo，示例收进设置；`kind: feature`）
-- 日期：2026-10-31
-- 结果：`code_gates` passed（10 门，attempt 001，`.munk/runs/run_ws_1828c869e01e6829/code-gates/attempts/001`）。AC 定义与实现细节归 `domains/workbench`（`qa/topbar-workflow-empty-state-de-demo.md`），本域只同步词条口径。
-- 覆盖摘要：中英同批删除 `shell.header.brandSubtitle`、`shell.toolbar.loadSamples` / `loadSamplesTitle` / `samples` / `samplesMenu`、全部 `shell.sampleMenu.*`、`directory.toolbar.loadSample` / `loadSampleTitle` / `demoRemote` / `demoRemoteTitle`；新增 `settings.samples.*` 成对键（分区标题 / 说明 / 4 条 scene 描述 / 远端快照标签 + 描述 / 失败项标签 + 描述），标签复用 `shell.view.*`；`shell.empty.hint` / `shell.empty.description` 与 `directory.picker.unavailable` 中英同批改写。`SettingsDialog.tsx` 已纳入 `shellScan.test.ts` 扫描清单，`messages.test.ts`（键集合 / 占位符 / 英文无汉字 / glossary）与 `i18n/mainScan.test.ts` 全绿。
-- 注：① 被删的样本 / 品牌副标题键在 en/zh 必须同时消失，`en` 侧 `Record<keyof typeof zh…>` 会在漏删时编译期报错，这是本轮键同步的主要护栏。② `settings.samples.*` 里的场景标签刻意复用 `shell.view.*`，后续不要再为新入口造同义重复词条。
-
-- 历史（上一轮）：WI：`wi_intake_07073ffc0b1720d2`（`<html lang>` 跟随界面语言，随 v0.2.7 发版；`kind: feature`）
-- 日期：2026-10-24
-- 结果：code_gates passed（9 gates，attempt 001，`.munk/runs/run_intake_07073ffc0b1720d2/code-gates/attempts/001`；`needSelfTest=false`，UI 自测跳过）。`pnpm test` 58 files / 897 passed + 1 skipped / 898（较上轮 891 增 6 条，全部为本项新增）。
-- 覆盖摘要：新增纯模块 `src/renderer/src/i18n/htmlLang.ts` —— `HTML_LANG: Record<Language, string>`（`en` → `en`、`zh` → `zh-CN`）为唯一映射，`htmlLang(language)` 读表，`applyHtmlLang(language)` 先判 `typeof document === 'undefined'` 再写 `document.documentElement.lang`（Node 环境 no-op）。`I18nProvider.tsx` 引入 `useLayoutEffect`，在 `[language]` 变化（含首帧）后调用 `applyHtmlLang`，使 `App` 生产路径与 `renderWithI18n` 测试路径共用同一同步点，`App.tsx` / `Workbench` / `SettingsDialog` 零改动。`src/renderer/index.html` 静态 `lang` 由 `zh-CN` 改为 `en`。测试新增 6 条且全部落在既有文件：`App.i18n.test.tsx` 默认英文首屏 → `'en'`、`zh-CN` 系统语言首屏 → `'zh-CN'`；`I18nProvider.test.tsx` 新增 `document language` describe（`renderWithI18n(..., 'en' | 'zh')` 挂载映射、切 zh 再切回 en、`htmlLang` 两条映射），`Probe` 增一个 `switch to zh` 按钮；`i18n/mainScan.test.ts` 增 index.html 静态断言（`not.toContain('zh-CN')` + `/<html lang="en">/`）。词典、`Language` 类型、语言解析规则零改动。
-- 注：本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 AC 逐条落档为 `qa/v027-html-lang-follows-ui-language.md`。后续注意：① `document.documentElement.lang` 现在只由 `I18nProvider` 写——任何新的语言入口（如 `?lang=`、系统实时跟随）必须复用 `htmlLang()` 而不是再写一次 `documentElement.lang`，否则映射会出现第二份；② `index.html` 的 `en` 是首帧兜底而非真值，jsdom 下没有 `index.html`，所以 `ac-index-no-zh-lang` 只能靠 `mainScan.test.ts` 的文本断言守，不要以为组件测试能覆盖它；③ `applyHtmlLang` 的 `typeof document` 守卫是 provider 能在 Node 环境被 import 的前提，删掉会让非 jsdom 的 i18n 纯逻辑测试一起崩；④ 若将来新增语言，`Language` 联合类型扩充时 `HTML_LANG` 的 `Record<Language, string>` 会在 typecheck 阶段强制补 tag，这是刻意留下的编译期闸。
-- 历史（上一轮）：`wi_ws_f42e6733aa4d9953`（主链路全量 Han 扫描、双语冒烟与交付收口，`kind: feature`；双语化第五轮 / 收口轮）；主链路 24 行汉字清零（`SplitPane` 分隔条 / filter 工厂 / 稳定 stat 标识 / 快照与样本库失败身份化）+ `mainScan` / `App.smoke` / `messages` 术语表钉板 + 快照导出导入本地化，`common.splitPane.divider` 等 13 键成对扩充；详见该轮 fold 记录。
-- 历史：文件级视图 WI `wi_ws_48f5bed4c5774d2b`（2026-10-24，`CodeView` 双栏 Diff + 三向合并 / `CsvView` / `StructuredView` 全文案 + `filesScan` 清单，`files` 表面成对扩充）；目录对比视图面 WI `wi_ws_76862eb920bf9b10`（2026-10-24，`DirectoryView` 过滤 / 工具栏 / 空态 / 跳过提示 / `TreeView` 展开折叠 / 同步与模板对话框 + 共享键 `views/directoryCopy.ts`，`directory` 表面 5→78 键）；设置面板与语言即时切换 WI `wi_ws_8954785bd6a40566`（2026-10-24，齿轮入口 + `SettingsDialog` + `i18n/languageLabel.ts` + 串行写盘 / 失败就地提示 + 通知条 `Notice` 渲染期重译；`shellScan` 清单扩到 12 文件）；外壳接入 WI `wi_ws_a0d69b96e026b9df`（2026-10-23，`App` 启动接线 + 工作台壳层 / 新建对比 / 共享组件文案 + `workbench/sessionDisplay.ts` 渲染期化；`common` 27 键 / `shell` 128 键）；底座 WI `wi_ws_80cc30bb21c00dc3`（2026-10-23，词典 / `I18nProvider` / `resolveInitialLanguage` + `loadInitialLanguage` / `renderWithI18n` / `scanHardcodedChinese`；平台设置与系统语言通道折叠在 `domains/foundation`）。
+- 日期：2026-11-02 · 结果：`code_gates` passed（21 门，attempt 001；`pnpm test` 114 files / 1,744 passed + 1 skipped）。
+- 覆盖摘要：新增测试专用 `i18n/localeTable.ts`（`LOCALE_ROWS` 逐键派生 + `localeText` 复用 `interpolate`，产品代码不 import）；`App.i18n.test.tsx` 928→234 与 `views/directoryI18n.test.tsx` 1,317→581 合计 2,245→815 行、用例 60→5 条关键路径（运行时切换含通知条同节点重译、`?perf=1` 分支、locale 表单源与缺键 fail-closed、目录视图与同步 / 模板对话框同源取值、EACCES·EPERM 与刷新失败双语等值）；`.toContain(` 57→2、`readFileSync` 0。
+- 旁证：`TemplateDialog.test.tsx` 与 `App.theme.test.tsx` 的文案断言改词典取值，`theme/themeSources.test.ts` 零文案断言；`messages/**`、`package.json#version`、`code-gates.json` 零 diff；覆盖 89.94 / 82.74 / 89.39 / 92.54 不低于基线。
+- 注：缺键 fail-closed 依赖 `LOCALE_ROWS.length === Object.keys(zh).length` 与逐行等值断言，删键不得静默跳过；后续新增 i18n 断言一律用 `localeText()`，900 行 / 5 条为硬上限；本 WI change pack 仅 `prd.md`，验收落档 `qa/locale-table-tests.md`。
