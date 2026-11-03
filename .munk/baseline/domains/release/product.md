@@ -56,6 +56,10 @@
 - **ac-changelog-no-unpublished-segment**：从未打 tag 的版本不保留独立段落，内容折叠进当前段；其 notes / evidence 路径与 Release 链接均不存在，`publishedTags` 不含它。
 - **ac-notes-h2-parity**：中英 notes 各 6 个 H2 且逐项同序（What changed / Windows installer and portable zip / macOS signing and notarization / Not in this release / Risk and verification scope / Upgrade 与中文镜像），第 3 行为 tag 固定绝对互链、各恰 1 条链接。
 - **ac-baseline-dedup-convention**：notes 只写相对上一已发布版本新增的用户可见变化；动笔前对照上一 tag 的 H2 / H3 与 `CHANGELOG.md` 段去重，交集只保留平台段等非「本版新增」表述。
+- **ac-notes-signing-scope-correction**：v0.2.18 双语 notes 的 Windows 段（`## Windows installer and portable zip` / `## Windows 安装包与免安装 zip`）末尾各新增一个段落，逐字含 `NotSigned`、`SmartScreen`、`v0.2.17`、`UnknownError`、`CSC_LINK`（中文段另含「未签名姿态」），说明签名凭据注入已收窄到仅 macOS 目标，且该段落位于 macOS 段之前。
+- **ac-notes-stale-signing-claim-removed**：两文件不再出现 `This release does not change the signing or notarization configuration` / `本版未改动签名与公证配置`；macOS 段改为「凭据注入范围收窄到仅 macOS 目标」的限定表述（EN 含 `macOS target` + `unchanged`，ZH 含「仅 macOS 目标」+「口径本身不变」），仍保留 `Developer ID` 与 `notarized` / `公证`。
+- **ac-notes-body-assembly-safe**：两文件不含 `<details>` / `<summary>` / `</details>` 与独占一行的 `---`，`release.yml` 的双语折叠组装与 gate 段落切分不受影响；第 1 行标题仍含 `v0.2.18`、第 3 行语言互链不变。
+- **ac-notes-doc-only-diff-scope**：相对改动前基线 `git diff --name-status` 只有两处 `M`（`docs/release-notes/v0.2.18.md`、`docs/release-notes/v0.2.18.zh-CN.md`）；`src/**`、`scripts/**`、`.github/**`、`package.json`、`CHANGELOG.md`、`docs/release-evidence/**` 与历史 notes 零 diff。
 - **ac-published-tag-decoupled**：最新已发布 tag 由证据台账与 `docs/release-evidence/*.md` 的 verified 数据派生，`package.json#version` 不进入该判定；当前版本锚与已发布锚各自单点、互不派生，当前 tag 无证据文件不报缺证据。
 - **ac-published-anchor**：两版 `README.md` 第 5 行只指向最新已发布 tag 的公开 Release（各恰 1 个 `releases/tag/` 链接），收敛未发布窗口里不出现当前未发布版本与「待发布」字样。
 - **ac-readme-en-default**：`README.md` 首行为 `# OpenCompare`；除第 3 行语言切换外全文零汉字（`\p{Script=Han}` 0 命中），不含中文二级标题。
@@ -95,8 +99,7 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_51f535e26a03b97f`（发版后验证自动派发，`kind: fix`，`deliveryIntent: local merge`，`needSelfTest=false`）；日期：2026-11-03。
-- 结果：`code_gates` 24 门全绿（attempt 001 全 exit 0，`failedGateIds: []`）；`test` 123 files / 1933 passed + 1 skipped；发布两套件单跑 328 passed。
-- 改动面：8 个已跟踪路径 +278/−17（`release.yml`、`post-release-verify.yml`、三个发布测试面文件与 fixtures、`test-debt.json`）；`package.json`、`CHANGELOG.md`、`docs/release-notes/**`、两版 README 与全部产品源码零 diff。
-- 验收落点：14 条 AC 落档 `domains/release/qa/post-release-verify-auto-dispatch.md`；`finalize` 主动派发并 fail-closed 校验 run 存在、`aggregate` 成功、artifact 名含 tag + `run_id`，`post-release-verify.yml` 仅留 `workflow_dispatch`。
-- 关键被推翻假设：`GITHUB_TOKEN` 公开的 Release 不触发 `release: published`（该监听项是死代码）；job 级 `permissions` 是覆盖而非合并，须同时写 `contents` 与 `actions`。
+- WI：`wi_intake_8830df87d702ce36`（v0.2.18 双语发布说明纠偏，`kind: fix`，`deliveryIntent: local merge`，`needSelfTest=false`）；日期：2026-11-03。
+- 结果：`code_gates` 全绿；改动仅 `docs/release-notes/v0.2.18.md` 与 `v0.2.18.zh-CN.md`（各 +3/−1），`src/**` / `scripts/**` / `.github/**` / `package.json` / `CHANGELOG.md` / `docs/release-evidence/**` / 历史 notes 零 diff。
+- 验收落点：`ac-notes-signing-scope-correction`（Windows 段新增 `NotSigned` / `UnknownError` / `CSC_LINK` / `v0.2.17` 说明段落）、`ac-notes-stale-signing-claim-removed`（删除「未改动签名配置」旧句，改述凭据注入收窄到 macOS 目标）、`ac-notes-body-assembly-safe` 与 `ac-notes-doc-only-diff-scope`。
+- 关键点：签名凭据已由 `matrix.target == 'mac'` 收窄注入，v0.2.17 的 Windows 安装包 `UnknownError` 属旧资产缺陷；v0.2.18 证据仍为 `blocked`，notes 只描述 CI 配置与产物姿态，不宣称已过 post-release-verify。
