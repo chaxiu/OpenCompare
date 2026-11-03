@@ -26,6 +26,7 @@ OpenCompare 是对标 Beyond Compare 5 Pro 的现代跨平台桌面对比与三�
 - 可执行 / 可达性判定（按钮 `disabled`、门禁断言）必须共用同一纯函数（如 `canApplySyncPreview`），禁止 UI 与门禁各留一份内联判定；只测内层函数不算覆盖（见 `docs/lessons.md` §9）。
 - Linux GUI verify 腿（`linux-directory-compare` / `cancel-leg` / `linux-deb-version`）必须复用 spike 同一 `xvfb-run` + `detached` 进程组启动，收尾走同一 `stopChild`（整组 SIGTERM→SIGKILL），并把 stderr / exit / signal 写入 step JSON 与 step log。
 - 未配置 Windows 签名证书时，安装包只断言 Authenticode `NotSigned`（`Valid` 亦放行）；`UnknownError` / `HashMismatch` / 空值与未知值一律 fail，禁止以 `Valid` 或跳过来兜底。
+- 发布先验证后公开：publish 之前验证——`finalize` 先以 draft 模式跑完三平台 15/15，aggregate PASS 后才 `gh release edit --draft=false --latest`；任一失败保持 draft，不公开、不回滚，不做先公开再回滚；public L1 只做公开可得性与 sha256，不替代 15 项。
 
 ## 常用命令
 

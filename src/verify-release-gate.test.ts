@@ -17,8 +17,8 @@ import {
   AUTHENTICODE_PASS_STATUSES, AUTHENTICODE_UNSIGNED_NOTE, CANCEL_NOISE_PATTERN, CANCEL_TREE_FILES_PER_SIDE,
   CI_CHECK_GROUPS, CI_PLATFORMS, LOCAL_CHECKS, LOCAL_FIXTURE_ROOTS, MANUAL_NOT_COVERED,
   RETENTION_THRESHOLD_BYTES, SMOKE_TREE, STEP_DIAGNOSTIC_TEXT_LIMIT, buildEnvironment, buildSummary, checksFor,
-  compareCheckSets, expectedCheckIds, judgeLocalRounds, judgeReleaseGate, judgeRetainedHeap, normalizeVersion,
-  parseArgs, readAsarJsonEntry, runVerifyReleaseCli, scanCancelNoise, selectedPlatforms, summarizeCounts,
+  compareCheckSets, createWorld, expectedCheckIds, judgeLocalRounds, judgeReleaseGate, judgeReleaseState, judgeRetainedHeap, normalizeVersion,
+  parseArgs, readAsarJsonEntry, releaseApiPath, RELEASE_STATES, runVerifyReleaseCli, scanCancelNoise, selectedPlatforms, summarizeCounts,
   validateStep, validateSummary, versionEqualsTag
 } from '../scripts/verify-release.mjs'
 import type {
@@ -62,7 +62,7 @@ const ASSET_NAMES = [
   `OpenCompare-Setup-${VERSION}.exe`, `OpenCompare-${VERSION}-win-x64.zip`,
   `OpenCompare-${VERSION}.AppImage`, `opencompare_${VERSION}_amd64.deb`, 'latest-mac.yml', 'latest.yml', 'latest-linux.yml'
 ]
-const fixtureAssets = (): Array<{ name: string; bytes: Buffer }> => ASSET_NAMES.map((name) => ({ name, bytes: Buffer.from(`fixture bytes for ${name}\n`) }))
+const fixtureAssets = (): Array<{ name: string; bytes: Buffer }> => ASSET_NAMES.map((name) => ({ name, bytes: Buffer.concat([Buffer.from(`fixture bytes for ${name}\n`), Buffer.from([0x00, 0xff, 0xfe])]) }))
 /** A minimal, real asar header so the AppImage version leg reads a real buffer. */
 const buildAsar = (files: Record<string, Buffer>): Buffer => {
   const header: { files: Record<string, { size: number; offset: string }> } = { files: {} }
@@ -83,7 +83,8 @@ interface FakeOptions {
   staplerStatus?: number; fourState?: FourStateCounts; fourStateSequence?: FourStateCounts[]; cancelNoise?: string
   progressAppears?: boolean; cancelButton?: boolean; operableAfterCancel?: boolean; missingAsset?: string
   metadataSize?: (name: string) => number; metadataSha?: (name: string) => string | null
-  releaseTag?: string; fixturePresent?: boolean; heapSequence?: Array<number | null>; failFourStateAtRound?: number
+  releaseTag?: string; releaseDraft?: boolean; duplicateRelease?: boolean; missingAssetId?: boolean; downloadStatus?: number
+  fixturePresent?: boolean; heapSequence?: Array<number | null>; failFourStateAtRound?: number
   omitAppRun?: boolean; launchFailure?: Partial<StepDiagnostics>
 }
 const ok = (stdout = ''): CommandResult => ({ status: 0, signal: null, stdout, stderr: '' })
@@ -94,6 +95,7 @@ interface LaunchRecord { command: string; args: string[]; processGroup: boolean 
 class FakeHost {
   readonly paths: string[] = []; readonly commands: string[][] = []; readonly heapCalls: string[] = []
   readonly detached: string[] = []; readonly launches: LaunchRecord[] = []
+  readonly downloads: Array<{ id?: number; name: string }> = []
   readonly assets = fixtureAssets(); readonly world: World
   private readonly virtualDirs = new Map<string, string[]>(); private round = 0
   constructor(private readonly options: FakeOptions = {}) {
@@ -118,14 +120,27 @@ class FakeHost {
       chmod: () => undefined,
       sha256: (path) => { seen(path); return sha256(readBytes(path)) },
       run: (command, args = [], runOptions = {}) => { this.commands.push([command, ...args]); return this.runCommand(command, args, runOptions) },
-      release: async (tag): Promise<ReleaseMetadata> => ({
-        tag: options.releaseTag ?? tag,
-        assets: this.assets.filter((asset) => asset.name !== options.missingAsset).map((asset) => ({
+      release: async (tag, releaseOptions = {}): Promise<ReleaseMetadata> => {
+        const draft = releaseOptions.state === 'draft'
+        const assets = this.assets.filter((asset) => asset.name !== options.missingAsset).map((asset, index) => ({
+          ...(draft && options.missingAssetId !== true ? { id: 100 + index } : {}),
           name: asset.name, url: `https://example.test/${asset.name}`,
           size: options.metadataSize === undefined ? asset.bytes.length : options.metadataSize(asset.name),
           sha256: options.metadataSha === undefined ? sha256(asset.bytes) : options.metadataSha(asset.name)
         }))
-      }),
+        if (!draft) return { tag: options.releaseTag ?? tag, draft: options.releaseDraft === true, assets }
+        return {
+          id: 7, tag: options.releaseTag ?? tag, draft: options.releaseDraft ?? true,
+          assets: options.duplicateRelease === true ? [...assets, { ...assets[0], id: 999 }] : assets
+        }
+      },
+      downloadAsset: async ({ asset, dir }): Promise<CommandResult> => {
+        this.downloads.push({ id: asset.id, name: asset.name })
+        if (options.downloadStatus !== undefined) return { status: options.downloadStatus, signal: null, stdout: '', stderr: 'injected download failure' }
+        const bytes = this.assets.find((entry) => entry.name === asset.name)?.bytes
+        if (bytes === undefined) return bad('asset bytes missing')
+        mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, asset.name), bytes); return ok()
+      },
       launchApp: async (options): Promise<LaunchHandle> => {
         this.launches.push({
           command: options.command,
@@ -286,6 +301,94 @@ describe('A-layer run', () => {
   it('keeps the identity conclusion independent of the selected platform', async () => {
     const single = await runCi(new FakeHost(), ['--platform=mac']); const all = await runCi(new FakeHost(), ['--platform=all'])
     expect(single.steps['identity-asset-bytes-sha256'].actual).toEqual(all.steps['identity-asset-bytes-sha256'].actual); expect(single.steps['identity-release-metadata'].actual).toEqual(all.steps['identity-release-metadata'].actual)
+  })
+})
+describe('draft transport', () => {
+  const draftRun = (options: FakeOptions = {}): Promise<CiRun> =>
+    runCi(new FakeHost({ releaseDraft: true, ...options }), ['--platform=all', '--release-state=draft'])
+  it('reads draft metadata by id and downloads every asset by id, keeping expected=15', async () => {
+    const host = new FakeHost({ releaseDraft: true }); const run = await runCi(host, ['--platform=all', '--release-state=draft'])
+    expect(run.code).toBe(0)
+    expect(run.summary).toMatchObject({ status: 'pass', counts: { pass: 15, fail: 0, skip: 0, total: 15, expected: 15 } })
+    expect(host.downloads.map((entry) => entry.id)).toEqual(ASSET_NAMES.map((_, index) => 100 + index))
+    const gh = host.commands.filter((args) => args[0] === 'gh')
+    expect(gh.filter((args) => args.join(' ').includes('releases/tags/'))).toEqual([])
+    expect(gh.filter((args) => args[1] === 'release')).toEqual([])
+    expect(readText(run.steps['identity-asset-bytes-sha256'].evidence[0])).toContain('releases/assets/100')
+    const identity = run.steps['identity-asset-bytes-sha256'].actual as { assets: Array<{ expectedSha256: string; actualSha256: string }> }
+    expect(identity.assets).toHaveLength(ASSET_NAMES.length)
+    for (const asset of identity.assets) expect(asset.actualSha256).toBe(asset.expectedSha256)
+  })
+  it.each([
+    ['a draft run reads an already published release', { releaseDraft: false }, 'identity-release-metadata'],
+    ['an asset has no id', { missingAssetId: true }, 'identity-asset-bytes-sha256'],
+    ['a draft asset download exits non-zero', { downloadStatus: 1 }, 'identity-asset-bytes-sha256']
+  ] as Array<[string, FakeOptions, string]>)('fails closed when %s', async (_name, options, step) => {
+    const run = await draftRun(options)
+    expect(run.steps[step].status, step).toBe('fail')
+    expect(run.summary.status).toBe('fail'); expect(run.code).toBeGreaterThan(0)
+  })
+  it('fails closed when a published run reads a draft release', async () => {
+    const run = await runCi(new FakeHost({ releaseDraft: true }), ['--platform=mac'])
+    expect(run.steps['identity-release-metadata'].status).toBe('fail'); expect(run.code).toBeGreaterThan(0)
+  })
+  it('writes octet-stream bytes binary-safe and leaves no .part behind', async () => {
+    const dir = tempDir('opencompare-download-'); const bin = tempDir('opencompare-gh-')
+    const calls = join(tempDir('opencompare-download-calls-'), 'calls.log')
+    writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash\necho "$*" >> "${calls}"\nprintf '\\x00\\xff\\xfe'\n`, { mode: 0o755 })
+    const bytes = Buffer.from([0x00, 0xff, 0xfe])
+    const world = createWorld({ env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` } })
+    const result = await world.downloadAsset({ asset: { id: 7, name: 'release.bin', size: bytes.length, sha256: sha256(bytes) }, dir })
+    expect(result.status).toBe(0)
+    expect(world.sha256(join(dir, 'release.bin'))).toBe(sha256(bytes))
+    expect(readdirSync(dir)).toEqual(['release.bin'])
+    expect(readText(calls)).toContain('releases/assets/7')
+    expect(readText(calls)).toContain('Accept: application/octet-stream')
+  })
+  it('reads draft metadata through the id routes and rejects zero or duplicate matches', async () => {
+    const calls = join(tempDir('opencompare-draft-world-'), 'calls.log')
+    const digest = 'a'.repeat(64)
+    const worldFor = (rows: string[]): World => {
+      const bin = tempDir('opencompare-gh-meta-')
+      const script = [
+        '#!/usr/bin/env bash', `echo "$*" >> "${calls}"`, 'case "$*" in',
+        `  *"releases --paginate"*) printf '%s\\n' ${rows.map((row) => `'${row}'`).join(' ')} ;;`,
+        `  *"releases/7/assets --paginate"*) printf '%s\\n' '100\tOpenCompare.dmg\t4\tsha256:${digest}' ;;`,
+        `  *"releases/7"*) printf '%s\\n' '${JSON.stringify({ tag: TAG, draft: true })}' ;;`,
+        'esac', 'exit 0'
+      ].join('\n')
+      writeFileSync(join(bin, 'gh'), `${script}\n`, { mode: 0o755 })
+      return createWorld({ env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` } })
+    }
+    const release = await worldFor(['7\ttrue']).release(TAG, { state: 'draft' })
+    expect(release).toMatchObject({ id: 7, tag: TAG, draft: true, assets: [{ id: 100, name: 'OpenCompare.dmg', size: 4, sha256: digest }] })
+    const text = readText(calls)
+    for (const marker of ['releases --paginate', 'releases/7', 'releases/7/assets']) expect(text).toContain(marker)
+    expect(text).not.toContain('releases/tags/')
+    for (const rows of [[], ['7\ttrue', '8\ttrue']]) {
+      await expect(worldFor(rows).release(TAG, { state: 'draft' })).rejects.toThrow(/命中 [02] 条/)
+    }
+  })
+})
+describe('draft mode contract', () => {
+  it('addresses draft metadata by id and published metadata by tag', () => {
+    expect(RELEASE_STATES).toEqual(['published', 'draft'])
+    expect(releaseApiPath({ tag: TAG })).toBe(`repos/{owner}/{repo}/releases/tags/${TAG}`)
+    expect(releaseApiPath({ tag: TAG, state: 'draft', id: 7 })).toBe('repos/{owner}/{repo}/releases/7')
+    expect(releaseApiPath({ state: 'draft', assetId: 100 })).toBe('repos/{owner}/{repo}/releases/assets/100')
+  })
+  it('judges the requested and actual release state fail-closed', () => {
+    const judge = (requested: 'published' | 'draft', actual: { draft?: boolean }): boolean => judgeReleaseState({ requested, actual }).ok
+    expect([judge('draft', { draft: true }), judge('published', { draft: false }), judge('published', {})]).toEqual([true, true, true])
+    expect([judge('draft', { draft: false }), judge('draft', {}), judge('published', { draft: true })]).toEqual([false, false, false])
+  })
+  it('accepts the mode switch only where a release is read', () => {
+    expect(parseArgs([`--tag=${TAG}`, '--layer=ci', '--out=/tmp/oc', '--release-state=draft']).options).toEqual({ tag: TAG, layer: 'ci', out: '/tmp/oc', releaseState: 'draft' })
+    for (const argv of [
+      [`--tag=${TAG}`, '--layer=ci', '--out=/tmp/oc', '--release-state=latest'],
+      [`--tag=${TAG}`, '--layer=local', '--out=/tmp/oc', '--release-state=draft'],
+      [`--tag=${TAG}`, '--layer=ci', '--aggregate=/tmp/parts', '--out=/tmp/oc', '--release-state=draft']
+    ]) expect(parseArgs(argv), argv.join(' ')).toEqual({ error: expect.any(String) })
   })
 })
 interface FailCase { name: string; opts: FakeOptions; platform: CiPlatform; step: string; detached?: boolean }
@@ -563,12 +666,24 @@ describe('post-release-verify workflow', () => {
   const workflow = parse(readText(join(repoRoot, '.github/workflows/post-release-verify.yml'))) as PostReleaseWorkflow
   const jobs = Object.entries(workflow.jobs ?? {}); const steps = jobs.flatMap(([name, job]) => (job.steps ?? []).map((step) => ({ job: name, step })))
   const commandText = steps.map(({ step }) => [step.run, step.uses, step.if, ...Object.values(step.env ?? {}), ...Object.values(step.with ?? {}).map(String)].join('\n')).join('\n')
-  it('only triggers on a manual tag dispatch, read-only', () => {
+  it('only triggers on a manual tag dispatch with a draft or published mode', () => {
     expect(Object.keys(workflow.on ?? {})).toEqual(['workflow_dispatch'])
-    expect((workflow.on?.workflow_dispatch as { inputs?: Record<string, { required?: boolean }> }).inputs?.tag?.required).toBe(true)
+    const dispatch = workflow.on?.workflow_dispatch as { inputs?: Record<string, { required?: boolean; default?: string; type?: string; options?: string[] }> }
+    expect(dispatch.inputs?.tag?.required).toBe(true)
+    expect(dispatch.inputs?.mode).toMatchObject({ required: true, default: 'draft', type: 'choice', options: ['draft', 'published'] })
     expect(workflow['run-name']).toBe('post-release-verify ${{ inputs.tag }}')
-    expect(workflow.permissions).toEqual({ contents: 'read' })
+    expect(workflow.permissions).toEqual({ contents: 'write' })
     for (const forbidden of [/secrets\./, /gh release (upload|edit|create|delete)/, /git (tag|push)/, /continue-on-error/]) expect(`${commandText}\n${JSON.stringify(workflow)}`, String(forbidden)).not.toMatch(forbidden)
+    const verifyCmd = steps.find(({ step }) => (step.run ?? '').includes('--platform='))?.step.run ?? ''
+    expect(verifyCmd).toContain('--release-state="$MODE"')
+    for (const { step } of steps) {
+      const run = step.run ?? ''
+      if (run.includes('--spike') || run.includes('--aggregate=')) expect(run).not.toContain('--release-state')
+    }
+  })
+  it('documents verify-before-publish in the workflow header', () => {
+    const header = readText(join(repoRoot, '.github/workflows/post-release-verify.yml')).split('jobs:')[0]
+    for (const marker of ['mode=draft', 'before it is public', 'contents: write', 'never before', 'aggregate']) expect(header, marker).toContain(marker)
   })
   it('calls the one script from every job, gated behind the spike, and archives every run', () => {
     for (const [name, job] of jobs) expect((job.steps ?? []).map((step) => step.run ?? '').join('\n').includes('scripts/verify-release.mjs'), `job ${name}`).toBe(true)
@@ -626,6 +741,12 @@ describe('agent and signing docs', () => {
       expect(atoms.some((atom) => atom.includes(marker)), marker).toBe(true)
     }
     expect(readText(join(repoRoot, 'scripts/verify-release.d.mts'))).toContain('StepDiagnostics')
+  })
+  it('states verify-before-publish and keep-draft in every release doc', () => {
+    for (const path of ['docs/release-process.md', 'docs/release-signing.md', 'AGENTS.md']) {
+      const text = markdownAtoms(readText(join(repoRoot, path))).join('\n')
+      for (const marker of ['publish 之前验证', '保持 draft', '不回滚']) expect(text, `${path}: ${marker}`).toContain(marker)
+    }
   })
 })
 afterAll(() => { for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true }) })

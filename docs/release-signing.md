@@ -56,6 +56,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - v0.2.5 已发布：公开 Release 为 <https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.5>，11 件资产、签名与公证的实测原文见 `docs/release-evidence/v0.2.5.md`。公开件（干净环境安装、多轮真实对比、footer 计数与 `latest*.yml` 命中）的复验由 product-qa 承接并回填该文件第六节；第六节目前仍是就绪条件，不在研发侧写成已通过。
 - 签名 + 公证由 CI 执行，实际结果以 tag 触发的那次 CI 为准；凭据齐备前 mac 打包步骤 fail-closed，不会产出未签名裸包。6 项 Secret 清单与录入方式见上文第一节。
 - 本版发布说明见 `docs/release-notes/v0.2.17.md`。
+- 发布姿态是**先验证后公开**：publish 之前验证——`finalize` 先以 draft 模式跑完三平台 15 项，aggregate PASS 之后才 `gh release edit --draft=false --latest`；任一检查失败时 Release 保持 draft，不公开、不回滚，不做先公开再回滚。
 - 如需查看 Release：
   ```bash
   gh release list --repo chaxiu/OpenCompare
@@ -97,7 +98,7 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
    ```
    `codesign -dv` 必须含 `Authority=Developer ID Application`、`TeamIdentifier=3X4J53U6RY` 与 hardened runtime 标志 `runtime`，且不含 `Signature=adhoc`。若打包输出里的 `.app` 未直接 staple，则从同次产出的 `release/*.dmg` 挂载并校验其中同一个 `OpenCompare.app`（失败路径也保证 `hdiutil detach`）；两者均失败才算失败。`spctl` 必须返回 0 且输出含 `accepted` 与 `Notarized Developer ID`。
 3. **产物名与 `latest*.yml`**：各平台必需产物（mac `.dmg` / `.zip`、win `.exe`、linux `.AppImage` / `.deb`）的文件名只能携带 tag 版本；`latest*.yml` 的 `version`、`files[].url` 与存在的 `path` 也必须含 tag 版本。
-4. **唯一公开正式 Release**：`finalize` 后用 `gh api --paginate` 统计该 tag 的 Release，要求恰好 1 个且 `draft=false`、`prerelease=false`；该 Release 资产必须覆盖 `.dmg`、`.zip`、`.exe`、`.AppImage`、`.deb` 与 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`，版本化资产名均含 tag 版本。
+4. **唯一公开正式 Release**：`finalize` 在 draft 15/15 PASS 之后才公开该 Release；公开后用 `gh api --paginate` 统计该 tag 的 Release，要求恰好 1 个且 `draft=false`、`prerelease=false`；该 Release 资产必须覆盖 `.dmg`、`.zip`、`.exe`、`.AppImage`、`.deb` 与 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`，版本化资产名均含 tag 版本。
 
 上述校验步骤与上传步骤没有 `continue-on-error` / `|| true` 等绕行路径；6 项 Secret 仍由人类录入，缺失即 fail-closed。
 
@@ -106,3 +107,4 @@ OpenCompare 的 macOS 构建（`dmg` / `zip`）需要 **Developer ID Application
 - `electron-builder.yml` 的 `win` 段没有签名配置，Windows 安装包按**未签名发布姿态**发布，`scripts/verify-release.mjs` 的 `windows-authenticode` 记录原始 `Status`：`NotSigned` 判 pass 并写明「Windows 未签名发布姿态」，`Valid` 判 pass（将来补证书不改代码），`UnknownError` / `HashMismatch` / 空值 / 其他值与 pwsh 非零退出一律 fail（fail-closed）。
 - `release.yml` 的 `Build installers` 只在 `matrix.target == 'mac'` 时注入 `CSC_LINK` / `CSC_KEY_PASSWORD`。修复 v0.2.17 复验暴露的缺陷：此前三平台矩阵共用该 env，Windows PE 被 macOS Developer ID 证书污染成不可信签名，`Get-AuthenticodeSignature` 返回 `UnknownError`（见 `docs/lessons.md` §14）。
 - 补签时机：取得 Windows 代码签名证书后，在 `electron-builder.yml` 的 `win` 段与 CI Secrets 接线，届时 `Valid` 自然通过；在此之前不得把断言写成 `Valid`、不得跳过或降级 warn。
+- `UnknownError` / `HashMismatch` 在 draft 阶段即判 fail 并拦住 publish：`finalize` 只有在 draft 15/15 aggregate PASS 之后才公开 Release，失败时 Release 保持 draft、不公开、不回滚。

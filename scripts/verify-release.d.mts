@@ -5,8 +5,10 @@ import type { ChildProcess } from 'node:child_process'
 export type Layer = 'local' | 'ci'
 export type CiPlatform = 'mac' | 'linux' | 'windows'
 export type StepStatus = 'pass' | 'fail' | 'skip'
+export type ReleaseState = 'published' | 'draft'
 
 export interface ReleaseAsset {
+  id?: number
   name: string
   size: number
   sha256: string | null
@@ -14,7 +16,9 @@ export interface ReleaseAsset {
 }
 
 export interface ReleaseMetadata {
+  id?: number
   tag: string
+  draft?: boolean
   assets: ReleaseAsset[]
 }
 
@@ -195,7 +199,8 @@ export interface World {
   chmod(path: string, mode: number): void
   sha256(path: string): string
   run(command: string, args?: string[], options?: Record<string, unknown>): CommandResult
-  release(tag: string): Promise<ReleaseMetadata>
+  release(tag: string, options?: { state?: ReleaseState }): Promise<ReleaseMetadata>
+  downloadAsset(options: { asset: ReleaseAsset; dir: string }): Promise<CommandResult>
   launchApp(options: {
     command: string
     args?: string[]
@@ -222,6 +227,7 @@ export interface CheckGroup {
 }
 
 export const CI_PLATFORMS: CiPlatform[]
+export const RELEASE_STATES: ReleaseState[]
 export const STEP_STATUSES: StepStatus[]
 export const LOCAL_ROUND_COUNT: number
 export const RETENTION_THRESHOLD_BYTES: number
@@ -290,10 +296,23 @@ export interface ParsedArgs {
     platform?: string
     aggregate?: string
     spike?: boolean
+    releaseState?: ReleaseState
   }
 }
 
 export function parseArgs(argv?: string[]): ParsedArgs
+
+export function releaseApiPath(options?: {
+  tag?: string
+  id?: number
+  assetId?: number
+  state?: ReleaseState
+}): string
+
+export function judgeReleaseState(options?: {
+  requested?: ReleaseState
+  actual?: { draft?: boolean } | null
+}): { ok: boolean; problems: string[] }
 
 export function selectedPlatforms(option?: string): CiPlatform[]
 

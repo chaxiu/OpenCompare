@@ -37,9 +37,11 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -58,6 +60,13 @@ import { fileURLToPath } from 'node:url'
 
 /** Platforms the A layer can verify; `--platform=all` selects every one. */
 export const CI_PLATFORMS = ['mac', 'linux', 'windows']
+
+/**
+ * Release transport modes. `published` reads the public tag (the original
+ * behaviour); `draft` verifies the same bytes before the release is public.
+ * The check registry, `expected=15` and every judgment are identical.
+ */
+export const RELEASE_STATES = ['published', 'draft']
 
 /** Only these three statuses may appear on a step. */
 export const STEP_STATUSES = ['pass', 'fail', 'skip']
@@ -207,13 +216,13 @@ export const CI_CHECK_GROUPS = [
       {
         id: 'identity-release-metadata',
         name: 'Release metadata enumerates every asset with size and sha256',
-        command: 'gh api repos/{owner}/{repo}/releases/tags/{tag}',
+        command: 'gh api repos/{owner}/{repo}/releases[/tags/{tag}]',
         run: runIdentityMetadata
       },
       {
         id: 'identity-asset-bytes-sha256',
         name: 'Every downloaded asset matches its declared byte count and sha256',
-        command: 'gh release download {tag} --dir <assets>',
+        command: 'gh release download {tag} | gh api .../releases/assets/{id}',
         run: runIdentityBytes
       }
     ]
@@ -408,6 +417,35 @@ export function versionEqualsTag(version, tag) {
 }
 
 /**
+ * The one place the draft / published API path lives. `published` keeps the
+ * historical `releases/tags/{tag}` call; `draft` addresses the release by id
+ * and each asset by id because a draft is not reachable through the tag route.
+ */
+export function releaseApiPath({ tag, id, assetId, state = 'published' } = {}) {
+  if (state === 'draft') {
+    if (assetId !== undefined) return `repos/{owner}/{repo}/releases/assets/${assetId}`
+    return `repos/{owner}/{repo}/releases/${id}`
+  }
+  return `repos/{owner}/{repo}/releases/tags/${tag}`
+}
+
+/**
+ * Fail-closed draft / published state judgment. A draft run must read a draft
+ * (`draft === true`); a published run must never read a draft. One call in
+ * `runIdentityMetadata`, no new check and no `skip`.
+ */
+export function judgeReleaseState({ requested, actual } = {}) {
+  const problems = []
+  if (requested === 'draft' && actual?.draft !== true) {
+    problems.push('draft 模式要求 draft=true，实测已公开')
+  }
+  if (requested === 'published' && actual?.draft === true) {
+    problems.push('published 模式不得读取 draft Release')
+  }
+  return { ok: problems.length === 0, problems }
+}
+
+/**
  * B-layer memory judgment: round 3 minus round 2 retained heap, after two GC
  * passes and one second of quiet, must stay at or below 16 MiB. There is no
  * argument that widens the threshold.
@@ -560,7 +598,7 @@ export function parseArgs(argv = []) {
       options.spike = true
       continue
     }
-    if (!['tag', 'layer', 'out', 'platform', 'aggregate'].includes(key)) {
+    if (!['tag', 'layer', 'out', 'platform', 'aggregate', 'release-state'].includes(key)) {
       return { error: `未知参数: --${key}` }
     }
     if (value === undefined) {
@@ -572,6 +610,13 @@ export function parseArgs(argv = []) {
       index += 1
     }
     if (value === '') return { error: `--${key} 缺少取值` }
+    if (key === 'release-state') {
+      if (!RELEASE_STATES.includes(value)) {
+        return { error: `--release-state 只能是 published 或 draft: ${value}` }
+      }
+      options.releaseState = value
+      continue
+    }
     options[key] = value
   }
 
@@ -598,6 +643,11 @@ export function parseArgs(argv = []) {
   }
   if (options.spike === true && options.aggregate !== undefined) {
     return { error: '--spike 与 --aggregate 不能同时使用' }
+  }
+  if (options.releaseState !== undefined) {
+    if (options.layer === 'local') return { error: '--release-state 只适用于 --layer=ci' }
+    if (options.aggregate !== undefined) return { error: '--release-state 不适用于 --aggregate' }
+    if (options.spike === true) return { error: '--release-state 不适用于 --spike' }
   }
   return { options }
 }
@@ -1351,13 +1401,73 @@ export function createWorld({ env = process.env } = {}) {
     chmod: (path, mode) => chmodSync(path, mode),
     sha256: (path) => sha256File(path),
     run: (command, args, options) => runCommand(command, args, options),
-    release: async (tag) => {
+    release: async (tag, options = {}) => {
+      if (options.state === 'draft') {
+        const listed = runCommand('gh', [
+          'api',
+          'repos/{owner}/{repo}/releases',
+          '--paginate',
+          '--jq',
+          `.[] | select(.tag_name=="${tag}") | [.id, .draft] | @tsv`
+        ], { env })
+        if (listed.status !== 0) {
+          throw new Error(`gh api 定位 draft Release 失败: ${listed.stderr.trim() || listed.status}`)
+        }
+        const rows = listed.stdout.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+        if (rows.length !== 1) {
+          throw new Error(`draft Release 定位失败：${tag} 命中 ${rows.length} 条（必须恰好 1 条）`)
+        }
+        const [idText] = rows[0].split('\t')
+        const id = Number(idText)
+        if (!Number.isInteger(id) || id <= 0) {
+          throw new Error(`draft Release id 非法: ${idText}`)
+        }
+        const meta = runCommand('gh', [
+          'api',
+          `repos/{owner}/{repo}/releases/${id}`,
+          '--jq',
+          '{tag: .tag_name, draft: .draft}'
+        ], { env })
+        if (meta.status !== 0) {
+          throw new Error(`gh api 读取 draft Release ${id} 失败: ${meta.stderr.trim() || meta.status}`)
+        }
+        const parsedMeta = JSON.parse(meta.stdout)
+        const listedAssets = runCommand('gh', [
+          'api',
+          `repos/{owner}/{repo}/releases/${id}/assets`,
+          '--paginate',
+          '--jq',
+          '.[] | [.id, .name, .size, (.digest // "")] | @tsv'
+        ], { env })
+        if (listedAssets.status !== 0) {
+          throw new Error(`gh api 读取 draft Release 资产失败: ${listedAssets.stderr.trim() || listedAssets.status}`)
+        }
+        const assets = listedAssets.stdout
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line !== '')
+          .map((line) => {
+            const [assetId, name, size, digest] = line.split('\t')
+            return {
+              id: Number(assetId),
+              name,
+              size: Number(size),
+              sha256: typeof digest === 'string' && digest !== '' ? digest.replace(/^sha256:/, '') : null
+            }
+          })
+        return {
+          id,
+          tag: parsedMeta.tag,
+          draft: parsedMeta.draft,
+          assets
+        }
+      }
       const result = runCommand('gh', [
         'api',
         `repos/{owner}/{repo}/releases/tags/${tag}`,
         '--jq',
         '{tag: .tag_name, assets: [.assets[] | {name: .name, size: .size, digest: .digest, url: .browser_download_url}]}'
-      ])
+      ], { env })
       if (result.status !== 0) {
         throw new Error(`gh api 读取 Release 失败: ${result.stderr.trim() || result.status}`)
       }
@@ -1371,6 +1481,36 @@ export function createWorld({ env = process.env } = {}) {
           url: asset.url
         }))
       }
+    },
+    downloadAsset: async ({ asset, dir }) => {
+      mkdirSync(dir, { recursive: true })
+      const target = join(dir, asset.name)
+      const part = `${target}.part`
+      let fd
+      let status = -1
+      let signal = null
+      let stderr
+      try {
+        fd = openSync(part, 'w')
+        const result = spawnSync(
+          'gh',
+          ['api', releaseApiPath({ state: 'draft', assetId: asset.id }), '-H', 'Accept: application/octet-stream'],
+          { env, stdio: ['ignore', fd, 'pipe'], timeout: 300_000, maxBuffer: 64 * 1024 * 1024 }
+        )
+        status = typeof result.status === 'number' ? result.status : -1
+        signal = result.signal ?? null
+        stderr = result.stderr === null || result.stderr === undefined ? '' : result.stderr.toString('utf8')
+      } catch (error) {
+        stderr = error instanceof Error ? error.message : String(error)
+      } finally {
+        if (fd !== undefined) closeSync(fd)
+      }
+      if (status === 0) {
+        renameSync(part, target)
+      } else {
+        rmSync(part, { force: true })
+      }
+      return { status, signal, stdout: '', stderr }
     },
     launchApp: async ({
       command,
@@ -1486,7 +1626,7 @@ function launchFailureActual(error, extra = {}) {
   return actual
 }
 
-function createCheckContext({ world, tag, outDir, workRoot, state, environment }) {
+function createCheckContext({ world, tag, outDir, workRoot, state, environment, releaseState }) {
   const log = []
   const exec = (command, args = [], options = {}) => {
     const result = world.run(command, args, options)
@@ -1501,6 +1641,7 @@ function createCheckContext({ world, tag, outDir, workRoot, state, environment }
     workRoot,
     state,
     environment,
+    releaseState: releaseState ?? 'published',
     exec,
     log,
     path: (name) => join(workRoot, name),
@@ -1514,12 +1655,16 @@ function createCheckContext({ world, tag, outDir, workRoot, state, environment }
 
 async function runIdentityMetadata(ctx) {
   const expected = { tag: ctx.tag, assets: '每个资产都有 name / size / sha256' }
-  const release = await ctx.world.release(ctx.tag)
+  const release = await ctx.world.release(ctx.tag, { state: ctx.releaseState })
   if (release === null || typeof release !== 'object') {
     return fail(expected, { error: 'Release 元数据不可读' })
   }
   if (release.tag !== ctx.tag) {
     return fail(expected, { tag: release.tag, error: 'Release tag 与 --tag 不等' })
+  }
+  const stateVerdict = judgeReleaseState({ requested: ctx.releaseState, actual: release })
+  if (!stateVerdict.ok) {
+    return fail(expected, { draft: release.draft, error: stateVerdict.problems.join('; ') })
   }
   const assets = Array.isArray(release.assets) ? release.assets : []
   if (assets.length === 0) {
@@ -1548,9 +1693,25 @@ async function runIdentityBytes(ctx) {
   }
   const dir = ctx.path('release-assets')
   ctx.world.mkdir(dir)
-  const download = ctx.exec('gh', ['release', 'download', ctx.tag, '--dir', dir])
-  if (download.status !== 0) {
-    return fail(expected, { error: `gh release download 退出 ${download.status}` })
+  if (ctx.releaseState === 'draft') {
+    const failures = []
+    for (const asset of release.assets) {
+      if (!Number.isFinite(asset.id)) {
+        failures.push(`${asset.name} 缺 asset id`)
+        continue
+      }
+      const result = await ctx.world.downloadAsset({ asset, dir })
+      ctx.log.push(
+        `$ gh api ${releaseApiPath({ state: 'draft', assetId: asset.id })} -H 'Accept: application/octet-stream'\n${result.stderr ?? ''}`
+      )
+      if (result.status !== 0) failures.push(`${asset.name} 下载失败 exit ${result.status}`)
+    }
+    if (failures.length > 0) return fail(expected, { problems: failures })
+  } else {
+    const download = ctx.exec('gh', ['release', 'download', ctx.tag, '--dir', dir])
+    if (download.status !== 0) {
+      return fail(expected, { error: `gh release download 退出 ${download.status}` })
+    }
   }
   const problems = []
   const perAsset = []
@@ -1589,7 +1750,7 @@ async function runIdentityBytes(ctx) {
 /** The release metadata is fetched once per run and shared by every check. */
 async function ensureRelease(ctx) {
   if (ctx.state.release !== undefined) return ctx.state.release
-  const release = await ctx.world.release(ctx.tag)
+  const release = await ctx.world.release(ctx.tag, { state: ctx.releaseState })
   ctx.state.release = release
   return release
 }
@@ -2360,7 +2521,7 @@ function isCiEnvironment(env) {
   return env.GITHUB_ACTIONS === 'true' || env.CI === 'true'
 }
 
-async function executeChecks({ checks, world, outDir, workRoot, tag, environment, state, stdout }) {
+async function executeChecks({ checks, world, outDir, workRoot, tag, environment, state, stdout, releaseState }) {
   const steps = []
   const stepsDir = join(outDir, 'steps')
   const logsDir = join(outDir, 'logs')
@@ -2368,7 +2529,7 @@ async function executeChecks({ checks, world, outDir, workRoot, tag, environment
   mkdirSync(logsDir, { recursive: true })
   for (const [index, check] of checks.entries()) {
     const startedAt = new Date().toISOString()
-    const ctx = createCheckContext({ world, tag, outDir, workRoot, state, environment })
+    const ctx = createCheckContext({ world, tag, outDir, workRoot, state, environment, releaseState })
     let outcome
     try {
       outcome = await check.run(ctx)
@@ -2559,7 +2720,7 @@ async function runSpike({
 
 const USAGE = [
   '用法:',
-  '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --out=<dir> [--platform=mac|linux|windows|all]',
+  '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --out=<dir> [--platform=mac|linux|windows|all] [--release-state=published|draft]',
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=local --out=<dir>',
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --aggregate=<parts> --out=<dir>',
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --spike --out=<dir>'
@@ -2684,7 +2845,8 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
       tag: options.tag,
       environment,
       state,
-      stdout
+      stdout,
+      releaseState: options.releaseState ?? 'published'
     })
   } finally {
     rmSync(workRoot, { recursive: true, force: true })

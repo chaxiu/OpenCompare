@@ -31,8 +31,9 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 
 ## 质量门禁
 
-默认矩阵 22 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
+默认矩阵 26 项：`pnpm install` / `lint` / `typecheck` / `build` / `build:web` / `test` /
 `test-compare-request` / `cancel-gate` / `memory-gate` / `structured-semantics` / `sync-real-gate` /
+`diff-normalize` / `diff-normalize-real` / `spike-launch-gate` / `spike-process-tree-gate` /
 `template-default-unchecked` / `template-single-source` / `template-sha-mtime` /
 `template-cancel-zero-write` / `template-e2e-real` / `template-case-collision` /
 `template-path-contained` / `template-move-actions` / `template-move-verify` / `verify-release-gate` /
@@ -43,3 +44,9 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 `.munk/code-gates.perf.json`（Host 不自动执行）：仅在 diff 触及扫描 / 哈希 / 缓存 / IPC / 树渲染
 / 取消路径时调用，或作为里程碑 `x.y.0` 的独立验收任务跑一次；同一 commit 只采样一次，重跑须在
 digest 写明上一轮作废原因与两轮差异。`perf-gate` 真实启动 Electron，无 GUI 会话或超时会红。
+
+## 发布验收与公开顺序
+
+- `scripts/verify-release.mjs` 是发布验收唯一实现：`--layer=ci` 固定 15 项注册表、期望集合 `expectedCheckIds` 单点、终局判定 `judgeReleaseGate` 单点。`--release-state=published|draft` 只切换**传输**（`published` 走 `releases/tags/{tag}` + `gh release download`；`draft` 走 `releases/{id}` + `releases/{id}/assets --paginate` + `releases/assets/{id}` 二进制直写 `.part` → rename），draft 状态判定只在 `judgeReleaseState`，两条传输共用同一段字节数 / sha256 校验循环；不改判定、不改 `expected=15`。
+- `.github/workflows/release.yml#finalize` 顺序固定为 `Resolve the tag's release state` → `Dispatch the post-release verification`（`-f mode=…`）→ `Find … run` → `Assert … aggregate passed`（aggregate `success` + artifact 存在）→ `Make the tag's release public`（全仓唯一 `--draft=false --latest`）→ 既有公开只读断言 → `Run the public L1 checks after publishing`；任一更早失败都保持 `draft=true`，不公开不回滚。
+- `post-release-verify.yml` 的 `permissions: contents: write` 仅为鉴权读取 draft 资产，工作流零写（`gh` 只做 GET）；`mode=published` 保留已公开 tag 的公开复验，publish 步骤对公开 Release 幂等。

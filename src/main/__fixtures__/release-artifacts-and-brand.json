@@ -465,6 +465,10 @@
     {
       "id": "finalize-latest-last",
       "names": [
+        "Resolve the tag's release state",
+        "Dispatch the post-release verification",
+        "Find the post-release verification run for this tag",
+        "Assert the post-release verification aggregate passed",
         "Make the tag's release public",
         "Assert the published release body is bilingual",
         "Assert the published release body links are absolute",
@@ -472,9 +476,7 @@
         "Assert the public release has every platform asset",
         "Assert latest*.yml urls match the release assets",
         "Assert the tag is the latest published release",
-        "Dispatch the post-release verification",
-        "Find the post-release verification run for this tag",
-        "Assert the post-release verification aggregate passed"
+        "Run the public L1 checks after publishing"
       ],
       "mustBeLast": true,
       "job": "finalize"
@@ -543,7 +545,8 @@
       "anchor": null,
       "normalizeEnDash": false,
       "headings": [
-        "唯一公开 Release"
+        "先验证后公开",
+        "公开后 L1"
       ],
       "items": [
         "NSIS",

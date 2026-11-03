@@ -738,8 +738,8 @@ jobs:
           fi
           gh release upload "${RELEASE_TAG}" "${assets[@]}" --clobber --repo "${GITHUB_REPOSITORY}"
 
-  # The release stays a draft while the matrix uploads, then is promoted once
-  # every platform has contributed its artifacts.
+  # The release stays a draft while the matrix uploads. Verification runs
+  # against that draft first; only a 15/15 aggregate lets the release go public.
   finalize:
     name: Publish the GitHub Release
     needs: release
@@ -751,6 +751,157 @@ jobs:
       contents: write
       actions: write
     steps:
+      # Read-only: the tag's release must exist exactly once, and its `draft`
+      # flag decides which transport mode the verification run uses. A missing,
+      # duplicate or non-boolean release state fails before anything is
+      # dispatched or published.
+      - name: Resolve the tag's release state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          state_file="${RUNNER_TEMP}/release-state.txt"
+          matches="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate | jq -s --arg tag "${RELEASE_TAG}" '[.[][] | select(.tag_name == $tag)]')"
+          count="$(printf '%s' "${matches}" | jq 'length')"
+          if [ "${count}" -ne 1 ]; then
+            echo "::error::Expected exactly one release for ${RELEASE_TAG}, found ${count}." >&2
+            exit 1
+          fi
+          release_id="$(printf '%s' "${matches}" | jq -r '.[0].id')"
+          draft="$(printf '%s' "${matches}" | jq -r '.[0].draft')"
+          case "${draft}" in
+            true) mode="draft" ;;
+            false) mode="published" ;;
+            *)
+              echo "::error::Release ${RELEASE_TAG} has a non-boolean draft flag '${draft}'." >&2
+              exit 1
+              ;;
+          esac
+          echo "${mode}" > "${state_file}"
+          echo "release id: ${release_id} (draft=${draft}, verification mode=${mode})"
+      # Publishing with GITHUB_TOKEN starts no `release: published` workflow, so
+      # the verification has to be dispatched from here. This is why the job
+      # declares `actions: write` on top of `contents: write`. The mode comes
+      # from the resolved release state, so a draft is verified before publish.
+      - name: Dispatch the post-release verification
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Only a run created at or after this moment may satisfy the gate
+          # below, so a dispatch re-run of an already verified tag cannot pass
+          # on the older run. Two minutes of clock skew are allowed.
+          since="$(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          echo "${since}" > "${RUNNER_TEMP}/post-release-verify-since.txt"
+          mode="$(cat "${RUNNER_TEMP}/release-state.txt")"
+          echo "验证模式: ${mode}"
+          gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="${mode}"
+      # A dispatch that resolves to no run is the exact failure this workflow
+      # used to ship: a release with zero verification. Look for the run-name
+      # that carries this tag and fail closed after five minutes instead of
+      # publishing silently unverified.
+      - name: Find the post-release verification run for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_id_file="${RUNNER_TEMP}/post-release-verify-run-id.txt"
+          runs_file="${RUNNER_TEMP}/post-release-verify-runs.json"
+          since="$(cat "${RUNNER_TEMP}/post-release-verify-since.txt")"
+          rm -f "${run_id_file}"
+          # Five minutes by default; the override exists so a headless test can
+          # drive the miss branch without sleeping the whole window.
+          lookup_seconds="${POST_RELEASE_LOOKUP_SECONDS:-300}"
+          deadline=$((SECONDS + lookup_seconds))
+          while :; do
+            gh run list --workflow=post-release-verify.yml --event=workflow_dispatch --limit 100 --json databaseId,displayTitle,createdAt > "${runs_file}"
+            run_id="$(jq -r --arg tag "${RELEASE_TAG}" --arg since "${since}" '[.[] | select((.displayTitle // "") | contains($tag)) | select(.createdAt >= $since)] | sort_by(.createdAt) | last | .databaseId // empty' "${runs_file}")"
+            if [ -n "${run_id}" ]; then
+              echo "Found post-release verification run ${run_id} for ${RELEASE_TAG}."
+              echo "${run_id}" > "${run_id_file}"
+              exit 0
+            fi
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "::error::No post-release-verify workflow_dispatch run for ${RELEASE_TAG} appeared within five minutes; the release is not published without verification." >&2
+              exit 1
+            fi
+            sleep 15
+          done
+      # A dispatched run is not a verification. Follow the very run that carries
+      # this tag to a successful `aggregate` job and to the aggregate artifact
+      # named after this tag and this run id; both waits are bounded and time
+      # out closed rather than passing on a pending run. A failure prints the
+      # failing check names and the verify-out evidence before exiting, and
+      # leaves the release a draft.
+      - name: Assert the post-release verification aggregate passed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_id="$(cat "${RUNNER_TEMP}/post-release-verify-run-id.txt")"
+          run_file="${RUNNER_TEMP}/post-release-verify-run.json"
+          artifacts_file="${RUNNER_TEMP}/post-release-verify-artifacts.txt"
+          evidence="${RUNNER_TEMP}/verify-out"
+          deadline=$((SECONDS + 5400))
+          while :; do
+            gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json status,jobs > "${run_file}"
+            run_status="$(jq -r '.status // empty' "${run_file}")"
+            aggregate="$(jq -r 'first(.jobs[] | select(.name == "aggregate") | (.conclusion // empty)) // empty' "${run_file}")"
+            if [ "${aggregate}" = "success" ]; then
+              break
+            fi
+            if [ "${aggregate}" = "failure" ] || [ "${aggregate}" = "cancelled" ] || [ "${aggregate}" = "timed_out" ]; then
+              rm -rf "${evidence}"
+              download_status=0
+              gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" --name "post-release-verify-${RELEASE_TAG}-${run_id}-aggregate" --dir "${evidence}" || download_status=$?
+              echo "aggregate artifact download exit: ${download_status}"
+              if [ -f "${evidence}/summary.json" ]; then
+                echo "aggregate summary status: $(jq -r '.status // "unknown"' "${evidence}/summary.json")"
+                jq -r '(.problems // [])[]' "${evidence}/summary.json" | while IFS= read -r problem; do
+                  echo "problem: ${problem}"
+                done
+                echo "evidence: ${evidence}/summary.json"
+              fi
+              if [ -d "${evidence}/steps" ]; then
+                for step_file in "${evidence}"/steps/*.json; do
+                  if [ ! -f "${step_file}" ]; then continue; fi
+                  echo "check: $(jq -r '.id + "=" + .status' "${step_file}")"
+                done
+              fi
+              echo "::error::The aggregate job of post-release verification run ${run_id} concluded ${aggregate}; the release stays draft. Evidence: ${evidence}" >&2
+              exit 1
+            fi
+            if [ "${run_status}" = "completed" ]; then
+              echo "::error::Post-release verification run ${run_id} completed without a successful aggregate job (aggregate='${aggregate}'); the release stays draft. Evidence: ${evidence}" >&2
+              exit 1
+            fi
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "::error::Timed out waiting for the aggregate job of post-release verification run ${run_id}; the release stays draft." >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          wanted="post-release-verify-${RELEASE_TAG}-${run_id}-aggregate"
+          artifact_deadline=$((SECONDS + 900))
+          while :; do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --paginate --jq '.artifacts[].name' > "${artifacts_file}"
+            if grep -Fqx "${wanted}" "${artifacts_file}"; then
+              echo "Verified post-release verification run ${run_id}: aggregate PASS, artifact ${wanted}. Publishing ${RELEASE_TAG}."
+              exit 0
+            fi
+            if [ "${SECONDS}" -ge "${artifact_deadline}" ]; then
+              echo "::error::Post-release verification run ${run_id} has no ${wanted} artifact; the release stays draft. available: $(tr '\n' ' ' < "${artifacts_file}")" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+      # This is the only publish action in the repository. Reaching it means the
+      # draft verification aggregate is 15/15 and its artifact exists; any
+      # earlier failure leaves the release a draft and never reaches this step.
       - name: Make the tag's release public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1061,99 +1212,67 @@ jobs:
             echo "::error::The latest published release is ${latest}, not ${RELEASE_TAG}; this tag is not the latest release." >&2
             exit 1
           fi
-      # Publishing with GITHUB_TOKEN starts no `release: published` workflow, so
-      # the read-only post-release verification has to be dispatched from here.
-      # This is why the job declares `actions: write` on top of `contents: write`.
-      - name: Dispatch the post-release verification
+      # Public L1 is a lightweight post-publish smoke check. It proves the
+      # public release URL and every asset URL are reachable and that one
+      # asset's bytes still match the release metadata digest. It does NOT
+      # replace or relax the 15 draft checks that gated the publish above.
+      - name: Run the public L1 checks after publishing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Only a run created at or after this moment may satisfy the gate
-          # below, so a dispatch re-run of an already verified tag cannot pass
-          # on the older run. Two minutes of clock skew are allowed.
-          since="$(date -u -d '2 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
-          echo "${since}" > "${RUNNER_TEMP}/post-release-verify-since.txt"
-          gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}"
-      # A dispatch that resolves to no run is the exact failure this workflow
-      # used to ship: a published release with zero verification. Look for the
-      # run-name that carries this tag and fail closed after five minutes
-      # instead of publishing silently unverified.
-      - name: Find the post-release verification run for this tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          run_id_file="${RUNNER_TEMP}/post-release-verify-run-id.txt"
-          runs_file="${RUNNER_TEMP}/post-release-verify-runs.json"
-          since="$(cat "${RUNNER_TEMP}/post-release-verify-since.txt")"
-          rm -f "${run_id_file}"
-          # Five minutes by default; the override exists so a headless test can
-          # drive the miss branch without sleeping the whole window.
-          lookup_seconds="${POST_RELEASE_LOOKUP_SECONDS:-300}"
-          deadline=$((SECONDS + lookup_seconds))
-          while :; do
-            gh run list --workflow=post-release-verify.yml --event=workflow_dispatch --limit 100 --json databaseId,displayTitle,createdAt > "${runs_file}"
-            run_id="$(jq -r --arg tag "${RELEASE_TAG}" --arg since "${since}" '[.[] | select((.displayTitle // "") | contains($tag)) | select(.createdAt >= $since)] | sort_by(.createdAt) | last | .databaseId // empty' "${runs_file}")"
-            if [ -n "${run_id}" ]; then
-              echo "Found post-release verification run ${run_id} for ${RELEASE_TAG}."
-              echo "${run_id}" > "${run_id_file}"
-              exit 0
+          workdir="${RUNNER_TEMP}/public-l1"
+          rm -rf "${workdir}"
+          mkdir -p "${workdir}"
+          meta="${workdir}/release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > "${meta}"
+          draft="$(jq -r '.draft' "${meta}")"
+          if [ "${draft}" != "false" ]; then
+            echo "::error::Release ${RELEASE_TAG} is not public after publish (draft=${draft})." >&2
+            exit 1
+          fi
+          html_url="$(jq -r '.html_url // empty' "${meta}")"
+          if [ -z "${html_url}" ]; then
+            echo "::error::Release ${RELEASE_TAG} exposes no html_url." >&2
+            exit 1
+          fi
+          code="$(curl -sSIL -o /dev/null -w '%{http_code}' "${html_url}")"
+          if [ "${code}" != "200" ]; then
+            echo "::error::Public release URL ${html_url} returned HTTP ${code}." >&2
+            exit 1
+          fi
+          jq -r '.assets[] | [.name, (.browser_download_url // ""), (.size // 0), (.digest // "")] | @tsv' "${meta}" > "${workdir}/assets.tsv"
+          if [ ! -s "${workdir}/assets.tsv" ]; then
+            echo "::error::Release ${RELEASE_TAG} exposes no public assets." >&2
+            exit 1
+          fi
+          status=0
+          while IFS=$'\t' read -r name url size digest; do
+            if [ -z "${url}" ]; then
+              echo "::error::Asset ${name} has no browser_download_url." >&2
+              status=1
+              continue
             fi
-            if [ "${SECONDS}" -ge "${deadline}" ]; then
-              echo "::error::No post-release-verify workflow_dispatch run for ${RELEASE_TAG} appeared within five minutes; the release is published without verification." >&2
-              exit 1
+            asset_code="$(curl -sSIL -o /dev/null -w '%{http_code}' "${url}")"
+            if [ "${asset_code}" != "200" ]; then
+              echo "::error::Public asset ${name} at ${url} returned HTTP ${asset_code}." >&2
+              status=1
             fi
-            sleep 15
-          done
-      # A dispatched run is not a verification. Follow the very run that carries
-      # this tag to a successful `aggregate` job and to the aggregate artifact
-      # named after this tag and this run id; both waits are bounded and time
-      # out closed rather than passing on a pending run.
-      - name: Assert the post-release verification aggregate passed
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          run_id="$(cat "${RUNNER_TEMP}/post-release-verify-run-id.txt")"
-          run_file="${RUNNER_TEMP}/post-release-verify-run.json"
-          artifacts_file="${RUNNER_TEMP}/post-release-verify-artifacts.txt"
-          deadline=$((SECONDS + 5400))
-          while :; do
-            gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json status,jobs > "${run_file}"
-            run_status="$(jq -r '.status // empty' "${run_file}")"
-            aggregate="$(jq -r 'first(.jobs[] | select(.name == "aggregate") | (.conclusion // empty)) // empty' "${run_file}")"
-            if [ "${aggregate}" = "success" ]; then
-              break
-            fi
-            if [ "${aggregate}" = "failure" ] || [ "${aggregate}" = "cancelled" ] || [ "${aggregate}" = "timed_out" ]; then
-              echo "::error::The aggregate job of post-release verification run ${run_id} concluded ${aggregate}." >&2
-              exit 1
-            fi
-            if [ "${run_status}" = "completed" ]; then
-              echo "::error::Post-release verification run ${run_id} completed without a successful aggregate job (aggregate='${aggregate}')." >&2
-              exit 1
-            fi
-            if [ "${SECONDS}" -ge "${deadline}" ]; then
-              echo "::error::Timed out waiting for the aggregate job of post-release verification run ${run_id}." >&2
-              exit 1
-            fi
-            sleep 30
-          done
-          wanted="post-release-verify-${RELEASE_TAG}-${run_id}-aggregate"
-          artifact_deadline=$((SECONDS + 900))
-          while :; do
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --paginate --jq '.artifacts[].name' > "${artifacts_file}"
-            if grep -Fqx "${wanted}" "${artifacts_file}"; then
-              echo "Verified post-release verification run ${run_id}: aggregate PASS, artifact ${wanted}."
-              exit 0
-            fi
-            if [ "${SECONDS}" -ge "${artifact_deadline}" ]; then
-              echo "::error::Post-release verification run ${run_id} has no ${wanted} artifact; available: $(tr '\n' ' ' < "${artifacts_file}")" >&2
-              exit 1
-            fi
-            sleep 15
-          done
+          done < "${workdir}/assets.tsv"
+          if [ "${status}" -ne 0 ]; then
+            exit 1
+          fi
+          picked="$(jq -r '[.assets[] | select((.digest // "") != "")] | sort_by(.size // 0) | .[0] | [(.name // ""), (.browser_download_url // ""), (.digest // "")] | @tsv' "${meta}")"
+          IFS=$'\t' read -r pick_name pick_url pick_digest <<< "${picked}"
+          if [ -z "${pick_digest}" ] || [ -z "${pick_url}" ]; then
+            echo "::error::No public asset of ${RELEASE_TAG} carries a digest; refusing to pass the sha256 L1." >&2
+            exit 1
+          fi
+          curl -sSL -o "${workdir}/${pick_name}" "${pick_url}"
+          actual="sha256:$(openssl dgst -sha256 "${workdir}/${pick_name}" | awk '{print $NF}')"
+          if [ "${actual}" != "${pick_digest}" ]; then
+            echo "::error::Public asset ${pick_name} sha256 ${actual} does not match release digest ${pick_digest}." >&2
+            exit 1
+          fi
+          echo "public L1 PASS: ${html_url} + $(wc -l < "${workdir}/assets.tsv" | tr -d ' ') asset URLs 200, ${pick_name} sha256 matches ${pick_digest}."
