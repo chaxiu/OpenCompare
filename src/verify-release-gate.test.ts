@@ -14,15 +14,16 @@ import * as ts from 'typescript'
 import { afterAll, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
-  CANCEL_NOISE_PATTERN, CANCEL_TREE_FILES_PER_SIDE, CI_CHECK_GROUPS, CI_PLATFORMS, LOCAL_CHECKS,
-  LOCAL_FIXTURE_ROOTS, MANUAL_NOT_COVERED, RETENTION_THRESHOLD_BYTES, SMOKE_TREE, buildEnvironment,
-  buildSummary, checksFor, compareCheckSets, expectedCheckIds, judgeLocalRounds, judgeReleaseGate,
-  judgeRetainedHeap, normalizeVersion, parseArgs, readAsarJsonEntry, runVerifyReleaseCli, scanCancelNoise,
-  selectedPlatforms, summarizeCounts, validateStep, validateSummary, versionEqualsTag
+  AUTHENTICODE_PASS_STATUSES, AUTHENTICODE_UNSIGNED_NOTE, CANCEL_NOISE_PATTERN, CANCEL_TREE_FILES_PER_SIDE,
+  CI_CHECK_GROUPS, CI_PLATFORMS, LOCAL_CHECKS, LOCAL_FIXTURE_ROOTS, MANUAL_NOT_COVERED,
+  RETENTION_THRESHOLD_BYTES, SMOKE_TREE, STEP_DIAGNOSTIC_TEXT_LIMIT, buildEnvironment, buildSummary, checksFor,
+  compareCheckSets, expectedCheckIds, judgeLocalRounds, judgeReleaseGate, judgeRetainedHeap, normalizeVersion,
+  parseArgs, readAsarJsonEntry, runVerifyReleaseCli, scanCancelNoise, selectedPlatforms, summarizeCounts,
+  validateStep, validateSummary, versionEqualsTag
 } from '../scripts/verify-release.mjs'
 import type {
-  CiPlatform, CommandResult, FourStateCounts, LaunchHandle, ReleaseMetadata, StepRecord, StepStatus,
-  Summary, World
+  CiPlatform, CommandResult, FourStateCounts, LaunchHandle, ReleaseMetadata, StepDiagnostics, StepRecord,
+  StepStatus, Summary, World
 } from '../scripts/verify-release.mjs'
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const TAG = 'v9.9.9'
@@ -78,18 +79,22 @@ const buildAsar = (files: Record<string, Buffer>): Buffer => {
 }
 interface FakeOptions {
   macVersion?: string; debVersion?: string; linuxVersion?: string; windowsVersion?: string
-  authenticode?: string; codesignStatus?: number; gatekeeperOutput?: string; staplerStatus?: number
-  fourState?: FourStateCounts; fourStateSequence?: FourStateCounts[]; cancelNoise?: string
+  authenticode?: string; authenticodeExit?: number; codesignStatus?: number; gatekeeperOutput?: string
+  staplerStatus?: number; fourState?: FourStateCounts; fourStateSequence?: FourStateCounts[]; cancelNoise?: string
   progressAppears?: boolean; cancelButton?: boolean; operableAfterCancel?: boolean; missingAsset?: string
   metadataSize?: (name: string) => number; metadataSha?: (name: string) => string | null
   releaseTag?: string; fixturePresent?: boolean; heapSequence?: Array<number | null>; failFourStateAtRound?: number
+  omitAppRun?: boolean; launchFailure?: Partial<StepDiagnostics>
 }
 const ok = (stdout = ''): CommandResult => ({ status: 0, signal: null, stdout, stderr: '' })
 const bad = (stderr = 'failed'): CommandResult => ({ status: 1, signal: null, stdout: '', stderr })
+/** Every launch the world saw: the command shape plus the teardown flag. */
+interface LaunchRecord { command: string; args: string[]; processGroup: boolean }
 /** A real filesystem with scripted commands, release metadata and a fake window. */
 class FakeHost {
   readonly paths: string[] = []; readonly commands: string[][] = []; readonly heapCalls: string[] = []
-  readonly detached: string[] = []; readonly assets = fixtureAssets(); readonly world: World
+  readonly detached: string[] = []; readonly launches: LaunchRecord[] = []
+  readonly assets = fixtureAssets(); readonly world: World
   private readonly virtualDirs = new Map<string, string[]>(); private round = 0
   constructor(private readonly options: FakeOptions = {}) {
     const heap = [...(options.heapSequence ?? [])]
@@ -121,16 +126,32 @@ class FakeHost {
           sha256: options.metadataSha === undefined ? sha256(asset.bytes) : options.metadataSha(asset.name)
         }))
       }),
-      launchApp: async (): Promise<LaunchHandle> => ({
-        cdp: {
-          url: 'devtools://opencompare/', send: async () => ({}), close: () => undefined, evaluate: async (expression) => this.evaluate(expression),
-          waitFor: async (_expression, description) => { if (description.includes('progress to appear') && options.progressAppears === false) throw new Error(`等待超时: ${description}`); return true }
-        },
-        output: [options.cancelNoise ?? ''],
-        collectGarbage: async () => { this.heapCalls.push('HeapProfiler.collectGarbage') },
-        readRetainedHeap: async () => { this.heapCalls.push('JSHeapUsedSize'); return heap.length === 0 ? null : (heap.shift() ?? null) },
-        stop: async () => undefined
-      })
+      launchApp: async (options): Promise<LaunchHandle> => {
+        this.launches.push({
+          command: options.command,
+          args: options.args ?? [],
+          processGroup: options.processGroup === true
+        })
+        if (this.options.launchFailure !== undefined) {
+          throw Object.assign(new Error('Electron 在暴露 DevTools page 前退出'), {
+            diagnostics: {
+              reason: 'process-exited', exitCode: null, signal: null, stdout: '', stderr: '',
+              portProbe: [{ at: '2026-11-03T00:00:00.000Z', elapsedMs: 0, ok: false, pageTargets: 0, url: null, error: 'fetch failed' }],
+              ...this.options.launchFailure
+            }
+          })
+        }
+        return {
+          cdp: {
+            url: 'devtools://opencompare/', send: async () => ({}), close: () => undefined, evaluate: async (expression) => this.evaluate(expression),
+            waitFor: async (_expression, description) => { if (description.includes('progress to appear') && this.options.progressAppears === false) throw new Error(`等待超时: ${description}`); return true }
+          },
+          output: [this.options.cancelNoise ?? ''],
+          collectGarbage: async () => { this.heapCalls.push('HeapProfiler.collectGarbage') },
+          readRetainedHeap: async () => { this.heapCalls.push('JSHeapUsedSize'); return heap.length === 0 ? null : (heap.shift() ?? null) },
+          stop: async () => undefined
+        }
+      }
     }
   }
   private fourState(): FourStateCounts {
@@ -168,6 +189,7 @@ class FakeHost {
     if (command === 'cp') { copyFileSync(args[0] as string, args[1] as string); return ok() }
     if (command === 'xvfb-run') {
       const root = join(String(options.cwd ?? process.cwd()), 'squashfs-root'); mkdirSync(join(root, 'resources'), { recursive: true }); writeFileSync(join(root, 'opencompare'), 'binary')
+      if (this.options.omitAppRun !== true) writeFileSync(join(root, 'AppRun'), '#!/usr/bin/env bash\nexec "$(dirname "$0")/opencompare" "$@"\n')
       writeFileSync(join(root, 'resources', 'app.asar'), buildAsar({ 'package.json': Buffer.from(JSON.stringify({ version: this.options.linuxVersion ?? VERSION })) }))
       return ok()
     }
@@ -177,7 +199,11 @@ class FakeHost {
       mkdirSync(join(args[2] as string, 'opt', 'OpenCompare'), { recursive: true }); writeFileSync(join(args[2] as string, 'opt', 'OpenCompare', 'opencompare'), 'binary'); return ok()
     }
     if (command === 'unzip') { const root = args[args.indexOf('-d') + 1] as string; mkdirSync(root, { recursive: true }); writeFileSync(join(root, 'OpenCompare.exe'), 'exe'); return ok() }
-    if (command === 'pwsh') return ok(`${(args.join(' ').includes('Get-AuthenticodeSignature') ? this.options.authenticode ?? 'Valid' : this.options.windowsVersion ?? VERSION)}\n`)
+    if (command === 'pwsh') {
+      if (!args.join(' ').includes('Get-AuthenticodeSignature')) return ok(`${this.options.windowsVersion ?? VERSION}\n`)
+      if (this.options.authenticodeExit !== undefined) return { status: this.options.authenticodeExit, signal: null, stdout: '', stderr: 'signature provider failed' }
+      return ok(`${this.options.authenticode ?? 'Valid'}\n`)
+    }
     return bad(`unexpected command ${command}`)
   }
 }
@@ -273,7 +299,8 @@ const failCases: FailCase[] = [
   { name: 'deb version', opts: { debVersion: '9.9.8' }, platform: 'linux', step: 'linux-deb-version' },
   { name: 'synthetic four-state drift', opts: { fourState: { same: 9, added: 3, removed: 2, modified: 4 } }, platform: 'linux', step: 'linux-directory-compare' },
   { name: 'portable zip version', opts: { windowsVersion: '9.9.8' }, platform: 'windows', step: 'windows-zip-version' },
-  { name: 'Authenticode', opts: { authenticode: 'NotSigned' }, platform: 'windows', step: 'windows-authenticode' },
+  { name: 'Authenticode UnknownError', opts: { authenticode: 'UnknownError' }, platform: 'windows', step: 'windows-authenticode' },
+  { name: 'Authenticode HashMismatch', opts: { authenticode: 'HashMismatch' }, platform: 'windows', step: 'windows-authenticode' },
   { name: 'unobserved cancel point', opts: { progressAppears: false }, platform: 'linux', step: 'cancel-leg' },
   { name: 'missing cancel button', opts: { cancelButton: false }, platform: 'linux', step: 'cancel-leg' },
   { name: 'inoperable after cancel', opts: { operableAfterCancel: false }, platform: 'linux', step: 'cancel-leg' },
@@ -298,6 +325,88 @@ describe('platform legs', () => {
     const run = await runCi(new FakeHost({ metadataSha: () => null }), ['--platform=mac'])
     const problems = (run.steps['identity-release-metadata'].actual as { problems: string[] }).problems
     expect(problems).toHaveLength(ASSET_NAMES.length); expect(problems.every((problem) => problem.endsWith('缺 sha256'))).toBe(true)
+  })
+})
+describe('Linux launch shape', () => {
+  it('starts the deb, directory-compare and cancel legs from one xvfb AppRun group', async () => {
+    const host = new FakeHost(); const run = await runCi(host, ['--platform=linux'])
+    expect(run.code).toBe(0); expect(host.launches).toHaveLength(3)
+    const [deb, compare, cancel] = host.launches
+    for (const launch of host.launches) {
+      expect(launch.command).toBe('xvfb-run'); expect(launch.processGroup).toBe(true)
+      expect(launch.args).toContain('--no-sandbox'); expect(launch.args).toContain('--disable-dev-shm-usage')
+      expect(launch.args.at(-1)).toMatch(/^--remote-debugging-port=\d+$/)
+    }
+    expect(deb.args[1]).toMatch(/\/opencompare$/)
+    expect(compare.args[1]).toMatch(/\/squashfs-root\/AppRun$/)
+    expect(cancel.args[1]).toMatch(/\/squashfs-root\/AppRun$/)
+    expect(compare.args).toEqual(expect.arrayContaining([expect.stringMatching(/\/smoke\/left$/), expect.stringMatching(/\/smoke\/right$/)]))
+    expect(run.steps['linux-directory-compare']).toMatchObject({
+      status: 'pass',
+      actual: { same: SMOKE_TREE.same, added: SMOKE_TREE.added, removed: SMOKE_TREE.removed, modified: SMOKE_TREE.modified }
+    })
+    expect(run.steps['cancel-leg']).toMatchObject({ status: 'pass', actual: { treeFilesPerSide: CANCEL_TREE_FILES_PER_SIDE, leftovers: 0 } })
+  })
+  it('fails closed when the unpacked AppImage has no AppRun launcher', async () => {
+    const run = await runCi(new FakeHost({ omitAppRun: true }), ['--platform=linux'])
+    expect(run.steps['linux-appimage-version'].status).toBe('fail')
+    expect((run.steps['linux-appimage-version'].actual as { error: string }).error).toContain('AppRun')
+  })
+})
+describe('launch diagnostics', () => {
+  const stdout = 'electron stdout before exit\n'; const stderr = 'electron stderr before exit\n'
+  it('keeps reason, exit, signal, stdout, stderr and portProbe in the step JSON and its log', async () => {
+    const portProbe = [{ at: '2026-11-03T00:00:00.000Z', elapsedMs: 250, ok: false, pageTargets: 0, url: null, error: 'fetch failed' }]
+    const run = await runCi(new FakeHost({ launchFailure: { exitCode: 137, signal: 'SIGKILL', stdout, stderr, portProbe } }), ['--platform=linux'])
+    const step = run.steps['linux-deb-version']
+    expect(step.status).toBe('fail')
+    const diagnostics = (step.actual as { diagnostics: StepDiagnostics }).diagnostics
+    expect(diagnostics).toMatchObject({
+      reason: 'process-exited', exitCode: 137, signal: 'SIGKILL', stdout, stderr, portProbe,
+      textLimit: STEP_DIAGNOSTIC_TEXT_LIMIT, truncated: { stdout: false, stderr: false },
+      originalChars: { stdout: stdout.length, stderr: stderr.length }
+    })
+    const onDisk = readJson<{ actual: { diagnostics: StepDiagnostics } }>(join(run.out, 'steps', '04-linux-deb-version.json'))
+    expect(onDisk.actual.diagnostics).toEqual(diagnostics)
+    const log = readText(step.evidence[0])
+    for (const token of ['--- launch diagnostics ---', 'reason=process-exited exitCode=137 signal=SIGKILL', '--- launch stdout ---', stdout, '--- launch stderr ---', stderr, `error=${portProbe[0].error}`]) {
+      expect(log, token).toContain(token)
+    }
+  })
+  it('cuts a stream at the explicit cap and records the truncation in the log', async () => {
+    const long = 'e'.repeat(STEP_DIAGNOSTIC_TEXT_LIMIT + 5)
+    const run = await runCi(new FakeHost({ launchFailure: { stdout: 'o'.repeat(STEP_DIAGNOSTIC_TEXT_LIMIT), stderr: long } }), ['--platform=linux'])
+    const diagnostics = (run.steps['linux-deb-version'].actual as { diagnostics: StepDiagnostics }).diagnostics
+    expect([diagnostics.stdout.length, diagnostics.stderr.length]).toEqual([STEP_DIAGNOSTIC_TEXT_LIMIT, STEP_DIAGNOSTIC_TEXT_LIMIT])
+    expect(diagnostics.truncated).toEqual({ stdout: false, stderr: true })
+    expect(diagnostics.originalChars).toEqual({ stdout: STEP_DIAGNOSTIC_TEXT_LIMIT, stderr: long.length })
+    expect(readText(run.steps['linux-deb-version'].evidence[0])).toContain(
+      `stdoutChars=${STEP_DIAGNOSTIC_TEXT_LIMIT} stderrChars=${long.length} stdoutTruncated=false stderrTruncated=true`
+    )
+  })
+})
+describe('Windows Authenticode posture', () => {
+  it('passes NotSigned with the unsigned posture note and accepts Valid for a future certificate', async () => {
+    expect(AUTHENTICODE_PASS_STATUSES).toEqual(['NotSigned', 'Valid'])
+    const unsigned = await runCi(new FakeHost({ authenticode: 'NotSigned' }), ['--platform=windows'])
+    expect(unsigned.code).toBe(0)
+    expect(unsigned.steps['windows-authenticode']).toMatchObject({
+      status: 'pass', actual: { status: 'NotSigned', signingPose: AUTHENTICODE_UNSIGNED_NOTE }
+    })
+    expect(AUTHENTICODE_UNSIGNED_NOTE).toContain('未签名')
+    const valid = await runCi(new FakeHost({ authenticode: 'Valid' }), ['--platform=windows'])
+    expect(valid.steps['windows-authenticode']).toMatchObject({ status: 'pass', actual: { status: 'Valid' } })
+  })
+  it('fails closed on an empty or unknown status and on a non-zero pwsh exit', async () => {
+    const cases: Array<[string, FakeOptions]> = [
+      ['empty', { authenticode: '' }], ['UnknownError', { authenticode: 'UnknownError' }],
+      ['HashMismatch', { authenticode: 'HashMismatch' }], ['pwsh exit', { authenticode: 'NotSigned', authenticodeExit: 1 }]
+    ]
+    for (const [name, options] of cases) {
+      const run = await runCi(new FakeHost(options), ['--platform=windows'])
+      expect(run.steps['windows-authenticode'].status, name).toBe('fail')
+      expect(run.code, name).toBeGreaterThan(0)
+    }
   })
 })
 describe('fail-closed summary', () => {
@@ -495,6 +604,28 @@ describe('lessons', () => {
     ]
     expect(markers.filter((marker) => !atoms.some((atom) => atom.includes(marker)))).toEqual([])
   })
+  it('records this round: the orphaned Linux app, the AppRun launch and the Authenticode binary', () => {
+    const atoms = markdownAtoms(readText(join(repoRoot, 'docs/lessons.md')))
+    const markers = [
+      '41564533825', 'Terminate orphan process', 'requestSingleInstanceLock', 'AppRun',
+      'NotSigned', 'UnknownError', 'HashMismatch', 'CSC_LINK', 'expected=15'
+    ]
+    expect(markers.filter((marker) => !atoms.some((atom) => atom.includes(marker)))).toEqual([])
+  })
 })
-// Every fixture lives under the OS temp dir and is removed after the suite.
+describe('agent and signing docs', () => {
+  it('states the Linux GUI teardown and the unsigned Windows posture in AGENTS.md', () => {
+    const atoms = markdownAtoms(readText(join(repoRoot, 'AGENTS.md')))
+    for (const marker of ['Linux GUI verify', 'detached', 'stopChild', 'stderr', 'NotSigned', 'UnknownError']) {
+      expect(atoms.some((atom) => atom.includes(marker)), marker).toBe(true)
+    }
+  })
+  it('documents the NotSigned / Valid pass and everything-else fail Authenticode table', () => {
+    const atoms = markdownAtoms(readText(join(repoRoot, 'docs/release-signing.md')))
+    for (const marker of ['NotSigned', 'Valid', 'UnknownError', 'HashMismatch', '未签名发布姿态', "matrix.target == 'mac'"]) {
+      expect(atoms.some((atom) => atom.includes(marker)), marker).toBe(true)
+    }
+    expect(readText(join(repoRoot, 'scripts/verify-release.d.mts'))).toContain('StepDiagnostics')
+  })
+})
 afterAll(() => { for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true }) })

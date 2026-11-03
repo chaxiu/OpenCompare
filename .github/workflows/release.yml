@@ -340,11 +340,14 @@ jobs:
       # Package locally only: publishing is deferred to the upload step below so
       # the three platforms never create the GitHub Release concurrently. The mac
       # step signs (CSC_LINK / CSC_KEY_PASSWORD) and notarizes (APPLE_API_KEY /
-      # APPLE_API_KEY_ID / APPLE_API_ISSUER) the bundle.
+      # APPLE_API_KEY_ID / APPLE_API_ISSUER) the bundle. The Developer ID
+      # certificate must never reach win/linux: electron-builder would sign the
+      # Windows PE with it, and Windows reports that untrusted signature as
+      # UnknownError (see docs/release-signing.md §七).
       - name: Build installers
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_KEY: ${{ steps.api-key.outputs.key-path }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}

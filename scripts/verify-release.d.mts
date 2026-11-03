@@ -146,6 +146,19 @@ export interface SpikeDiagnostics {
   finishedAt?: string
 }
 
+/** One startup failure as it lands in a step `actual` and its plain-text log. */
+export interface StepDiagnostics {
+  reason: SpikeFailureReason | null
+  exitCode: number | null
+  signal: string | null
+  stdout: string
+  stderr: string
+  portProbe: SpikePortProbe[]
+  textLimit: number
+  truncated: { stdout: boolean; stderr: boolean }
+  originalChars: { stdout: number; stderr: number }
+}
+
 export interface SpikeLaunchDescriptor {
   command: string
   args: string[]
@@ -220,6 +233,9 @@ export const SPIKE_PROCESS_EXIT_BUDGET_MS: number
 export const SPIKE_PROCESS_KILL_WAIT_MS: number
 export const SPIKE_PROCESS_POLL_INTERVAL_MS: number
 export const SPIKE_EXIT_FLUSH_TIMEOUT_MS: number
+export const STEP_DIAGNOSTIC_TEXT_LIMIT: number
+export const AUTHENTICODE_PASS_STATUSES: string[]
+export const AUTHENTICODE_UNSIGNED_NOTE: string
 export const SPIKE_FAILURE_REASONS: SpikeFailureReason[]
 export const LOCAL_FIXTURE_ROOTS: { left: string; right: string }
 export const MANUAL_NOT_COVERED: Array<{ id: string; label: string; reason: string }>
@@ -327,6 +343,20 @@ export function buildSpikeLaunchDescriptor(options?: {
   root?: string
   electronBinary?: string
 }): SpikeLaunchDescriptor
+
+/** The one Linux xvfb command shape shared by the spike and every verify leg. */
+export function buildXvfbAppLaunch(options?: {
+  executable: string
+  args?: string[]
+  port: number
+}): { command: string; args: string[] }
+
+export function stepDiagnostics(
+  error: unknown,
+  options?: { limit?: number }
+): StepDiagnostics
+
+export function formatStepDiagnostics(diagnostics: StepDiagnostics): string
 
 export function waitForSpikePageTarget(
   options?: SpikeTargetWaitOptions

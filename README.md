@@ -16,7 +16,7 @@ OpenCompare is a modern cross-platform desktop diff and three-way merge tool for
 
 - **macOS arm64**: download the `.dmg` from [Releases](https://github.com/chaxiu/OpenCompare/releases), drag OpenCompare into Applications, then launch it.
 - **Windows**: run the `.exe` installer, finish the wizard, then launch OpenCompare from the Start menu.
-- **Linux**: `chmod +x` the `.AppImage` and run it; or install the `.deb` package with `sudo apt install ./opencompare_amd64.deb`.
+- **Linux**: `chmod +x` the `.AppImage` and run it; or install the `.deb` package with `sudo apt install ./opencompare_amd64.deb`. The `.AppImage` mounts through FUSE 2, so install `libfuse2` (`libfuse2t64` on Ubuntu 24.04+) first; on a machine without FUSE 2, run it with `APPIMAGE_EXTRACT_AND_RUN=1 ./OpenCompare-*.AppImage` or use the `.deb`.
 
 Every published version is listed on the [Releases page](https://github.com/chaxiu/OpenCompare/releases).
 

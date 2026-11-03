@@ -257,6 +257,14 @@ describe('release workflow step contracts', () => {
     if (row.mustBeLast) expect(names[names.length - 1], `${row.job}: last step`).toBe(row.names[row.names.length - 1])
   })
 
+  it('never hands the macOS Developer ID certificate to the win/linux packaging legs', () => {
+    const step = packageStep('Build installers')
+    expect(step, 'Build installers: present').toBeDefined()
+    for (const name of ['CSC_LINK', 'CSC_KEY_PASSWORD']) {
+      expect(step?.env?.[name], name).toContain("matrix.target == 'mac'")
+    }
+  })
+
   it('never combines gh api --slurp with --jq or --template', () => {
     const config = fixture.ghApiCompatibility
     const commands = allRunText.replace(/\\\r?\n\s*/g, ' ').split(/\r?\n/)
