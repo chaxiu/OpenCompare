@@ -71,6 +71,18 @@ export const RETENTION_THRESHOLD_BYTES = 16 * 1024 * 1024
 /** Cancellation noise: any hit fails the run, skip is not allowed. */
 export const CANCEL_NOISE_PATTERN = /OperationCancelledError|ECANCELED/
 
+/**
+ * Spike budgets. Bounded on purpose: a dead Electron must fail in seconds, and
+ * a live Electron that never exposes a page target must fail in under a minute.
+ */
+export const SPIKE_TARGET_POLL_INTERVAL_MS = 500
+export const SPIKE_TARGET_TIMEOUT_MS = 60_000
+export const SPIKE_APP_SHELL_TIMEOUT_MS = 60_000
+export const SPIKE_PROCESS_EXIT_BUDGET_MS = 5_000
+
+/** Closed set of spike failure reasons; no other value may reach `spike.json`. */
+export const SPIKE_FAILURE_REASONS = ['process-exited', 'no-page-target', 'app-shell-timeout']
+
 /** The real 6.43 GiB pair, read-only, local layer only. */
 export const LOCAL_FIXTURE_ROOTS = {
   left: '/Users/zhutao/opencompare-fixtures/work/left',
@@ -801,9 +813,14 @@ export function judgeReleaseGate(summary, { expectedIds = [], exists = existsSyn
 
 /** Temporary file plus rename: a half-written JSON can never look like a pass. */
 export function writeJsonAtomic(path, value) {
+  writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+/** Same rename discipline for diagnostics, so a crash never truncates them. */
+export function writeTextAtomic(path, text) {
   const temp = `${path}.tmp-${process.pid}-${Date.now()}`
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  writeFileSync(temp, text, 'utf8')
   renameSync(temp, path)
 }
 
@@ -861,27 +878,157 @@ function stopChild(child) {
   })
 }
 
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
+
+/** A page target is the only entry CDP may attach to: it must carry a socket URL. */
+function isPageTarget(entry) {
+  return (
+    entry !== null &&
+    typeof entry === 'object' &&
+    entry.type === 'page' &&
+    typeof entry.webSocketDebuggerUrl === 'string' &&
+    entry.webSocketDebuggerUrl.length > 0
+  )
+}
+
+/** Real `/json/list` probe; a refused port is an error record, never a silent spin. */
+async function probeDevToolsTargets(port) {
+  if (typeof fetch === 'undefined') {
+    throw new Error('需要 Node 22+（全局 fetch）才能探测 DevTools')
+  }
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+/**
+ * One platform launch descriptor. macOS stays byte-for-byte the old command;
+ * Linux owns its own xvfb and the two Chromium flags its verify legs already
+ * use. Everything else launches the same Electron entry directly.
+ */
+export function buildSpikeLaunchDescriptor({
+  platform = process.platform,
+  port,
+  root = '.',
+  electronBinary
+} = {}) {
+  if (typeof electronBinary !== 'string' || electronBinary.length === 0) {
+    throw new Error('spike 需要一个 Electron 可执行文件')
+  }
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw new Error(`spike 端口非法: ${port}`)
+  }
+  const debugging = `--remote-debugging-port=${port}`
+  if (platform === 'linux') {
+    return {
+      command: 'xvfb-run',
+      args: ['-a', electronBinary, '.', '--no-sandbox', '--disable-dev-shm-usage', debugging],
+      cwd: root
+    }
+  }
+  return { command: electronBinary, args: ['.', debugging], cwd: root }
+}
+
+/**
+ * Bounded target wait with a liveness check. Every dependency (clock, probe,
+ * sleep, child liveness) is injected so the deterministic gate never boots a
+ * real window. A dead child fails on the next tick instead of burning the
+ * whole budget; a live child that never exposes a target ends in
+ * `no-page-target` with the probe trail attached.
+ */
+export async function waitForSpikePageTarget({
+  port,
+  timeoutMs = SPIKE_TARGET_TIMEOUT_MS,
+  intervalMs = SPIKE_TARGET_POLL_INTERVAL_MS,
+  probe = probeDevToolsTargets,
+  childAlive = () => true,
+  now = () => Date.now(),
+  sleepFn = sleep
+} = {}) {
+  const startedAtMs = now()
+  const deadline = startedAtMs + timeoutMs
+  const portProbe = []
+  let target = null
+  let reason = null
+  for (;;) {
+    if (!childAlive()) {
+      reason = 'process-exited'
+      break
+    }
+    const probeAt = now()
+    try {
+      const entries = await probe(port)
+      const list = Array.isArray(entries) ? entries : []
+      target = list.find(isPageTarget) ?? null
+      portProbe.push({
+        at: new Date(probeAt).toISOString(),
+        elapsedMs: probeAt - startedAtMs,
+        ok: true,
+        pageTargets: list.filter(isPageTarget).length,
+        url: target?.url ?? null,
+        error: null
+      })
+    } catch (error) {
+      portProbe.push({
+        at: new Date(probeAt).toISOString(),
+        elapsedMs: probeAt - startedAtMs,
+        ok: false,
+        pageTargets: 0,
+        url: null,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+    if (target !== null) break
+    if (!childAlive()) {
+      reason = 'process-exited'
+      break
+    }
+    const remaining = deadline - now()
+    if (remaining <= 0) {
+      reason = 'no-page-target'
+      break
+    }
+    await sleepFn(Math.min(intervalMs, remaining))
+  }
+  return {
+    target,
+    reason: target === null ? reason : null,
+    portProbe,
+    startedAt: new Date(startedAtMs).toISOString(),
+    finishedAt: new Date(now()).toISOString()
+  }
+}
+
+/** One log file the maintainer can read without any other tooling. */
+export function formatSpikeLaunchLog(record) {
+  const lines = [
+    `[spike] id=${record.id} tag=${record.tag} conclusion=${record.conclusion}`,
+    `[spike] reason=${record.reason ?? 'none'} exitCode=${record.exitCode ?? 'null'} signal=${record.signal ?? 'null'}`,
+    `[spike] startedAt=${record.startedAt} finishedAt=${record.finishedAt}`,
+    `[spike] error=${record.error ?? 'none'}`,
+    '',
+    '--- electron stdout (xvfb-run wrapper output included) ---',
+    record.stdout ?? '',
+    '--- electron stderr (xvfb-run wrapper output included) ---',
+    record.stderr ?? '',
+    '--- devtools /json/list probes ---'
+  ]
+  for (const probe of record.portProbe ?? []) {
+    lines.push(
+      `[${probe.at} +${probe.elapsedMs}ms] ok=${probe.ok} pageTargets=${probe.pageTargets}` +
+        `${probe.url === null ? '' : ` url=${probe.url}`}` +
+        `${probe.error === null ? '' : ` error=${probe.error}`}`
+    )
+  }
+  return `${lines.join('\n')}\n`
+}
+
 /** Minimal DevTools-protocol client over the global WebSocket (Node 22+). */
 class CdpClient {
-  static async connect(port, { timeoutMs = 60_000 } = {}) {
+  static async connectToTarget(target) {
     if (typeof WebSocket === 'undefined') {
       throw new Error('需要 Node 22+（全局 WebSocket）才能连接 DevTools')
     }
-    const deadline = Date.now() + timeoutMs
-    let target
-    while (Date.now() < deadline) {
-      try {
-        const list = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
-          response.json()
-        )
-        target = list.find((entry) => entry.type === 'page')
-      } catch {
-        // Chromium is still booting.
-      }
-      if (target !== undefined) break
-      await sleep(200)
-    }
-    if (target === undefined) throw new Error(`窗口未暴露 DevTools page target (port ${port})`)
     const socket = new WebSocket(target.webSocketDebuggerUrl)
     await new Promise((accept, reject) => {
       socket.addEventListener('open', accept, { once: true })
@@ -889,8 +1036,7 @@ class CdpClient {
         once: true
       })
     })
-    const client = new CdpClient(socket, target.url)
-    return client
+    return new CdpClient(socket, target.url)
   }
 
   constructor(socket, url) {
@@ -944,8 +1090,6 @@ class CdpClient {
   }
 }
 
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
-
 /** Real world: filesystem, commands, `gh`, CDP launches and heap sampling. */
 export function createWorld({ env = process.env } = {}) {
   return {
@@ -984,25 +1128,84 @@ export function createWorld({ env = process.env } = {}) {
         }))
       }
     },
-    launchApp: async ({ command, args = [], port, cwd, env: extraEnv, timeoutMs }) => {
+    launchApp: async ({ command, args = [], port, cwd, env: extraEnv, timeoutMs, waitForTarget }) => {
+      const launchStartedAt = new Date().toISOString()
       const child = spawn(command, args, {
         cwd,
         env: { ...env, ...extraEnv },
         stdio: ['ignore', 'pipe', 'pipe']
       })
       const output = []
-      child.stdout?.on('data', (chunk) => output.push(String(chunk)))
-      child.stderr?.on('data', (chunk) => output.push(String(chunk)))
+      const stdoutChunks = []
+      const stderrChunks = []
+      child.stdout?.on('data', (chunk) => {
+        const text = String(chunk)
+        stdoutChunks.push(text)
+        output.push(text)
+      })
+      child.stderr?.on('data', (chunk) => {
+        const text = String(chunk)
+        stderrChunks.push(text)
+        output.push(text)
+      })
+      let exitInfo = null
+      child.once('exit', (code, signal) => {
+        exitInfo = { code, signal }
+      })
+      child.once('error', (spawnError) => {
+        exitInfo = { code: -1, signal: null }
+        stderrChunks.push(`spawn error: ${spawnError.message}\n`)
+        output.push(`spawn error: ${spawnError.message}\n`)
+      })
+      const childAlive = () =>
+        exitInfo === null && child.exitCode === null && child.signalCode === null
+      const diagnostics = (reason, wait) => ({
+        reason,
+        exitCode: exitInfo?.code ?? child.exitCode ?? null,
+        signal: exitInfo?.signal ?? child.signalCode ?? null,
+        stdout: stdoutChunks.join(''),
+        stderr: stderrChunks.join(''),
+        portProbe: wait?.portProbe ?? [],
+        startedAt: launchStartedAt,
+        finishedAt: new Date().toISOString()
+      })
+      const failure = (reason, message, wait) => {
+        const error = new Error(message)
+        error.diagnostics = diagnostics(reason, wait)
+        return error
+      }
+      let wait
       let cdp
       try {
-        cdp = await CdpClient.connect(port, { timeoutMs: timeoutMs ?? 120_000 })
+        const waitFn = waitForTarget ?? waitForSpikePageTarget
+        wait = await waitFn({
+          port,
+          timeoutMs: timeoutMs ?? 120_000,
+          childAlive
+        })
+        if (wait.target === null || wait.target === undefined) {
+          const reason = wait.reason ?? 'no-page-target'
+          throw failure(
+            reason,
+            reason === 'process-exited'
+              ? `Electron 在暴露 DevTools page 前退出 (port ${port})`
+              : `窗口未暴露 DevTools page target (port ${port})`,
+            wait
+          )
+        }
+        cdp = await CdpClient.connectToTarget(wait.target)
       } catch (error) {
+        const wrapped =
+          error?.diagnostics === undefined
+            ? failure(childAlive() ? 'no-page-target' : 'process-exited', String(error?.message ?? error), wait)
+            : error
         await stopChild(child)
-        throw error
+        throw wrapped
       }
       return {
         cdp,
         output,
+        diagnostics: () => diagnostics(null, wait),
         collectGarbage: async () => {
           await cdp.send('HeapProfiler.enable')
           await cdp.send('HeapProfiler.collectGarbage')
@@ -1998,50 +2201,97 @@ function aggregateSteps(dir) {
   return { steps: [...byId.values()], conflicts: [...conflicts] }
 }
 
-async function runSpike({ tag, outDir, world, environment, stdout }) {
+/**
+ * A spike run always lands two files, pass or fail: `spike.json` holds the
+ * verdict plus the closed-set `reason`, and `spike-launch.log` holds the raw
+ * Electron / xvfb output and every `/json/list` probe. Both are written
+ * atomically after the child is stopped, so a crash cannot swallow them.
+ */
+async function runSpike({
+  tag,
+  outDir,
+  world,
+  environment,
+  stdout,
+  env = process.env,
+  platform = process.platform
+}) {
   const startedAt = nowIso(() => new Date())
   const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
   const port = 9700 + Math.floor(Math.random() * 90)
   const home = join(outDir, 'spike-home')
   mkdirSync(home, { recursive: true })
-  let electronBinary = process.env.ELECTRON_BINARY ?? ''
+  let electronBinary = env.ELECTRON_BINARY ?? ''
   let conclusion = 'window-booted'
   let error = null
   let url = null
+  let reason = null
+  let pendingReason = null
   let launch
+  let diagnostics = {
+    exitCode: null,
+    signal: null,
+    stdout: '',
+    stderr: '',
+    portProbe: []
+  }
   try {
     if (electronBinary === '') {
       electronBinary = createRequire(import.meta.url)('electron')
     }
+    const descriptor = buildSpikeLaunchDescriptor({ platform, port, root, electronBinary })
     launch = await world.launchApp({
-      command: electronBinary,
-      args: ['.', `--remote-debugging-port=${port}`],
-      cwd: root,
+      ...descriptor,
       env: { HOME: home },
       port,
-      timeoutMs: 120_000
+      timeoutMs: SPIKE_TARGET_TIMEOUT_MS
     })
-    await launch.cdp.waitFor(APP_SHELL_EXPRESSION, 'the Electron window to boot', {
-      timeoutMs: 120_000
-    })
+    try {
+      await launch.cdp.waitFor(APP_SHELL_EXPRESSION, 'the Electron window to boot', {
+        timeoutMs: SPIKE_APP_SHELL_TIMEOUT_MS
+      })
+    } catch (shellCause) {
+      pendingReason = 'app-shell-timeout'
+      throw shellCause
+    }
     url = launch.cdp.url ?? null
   } catch (cause) {
     conclusion = 'failed'
     error = cause instanceof Error ? cause.message : String(cause)
+    const fromCause = cause?.diagnostics
+    if (fromCause !== undefined) diagnostics = { ...diagnostics, ...fromCause }
+    reason = fromCause?.reason ?? pendingReason ?? 'no-page-target'
   } finally {
-    if (launch !== undefined) await launch.stop()
+    if (launch !== undefined) {
+      if (typeof launch.diagnostics === 'function') {
+        const final = launch.diagnostics()
+        diagnostics = {
+          ...diagnostics,
+          ...final,
+          portProbe: final.portProbe ?? diagnostics.portProbe
+        }
+      }
+      await launch.stop()
+    }
   }
   const record = {
     id: 'spike-window-boot',
     tag,
     conclusion,
+    reason,
     url,
     error,
+    exitCode: diagnostics.exitCode ?? null,
+    signal: diagnostics.signal ?? null,
+    stdout: diagnostics.stdout ?? '',
+    stderr: diagnostics.stderr ?? '',
+    portProbe: diagnostics.portProbe ?? [],
     environment,
     startedAt,
     finishedAt: nowIso(() => new Date())
   }
   writeJsonAtomic(join(outDir, 'spike.json'), record)
+  writeTextAtomic(join(outDir, 'spike-launch.log'), formatSpikeLaunchLog(record))
   stdout(`spike ${conclusion}${error === null ? '' : `: ${error}`}`)
   return conclusion === 'window-booted' ? 0 : 1
 }
@@ -2080,7 +2330,15 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
   const world = io.world ?? createWorld({ env })
 
   if (options.spike === true) {
-    return runSpike({ tag: options.tag, outDir, world, environment, stdout })
+    return runSpike({
+      tag: options.tag,
+      outDir,
+      world,
+      environment,
+      stdout,
+      env,
+      platform: io.platform ?? process.platform
+    })
   }
 
   const platforms = options.aggregate !== undefined ? [...CI_PLATFORMS] : selectedPlatforms(options.platform)

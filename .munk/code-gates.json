@@ -68,6 +68,11 @@
       "command": "pnpm test src/diff-normalize-real-gate.test.tsx"
     },
     {
+      "id": "spike-launch-gate",
+      "cwd": ".",
+      "command": "pnpm test src/spike-launch-gate.test.ts"
+    },
+    {
       "id": "template-default-unchecked",
       "cwd": ".",
       "command": "pnpm test src/template-gate-default-unchecked.test.ts"

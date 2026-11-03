@@ -206,3 +206,11 @@ v0.2.6 实测：
 - 旧口径 `d1≥d2≥d3` 废止理由：该口径把未 GC 的轮末瞬时堆当判定依据，实测被 V8 未回收垃圾与渲染帧抖动主导（同一进程连续三轮可任意排列），无法区分真实保留与待回收内存；v0.2.16 起改用「GC×2 + 静置 1s 后的保留堆」并只比较第 3 轮与第 2 轮，口径可复核、可复现，旧 `d1≥d2≥d3` 不再作为判定。
 - CI 不跑内存腿：A 层不做任何 heap / memory 采样，也不访问本机 6.4 GiB 夹具；三轮真实目录对长跑由 product-qa 任务 `task_0194dba8b812d08b` 在本机执行，本仓脚本只承载规则。
 - 断言位置：`src/verify-release-gate.test.ts`（`.munk/code-gates.json` 的 `verify-release-gate`）。
+
+## 12. 2026-11-03 Linux spike 启动根因与诊断契约
+
+- 真证据（RUN#41557584455，`workflow_dispatch`，head `a2ccdc9`，TAG `v0.2.17`）：`spike (ubuntu-latest)` 在 01:07:30 → 01:09:30 整 120 s 后 exit 1，唯一错误 `窗口未暴露 DevTools page target (port 9702)`；同 run 的 `spike (macos-latest)` success，三个 verify leg 因 `needs` 全 skipped，aggregate `total=0 expected=15` fail-closed。证据归档：GitHub artifact `spike-v0.2.17-41557584455-ubuntu-latest`（418 B，只有旧版 `spike.json`，无 Electron stdout/stderr），job log `https://github.com/chaxiu/OpenCompare/actions/runs/41557584455`（job 125660128129，仅 308 行）。旧代码从不捕获子进程输出，因此本次修复的首要产物就是可读的 `spike-launch.log`。
+- 根因判定（由差异指认，不由猜测）：spike 是唯一一条 Linux 启动路径既没有 `--no-sandbox` / `--disable-dev-shm-usage`，又把 xvfb 归属交给外层 `xvfb-run`；同仓 Linux verify leg 一直显式 `xvfb-run -a <binary> --no-sandbox ...` 且通过。macOS 同代码同参数通过，排除被测程序与构建产物。等待逻辑本身让失败无法区分：旧 `CdpClient.connect` 只轮询 `/json/list`，不检查子进程存活，子进程秒退时静默空转到 120 s。
+- 修复口径：平台差异只存在于 `buildSpikeLaunchDescriptor`（`scripts/verify-release.mjs`）——Linux 返回 `xvfb-run` + `-a` + Electron + 仓库根 `.` + `--no-sandbox` + `--disable-dev-shm-usage` + `--remote-debugging-port=<port>`；macOS 仍是 Electron + `.` + 调试端口，语义不变。workflow 两个 OS 执行同一条命令，Linux 步骤前显式 `apt-get install -y xvfb`，不再由外层包裹。
+- 等待与诊断契约：`SPIKE_TARGET_POLL_INTERVAL_MS=500`、`SPIKE_TARGET_TIMEOUT_MS=60000`、`SPIKE_APP_SHELL_TIMEOUT_MS=60000`、`SPIKE_PROCESS_EXIT_BUDGET_MS=5000`；`SPIKE_FAILURE_REASONS` 封闭为 `process-exited` / `no-page-target` / `app-shell-timeout`。子进程退出在下一探针周期即失败；始终无 target 在固定预算内以 `no-page-target` 结束并带 `portProbe`；target 出现但 app shell 不就绪为 `app-shell-timeout`。失败与成功都原子写 `spike.json` + `spike-launch.log`（Electron stdout/stderr、xvfb 包装输出、逐条 `/json/list` 探针），随 `verify-out` 上传。
+- 断言位置：`src/spike-launch-gate.test.ts`（`.munk/code-gates.json` 的 `spike-launch-gate`，插在 `diff-normalize-real` 之后、9 个模板门禁之前），另由 `src/verify-release-gate.test.ts` 的既有 15 项 expected / fail-closed 断言保持不动。
