@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 47723
+    "repoTestLines": 47937
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1590
+    "repoTestCases": 1609
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 47355,
-      "to": 47723,
-      "reason": "add the real three-way merge entry suites: shared path normalisation + per-side probe ordering and stable error codes, renderer session build / identity / display text / read-failure localisation / ordered history upsert and reopen plan, and the jsdom workbench evidence for dialog modes, invalid-side no-tab, three real panes with real conflict counts, status-bar conflict decrement, accept / save, title-subtitle paths, same-trio tab reuse, ordered history write, fresh disk reopen and restrained missing-side failure with console path privacy",
-      "addedCases": 14
+      "from": 47723,
+      "to": 47937,
+      "reason": "extend the merge-session jsdom evidence for switch fidelity: non-default shell switches recorded on the merge row, restart reopen keeping the entry switches while restoring the shell, fresh disk reread with a changed conflict count, reused tab id and single row across repeated reopens, failed reopen leaving tabs / history / shell switches untouched, merge rows coexisting with directory and file rows, single localStorage history key and console path privacy",
+      "addedCases": 3
     }
   ]
 }

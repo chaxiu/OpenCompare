@@ -904,16 +904,19 @@ export function Workbench({
     const switches = plan.switches
     const fail = (): void => report(copyNotice('shell.history.reopenFailed'))
     if (plan.kind === 'merge') {
-      // A merge session never consumes the three comparison switches: reopening
-      // only re-reads the three files and leaves the shell preference untouched.
-      await openMergeRequest(
+      // The merge view itself ignores the three switches, but the entry still
+      // carries the combination it was established with; a successful reopen
+      // restores the shell preference to that entry value.
+      const opened = await openMergeRequest(
         {
           base: plan.paths[0] ?? '',
           ours: plan.paths[1] ?? '',
           theirs: plan.paths[2] ?? ''
         },
-        fail
+        fail,
+        switches
       )
+      if (opened) setComparisonSwitches(switches)
       return
     }
     if (plan.kind === 'directory') {
@@ -1104,14 +1107,16 @@ export function Workbench({
    */
   async function openMergeRequest(
     paths: MergePaths,
-    onError: (message: string) => void
+    onError: (message: string) => void,
+    switches: ComparisonSwitches = comparisonSwitches
   ): Promise<boolean> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
       const session = await buildMergeSession(platform, paths.base, paths.ours, paths.theirs)
-      const historyId = recordHistory('merge', [paths.base, paths.ours, paths.theirs])
+      const historyId = recordHistory('merge', [paths.base, paths.ours, paths.theirs], switches)
       upsertSession({ ...session, historyId })
+      setComparisonSwitches(switches)
       setStatus('ready')
       return true
     } catch (cause) {
