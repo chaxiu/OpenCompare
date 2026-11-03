@@ -9,6 +9,8 @@ export interface StateViewProps {
   /** Primary recovery action, e.g. the empty-state load button or a retry. */
   readonly action?: ReactNode
   readonly hint?: ReactNode
+  /** Extra content below the hint, e.g. the empty workbench's recent history. */
+  readonly extra?: ReactNode
 }
 
 /** Centred state surface used for the empty, loading and error states. */
@@ -18,7 +20,8 @@ export function StateView({
   description,
   tone = 'neutral',
   action,
-  hint
+  hint,
+  extra
 }: StateViewProps): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-8">
@@ -37,6 +40,7 @@ export function StateView({
         <p className="text-xs leading-5 text-content-secondary">{description}</p>
         {action ? <div className="mt-1 flex items-center gap-2">{action}</div> : null}
         {hint ? <p className="text-2xs text-content-muted">{hint}</p> : null}
+        {extra ? <div className="mt-2 w-full">{extra}</div> : null}
       </div>
     </div>
   )

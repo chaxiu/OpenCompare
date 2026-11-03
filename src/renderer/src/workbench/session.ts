@@ -60,6 +60,12 @@ export interface AdhocFilePair {
 }
 
 export interface WorkbenchSession extends FixtureSession {
+  /**
+   * The recent-history entry this session was established from, when it came
+   * from a real directory / file pair. Sample, drilldown and snapshot sessions
+   * have none, so switch changes never write an entry they do not own.
+   */
+  readonly historyId?: string
   /** Diff-semantic counts backing the status bar legend, when known. */
   readonly composition?: SampleComposition
   /** Parsed CSV/TSV tables, present for the CSV scene only. */

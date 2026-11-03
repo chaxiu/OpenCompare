@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 46959
+    "repoTestLines": 47355
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1543
+    "repoTestCases": 1590
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46563,
-      "to": 46959,
-      "reason": "add the comparison-history pure model suite, the real temporary-path id opacity check, the Electron atomic read/write and write-failure evidence, the web localStorage/memory fallback contract, the preload channel forwarding assertions and the dedicated history-store gate",
-      "addedCases": 25
+      "from": 46959,
+      "to": 47355,
+      "reason": "add the new-page recent-history suites: the pure helper and HistoryHome component contract (order, cap pass-through, path title, localized time, reopen / remove / busy) plus the Workbench integration evidence for establish writes, excluded sources, write failure, directory rescan reopen, file re-read with restored switches, same-path dedupe, restrained reopen failure, single remove, switch sync / isolation and console path privacy",
+      "addedCases": 47
     }
   ]
 }

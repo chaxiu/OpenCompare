@@ -157,5 +157,15 @@ export const shell = {
     '左右两侧类型不一致：左侧是{leftKind}（{left}），右侧是{rightKind}（{right}）。',
   'shell.compare.error.UNSUPPORTED_FILE_TYPE':
     '不支持的文件类型：{side}「{path}」。支持代码/文本、CSV/TSV、JSON/YAML 文件。',
-  'shell.compare.error.ACCESS_DENIED': '无法访问{side}路径：{path}（权限不足或不可读）。'
+  'shell.compare.error.ACCESS_DENIED': '无法访问{side}路径：{path}（权限不足或不可读）。',
+  'shell.history.title': '最近对比',
+  'shell.history.kind.directory': '目录',
+  'shell.history.kind.file': '文件',
+  'shell.history.kind.merge': '三向合并',
+  'shell.history.reopen': '重开',
+  'shell.history.remove': '移除',
+  'shell.history.reopenTitle': '重开 {paths}',
+  'shell.history.removeTitle': '移除 {paths}',
+  'shell.history.reopenFailed':
+    '无法重开这条对比：路径可能已删除、不可读或类型已变化。'
 } as const

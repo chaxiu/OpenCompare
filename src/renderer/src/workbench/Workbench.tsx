@@ -6,6 +6,13 @@ import { CODE_SCENE, CSV_SCENE, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { SampleComposition, SceneId } from '@shared/fixtures'
 import type { CompareRequest, CompareRequestPayload } from '@shared/compareRequest'
 import type { PlatformPort } from '@shared/platform/types'
+import {
+  removeComparisonHistoryEntry,
+  resolveComparisonHistoryReopen,
+  trimComparisonHistory,
+  upsertComparisonHistory
+} from '@shared/history/model'
+import type { ComparisonHistoryEntry } from '@shared/history/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
 import { visibleDirectoryCounts } from '@core/directory/rows'
@@ -85,6 +92,7 @@ import type { CompareOpenOutcome } from './NewCompareDialog'
 import { commitSessionTree, closeSessions } from './sessionStore'
 import {
   compareSides,
+  directoryRootsOf,
   directorySides,
   exportSideSnapshot,
   parseSnapshotText,
@@ -99,6 +107,8 @@ import {
 import type { ComparisonSides, SidePosition } from './snapshotOps'
 import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import { syncRefreshReasonCopy, syncTargetFailureCopy } from './syncFailureCopy'
+import { historyCandidate, historyIdFor, withHistorySwitches } from './historyHomeModel'
+import { HistoryHome } from './historyHome'
 import type { CodeFileBuffer, FilePair, FilePairProbes, WorkbenchSession } from './session'
 import { entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
 import type { ShellEntryId } from './shellLayout'
@@ -172,6 +182,22 @@ interface DirectoryProgressState {
 interface ActiveDirectoryOperation {
   readonly id: string
   readonly controller: AbortController
+}
+
+/** Per-call policy of one directory comparison run. */
+interface SidesCompareOptions {
+  /** Record the pair in the recent history (real entry points only). */
+  readonly recordHistory?: boolean
+  /** Scan with a throwaway cache and unobstruct the shared one first. */
+  readonly freshCache?: boolean
+  /** Switches to store with a reopened record instead of the shell's current. */
+  readonly historySwitches?: ComparisonSwitches
+}
+
+/** Per-call policy of one file-pair open. */
+interface OpenFilePairOptions {
+  readonly recordHistory?: boolean
+  readonly historySwitches?: ComparisonSwitches
 }
 
 /** A localized fragment inside a notice parameter, resolved when it renders. */
@@ -260,6 +286,11 @@ async function isDirectoryPath(platform: PlatformPort, path: string): Promise<bo
   }
 }
 
+/** True only when both sides are real on-disk directories (no snapshot mount). */
+function sidesAreRealDirectories(sides: ComparisonSides): boolean {
+  return sides.left.kind === 'directory' && sides.right.kind === 'directory'
+}
+
 /**
  * Localizes the two known file-pair failures; every other rejection keeps its
  * original message as the diagnostic detail.
@@ -334,6 +365,15 @@ export function Workbench({
   const [comparisonSwitches, setComparisonSwitches] = useState<ComparisonSwitches>(() =>
     resolveComparisonSwitches({})
   )
+  /**
+   * The recent comparisons shown on the empty workbench, newest first and
+   * already trimmed by the shared model. Read once per mount; a failed read is
+   * an empty list, never a blocking error.
+   */
+  const [history, setHistory] = useState<readonly ComparisonHistoryEntry[]>([])
+  const historyRef = useRef<readonly ComparisonHistoryEntry[]>([])
+  /** Resolves when the mount read settles; later writes wait on it. */
+  const historyReady = useRef<Promise<void> | null>(null)
   const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   /**
@@ -396,6 +436,34 @@ export function Workbench({
     const unsubscribe = subscribe((payload) => launchRequest.current(payload))
     void platform.compareRequestsReady?.()
     return unsubscribe
+  }, [platform])
+
+  /**
+   * One read per mount. The shared model owns ordering / the 20-record cap, so
+   * the renderer only renders what it got; a rejected read is simply empty. Its
+   * settle promise gates later writes, so an establish that lands before the
+   * read returns rebuilds on the stored list instead of replacing it.
+   */
+  useEffect(() => {
+    let active = true
+    historyReady.current = platform
+      .readComparisonHistory()
+      .then((entries) => trimComparisonHistory(entries))
+      .then(
+        (entries) => {
+          if (!active) return
+          historyRef.current = entries
+          setHistory(entries)
+        },
+        () => {
+          if (!active) return
+          historyRef.current = []
+          setHistory([])
+        }
+      )
+    return () => {
+      active = false
+    }
   }, [platform])
 
   // Cmd/Ctrl+N opens the manual entry from anywhere; while it is already open
@@ -473,7 +541,10 @@ export function Workbench({
     (id: string, side: SidePosition, file: PickedTextFile) => {
       setSessions((current) =>
         current.map((session) =>
-          session.id === id ? replaceFilePairSide(session, side, file) : session
+          // The pair now points at another file: its history row no longer fits.
+          session.id === id
+            ? { ...replaceFilePairSide(session, side, file), historyId: undefined }
+            : session
         )
       )
     },
@@ -483,14 +554,21 @@ export function Workbench({
   /**
    * Commits an explicit reload / swap back to the session that owns the pair.
    * The tab keeps its id and count; only the two bodies, the line stats and the
-   * probe facts move, so a parent directory comparison is never rescanned.
+   * probe facts move, so a parent directory comparison is never rescanned. A
+   * reload keeps the same ordered paths and therefore the history row; a swap
+   * re-points the pair and drops it.
    */
   const handleSessionPairChange = useCallback(
     (id: string, pair: FilePair, probes: FilePairProbes) => {
       setSessions((current) =>
-        current.map((session) =>
-          session.id === id ? replaceFilePair(session, pair, probes) : session
-        )
+        current.map((session) => {
+          if (session.id !== id) return session
+          const next = replaceFilePair(session, pair, probes)
+          const samePair =
+            session.adhoc?.pair.left.path === pair.left.path &&
+            session.adhoc?.pair.right.path === pair.right.path
+          return samePair ? next : { ...next, historyId: undefined }
+        })
       )
     },
     []
@@ -747,6 +825,99 @@ export function Workbench({
   }
 
   /**
+   * Applies one history list to the UI, then persists it. A rejected write only
+   * drops this write: the list rolls back to its pre-write value unless a later
+   * write already advanced it, so the session and tab stay untouched.
+   */
+  function persistHistory(
+    before: readonly ComparisonHistoryEntry[],
+    next: readonly ComparisonHistoryEntry[]
+  ): void {
+    historyRef.current = next
+    setHistory(next)
+    void platform.writeComparisonHistory(next).catch(() => {
+      if (historyRef.current !== next) return
+      historyRef.current = before
+      setHistory(before)
+    })
+  }
+
+  /**
+   * Applies one history update on top of the stored list, waiting for the mount
+   * read first so an early establish never overwrites what was already stored.
+   */
+  function applyHistoryWrite(
+    update: (before: readonly ComparisonHistoryEntry[]) => readonly ComparisonHistoryEntry[]
+  ): void {
+    void (historyReady.current ?? Promise.resolve()).then(() => {
+      const before = historyRef.current
+      const next = update(before)
+      if (next === before) return
+      persistHistory(before, next)
+    })
+  }
+
+  /**
+   * Records one successfully established real pair and returns the opaque entry
+   * id its session keeps, so later switch changes can update exactly that row.
+   */
+  function recordHistory(
+    kind: 'directory' | 'file',
+    paths: readonly string[],
+    switches: ComparisonSwitches = comparisonSwitches
+  ): string {
+    const candidate = historyCandidate(kind, paths, switches, Date.now())
+    applyHistoryWrite((before) => upsertComparisonHistory(before, candidate))
+    return historyIdFor(kind, paths)
+  }
+
+  /** Updates the active file session's switch snapshot, never another row. */
+  function updateComparisonSwitches(next: ComparisonSwitches): void {
+    setComparisonSwitches(next)
+    const id = active?.historyId
+    if (id === undefined) return
+    applyHistoryWrite((before) => withHistorySwitches(before, id, next))
+  }
+
+  /** Removes exactly one row and writes the rest back unchanged. */
+  function removeHistoryEntry(id: string): void {
+    applyHistoryWrite((before) => {
+      const next = removeComparisonHistoryEntry(before, id)
+      return next.length === before.length ? before : next
+    })
+  }
+
+  /**
+   * Rebuilds one stored pair through the normal builders. Directory pairs get a
+   * brand-new comparison cache (and the shared cache loses their roots); file
+   * pairs re-read both sides. The shell switches are applied only after success,
+   * and a failure leaves every tab / row as it was.
+   */
+  async function reopenHistoryEntry(entry: ComparisonHistoryEntry): Promise<void> {
+    const plan = resolveComparisonHistoryReopen(entry)
+    if (!plan.ok || plan.kind === 'merge') {
+      report(copyNotice('shell.history.reopenFailed'))
+      return
+    }
+    const switches = plan.switches
+    const fail = (): void => report(copyNotice('shell.history.reopenFailed'))
+    if (plan.kind === 'directory') {
+      const opened = await runSidesCompare(
+        directorySides(plan.paths[0] ?? '', plan.paths[1] ?? ''),
+        fail,
+        { recordHistory: true, freshCache: true, historySwitches: switches }
+      )
+      if (opened) setComparisonSwitches(switches)
+      return
+    }
+    const opened = await openFilePair(plan.paths[0] ?? '', plan.paths[1] ?? '', fail, {
+      recordHistory: true,
+      historySwitches: switches
+    })
+    if (opened) setComparisonSwitches(switches)
+  }
+
+  /**
    * Refreshes one session in place with a newer model of itself. A sync rewrites
    * the compared roots, so the refreshed model gets a new id of its own; the tab
    * keeps the identity it was opened with instead of leaving a stale one behind.
@@ -768,7 +939,8 @@ export function Workbench({
    */
   async function runSidesCompare(
     next: ComparisonSides,
-    onError?: (message: string) => void
+    onError?: (message: string) => void,
+    options: SidesCompareOptions = {}
   ): Promise<boolean> {
     // Dismiss the new-comparison dialog before the scan starts: its modal overlay would
     // otherwise sit on top of the shell progress bar and its cancel button for
@@ -785,8 +957,13 @@ export function Workbench({
     setDirectoryBusy(true)
     setNotice(null)
     setDirectoryProgress({ phase: 'scan', files: 0, bytes: 0, phaseFiles: 0, cancelling: false })
+    // A reopen must never reuse a digest of the same size / mtime, so it scans
+    // with a throwaway cache and drops the pair's shared entries before and after.
+    const roots = options.freshCache === true ? directoryRootsOf(next) : []
+    if (options.freshCache === true) cache.current.evictUnderRoots(roots)
+    const runCache = options.freshCache === true ? createComparisonCache() : cache.current
     try {
-      const comparison = await compareSides(platform, next, cache.current, {
+      const comparison = await compareSides(platform, next, runCache, {
         signal: operation.controller.signal,
         operationId: operation.id,
         onProgress: (progress) => {
@@ -803,7 +980,12 @@ export function Workbench({
           )
         }
       })
-      upsertSession(createDirectorySession(comparison, next))
+      const session = createDirectorySession(comparison, next)
+      const historyId =
+        options.recordHistory === true && sidesAreRealDirectories(next)
+          ? recordHistory('directory', directoryRootsOf(next), options.historySwitches)
+          : undefined
+      upsertSession(historyId === undefined ? session : { ...session, historyId })
       setStatus('ready')
       // A comparison that succeeded with unreadable entries is still a success:
       // report what was left out instead of turning it into an error.
@@ -828,6 +1010,9 @@ export function Workbench({
       else report(detailNotice(message))
       return false
     } finally {
+      // Whatever the fresh scan wrote (or a later caller might reuse) never
+      // survives this reopen: the next comparison must read the disk again.
+      if (options.freshCache === true) cache.current.evictUnderRoots(roots)
       activeDirectoryOperation.current = null
       setDirectoryProgress(null)
       setDirectoryBusy(false)
@@ -857,12 +1042,18 @@ export function Workbench({
   async function openFilePair(
     leftPath: string,
     rightPath: string,
-    onError?: (message: string) => void
+    onError?: (message: string) => void,
+    options: OpenFilePairOptions = {}
   ): Promise<boolean> {
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      upsertSession(await openFilePairSession(platform, leftPath, rightPath))
+      const session = await openFilePairSession(platform, leftPath, rightPath)
+      const historyId =
+        options.recordHistory === true
+          ? recordHistory('file', [leftPath, rightPath], options.historySwitches)
+          : undefined
+      upsertSession(historyId === undefined ? session : { ...session, historyId })
       setStatus('ready')
       return true
     } catch (cause) {
@@ -884,9 +1075,11 @@ export function Workbench({
     onError: (message: string) => void
   ): Promise<boolean> {
     if (request.kind === 'directory') {
-      return runSidesCompare(directorySides(request.left, request.right), onError)
+      return runSidesCompare(directorySides(request.left, request.right), onError, {
+        recordHistory: true
+      })
     }
-    return openFilePair(request.left, request.right, onError)
+    return openFilePair(request.left, request.right, onError, { recordHistory: true })
   }
 
   /** Open file: left file then right file, no sample involved. */
@@ -899,7 +1092,7 @@ export function Workbench({
     if (rightPath === null) return false
 
     setPendingLeft(null)
-    return openFilePair(leftPath, rightPath, onError)
+    return openFilePair(leftPath, rightPath, onError, { recordHistory: true })
   }
 
   /** Open folder: left directory then right directory, no sample involved. */
@@ -912,7 +1105,9 @@ export function Workbench({
     if (rightPath === null) return false
 
     setPendingLeft(null)
-    return runSidesCompare(directorySides(leftPath, rightPath), onError)
+    return runSidesCompare(directorySides(leftPath, rightPath), onError, {
+      recordHistory: true
+    })
   }
 
   /** The dialog's open-file action feeds the same pair builder. */
@@ -984,8 +1179,8 @@ export function Workbench({
     }
 
     setPendingLeft(null)
-    if (leftDirectory) await runSidesCompare(directorySides(paths[0], paths[1]))
-    else await openFilePair(paths[0], paths[1])
+    if (leftDirectory) await runSidesCompare(directorySides(paths[0], paths[1]), undefined, { recordHistory: true })
+    else await openFilePair(paths[0], paths[1], undefined, { recordHistory: true })
   }
 
   function handleDragOver(event: ReactDragEvent<HTMLDivElement>): void {
@@ -1449,7 +1644,7 @@ export function Workbench({
             buffer={session.codeBuffer}
             probes={session.probes}
             switches={comparisonSwitches}
-            onSwitchesChange={setComparisonSwitches}
+            onSwitchesChange={updateComparisonSwitches}
             readSide={(path) => readSessionSide(session, path)}
             onPairChange={(pair, probes) => handleSessionPairChange(session.id, pair, probes)}
             mode={codeModes[session.id] ?? 'diff'}
@@ -1466,7 +1661,7 @@ export function Workbench({
             fixture={CODE_SCENE}
             probes={session.probes}
             switches={comparisonSwitches}
-            onSwitchesChange={setComparisonSwitches}
+            onSwitchesChange={updateComparisonSwitches}
             mode={codeModes[session.id] ?? (session.columns === 3 ? 'merge' : 'diff')}
             onModeChange={(mode) => handleCodeMode(session.id, mode)}
             platform={platform}
@@ -1774,6 +1969,16 @@ export function Workbench({
               </>
             }
             hint={t('shell.empty.hint')}
+            extra={
+              history.length > 0 ? (
+                <HistoryHome
+                  entries={history}
+                  busy={directoryBusy}
+                  onReopen={(entry) => void reopenHistoryEntry(entry)}
+                  onRemove={removeHistoryEntry}
+                />
+              ) : null
+            }
           />
         ) : null}
 
