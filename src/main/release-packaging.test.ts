@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
+import { UPLOAD_ASSET_GLOBS } from '../../scripts/verify-release.mjs'
 import { builder, currentTag, currentVersion, finalizeStep, gateStep, gatesSteps, macEntitlements, packageStep, pkg, repoRoot, workflow, yamlScalars } from './release-doc-fixtures.test-helpers'
 
 // Table-driven contract for the release package metadata, the body / link / metadata /
@@ -210,6 +211,36 @@ describe('release workflow contracts', () => {
     expect(new Set(refs), 'secret set').toEqual(new Set([...fixture.signing.secrets, fixture.signing.token]))
     expect(allStepText, 'api-key path').toMatch(new RegExp(fixture.signing.apiKeyRefPattern))
   })
+
+  // The build-time baseline has to be produced by the same glob the upload
+  // sends, archived as a workflow artifact only, and compared by one rule.
+  it('hashes the upload set before upload and archives the manifest as an artifact', () => {
+    const compute = stepIndex('release', 'Compute the build-time sha256 manifest')
+    const archive = stepIndex('release', 'Archive the build-time sha256 manifest')
+    const upload = stepIndex('release', "Upload installers to the tag's release")
+    expect(compute, 'compute step').toBeGreaterThan(-1)
+    expect(archive, 'archive step').toBeGreaterThan(compute)
+    expect(upload, 'upload step').toBeGreaterThan(archive)
+    const archiveStep = stepsOf('release')[archive]
+    expect(String(archiveStep?.uses ?? ''), 'archive action').toMatch(/^actions\/upload-artifact@/)
+    expect(String(archiveStep?.with?.name ?? ''), 'artifact name').toContain('env.RELEASE_TAG')
+    expect(String(archiveStep?.with?.name ?? ''), 'artifact target').toContain('matrix.target')
+    expect(archiveStep?.with?.path, 'artifact path').toBe('sha256-manifest')
+    expect(archiveStep?.with?.['if-no-files-found'], 'artifact required').toBe('error')
+    const uploadRun = stepsOf('release')[upload].run ?? ''
+    const globs = UPLOAD_ASSET_GLOBS.map((glob) => `release/${glob}`).join(' ')
+    expect(uploadRun, 'upload glob is the single source').toContain(`assets=(${globs})`)
+    expect(uploadRun, 'the manifest never reaches the upload set').not.toContain('sha256-manifest')
+    expect(stepsOf('release')[compute].run ?? '', 'no second glob enumeration').not.toContain('release/*')
+  })
+
+  // Only `scripts/verify-release.mjs` maps a local name onto its uploaded name.
+  it('keeps one spaces-to-dots mapping outside the workflow', () => {
+    const text = readText('.github/workflows/release.yml')
+    expect(text, 'no shell rewrite').not.toMatch(/tr ' ' '\.'/)
+    expect(text, 'no jq rewrite').not.toMatch(/gsub\(\s*" "\s*;\s*"\."\s*\)/)
+    expect(text, 'no sed rewrite').not.toMatch(/sed[^\n]*s\/ \/\./)
+  })
 })
 
 // A dispatch is only worth the permission if the gates after it really fail
@@ -294,7 +325,7 @@ describe('finalize publish gate', () => {
         writeFileSync(script, body)
         const result = spawnSync('bash', [script], {
           cwd: dir, encoding: 'utf8',
-          env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag, GITHUB_REPOSITORY: 'chaxiu/OpenCompare' }
+          env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag, GITHUB_REPOSITORY: 'chaxiu/OpenCompare', GITHUB_RUN_ID: '4242' }
         })
         output += `${result.stdout ?? ''}${result.stderr ?? ''}`
         if ((result.status ?? -1) !== 0) { status = result.status ?? -1; break }
@@ -327,49 +358,83 @@ describe('finalize publish gate', () => {
   })
 })
 
-// Public L1 is a post-publish smoke check over the public metadata and URLs.
+// Public L1 is a post-publish check over the public metadata, URLs and the
+// build-time sha256 manifests. The digest comparison itself lives only in
+// `scripts/verify-release.mjs`; this suite executes the real step and script.
 describe('public L1 after publish', () => {
   const l1Name = fixture.steps.find((row) => row.id === 'public-l1-after-publish')?.name ?? ''
   const payload = 'public-l1-payload'
-  const digestOf = (text: string): string => `sha256:${createHash('sha256').update(text).digest('hex')}`
+  const shaOf = (text: string): string => createHash('sha256').update(text).digest('hex')
+  const digestOf = (text: string): string => `sha256:${shaOf(text)}`
   const curl = [
     '#!/usr/bin/env bash', 'out=""', 'prev=""', 'for arg in "$@"; do',
     '  if [ "$prev" = "-o" ]; then out="$arg"; fi', '  prev="$arg"', 'done',
     'if [ -n "$out" ] && [ "$out" != "/dev/null" ]; then printf "%s" "$FAKE_ASSET_PAYLOAD" > "$out"; fi',
     'case "$*" in', '  *"-w"*) printf "%s" "${FAKE_HTTP_CODE:-200}" ;;', 'esac', 'exit 0'
   ].join('\n')
-  const runL1 = (options: { httpCode?: string; digest?: string } = {}): { status: number; output: string } =>
+  type ManifestMode = 'match' | 'mismatch' | 'missing' | 'orphan'
+  const runL1 = (options: { httpCode?: string; digest?: string; manifest?: ManifestMode } = {}): { status: number; output: string } =>
     runInTemp((dir) => {
       const assets = [{ name: 'OpenCompare.dmg', browser_download_url: 'https://github.test/OpenCompare.dmg', size: payload.length, digest: options.digest ?? digestOf(payload) }]
       const meta = JSON.stringify({ draft: false, html_url: `https://github.test/releases/tag/${currentTag}`, assets })
-      writeFileSync(join(dir, 'gh'), `#!/usr/bin/env bash\nprintf '%s\\n' '${meta}'\n`, { mode: 0o755 })
+      mkdirSync(join(dir, 'scripts'), { recursive: true })
+      copyFileSync(join(repoRoot, 'scripts/verify-release.mjs'), join(dir, 'scripts/verify-release.mjs'))
+      const mode = options.manifest ?? 'match'
+      const manifest = JSON.stringify({
+        version: 1, tag: currentTag, target: 'mac',
+        files: [
+          { name: 'OpenCompare.dmg', sha256: mode === 'mismatch' ? shaOf('other bytes') : shaOf(payload), bytes: payload.length },
+          ...(mode === 'orphan' ? [{ name: 'ghost.zip', sha256: shaOf('ghost'), bytes: 1 }] : [])
+        ]
+      })
+      const gh = [
+        '#!/usr/bin/env bash',
+        'if [ "$1" = "run" ] && [ "$2" = "download" ]; then',
+        `  if [ "${mode}" = "missing" ]; then echo "no manifests" >&2; exit 1; fi`,
+        '  out=""; prev=""; for arg in "$@"; do if [ "$prev" = "--dir" ]; then out="$arg"; fi; prev="$arg"; done',
+        `  mkdir -p "$out/sha256-manifest-${currentTag}-mac"`,
+        `  printf '%s\\n' '${manifest}' > "$out/sha256-manifest-${currentTag}-mac/mac.json"`,
+        '  exit 0',
+        'fi',
+        `printf '%s\\n' '${meta}'`
+      ].join('\n')
+      writeFileSync(join(dir, 'gh'), `${gh}\n`, { mode: 0o755 })
       writeFileSync(join(dir, 'curl'), `${curl}\n`, { mode: 0o755 })
       const script = join(dir, 'l1.sh')
       writeFileSync(script, finalizeStep(l1Name)?.run ?? '')
       return spawnSync('bash', [script], {
         cwd: dir, encoding: 'utf8',
         env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag,
-          GITHUB_REPOSITORY: 'chaxiu/OpenCompare', FAKE_ASSET_PAYLOAD: payload, FAKE_HTTP_CODE: options.httpCode ?? '200' }
+          GITHUB_REPOSITORY: 'chaxiu/OpenCompare', GITHUB_RUN_ID: '4242', FAKE_ASSET_PAYLOAD: payload, FAKE_HTTP_CODE: options.httpCode ?? '200' }
       })
     })
 
-  it('passes when the release URL, every asset URL and one digest are all present', () => {
+  it('passes when every asset digest equals the build-time sha256', () => {
     const passed = runL1()
     expect(passed.status, passed.output).toBe(0)
     expect(passed.output).toContain('public L1 PASS')
+    expect(passed.output).toContain('1 assets digest == build sha256')
   })
   it('fails closed on a non-200 asset URL and on a digest mismatch', () => {
     const notFound = runL1({ httpCode: '404' })
     expect(notFound.status, notFound.output).not.toBe(0)
     expect(notFound.output).toContain('returned HTTP 404')
-    const mismatch = runL1({ digest: digestOf('other bytes') })
+    const mismatch = runL1({ manifest: 'mismatch' })
     expect(mismatch.status, mismatch.output).not.toBe(0)
-    expect(mismatch.output).toContain('does not match release digest')
+    expect(mismatch.output).toContain(`OpenCompare.dmg digest 期望(构建期) ${shaOf('other bytes')} 实测 sha256:${shaOf(payload)}`)
+  })
+  it('fails closed when the manifest is missing or has an orphan entry', () => {
+    const missing = runL1({ manifest: 'missing' })
+    expect(missing.status, missing.output).not.toBe(0)
+    expect(missing.output).toContain('缺构建期 sha256 清单')
+    const orphan = runL1({ manifest: 'orphan' })
+    expect(orphan.status, orphan.output).not.toBe(0)
+    expect(orphan.output).toContain('ghost.zip 清单条目在发布上不存在')
   })
   it('refuses to pass the sha256 leg when no asset carries a digest', () => {
     const missing = runL1({ digest: '' })
     expect(missing.status, missing.output).not.toBe(0)
-    expect(missing.output).toContain('carries a digest')
+    expect(missing.output).toContain('digest 为空')
   })
 })
 

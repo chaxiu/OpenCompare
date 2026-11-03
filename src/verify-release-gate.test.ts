@@ -17,9 +17,10 @@ import {
   AUTHENTICODE_PASS_STATUSES, AUTHENTICODE_UNSIGNED_NOTE, CANCEL_NOISE_PATTERN, CANCEL_TREE_FILES_PER_SIDE,
   CI_CHECK_GROUPS, CI_PLATFORMS, LOCAL_CHECKS, LOCAL_FIXTURE_ROOTS, MANUAL_NOT_COVERED,
   RETENTION_THRESHOLD_BYTES, SMOKE_TREE, STEP_DIAGNOSTIC_TEXT_LIMIT, artifactEvidencePath, buildEnvironment, buildSummary, checksFor,
-  compareCheckSets, createWorld, expectedCheckIds, judgeLocalRounds, judgeReleaseGate, judgeReleaseState, judgeRetainedHeap, normalizeVersion,
-  parseArgs, readAsarJsonEntry, releaseApiPath, RELEASE_STATES, runVerifyReleaseCli, scanCancelNoise, selectedPlatforms, summarizeCounts,
-  validateStep, validateSummary, versionEqualsTag
+  buildSha256Manifest, compareCheckSets, createWorld, expectedCheckIds, judgeBuildSha256, judgeLocalRounds, judgeManifestCoverage,
+  judgeReleaseGate, judgeReleaseState, judgeRetainedHeap, matchesUploadAssetGlob, normalizeVersion, parseArgs, readAsarJsonEntry,
+  readSha256Manifests, releaseApiPath, RELEASE_STATES, runVerifyReleaseCli, scanCancelNoise, selectedPlatforms, summarizeCounts,
+  uploadAssetName, UPLOAD_ASSET_GLOBS, validateStep, validateSummary, versionEqualsTag
 } from '../scripts/verify-release.mjs'
 import type {
   CiPlatform, CommandResult, FourStateCounts, LaunchHandle, ReleaseMetadata, StepDiagnostics, StepRecord,
@@ -273,6 +274,24 @@ describe('CLI contract', () => {
     const code = await runVerifyReleaseCli([`--tag=${TAG}`, '--layer=ci', `--out=${join(file, 'out')}`], { world: new FakeHost().world, env: CI_ENV, stdout: silent, stderr: silent })
     expect(code).toBeGreaterThan(0); expect(existsSync(join(file, 'out', 'summary.json'))).toBe(false)
   })
+  it('writes the build manifest keyed by the uploaded asset name', async () => {
+    const root = tempDir('opencompare-manifest-build-')
+    const releaseDir = join(root, 'release'); const out = join(root, 'sha256-manifest')
+    mkdirSync(releaseDir, { recursive: true })
+    const localName = `OpenCompare Setup ${VERSION}.exe`
+    writeFileSync(join(releaseDir, localName), Buffer.from('exe bytes'))
+    writeFileSync(join(releaseDir, 'latest.yml'), Buffer.from('latest'))
+    writeFileSync(join(releaseDir, 'notes.txt'), Buffer.from('not uploaded'))
+    const code = await runVerifyReleaseCli(
+      ['--build-sha256-manifest', `--tag=${TAG}`, '--target=win', `--release-dir=${releaseDir}`, `--out=${out}`],
+      { env: CI_ENV, stdout: silent, stderr: silent }
+    )
+    expect(code).toBe(0)
+    const manifest = readJson<{ version: number; tag: string; target: string; files: Array<{ name: string; sha256: string; bytes: number }> }>(join(out, 'win.json'))
+    expect(manifest).toMatchObject({ version: 1, tag: TAG, target: 'win' })
+    expect(manifest.files.map((file) => file.name)).toEqual([`OpenCompare.Setup.${VERSION}.exe`, 'latest.yml'])
+    expect(manifest.files[0]).toEqual({ name: `OpenCompare.Setup.${VERSION}.exe`, sha256: sha256(Buffer.from('exe bytes')), bytes: 9 })
+  })
   it('refuses any switch that would widen the retained-heap line and narrows platforms only on request', () => {
     for (const flag of ['--threshold=64', '--max-retained=1', '--tolerance=0.5']) expect(parseArgs([`--tag=${TAG}`, '--layer=local', '--out=/tmp/oc', flag])).toEqual({ error: expect.any(String) })
     expect(parseArgs([`--tag=${TAG}`, '--layer=local', '--out=/tmp/oc']).options).toEqual({ tag: TAG, layer: 'local', out: '/tmp/oc' })
@@ -307,7 +326,13 @@ describe('draft transport', () => {
   const draftRun = (options: FakeOptions = {}): Promise<CiRun> =>
     runCi(new FakeHost({ releaseDraft: true, ...options }), ['--platform=all', '--release-state=draft'])
   it('reads draft metadata by id and downloads every asset by id, keeping expected=15', async () => {
-    const host = new FakeHost({ releaseDraft: true }); const run = await runCi(host, ['--platform=all', '--release-state=draft'])
+    const host = new FakeHost({ releaseDraft: true })
+    const manifestDir = tempDir('opencompare-sha256-manifest-')
+    writeFileSync(join(manifestDir, 'mac.json'), JSON.stringify({
+      version: 1, tag: TAG, target: 'mac',
+      files: host.assets.map((asset) => ({ name: uploadAssetName(asset.name), sha256: sha256(asset.bytes), bytes: asset.bytes.length }))
+    }))
+    const run = await runCi(host, ['--platform=all', '--release-state=draft', `--sha256-manifest-dir=${manifestDir}`])
     expect(run.code).toBe(0)
     expect(run.summary).toMatchObject({ status: 'pass', counts: { pass: 15, fail: 0, skip: 0, total: 15, expected: 15 } })
     expect(host.downloads.map((entry) => entry.id)).toEqual(ASSET_NAMES.map((_, index) => 100 + index))
@@ -318,6 +343,29 @@ describe('draft transport', () => {
     const identity = run.steps['identity-asset-bytes-sha256'].actual as { assets: Array<{ expectedSha256: string; actualSha256: string }> }
     expect(identity.assets).toHaveLength(ASSET_NAMES.length)
     for (const asset of identity.assets) expect(asset.actualSha256).toBe(asset.expectedSha256)
+  })
+  it('fails closed when a draft run has no build-time sha256 manifest', async () => {
+    const run = await draftRun()
+    const step = run.steps['identity-asset-bytes-sha256']
+    expect(step.status).toBe('fail')
+    expect(JSON.stringify(step.actual)).toContain('缺构建期 sha256 清单')
+    expect(run.summary.counts.expected).toBe(15)
+    expect(run.code).toBeGreaterThan(0)
+  })
+  it('fails closed when a draft manifest sha256 differs from the release digest', async () => {
+    const host = new FakeHost({ releaseDraft: true })
+    const manifestDir = tempDir('opencompare-sha256-manifest-')
+    const wrong = sha256(Buffer.from('different bytes'))
+    writeFileSync(join(manifestDir, 'mac.json'), JSON.stringify({
+      version: 1, tag: TAG, target: 'mac',
+      files: host.assets.map((asset) => ({ name: uploadAssetName(asset.name), sha256: wrong, bytes: asset.bytes.length }))
+    }))
+    const run = await runCi(host, ['--platform=all', '--release-state=draft', `--sha256-manifest-dir=${manifestDir}`])
+    const step = run.steps['identity-asset-bytes-sha256']
+    expect(step.status).toBe('fail')
+    const problems = (step.actual as { problems: string[] }).problems.join('\n')
+    expect(problems).toContain(`${host.assets[0].name} digest 期望(构建期) ${wrong} 实测 ${sha256(host.assets[0].bytes)}`)
+    expect(run.code).toBeGreaterThan(0)
   })
   it.each([
     ['a draft run reads an already published release', { releaseDraft: false }, 'identity-release-metadata'],
@@ -642,6 +690,58 @@ describe('pure judgments', () => {
   it('normalises only the v prefix and X.Y.Z', () => {
     expect(['v9.9.9', '9.9.9', '9.9.9-1', 'nightly', undefined].map((value) => normalizeVersion(value))).toEqual(['9.9.9', '9.9.9', '9.9.9', null, null]); expect([versionEqualsTag('v9.9.9', 'v9.9.9'), versionEqualsTag('9.9.8', 'v9.9.9')]).toEqual([true, false])
   })
+  it('maps a local name onto its uploaded asset name through the one function', () => {
+    expect(uploadAssetName(' OpenCompare Setup 9.9.9.exe ')).toBe('OpenCompare.Setup.9.9.9.exe')
+    expect(UPLOAD_ASSET_GLOBS).toEqual(['*.dmg', '*.zip', '*.exe', '*.AppImage', '*.deb', '*.blockmap', 'latest*.yml'])
+    expect(['OpenCompare.dmg', 'latest-mac.yml', 'setup.exe', 'notes.txt'].map((name) => matchesUploadAssetGlob(name))).toEqual([true, true, true, false])
+  })
+  it('builds a sorted manifest and refuses bad hex or a duplicate conflict', () => {
+    const shaA = sha256(Buffer.from('a')); const shaB = sha256(Buffer.from('b'))
+    const built = buildSha256Manifest({ tag: TAG, target: 'mac', files: [{ name: 'b dmg', sha256: shaB, bytes: 2 }, { name: 'a.dmg', sha256: shaA, bytes: 1 }] })
+    expect(built.ok).toBe(true); expect(built.manifest).toMatchObject({ version: 1, tag: TAG, target: 'mac' })
+    expect(built.manifest.files.map((file) => file.name)).toEqual(['a.dmg', 'b.dmg'])
+    const conflict = buildSha256Manifest({ tag: TAG, target: 'mac', files: [{ name: 'a.dmg', sha256: shaA, bytes: 1 }, { name: 'a.dmg', sha256: shaB, bytes: 1 }] })
+    expect(conflict.ok).toBe(false); expect(conflict.problems.join('\n')).toContain('a.dmg 清单重复且冲突')
+    expect(buildSha256Manifest({ tag: TAG, target: 'mac', files: [{ name: 'a.dmg', sha256: 'nope', bytes: 1 }] }).ok).toBe(false)
+  })
+  it('requires the manifest key set to equal the upload set in both directions', () => {
+    expect(judgeManifestCoverage({ releaseNames: ['a.dmg', 'b.zip'], manifestNames: ['a.dmg', 'b.zip'] })).toEqual({ ok: true, problems: [] })
+    expect(judgeManifestCoverage({ releaseNames: ['a.dmg', 'b.zip'], manifestNames: ['a.dmg'] }).problems).toEqual([expect.stringContaining('b.zip 命中上传 glob 却未进清单')])
+    expect(judgeManifestCoverage({ releaseNames: ['a.dmg'], manifestNames: ['a.dmg', 'ghost.zip'] }).problems).toEqual([expect.stringContaining('ghost.zip 清单有键但文件不存在')])
+  })
+  it('covers the five/four/three upload set per target from the one glob source', () => {
+    const mac = [`OpenCompare-${VERSION}-arm64.dmg`, `OpenCompare-${VERSION}-arm64.dmg.blockmap`, `OpenCompare-${VERSION}-arm64-mac.zip`, `OpenCompare-${VERSION}-arm64-mac.zip.blockmap`, 'latest-mac.yml']
+    const win = [`OpenCompare-Setup-${VERSION}.exe`, `OpenCompare-Setup-${VERSION}.exe.blockmap`, `OpenCompare-${VERSION}-win-x64.zip`, 'latest.yml']
+    const linux = [`OpenCompare-${VERSION}.AppImage`, `opencompare_${VERSION}_amd64.deb`, 'latest-linux.yml']
+    expect([mac.length, win.length, linux.length]).toEqual([5, 4, 3])
+    for (const [target, names] of [['mac', mac], ['win', win], ['linux', linux]] as const) {
+      expect(names.every((name) => matchesUploadAssetGlob(name)), target).toBe(true)
+      const built = buildSha256Manifest({ tag: TAG, target, files: names.map((name) => ({ name, sha256: sha256(Buffer.from(name)), bytes: name.length })) })
+      expect(built.ok, target).toBe(true)
+      expect(judgeManifestCoverage({ releaseNames: names, manifestNames: built.manifest.files.map((file) => file.name) }), target).toEqual({ ok: true, problems: [] })
+      expect(judgeManifestCoverage({ releaseNames: names, manifestNames: built.manifest.files.slice(1).map((file) => file.name) }).ok, target).toBe(false)
+    }
+  })
+  it('compares every digest against the build-time sha256 and names both values', () => {
+    const build = sha256(Buffer.from('build bytes')); const other = sha256(Buffer.from('other bytes'))
+    const manifest = { version: 1 as const, tag: TAG, target: 'mac' as const, files: [{ name: 'OpenCompare.dmg', sha256: build, bytes: 11 }] }
+    const matched = judgeBuildSha256({ releaseAssets: [{ name: 'OpenCompare.dmg', size: 11, sha256: `sha256:${build}` }], manifests: [manifest] })
+    expect(matched).toMatchObject({ ok: true, count: 1, problems: [] })
+    const mismatch = judgeBuildSha256({ releaseAssets: [{ name: 'OpenCompare.dmg', size: 11, sha256: `sha256:${other}` }], manifests: [manifest] })
+    expect(mismatch.ok).toBe(false)
+    expect(mismatch.problems).toEqual([expect.stringContaining(`OpenCompare.dmg digest 期望(构建期) ${build} 实测 sha256:${other}`)])
+    expect(judgeBuildSha256({ releaseAssets: [{ name: 'OpenCompare.dmg', size: 11, sha256: `sha256:${build}` }], manifests: [] }).problems).toEqual([expect.stringContaining('OpenCompare.dmg 缺构建期 sha256')])
+    expect(judgeBuildSha256({ releaseAssets: [], manifests: [manifest] }).problems).toEqual([expect.stringContaining('OpenCompare.dmg 清单条目在发布上不存在')])
+    expect(judgeBuildSha256({ releaseAssets: [{ name: 'OpenCompare.dmg', size: 11, sha256: '' }], manifests: [manifest] }).problems).toEqual([expect.stringContaining('OpenCompare.dmg digest 为空')])
+    const duplicate = judgeBuildSha256({ releaseAssets: [{ name: 'OpenCompare.dmg', size: 11, sha256: `sha256:${build}` }], manifests: [manifest, { ...manifest, files: [{ ...manifest.files[0], sha256: other }] }] })
+    expect(duplicate.ok).toBe(false); expect(duplicate.duplicates).toEqual(['OpenCompare.dmg'])
+    expect(duplicate.problems.join('\n')).toContain(`OpenCompare.dmg 清单重复且冲突 期望 ${build} 实测 ${other}`)
+  })
+  it('reads manifests fail-closed from a missing or empty directory', () => {
+    const empty = tempDir('opencompare-empty-manifest-'); const host = new FakeHost()
+    expect(readSha256Manifests(host.world, empty, { tag: TAG })).toMatchObject({ ok: false, problems: [expect.stringContaining('缺构建期 sha256 清单')] })
+    expect(readSha256Manifests(host.world, join(empty, 'nope'), { tag: TAG })).toMatchObject({ ok: false, problems: [expect.stringContaining('缺构建期 sha256 清单')] })
+  })
   it('puts the retained-heap line exactly at 16 MiB', () => {
     const base = 100 * MIB
     expect(judgeRetainedHeap({ round2RetainedBytes: base, round3RetainedBytes: base + RETENTION_THRESHOLD_BYTES })).toMatchObject({ ok: true, delta: RETENTION_THRESHOLD_BYTES })
@@ -727,7 +827,7 @@ describe('script structure (AST)', () => {
 })
 interface PostReleaseWorkflow {
   on?: Record<string, unknown>; 'run-name'?: string; permissions?: Record<string, string>
-  jobs?: Record<string, { needs?: string | string[]; steps?: Array<{ uses?: string; run?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }> }>
+  jobs?: Record<string, { needs?: string | string[]; steps?: Array<{ name?: string; uses?: string; run?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }> }>
 }
 describe('post-release-verify workflow', () => {
   const workflow = parse(readText(join(repoRoot, '.github/workflows/post-release-verify.yml'))) as PostReleaseWorkflow
@@ -739,7 +839,7 @@ describe('post-release-verify workflow', () => {
     expect(dispatch.inputs?.tag?.required).toBe(true)
     expect(dispatch.inputs?.mode).toMatchObject({ required: true, default: 'draft', type: 'choice', options: ['draft', 'published'] })
     expect(workflow['run-name']).toBe('post-release-verify ${{ inputs.tag }}')
-    expect(workflow.permissions).toEqual({ contents: 'write' })
+    expect(workflow.permissions).toEqual({ contents: 'write', actions: 'read' })
     for (const forbidden of [/secrets\./, /gh release (upload|edit|create|delete)/, /git (tag|push)/, /continue-on-error/]) expect(`${commandText}\n${JSON.stringify(workflow)}`, String(forbidden)).not.toMatch(forbidden)
     const verifyCmd = steps.find(({ step }) => (step.run ?? '').includes('--platform='))?.step.run ?? ''
     expect(verifyCmd).toContain('--release-state="$MODE"')
@@ -747,6 +847,17 @@ describe('post-release-verify workflow', () => {
       const run = step.run ?? ''
       if (run.includes('--spike') || run.includes('--aggregate=')) expect(run).not.toContain('--release-state')
     }
+  })
+  it('fetches this release run\'s sha256 manifests read-only', () => {
+    const input = (workflow.on?.workflow_dispatch as { inputs?: Record<string, { required?: boolean; default?: string; type?: string }> }).inputs?.release_run_id
+    expect(input).toMatchObject({ required: false, default: '', type: 'string' })
+    const fetch = steps.find(({ step }) => step.name === 'Fetch the build-time sha256 manifests')?.step
+    expect(fetch?.run).toContain('gh run download')
+    expect(fetch?.run).toContain("--pattern 'sha256-manifest-*'")
+    expect(fetch?.run).toContain('缺构建期 sha256 清单')
+    expect(fetch?.run).toContain('exit 1')
+    const verifyRun = steps.find(({ step }) => (step.run ?? '').includes('--platform='))?.step.run ?? ''
+    expect(verifyRun).toContain('--sha256-manifest-dir=sha256-manifests')
   })
   it('documents verify-before-publish in the workflow header', () => {
     const header = readText(join(repoRoot, '.github/workflows/post-release-verify.yml')).split('jobs:')[0]
