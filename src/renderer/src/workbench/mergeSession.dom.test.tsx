@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { buildMergeModel, renderMerge, renderMergeText } from '@core/text/merge'
 import type { MergeResolutions } from '@core/text/merge'
 import { resolveComparisonSwitches } from '@core/text/normalize'
+import { upsertComparisonHistory } from '@shared/history/model'
 import type { PlatformPort, SaveFileOptions } from '@shared/platform/types'
 import { zh } from '@renderer/i18n/messages'
 import type { MessageKey } from '@renderer/i18n/messages'
@@ -32,6 +33,31 @@ const closeTab = (tab: HTMLElement): void => {
 }
 const reopenButton = (paths: string[]): HTMLElement => within(rows().find((row) => rowPaths(row) === paths.join(' ↔ '))!).getByRole('button', { name: reopenName(paths) })
 const mergeError = (code: string, path: string): string => copy(`shell.merge.error.${code}`).replace('{side}', copy('files.merge.side.base')).replace('{path}', path)
+const switchEl = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-code-switch="${id}"]`)!
+const historyKeys = (): string[] => Object.keys(localStorage).sort()
+const mount = (port: PlatformPort): void => {
+  renderWithI18n(<Workbench platform={port} />, 'zh')
+}
+async function openPair(left: string, right: string): Promise<void> {
+  fireEvent.click(screen.getAllByRole('button', { name: copy('shell.toolbar.newCompare') })[0]!)
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.change(within(dialog).getByLabelText(copy('shell.compare.leftPath')), { target: { value: left } })
+  fireEvent.change(within(dialog).getByLabelText(copy('shell.compare.rightPath')), { target: { value: right } })
+  fireEvent.click(within(dialog).getByRole('button', { name: copy('shell.compare.submit') }))
+  await waitFor(() => expect(tabs()).toHaveLength(1), { timeout: 30_000 })
+}
+async function closeAllTabs(): Promise<void> {
+  while (tabs().length > 0) {
+    const count = tabs().length
+    closeTab(tabs()[0]!)
+    await waitFor(() => expect(tabs()).toHaveLength(count - 1))
+  }
+}
+async function clickReopen(paths: string[]): Promise<void> {
+  const title = paths.join(' ↔ ')
+  await waitFor(() => expect(rows().some((row) => rowPaths(row) === title)).toBe(true))
+  fireEvent.click(reopenButton(paths))
+}
 
 function captureConsole(): { calls: string[]; restore: () => void } {
   const calls: string[] = []
@@ -206,5 +232,193 @@ describe('real merge session', () => {
     expect(JSON.stringify(await readHistory(port))).toBe(before)
     restore()
     for (const path of ordered) expect(calls.join('\n')).not.toContain(path)
+  }, 60_000)
+})
+
+describe('merge history switch fidelity', () => {
+  it('keeps the entry switches across a restart and restores them into the shell', async () => {
+    const { calls, restore } = captureConsole()
+    const pairLeft = '/memory/merge/pair-left.txt'
+    const pairRight = '/memory/merge/pair-right.txt'
+    const second = ['/memory/merge/second-base.txt', '/memory/merge/second-ours.txt', '/memory/merge/second-theirs.txt']
+    const NON_DEFAULT = { ignoreNewline: false, ignoreEncoding: true, ignoreWhitespace: true }
+    const ordered = [BASE, OURS, THEIRS]
+    try {
+      const port = await trioPort()
+      await port.writeTextFile(pairLeft, 'alpha\nbeta\n')
+      await port.writeTextFile(pairRight, 'alpha\ngamma\n')
+      for (const path of second) await port.writeTextFile(path, 'one\ntwo\nthree\n')
+      mount(port)
+      await openPair(pairLeft, pairRight)
+      await waitFor(() => expect(switchEl('ignore-whitespace')).not.toBeNull())
+      fireEvent.click(switchEl('ignore-whitespace'))
+      fireEvent.click(switchEl('ignore-newline'))
+      expect(switchEl('ignore-whitespace').getAttribute('aria-checked')).toBe('true')
+      expect(switchEl('ignore-newline').getAttribute('aria-checked')).toBe('false')
+      await closeAllTabs()
+
+      const before = await readHistory(port)
+      fill(await openDialog(), BASE, OURS, THEIRS)
+      await waitFor(() => expect(tabs()).toHaveLength(1))
+      const afterCreate = await readHistory(port)
+      const mergeRows = afterCreate.filter((entry) => entry.kind === 'merge')
+      expect(afterCreate).toHaveLength(before.length + 1)
+      expect(mergeRows).toHaveLength(1)
+      expect(mergeRows[0]).toMatchObject({ kind: 'merge', paths: ordered, ...NON_DEFAULT })
+      const entryId = mergeRows[0]!.id
+      const createdAt = mergeRows[0]!.createdAt
+      const sessionTab = tabs()[0]!.getAttribute('data-session-tab')
+      expect(historyKeys()).toEqual(['opencompare.comparisonHistory'])
+
+      cleanup()
+      mount(port)
+      const nextBase = 'alpha\nbase-one\nalpha\nbase-two\nalpha\n'
+      const nextOurs = 'alpha\nours-one\nalpha\nours-two\nalpha\n'
+      const nextTheirs = 'alpha\ntheirs-one\nalpha\ntheirs-two\nalpha\n'
+      await port.writeTextFile(BASE, nextBase)
+      await port.writeTextFile(OURS, nextOurs)
+      await port.writeTextFile(THEIRS, nextTheirs)
+      const nextTotal = buildMergeModel(nextBase, nextOurs, nextTheirs).conflictIds.length
+      expect(nextTotal).not.toBe(buildMergeModel(BASE_TEXT, OURS_TEXT, THEIRS_TEXT).conflictIds.length)
+
+      await clickReopen(ordered)
+      await waitFor(() => expect(tabs()).toHaveLength(1))
+      expect(tabs()[0]!.getAttribute('data-session-tab')).toBe(sessionTab)
+      await waitFor(() => expect(within(panel(OURS)).queryByText('ours-two')).not.toBeNull())
+      expect(within(panel(BASE)).getByText('base-one')).toBeDefined()
+      expect(within(panel(THEIRS)).getByText('theirs-two')).toBeDefined()
+      await waitFor(() => expect(conflicts()).toBe(nextTotal))
+
+      let history = await readHistory(port)
+      const reopened = history.find((entry) => entry.id === entryId)!
+      expect(reopened).toMatchObject({ kind: 'merge', paths: ordered, ...NON_DEFAULT })
+      expect(reopened.createdAt).toBeGreaterThan(createdAt)
+
+      // The same trio reopens twice more without a new row or a second tab.
+      await closeAllTabs()
+      await clickReopen(ordered)
+      await waitFor(() => expect(tabs()).toHaveLength(1))
+      await closeAllTabs()
+      await clickReopen(ordered)
+      await waitFor(() => expect(tabs()).toHaveLength(1))
+      history = await readHistory(port)
+      const trioRows = history.filter((entry) => entry.kind === 'merge' && entry.paths.join('\u0000') === ordered.join('\u0000'))
+      expect(trioRows).toHaveLength(1)
+      expect(trioRows[0]!.id).toBe(entryId)
+      expect(tabs()[0]!.getAttribute('data-session-tab')).toBe(sessionTab)
+
+      // A fresh trio records the shell switches restored by the reopen.
+      fill(await openDialog(), second[0]!, second[1]!, second[2]!)
+      await waitFor(() => expect(tabs()).toHaveLength(2))
+      history = await readHistory(port)
+      expect(history.find((entry) => entry.paths.join('\u0000') === second.join('\u0000'))).toMatchObject({
+        kind: 'merge',
+        ...NON_DEFAULT
+      })
+      expect(historyKeys()).toEqual(['opencompare.comparisonHistory'])
+      const output = calls.join('\n')
+      for (const path of [...ordered, pairLeft, pairRight, ...second]) expect(output).not.toContain(path)
+    } finally {
+      restore()
+    }
+  }, 60_000)
+
+  it('leaves tabs, history and shell switches untouched when a reopened side is gone', async () => {
+    const { calls, restore } = captureConsole()
+    const pairLeft = '/memory/merge/failure-pair-left.txt'
+    const pairRight = '/memory/merge/failure-pair-right.txt'
+    const ordered = [BASE, OURS, THEIRS]
+    try {
+      const port = await trioPort()
+      await port.writeTextFile(pairLeft, 'alpha\nbeta\n')
+      await port.writeTextFile(pairRight, 'alpha\ngamma\n')
+      const seeded = upsertComparisonHistory([], {
+        kind: 'merge',
+        paths: ordered,
+        createdAt: 1_700_000_000_000,
+        ignoreNewline: false,
+        ignoreEncoding: false,
+        ignoreWhitespace: true
+      })
+      await port.writeComparisonHistory(seeded)
+      mount(port)
+      await waitFor(() => expect(rows()).toHaveLength(1))
+      const before = JSON.stringify(await readHistory(port))
+      await port.deleteFile(THEIRS)
+
+      await clickReopen(ordered)
+      const alert = await screen.findByText(copy('shell.history.reopenFailed'))
+      expect(alert.textContent).not.toContain(THEIRS)
+      expect(tabs()).toHaveLength(0)
+      expect(JSON.stringify(await readHistory(port))).toBe(before)
+      expect(historyKeys()).toEqual(['opencompare.comparisonHistory'])
+
+      // The stored combination (whitespace on, newline / encoding off) must not
+      // leak into the shell after the failure.
+      await openPair(pairLeft, pairRight)
+      await waitFor(() => expect(switchEl('ignore-whitespace')).not.toBeNull())
+      expect(switchEl('ignore-whitespace').getAttribute('aria-checked')).toBe('false')
+      expect(switchEl('ignore-newline').getAttribute('aria-checked')).toBe('true')
+      expect(switchEl('ignore-encoding').getAttribute('aria-checked')).toBe('true')
+      const output = calls.join('\n')
+      for (const path of [...ordered, pairLeft, pairRight]) expect(output).not.toContain(path)
+    } finally {
+      restore()
+    }
+  }, 60_000)
+
+  it('reopens a merge next to directory and file rows without disturbing them', async () => {
+    const dirLeft = '/memory/merge-coexist/dir-left'
+    const dirRight = '/memory/merge-coexist/dir-right'
+    const fileLeft = '/memory/merge-coexist/file-left.txt'
+    const fileRight = '/memory/merge-coexist/file-right.txt'
+    const ordered = [BASE, OURS, THEIRS]
+    const DEFAULTS = resolveComparisonSwitches({})
+    const NON_DEFAULT = { ignoreNewline: false, ignoreEncoding: false, ignoreWhitespace: true }
+    const port = await trioPort()
+    await port.writeTextFile(`${dirLeft}/same.txt`, 'same\n')
+    await port.writeTextFile(`${dirRight}/same.txt`, 'same\n')
+    await port.writeTextFile(fileLeft, 'alpha\n')
+    await port.writeTextFile(fileRight, 'alpha\nbeta\n')
+    let seeded = upsertComparisonHistory([], { kind: 'directory', paths: [dirLeft, dirRight], createdAt: 3_000, ...DEFAULTS })
+    seeded = upsertComparisonHistory(seeded, { kind: 'file', paths: [fileLeft, fileRight], createdAt: 2_000, ...DEFAULTS })
+    seeded = upsertComparisonHistory(seeded, { kind: 'merge', paths: ordered, createdAt: 1_000, ...NON_DEFAULT })
+    await port.writeComparisonHistory(seeded)
+
+    mount(port)
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    expect(rows().map(rowPaths)).toEqual([
+      `${dirLeft} ↔ ${dirRight}`,
+      `${fileLeft} ↔ ${fileRight}`,
+      ordered.join(' ↔ ')
+    ])
+
+    await clickReopen(ordered)
+    await waitFor(() => expect(tabs()).toHaveLength(1))
+    const afterMerge = await readHistory(port)
+    expect(afterMerge.filter((entry) => entry.kind !== 'merge')).toEqual(seeded.filter((entry) => entry.kind !== 'merge'))
+    const mergeRow = afterMerge.find((entry) => entry.kind === 'merge')!
+    expect(mergeRow).toMatchObject({ id: seeded[2]!.id, paths: ordered, ...NON_DEFAULT })
+
+    await closeAllTabs()
+    await clickReopen([dirLeft, dirRight])
+    await waitFor(() => expect(tabs()).toHaveLength(1), { timeout: 30_000 })
+    const afterDirectory = await readHistory(port)
+    expect(afterDirectory.find((entry) => entry.kind === 'merge')).toEqual(mergeRow)
+
+    await closeAllTabs()
+    await clickReopen([fileLeft, fileRight])
+    await waitFor(() => expect(tabs()).toHaveLength(1), { timeout: 30_000 })
+    const afterFile = await readHistory(port)
+    expect(afterFile.find((entry) => entry.kind === 'merge')).toEqual(mergeRow)
+
+    await closeAllTabs()
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    expect(rows().map(rowPaths)).toEqual(expect.arrayContaining([
+      `${dirLeft} ↔ ${dirRight}`,
+      `${fileLeft} ↔ ${fileRight}`,
+      ordered.join(' ↔ ')
+    ]))
+    expect(historyKeys()).toEqual(['opencompare.comparisonHistory'])
   }, 60_000)
 })

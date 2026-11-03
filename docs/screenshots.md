@@ -7,7 +7,7 @@ used.
 
 ## Captured commit
 
-- commit: `23aaade22da619ef088172ef947a8cdccae8048a`
+- commit: `b9e3666cb95b23bc362f7ef41c6291bcf7d9fc29`
 - both images were rebuilt on a clean working tree at exactly that commit
   (`git status --porcelain` was empty and `HEAD` equalled this commit before the
   build), running `pnpm build` and then the capture script below in that order,
@@ -23,16 +23,17 @@ used.
 ## Rebuild evidence
 
 The rebuild on the clean tree above printed
-`wrote docs/assets/opencompare-workbench.png (288659 bytes)` and
-`wrote docs/assets/opencompare-file-diff.png (324378 bytes)`. Both rebuilt files
+`wrote docs/assets/opencompare-workbench.png (287891 bytes)` and
+`wrote docs/assets/opencompare-file-diff.png (324210 bytes)`. Both rebuilt files
 differ from the previously committed images (`git diff` reports binary changes
-for both), so the rebuilt PNGs replaced the old ones — the renderer now carries
-the real three-way merge entry in the new-compare dialog.
+for both), so the rebuilt PNGs replaced the old ones — the rebuild followed the
+merge-history switch-fidelity change (reopened merge rows keep their switches
+and restore them into the shell).
 
 | Image | Previous sha256 | Rebuilt sha256 (committed) |
 | --- | --- | --- |
-| `docs/assets/opencompare-workbench.png` | `88849c0b2b93247d0af6b07834653def7f7e72f1fd64ae769a684ea989c104d5` | `1ac905aefac3ade6c9e0ddeb154c3c60374ee24cf51aa5d4466d566183464326` |
-| `docs/assets/opencompare-file-diff.png` | `6ae7b6c47cb80cedd0eef03d1e5e6ced16d53dc9c7722c17c0a74179b5f0a84c` | `cc8506a15ac3cdff408968eacf0d882058cb4d70bbc7b0a1afc4ec5ecdc706f0` |
+| `docs/assets/opencompare-workbench.png` | `1ac905aefac3ade6c9e0ddeb154c3c60374ee24cf51aa5d4466d566183464326` | `379ae5af5ecac0d8cf5f47e5f77b0dd70984313dda91f72ff750fc73a6a57126` |
+| `docs/assets/opencompare-file-diff.png` | `cc8506a15ac3cdff408968eacf0d882058cb4d70bbc7b0a1afc4ec5ecdc706f0` | `3b644340d00ab2ca86983937874e110c58c04eab08a360012ba6588977dbff03` |
 
 `src/main/release-artifacts-and-brand.test.ts` guards this record: the captured
 commit must resolve, be an ancestor of `HEAD`, and leave `src/renderer` with a
