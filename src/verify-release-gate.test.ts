@@ -447,17 +447,17 @@ describe('script structure (AST)', () => {
   })
 })
 interface PostReleaseWorkflow {
-  on?: Record<string, unknown>; permissions?: Record<string, string>
+  on?: Record<string, unknown>; 'run-name'?: string; permissions?: Record<string, string>
   jobs?: Record<string, { needs?: string | string[]; steps?: Array<{ uses?: string; run?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }> }>
 }
 describe('post-release-verify workflow', () => {
   const workflow = parse(readText(join(repoRoot, '.github/workflows/post-release-verify.yml'))) as PostReleaseWorkflow
   const jobs = Object.entries(workflow.jobs ?? {}); const steps = jobs.flatMap(([name, job]) => (job.steps ?? []).map((step) => ({ job: name, step })))
   const commandText = steps.map(({ step }) => [step.run, step.uses, step.if, ...Object.values(step.env ?? {}), ...Object.values(step.with ?? {}).map(String)].join('\n')).join('\n')
-  it('only triggers on a published release and a manual tag dispatch, read-only', () => {
-    expect(Object.keys(workflow.on ?? {}).sort()).toEqual(['release', 'workflow_dispatch'])
-    expect((workflow.on?.release as { types?: string[] }).types).toEqual(['published'])
+  it('only triggers on a manual tag dispatch, read-only', () => {
+    expect(Object.keys(workflow.on ?? {})).toEqual(['workflow_dispatch'])
     expect((workflow.on?.workflow_dispatch as { inputs?: Record<string, { required?: boolean }> }).inputs?.tag?.required).toBe(true)
+    expect(workflow['run-name']).toBe('post-release-verify ${{ inputs.tag }}')
     expect(workflow.permissions).toEqual({ contents: 'read' })
     for (const forbidden of [/secrets\./, /gh release (upload|edit|create|delete)/, /git (tag|push)/, /continue-on-error/]) expect(`${commandText}\n${JSON.stringify(workflow)}`, String(forbidden)).not.toMatch(forbidden)
   })

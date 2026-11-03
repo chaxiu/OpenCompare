@@ -10,21 +10,27 @@ name: post-release-verify
 #
 # Ordering: `verify` needs `spike`, so a runner that cannot boot Electron and
 # expose a DevTools page stops the matrix before any platform leg runs.
+#
+# Triggering: only `workflow_dispatch`. Event listeners for a published release
+# never fire here, because the release is published by a `GITHUB_TOKEN` call in
+# `release.yml`, and GitHub events created by that token start no new run. The
+# release workflow dispatches this one explicitly instead, so `inputs.tag` is
+# mandatory and `run-name` repeats it for `gh run list` lookups.
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
         description: Release tag to verify (vX.Y.Z)
         required: true
 
+run-name: post-release-verify ${{ inputs.tag }}
+
 permissions:
   contents: read
 
 env:
-  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  TAG: ${{ inputs.tag }}
 
 jobs:
   spike:

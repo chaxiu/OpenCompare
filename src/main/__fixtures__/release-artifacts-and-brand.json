@@ -471,7 +471,10 @@
         "Verify the tag has exactly one public release",
         "Assert the public release has every platform asset",
         "Assert latest*.yml urls match the release assets",
-        "Assert the tag is the latest published release"
+        "Assert the tag is the latest published release",
+        "Dispatch the post-release verification",
+        "Find the post-release verification run for this tag",
+        "Assert the post-release verification aggregate passed"
       ],
       "mustBeLast": true,
       "job": "finalize"

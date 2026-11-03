@@ -1,14 +1,14 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "120f06d560ad4cef9d43cd0826db86516c1d8f36",
-    "date": "2026-11-02"
+    "commit": "ed3116efcb8ebe3bf33ee30c67eb829b577e30df",
+    "date": "2026-11-03"
   },
   "ceilings": {
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 44398
+    "repoTestLines": 44462
   },
   "floors": {
     "appTestCases": 94,
@@ -29,10 +29,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 43999,
-      "to": 44398,
-      "reason": "I#9 gates-evidence: real-disk newline/encoding evidence gate plus the 24-entry manifest pin",
-      "addedCases": 11
+      "from": 44398,
+      "to": 44462,
+      "reason": "release pipeline: finalize dispatch + fail-closed post-release verify run/aggregate/artifact contract rows and the dispatch-only run-name contract",
+      "addedCases": 6
     }
   ]
 }

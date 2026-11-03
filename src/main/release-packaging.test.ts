@@ -25,6 +25,10 @@ interface Fixture {
   schemaVersion: number
   packageRows: ValueRow[]; builderRows: ValueRow[]; entitlements: Array<{ id: string; key: string }>
   docs: DocsRow[]; steps: StepRow[]; stepOrder: StepOrderRow[]; workflowChecks: CheckRow[]
+  postReleaseVerify: {
+    id: string; path: string; runName: string; findStep: string; aggregateStep: string; tagRequired: boolean
+    permissions: Record<string, string>; forbiddenTriggers: Strings; forbiddenPatterns: Strings
+  }
   releaseBody: {
     id: string; name: string; makePublicName: string; versionDerivation: string
     notesPath: string; bilingualPath: string; bodyFile: string; notesFileFlag: string; notesFileWrites: number
@@ -77,7 +81,7 @@ const fixtureRowIds = [
   ...fixture.packageRows, ...fixture.builderRows, ...fixture.entitlements, ...fixture.docs,
   ...fixture.steps, ...fixture.stepOrder, ...fixture.workflowChecks, ...fixture.releaseBody.guards,
   ...fixture.notesLinks.rows, ...fixture.bodyGate.cases, ...fixture.linkGate.cases,
-  ...fixture.appImage.cases, ...fixture.evidence.ledger, fixture.releaseBody.id
+  ...fixture.appImage.cases, ...fixture.evidence.ledger, fixture.releaseBody.id, fixture.postReleaseVerify.id
 ].map((row) => (typeof row === 'string' ? row : row.id))
 
 const stepOf = (row: StepRow): { if?: string; run?: string } | undefined =>
@@ -155,6 +159,22 @@ describe('release workflow contracts', () => {
     expect(allRunText, 'duplicate release prune').toContain('gh api --method DELETE')
   })
 
+  it('wires finalize to dispatch and check the post-release verification', () => {
+    const spec = fixture.postReleaseVerify
+    useRow(spec.id)
+    const verify = parse(readText(spec.path)) as {
+      on?: Record<string, { inputs?: Record<string, { required?: boolean }> }>
+      'run-name'?: string
+      permissions?: Record<string, string>
+    }
+    expect(workflow.jobs?.finalize?.permissions, 'finalize permissions').toEqual({ contents: 'write', actions: 'write' })
+    expect(Object.keys(verify.on ?? {}), 'verify triggers').toEqual(['workflow_dispatch'])
+    expect(spec.forbiddenTriggers.filter((event) => event in (verify.on ?? {})), 'dead triggers').toEqual([])
+    expect([verify.on?.workflow_dispatch?.inputs?.tag?.required, verify['run-name'], verify.permissions]).toEqual([spec.tagRequired, spec.runName, spec.permissions])
+    const text = JSON.stringify(verify)
+    for (const pattern of spec.forbiddenPatterns) expect(text, pattern).not.toMatch(new RegExp(pattern))
+  })
+
   it('pins every gates job command in order', () => {
     const pnpmRuns = gatesSteps.map((step) => (step.run ?? '').trim()).filter((run) => run.startsWith('pnpm '))
     expect(pnpmRuns, 'gates job pnpm steps').toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm typecheck', 'pnpm test', 'pnpm build'])
@@ -188,6 +208,50 @@ describe('release workflow contracts', () => {
     const refs = [...allStepText.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1])
     expect(new Set(refs), 'secret set').toEqual(new Set([...fixture.signing.secrets, fixture.signing.token]))
     expect(allStepText, 'api-key path').toMatch(new RegExp(fixture.signing.apiKeyRefPattern))
+  })
+})
+
+// A dispatch is only worth the permission if the gates after it really fail
+// closed, so both shell steps run in-process against a fake `gh` on PATH.
+describe('post-release verification dispatch gates', () => {
+  const spec = fixture.postReleaseVerify
+  const print = (text: string): string => `printf '%s\\n' '${text}'`
+  const runGate = (step: string, gh: string, extraEnv: Record<string, string> = {}, since = '1970-01-01T00:00:00Z'): { status: number; output: string } =>
+    runInTemp((dir) => {
+      writeFileSync(join(dir, 'gh'), `#!/usr/bin/env bash\n${gh}\n`, { mode: 0o755 })
+      writeFileSync(join(dir, 'post-release-verify-run-id.txt'), '4242\n')
+      writeFileSync(join(dir, 'post-release-verify-since.txt'), `${since}\n`)
+      writeFileSync(join(dir, 'gate.sh'), step)
+      return spawnSync('bash', [join(dir, 'gate.sh')], {
+        cwd: dir, encoding: 'utf8',
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag, GITHUB_REPOSITORY: 'chaxiu/OpenCompare', ...extraEnv }
+      })
+    })
+
+  it('finds the run named after this tag and fails closed when none appears', () => {
+    const find = finalizeStep(spec.findStep)?.run ?? ''
+    const runs = (tag: string): string => print(JSON.stringify([{ databaseId: 4242, displayTitle: `post-release-verify ${tag}`, createdAt: '2026-11-03T00:00:00Z' }]))
+    const found = runGate(find, runs(currentTag))
+    const missing = runGate(find, runs('v0.0.1'), { POST_RELEASE_LOOKUP_SECONDS: '0' })
+    const stale = runGate(find, runs(currentTag), { POST_RELEASE_LOOKUP_SECONDS: '0' }, '2026-11-04T00:00:00Z')
+    expect(found.status, 'found').toBe(0)
+    expectTokens(found.output, ['run 4242'], 'found')
+    expect(missing.status, 'missing').not.toBe(0)
+    expect(stale.status, 'stale').not.toBe(0)
+    expectTokens(missing.output, ['appeared within five minutes'], 'missing')
+  })
+
+  it('accepts only a successful aggregate job with the tag and run artifact', () => {
+    const aggregate = finalizeStep(spec.aggregateStep)?.run ?? ''
+    const gh = (conclusion: string): string => ['if [ "$1" = "run" ]; then',
+      `  ${print(JSON.stringify({ status: 'completed', jobs: [{ name: 'spike', conclusion: 'success' }, { name: 'aggregate', conclusion }] }))}`,
+      'else', `  ${print(`post-release-verify-${currentTag}-4242-aggregate`)}`, 'fi'].join('\n')
+    const passed = runGate(aggregate, gh('success'))
+    const failed = runGate(aggregate, gh('failure'))
+    expect(passed.status, 'passed').toBe(0)
+    expectTokens(passed.output, [`post-release-verify-${currentTag}-4242-aggregate`], 'passed')
+    expect(failed.status, 'failed').not.toBe(0)
+    expectTokens(failed.output, ['concluded failure'], 'failed')
   })
 })
 

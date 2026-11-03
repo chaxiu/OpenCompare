@@ -64,6 +64,7 @@ export interface WorkflowStep {
 export interface WorkflowJob {
   name?: string
   needs?: string | string[]
+  permissions?: Record<string, string>
   strategy?: { matrix?: { include?: Array<Record<string, string>> } }
   steps?: WorkflowStep[]
 }
