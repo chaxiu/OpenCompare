@@ -51,7 +51,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /* ------------------------------------------------------------------ */
@@ -2597,9 +2597,32 @@ function collectStepFiles(dir) {
 }
 
 /**
+ * Cross-machine evidence mapping. A platform job writes `evidence` as an
+ * absolute path on its own runner (`/Users/...`, `/home/...`, `C:\...`), which
+ * can never exist on the aggregate runner. The artifact that carried the step
+ * JSON is the only place that same file can live, so the path is re-based onto
+ * `<artifactRoot>/logs/<basename>` (both separators split the basename).
+ *
+ * A path that cannot be re-based lands on a name inside the artifact that is
+ * guaranteed not to exist, so the evidence check stays fail-closed instead of
+ * being widened to "any path is fine".
+ */
+export function artifactEvidencePath(stepPath, evidencePath) {
+  const stepsDir = dirname(stepPath)
+  const artifactRoot = basename(stepsDir) === 'steps' ? dirname(stepsDir) : stepsDir
+  const name = typeof evidencePath === 'string' ? evidencePath.split(/[\\/]/).pop() ?? '' : ''
+  if (name === '' || name === '.' || name === '..') {
+    return join(stepsDir, '__unresolved-evidence__')
+  }
+  return join(artifactRoot, 'logs', name)
+}
+
+/**
  * `--aggregate`: merges every job's step JSON into one fail-closed summary.
  * The same id from several platform jobs is one check; a status disagreement
- * between jobs is a conflict and turns the aggregate red.
+ * between jobs is a conflict and turns the aggregate red. Evidence paths are
+ * re-based onto their own artifact before the merge, because only the artifact
+ * travels to this runner.
  */
 function aggregateSteps(dir) {
   const byId = new Map()
@@ -2611,6 +2634,9 @@ function aggregateSteps(dir) {
     } catch {
       // An unparsable step file is a missing step: the id never shows up.
       continue
+    }
+    if (Array.isArray(step.evidence)) {
+      step.evidence = step.evidence.map((entry) => artifactEvidencePath(path, entry))
     }
     const existing = byId.get(step.id)
     if (existing === undefined) {

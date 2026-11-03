@@ -331,6 +331,8 @@ export function buildSummary(options?: {
   finishedAt?: string
 }): Summary
 
+export function artifactEvidencePath(stepPath: string, evidencePath: unknown): string
+
 export function validateStep(
   step: unknown,
   options?: { exists?: (path: string) => boolean; keys?: string[] }

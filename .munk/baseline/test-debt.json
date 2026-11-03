@@ -8,7 +8,7 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 45623
+    "repoTestLines": 45690
   },
   "floors": {
     "appTestCases": 94,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 45384,
-      "to": 45623,
-      "reason": "verify-before-publish: draft transport mode, finalize publish gate and post-publish public L1 regression tests",
-      "addedCases": 25
+      "from": 45623,
+      "to": 45690,
+      "reason": "post-release aggregate: cross-machine parts/** evidence re-basing keeps 15/15 pass and still fails closed when one artifact log is missing",
+      "addedCases": 3
     }
   ]
 }

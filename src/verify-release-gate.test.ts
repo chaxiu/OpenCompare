@@ -16,7 +16,7 @@ import { parse } from 'yaml'
 import {
   AUTHENTICODE_PASS_STATUSES, AUTHENTICODE_UNSIGNED_NOTE, CANCEL_NOISE_PATTERN, CANCEL_TREE_FILES_PER_SIDE,
   CI_CHECK_GROUPS, CI_PLATFORMS, LOCAL_CHECKS, LOCAL_FIXTURE_ROOTS, MANUAL_NOT_COVERED,
-  RETENTION_THRESHOLD_BYTES, SMOKE_TREE, STEP_DIAGNOSTIC_TEXT_LIMIT, buildEnvironment, buildSummary, checksFor,
+  RETENTION_THRESHOLD_BYTES, SMOKE_TREE, STEP_DIAGNOSTIC_TEXT_LIMIT, artifactEvidencePath, buildEnvironment, buildSummary, checksFor,
   compareCheckSets, createWorld, expectedCheckIds, judgeLocalRounds, judgeReleaseGate, judgeReleaseState, judgeRetainedHeap, normalizeVersion,
   parseArgs, readAsarJsonEntry, releaseApiPath, RELEASE_STATES, runVerifyReleaseCli, scanCancelNoise, selectedPlatforms, summarizeCounts,
   validateStep, validateSummary, versionEqualsTag
@@ -540,6 +540,73 @@ describe('fail-closed summary', () => {
     const out = join(parts, 'aggregate')
     const code = await runVerifyReleaseCli([`--tag=${TAG}`, '--layer=ci', `--aggregate=${parts}`, `--out=${out}`], { world: new FakeHost().world, env: CI_ENV, stdout: silent, stderr: silent })
     expect(code).toBe(0); expect(readJson<Summary>(join(out, 'summary.json'))).toMatchObject({ status: 'pass', counts: { pass: 15, fail: 0, skip: 0, total: 15, expected: 15 }, duplicates: [] })
+  })
+})
+const REMOTE_LOG_DIRS: Record<CiPlatform, string[]> = {
+  mac: ['/Users/runner/work/OpenCompare/OpenCompare/verify-out/logs'],
+  linux: ['/home/runner/work/OpenCompare/OpenCompare/verify-out/logs'],
+  windows: ['C:\\Users\\runneradmin\\verify-out\\logs', 'D:\\a\\OpenCompare\\OpenCompare\\verify-out\\logs']
+}
+const CI_PLATFORM_IDS: Record<CiPlatform, string[]> = {
+  mac: ['identity-release-metadata', 'identity-asset-bytes-sha256', 'mac-dmg-version', 'mac-codesign', 'mac-gatekeeper', 'mac-stapler', 'evidence-environment', 'evidence-artifacts'],
+  linux: ['identity-release-metadata', 'identity-asset-bytes-sha256', 'linux-appimage-version', 'linux-deb-version', 'linux-directory-compare', 'cancel-leg', 'cancel-log-scan', 'evidence-environment', 'evidence-artifacts'],
+  windows: ['identity-release-metadata', 'identity-asset-bytes-sha256', 'windows-zip-version', 'windows-authenticode', 'evidence-environment', 'evidence-artifacts']
+}
+/** Writes one job artifact exactly as `download-artifact` lays it out under `parts/**`. */
+const writeRemoteArtifact = (parts: string, platform: CiPlatform): Array<{ id: string; log: string }> => {
+  const root = join(parts, `post-release-verify-${TAG}-41571697872-${platform}`)
+  mkdirSync(join(root, 'steps'), { recursive: true })
+  mkdirSync(join(root, 'logs'), { recursive: true })
+  return CI_PLATFORM_IDS[platform].map((id, index) => {
+    const name = `${String(index + 1).padStart(2, '0')}-${id}`
+    const directories = REMOTE_LOG_DIRS[platform]
+    const remote = `${directories[index % directories.length]}${directories[index % directories.length].includes('\\') ? '\\' : '/'}${name}.log`
+    const log = join(root, 'logs', `${name}.log`)
+    writeFileSync(log, `${id} evidence\n`)
+    writeFileSync(join(root, 'steps', `${name}.json`), JSON.stringify({
+      id, name, command: name, expected: {}, actual: {}, status: 'pass', evidence: [remote],
+      startedAt: '2026-11-03T00:00:00.000Z', finishedAt: '2026-11-03T00:00:01.000Z'
+    }))
+    return { id, log }
+  })
+}
+const aggregateParts = async (parts: string): Promise<{ code: number; summary: Summary }> => {
+  const out = tempDir('opencompare-verify-aggregate-')
+  const code = await runVerifyReleaseCli([`--tag=${TAG}`, '--layer=ci', `--aggregate=${parts}`, `--out=${out}`], { world: new FakeHost().world, env: CI_ENV, stdout: silent, stderr: silent })
+  return { code, summary: readJson<Summary>(join(out, 'summary.json')) }
+}
+describe('cross-machine aggregate evidence', () => {
+  it('re-bases every runner-absolute evidence path onto its own artifact', async () => {
+    const parts = tempDir('opencompare-verify-cross-')
+    const logs = CI_PLATFORMS.flatMap((platform) => writeRemoteArtifact(parts, platform))
+    expect(logs.filter((entry) => entry.id === 'windows-zip-version')).toHaveLength(1)
+    const { code, summary } = await aggregateParts(parts)
+    expect(code).toBe(0)
+    expect(summary).toMatchObject({ status: 'pass', counts: { pass: 15, fail: 0, skip: 0, total: 15, expected: 15 } })
+    expect([...summary.checks.map((check) => check.id)].sort()).toEqual([...ciIds].sort())
+    const evidence = summary.checks.flatMap((check) => check.evidence)
+    expect(evidence.every((path) => path.startsWith(`${parts}/`) && existsSync(path))).toBe(true)
+    expect(evidence.filter((path) => /^(?:\/Users\/runner|\/home\/runner|[A-Za-z]:\\)/.test(path))).toEqual([])
+  })
+  it('fails closed when one artifact evidence file is missing', async () => {
+    const parts = tempDir('opencompare-verify-cross-missing-')
+    const logs = CI_PLATFORMS.flatMap((platform) => writeRemoteArtifact(parts, platform))
+    const target = logs.find((entry) => entry.id === 'windows-zip-version')
+    expect(target === undefined).toBe(false)
+    rmSync(target!.log)
+    const { code, summary } = await aggregateParts(parts)
+    expect(code).toBeGreaterThan(0)
+    expect(summary.status).toBe('fail')
+    const problems = summary.problems ?? []
+    expect(problems.some((problem) => problem.includes('windows-zip-version') && problem.includes('不存在'))).toBe(true)
+  })
+  it('maps both separators onto logs/<basename> and never resolves an unusable path', () => {
+    const artifact = join(tempDir('opencompare-verify-map-'), 'post-release-verify-v9.9.9-1-mac')
+    const stepPath = join(artifact, 'steps', '01-identity-release-metadata.json')
+    expect(artifactEvidencePath(stepPath, '/Users/runner/work/OpenCompare/logs/01-identity-release-metadata.log')).toBe(join(artifact, 'logs', '01-identity-release-metadata.log'))
+    expect(artifactEvidencePath(stepPath, 'D:\\a\\OpenCompare\\verify-out\\logs\\02-windows-zip-version.log')).toBe(join(artifact, 'logs', '02-windows-zip-version.log'))
+    expect(existsSync(artifactEvidencePath(stepPath, ''))).toBe(false)
+    expect(existsSync(artifactEvidencePath(stepPath, '..\\..'))).toBe(false)
   })
 })
 const LOCAL_COUNTS: FourStateCounts = { same: 2, added: 1, removed: 0, modified: 0 }
