@@ -310,6 +310,66 @@
       "absent": [],
       "patterns": [],
       "absentPatterns": []
+    },
+    {
+      "id": "finalize-dispatch-verify",
+      "job": "finalize",
+      "name": "Dispatch the post-release verification",
+      "tokens": [
+        "set -euo pipefail",
+        "date -u -d '2 minutes ago'",
+        "post-release-verify-since.txt",
+        "gh workflow run post-release-verify.yml -f tag=\"${RELEASE_TAG}\""
+      ],
+      "absent": [],
+      "patterns": [],
+      "absentPatterns": [
+        "v[0-9]+\\.[0-9]+\\.[0-9]+"
+      ]
+    },
+    {
+      "id": "finalize-find-verify-run",
+      "job": "finalize",
+      "name": "Find the post-release verification run for this tag",
+      "tokens": [
+        "set -euo pipefail",
+        "gh run list --workflow=post-release-verify.yml --event=workflow_dispatch",
+        "displayTitle",
+        "contains($tag)",
+        "--arg since",
+        "createdAt >= $since",
+        "POST_RELEASE_LOOKUP_SECONDS:-300",
+        "post-release-verify-run-id.txt",
+        "::error::",
+        "exit 1"
+      ],
+      "absent": [],
+      "patterns": [
+        "sleep 15"
+      ],
+      "absentPatterns": []
+    },
+    {
+      "id": "finalize-aggregate-gate",
+      "job": "finalize",
+      "name": "Assert the post-release verification aggregate passed",
+      "tokens": [
+        "set -euo pipefail",
+        "aggregate",
+        "conclusion",
+        "\"success\"",
+        "actions/runs/${run_id}/artifacts",
+        ".artifacts[].name",
+        "post-release-verify-${RELEASE_TAG}-${run_id}-aggregate",
+        "exit 1"
+      ],
+      "absent": [],
+      "patterns": [
+        "SECONDS \\+ 5400",
+        "SECONDS \\+ 900",
+        "grep -Fqx"
+      ],
+      "absentPatterns": []
     }
   ],
   "stepOrder": [
@@ -322,7 +382,10 @@
         "Verify the tag has exactly one public release",
         "Assert the public release has every platform asset",
         "Assert latest*.yml urls match the release assets",
-        "Assert the tag is the latest published release"
+        "Assert the tag is the latest published release",
+        "Dispatch the post-release verification",
+        "Find the post-release verification run for this tag",
+        "Assert the post-release verification aggregate passed"
       ],
       "mustBeLast": true,
       "job": "finalize"
@@ -338,6 +401,28 @@
       "job": "finalize"
     }
   ],
+  "postReleaseVerify": {
+    "id": "post-release-verify-contract",
+    "path": ".github/workflows/post-release-verify.yml",
+    "runName": "post-release-verify ${{ inputs.tag }}",
+    "findStep": "Find the post-release verification run for this tag",
+    "aggregateStep": "Assert the post-release verification aggregate passed",
+    "tagRequired": true,
+    "permissions": {
+      "contents": "read"
+    },
+    "forbiddenTriggers": [
+      "release",
+      "push",
+      "schedule"
+    ],
+    "forbiddenPatterns": [
+      "secrets\\.",
+      "gh release (upload|edit|create|delete)",
+      "git (tag|push)",
+      "continue-on-error"
+    ]
+  },
   "workflowChecks": [
     {
       "id": "workflow-trigger-and-single-release",
