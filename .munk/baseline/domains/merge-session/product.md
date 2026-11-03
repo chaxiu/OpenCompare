@@ -23,12 +23,20 @@
 - **ac-merge-title-subtitle**：tab 标题含三个真实文件名（三名全同收敛为单个文件名），副标题（含 tab `title`）含三条完整绝对路径。
 - **ac-merge-no-sample**：会话合并输入路径逐项等于三条真实临时路径，不含 `/samples/` 前缀、不读 fixtures；内置样本三向场景仍渲染 3 个冲突块且模式切换不变。
 - **ac-merge-session-identity**：同 trio 再次建立 / 重开 tab 数不增加且 `data-session-tab` 不变；ours 与 theirs 对调视为不同会话（新增 tab）。
-- **ac-merge-history-write**：建立成功后历史恰新增 1 条 `kind: 'merge'`，`paths` 为 `[base, ours, theirs]` 且与真实路径逐项相等，三项开关等于建立时 shell 开关；同 trio 重复建立仍 1 条且 `id` 不变、`createdAt` 变大。
-- **ac-merge-history-reopen**：关闭全部 tab 并重新挂载后重开：三栏内容等于磁盘最新内容（重开后改写的文件可见）、冲突数与新内容一致、tab `data-session-tab` 与重开前相同、条目 `id` 不变且 `createdAt` 变大。
+- **ac-merge-entry-written-with-shell-switches**：在 shell 开关为非默认组合时建立真实三向合并，相对建立前恰新增 1 条 `kind: 'merge'` 条目，`paths` 逐项等于 `[base, ours, theirs]` 真实绝对路径，三项开关逐项等于建立时 shell 开关。
+- **ac-merge-history-write**：建立成功后历史恰新增 1 条 `kind: 'merge'`，`paths` 为 `[base, ours, theirs]` 且与真实路径逐项相等；同 trio 重复建立仍 1 条且 `id` 不变、`createdAt` 变大。
+- **ac-merge-history-reopen**：关闭全部 tab 并重新挂载后重开：三栏内容等于磁盘最新内容（重开后改写的文件可见）、条目 `id` 不变且 `createdAt` 变大。
+- **ac-merge-reopen-keeps-entry-switches**：关闭全部 tab 并重新挂载（shell 三项开关回默认）后重开该 merge 条目：条目 `id` 不变、`createdAt` 变大，条目三项开关逐项等于重启前值，未被默认值覆盖。
+- **ac-merge-reopen-applies-shell-switches**：同一重开成功后，shell 三项开关逐项等于条目值（以重开后再建立一个不同 trio 的 merge 条目、其记录开关逐项相等来观测）。
+- **ac-merge-reopen-rereads-and-reuses-tab**：重开前改写三个文件正文（冲突块数量随之变化）：重开后恰 1 个 merge tab、`data-session-tab` 与重启前相同、三栏文本逐字等于磁盘最新内容、状态栏冲突块数等于 `buildMergeModel` 对新内容的结果。
+- **ac-merge-reopen-single-row**：同一 trio 重启后再重开两次，历史中该 trio 恰 1 条且 `id` 不变，tab 数不增加（仍为 1）。
+- **ac-merge-reopen-failure-atomic**：删除任一侧后重开：tab 数不变、历史清单（条目数 / 顺序 / 每条字段含开关）序列化前后逐字相等、shell 开关不变，只出现一条 zh / en 成对且不含真实绝对路径的失败提示。
 - **ac-merge-reopen-failure-restrained**：删除任一侧后重开：tab 数不变、历史条目字段与顺序不变、出现一条 zh / en 成对失败提示且文本不含真实绝对路径。
+- **ac-merge-coexists-directory-file**：历史中同时存在 `directory` / `file` / `merge` 各 1 条时：重开 merge 后目录 / 文件两条字段与相对顺序逐项不变；再重开其中一条 directory / file 后 merge 条字段不变；三条行文本分别保持各自类型的完整路径串，merge 行为三条路径以 ` ↔ ` 连接。
 - **ac-pair-entry-no-regression**：双路模式仍能建立真实文件对与目录对，非法双路输入仍只在弹窗提示且不建 tab；顶栏入口集合与顺序不变，不出现 demo / 样本入口。
+- **ac-history-single-store**：建立 / 重启 / 重开 / 失败全过程 `localStorage` 键集合恒为 `['opencompare.comparisonHistory']`，无第二个历史键、无第二份解析写入。
 - **ac-i18n-paired**：新增可见文案在 zh / en 的键集与占位符完全一致（`messages.test.ts` 通过），zh 不是英文原样复制；新增 shell 源文件已加入 `shellScan.test.ts` 的 `SHELL_COPY_FILES` 且全链路中文扫描零命中。
-- **ac-console-no-paths**：建立、非法提交、重开、保存全过程 renderer console 输出中不出现任一侧真实绝对路径。
+- **ac-console-no-paths**：建立、非法提交、重启、重开、保存、失败全过程 renderer console 输出中不出现任一侧真实绝对路径。
 
 ## 非目标
 
@@ -42,9 +50,9 @@
 
 ## 实现约束
 
-- 文件锚点：`src/shared/mergeRequest.ts`（`MergePaths` / `MergeSide` / `MergeErrorCode` / `MergeResult`、`parseMergeManualPaths`、`resolveMergeRequest`）；`src/renderer/src/workbench/mergeSession.ts`（`mergeSessionId`、`mergeSessionText`、`buildMergeSession`、`mergeSessionErrorMessage`，本文件零中文可见字面量）；`workbench/session.ts` 的 `WorkbenchSession.merge?: MergeFileSides`（`{ base, ours, theirs }` 三个 `TextSample`）；`views/CodeView.tsx` 的 `mergeSides?: MergeFileSides`（存在即固定 merge 模式、不渲染分段控件）；`workbench/NewCompareDialog.tsx` 的模式状态 + 三输入 + `openMergeRequest(request, onError)`；`workbench/Workbench.tsx` 的编排（成功才 `upsertSession` → `recordHistory('merge', [base, ours, theirs])`）与 `reopenHistoryEntry` 的 `kind === 'merge'` 分支；`workbench/sessionDisplay.ts` 的标题 / 副标题 / stats（只留 `shell.stat.conflicts`）；`i18n/messages/{zh,en}/shell.ts` 成对新增键，侧标签优先复用 `files.merge.side.*`。
+- 文件锚点：`src/shared/mergeRequest.ts`（`MergePaths` / `MergeSide` / `MergeErrorCode` / `MergeResult`、`parseMergeManualPaths`、`resolveMergeRequest`）；`src/renderer/src/workbench/mergeSession.ts`（`mergeSessionId`、`mergeSessionText`、`buildMergeSession`、`mergeSessionErrorMessage`，本文件零中文可见字面量）；`workbench/session.ts` 的 `WorkbenchSession.merge?: MergeFileSides`（`{ base, ours, theirs }` 三个 `TextSample`）；`views/CodeView.tsx` 的 `mergeSides?: MergeFileSides`（存在即固定 merge 模式、不渲染分段控件）；`workbench/NewCompareDialog.tsx` 的模式状态 + 三输入 + `openMergeRequest(request, onError)`；`workbench/Workbench.tsx` 的编排（`openMergeRequest(paths, onError, switches = comparisonSwitches)`：成功才 `recordHistory('merge', [base, ours, theirs], switches)` → `upsertSession` → `setComparisonSwitches(switches)`）与 `reopenHistoryEntry` 的 `kind === 'merge'` 分支（把 `plan.switches` 传入，仅在返回 `true` 时恢复 shell 开关）；`workbench/sessionDisplay.ts` 的标题 / 副标题 / stats（只留 `shell.stat.conflicts`）；`i18n/messages/{zh,en}/shell.ts` 成对新增键，侧标签优先复用 `files.merge.side.*`。
 - 身份与去重：会话 id 顺序敏感；历史身份仍由 `comparisonHistoryId(kind, paths)` 决定，重开继续用 `resolveComparisonHistoryReopen`，不新增第二套去重逻辑。
-- 写入归属：只在真实三向建立 / 重开成功分支记录历史；内置样本、目录下钻、快照导入、失败或取消都不写。失败原子性：先读齐三侧再 `upsertSession`。
+- 写入归属：只在真实三向建立 / 重开成功分支记录历史；内置样本、目录下钻、快照导入、失败或取消都不写。失败原子性顺序：先读齐三侧 → 写历史 → 提交会话 → 最后恢复 shell 开关；任一步失败都不得留下半成品 tab、历史改动或开关变更。
 - 隐私：renderer 不打印历史 payload 或三侧路径；错误提示只用 i18n 文案（可含该侧路径），不拼原始诊断串。
 - 分层：`src/shared/` 零 Electron / DOM / Node 依赖；renderer 平台能力只经 `PlatformPort`；`workbench` 全目录中文扫描覆盖，新文件须零中文并加入 `SHELL_COPY_FILES`。
 - 测试落位：`src/shared/mergeRequest.test.ts`、`src/renderer/src/workbench/mergeSession.test.ts`、新增 `*.dom.test.tsx`；既有测试只追加 / 最小改动，不为凑绿放宽门禁。
@@ -52,8 +60,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_b606fdf77631423e`（真实三向合并会话入口 + merge 历史写入 / 重开，`kind: feature`）
+- WI：`wi_ws_b43bc65695c11486`（merge 历史开关保真 + 重启 / 共存 / 单条回归，`kind: bugfix`）
 - 日期：2026-11-04
 - 结果：code_gates 通过（28 gates，attempt 001，`ok: true`）；按本项口径不做浏览器 / 设备 / 桌面 GUI 验收。
-- 覆盖摘要：新增 `src/shared/mergeRequest.ts`（归一化复用 `normalizePathValue` / `toDisplayPath`，逐侧一次 `statPath`，稳定错误码 + 侧信息，允许重复路径）与 `src/renderer/src/workbench/mergeSession.ts`（`merge:base ↔ ours ↔ theirs` 会话 id、`mergeSessionText` 单一文案派生、并行读三侧失败抛 `READ_FAILED`）；`NewCompareDialog` 增模式切换 + 三输入且两模式输入各自保留；`Workbench` 增 `openMergeRequest` 与 `reopenHistoryEntry` 的 merge 分支（失败只报既有提示、不改 shell 开关）；`CodeView` 增 `mergeSides` prop 固定三栏合并、复用既有 `CodeMergeView`；`sessionDisplay` 走 `mergeSessionText` 且 stats 仅冲突数；zh / en 成对新增 shell 文案并纳入 `SHELL_COPY_FILES`。测试新增 `mergeRequest.test.ts`、`mergeSession.test.ts`、`mergeSession.dom.test.tsx`，同步 `test-debt.json` growth 与 README 截图 provenance 重钉。
+- 覆盖摘要：`openMergeRequest` 增第三参 `switches`（默认取当前 shell 开关），成功路径按该组合 `recordHistory` 并在 `upsertSession` 后 `setComparisonSwitches`；`reopenHistoryEntry` 的 merge 分支把 `plan.switches` 传入，仅在接受成功时恢复 shell 开关，失败分支不改 tab / 历史 / 开关。`mergeSession.dom.test.tsx` 追加 3 个 jsdom 用例（重启后重开保持条目开关并恢复 shell、某侧缺失时 tab / 历史序列化 / shell 开关全不变、与 directory / file 条目共存互不干扰），`test-debt.json` 增 `repoTestLines` growth（+214）并上调 `repoTestCases` 至 1609；`src/renderer/**` 改动触发 README 截图重建与 `docs/screenshots.md` provenance 重钉。
 - 注：本 WI change pack 仅含 `prd.md`，未提供 `tests/cases/**` / `tech.md` / `ux/**`，无新增折叠用例与设计 / 技术折叠。
