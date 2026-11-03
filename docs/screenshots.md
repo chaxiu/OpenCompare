@@ -7,7 +7,7 @@ used.
 
 ## Captured commit
 
-- commit: `ef70939d52fc41efc800f05d40c019a2f770b2e0`
+- commit: `dc781cd1d5ac922927a3c59bb9f86ebe68f072a0`
 - the capture ran on the working tree on top of that commit (`pnpm build`, then
   the script below), so the recorded commit is the resolvable ancestor the build
   was made from.

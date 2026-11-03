@@ -184,6 +184,11 @@ describe('session tab semantics', () => {
     expect(compactLabel).toBe(`${tab.title} — ${tab.subtitle}`)
     cleanup()
 
+    setWindowWidth(TIER_WIDTHS.regular)
+    renderTabs([tab], tab.id)
+    expect(screen.getByRole('tab').getAttribute('title')).toBe(`${tab.title} — ${tab.subtitle}`)
+    cleanup()
+
     setWindowWidth(TIER_WIDTHS.wide)
     renderTabs([tab], tab.id)
     const fullLabel = screen.getByRole('tab').getAttribute('title') ?? ''

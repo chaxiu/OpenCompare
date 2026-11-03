@@ -24,12 +24,13 @@ interface DocsRow {
   absent: Strings; absentPatterns: Strings
 }
 interface NotesRow { id: string; doc: string; heading: string; sentences: number; sentenceSeparator: string; code: Strings; text: Strings; absent: Strings }
+interface Screenshots { id: string; readmes: Strings; assets: Strings; record: string; commitPattern: string; reproduce: string }
 interface RenderRow { id: string; builderPath: string; arch: string; ext: string; expected: string }
 interface WinCase { id: string; script: 'version' | 'feed' | 'assets'; artifacts?: 'both' | 'zip-only' | 'exe-only' | 'none'; latest?: 'installer-only' | 'with-zip'; omit?: 'none' | 'zip' | 'exe'; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings }
 interface Fixture {
   schemaVersion: number
   brandAssets: BrandAsset[]; builderRows: BuilderRow[]; sources: SourceRow[]; steps: StepRow[]
-  stepOrder: StepOrderRow[]; finalizeGates: Strings; docs: DocsRow[]; notesSections: NotesRow[]
+  stepOrder: StepOrderRow[]; finalizeGates: Strings; docs: DocsRow[]; notesSections: NotesRow[]; screenshots: Screenshots
   iconPolicy: { id: string; requiredPrefix: string; forbiddenPattern: string; electronCandidates: Strings }
   ghApiCompatibility: { id: string; slurp: string; forbidden: Strings }
   packageBans: { id: string; scriptNamesAbsent: Strings; scriptCommandsAbsent: Strings; bannedDependencies: Strings }
@@ -74,7 +75,7 @@ const useRow = (id: string): void => { referencedIds.add(id) }
 const fixtureRowIds = [
   ...fixture.brandAssets, ...fixture.builderRows, ...fixture.steps, ...fixture.stepOrder,
   ...fixture.docs, ...fixture.sources, ...fixture.notesSections, ...fixture.windowsPackaging.render,
-  ...fixture.windowsPackaging.cases, fixture.iconPolicy.id, fixture.packageBans.id
+  ...fixture.windowsPackaging.cases, fixture.iconPolicy.id, fixture.packageBans.id, fixture.screenshots.id
 ].map((row) => (typeof row === 'string' ? row : row.id))
 
 const stepOf = (row: StepRow): { if?: string; run?: string } | undefined =>
@@ -213,6 +214,33 @@ describe('documentation markers', () => {
     for (const pattern of row.codePatterns ?? []) expect(values.code.some((value) => new RegExp(pattern).test(value)), `${row.id} codePattern: ${pattern}`).toBe(true)
     const present = documentAtoms(doc).join('\n')
     expectAbsent(present, row.absent, row.id); expectNoPattern(present, row.absentPatterns, row.id)
+  })
+})
+
+describe('readme screenshots and capture provenance', () => {
+  it('references both screenshots from both READMEs', () => {
+    useRow(fixture.screenshots.id)
+    for (const readme of fixture.screenshots.readmes) {
+      const targets = new Set(parseMarkdown(readText(readme)).links.map((link) => link.target))
+      for (const asset of fixture.screenshots.assets) expect(targets.has(asset), `${readme}: ${asset}`).toBe(true)
+    }
+  })
+
+  it('ships both screenshots as non-empty PNG files', () => {
+    for (const asset of fixture.screenshots.assets) {
+      const bytes = readBytes(join(repoRoot, asset))
+      expect(bytes.length, `${asset} bytes`).toBeGreaterThan(0)
+      expect([...bytes.subarray(0, 4)], `${asset} PNG signature`).toEqual([0x89, 0x50, 0x4e, 0x47])
+    }
+  })
+
+  it('records a capture commit the local repository can resolve', () => {
+    const record = readText(fixture.screenshots.record)
+    const commit = new RegExp(fixture.screenshots.commitPattern).exec(record)?.[1] ?? ''
+    expect(commit, 'captured commit shape').toMatch(/^[0-9a-f]{40}$/)
+    const lookup = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: repoRoot })
+    expect(lookup.status, `git cat-file ${commit}`).toBe(0)
+    expectTokens(record, [fixture.screenshots.reproduce], fixture.screenshots.id)
   })
 })
 
