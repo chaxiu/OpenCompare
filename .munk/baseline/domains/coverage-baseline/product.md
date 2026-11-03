@@ -1,57 +1,74 @@
 # Domain: coverage-baseline
 
-`src/core/**` 覆盖率基线治理域：定义「先实测、后判定是否钉地板」的口径——覆盖率数字只来自 worktree 内一次可复现的 v8 冷跑，落进 `.munk/baseline/coverage.json` 留档；是否把覆盖率变成门禁，由决策闸按实测值判定，不由人拍。本域管**覆盖率基线与「要不要接门」的判定**，不管门禁清单的形状与触发纪律（归 `quality-gates`：默认矩阵项数、追加纪律、条件 profile）、不管被测行为本身（`text` / `directory` / `structured` / `csv` / `theme` 各行为域）、不管测试清债棘轮（`quality-gates` 的 `test-debt-gate` / `.munk/baseline/test-debt.json`）、不管 renderer 与 jsdom 覆盖率（明确不设地板）。
+`src/core/**` 覆盖率基线治理域：先实测、后判定，再把判定结果钉成**发版级硬门**。数字只来自 worktree / CI 内一次可复现的 v8 冷跑；策略与期望值只存 `.munk/baseline/coverage.json`；判定与执行分离在 `scripts/coverage-gate.mjs` 与 release workflow 的单一 step 中。本域管**覆盖率基线、地板策略与发版覆盖率门**，不管门禁矩阵的形状与触发纪律（归 `quality-gates`：默认矩阵项数、追加纪律、条件 profile）、不管被测行为本身（`text` / `directory` / `structured` / `csv` / `theme` 各行为域）、不管测试清债棘轮（`quality-gates` 的 `test-debt-gate` / `.munk/baseline/test-debt.json`）、不管 renderer 与 jsdom 覆盖率（明确不设地板）。
 
 ## 范围
 
-- **测量对象恰 22 个纯模块**（`src/core/**` 下全部非测试 `.ts`，合计约 7,559 行）：`text/{diff,normalize,merge,probe,lines,ruler}.ts`、`directory/{snapshot,compare,report,rows,filter,template,hash,sync}.ts`、`structured/{diff,locate,locateFallback,locateLine,parse}.ts`、`csv/align.ts`、`theme/contrast.ts`、`io.ts`。不含 `*.test.ts` / `*.test.tsx` / `__fixtures__/**` / 纯类型 `.d.ts`。
-- **唯一测量命令**（逐字口径，provider 固定 v8、reporter 固定 text+lcov+json-summary、reportsDirectory 指向 change pack 证据目录）：`pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=text --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reportsDirectory=.munk/changes/<wi>/evidence/coverage-coding`。`@vitest/coverage-v8@5.0.5` 用仓库既有依赖，不新增依赖、不改 `package.json`。
-- **基线文件 `.munk/baseline/coverage.json`**：`version` / `measuredAt {commit, date}` / `command` / `provider: "v8"` / `scope {include, exclude}` / `ignoreDirectives {v8, c8}` / `totals`（lines / branches / functions / statements 各带 `pct` 与 `covered` / `total`）/ `modules`（22 条相对路径，各带 lines / branches / functions / statements）/ `decision {floor, reason, thresholds}`。`measuredAt.commit` 必须是实跑时 worktree 的 `git rev-parse HEAD`，不得估计或沿用旧提交。
-- **决策闸（先测后钉）**：`core branches ≥ 85% 且无单模块 < 60%` ⇒ 只留报告、不钉地板；`有模块 < 50%` ⇒ 报告即下一条 goal 加真断言的依据（列缺口、仍不钉地板）；其余情形才考虑把 `coverage-core` 接进矩阵。阈值集固定为 `coreBranchesMin: 85` / `moduleBranchesMin: 60` / `moduleBranchesStop: 50`。
-- **现行判定：只留报告、不钉地板**（`decision.floor = false`）。因此 `.munk/code-gates.json` 不含 `coverage-core`，`vitest.config.mts` 不写 coverage thresholds / include / exclude，`scripts/` 不新增覆盖率门脚本；coverage 也不进 release 的 Quality gates job。
-- **本次实测的核心数字**（commit `b83511f`）：core 总量 lines 98.12%（2090/2130）、branches 90.27%（1346/1491）、functions 99.5%（402/404）、statements 96.39%（2351/2439）；单模块最低 branches 为 `theme/contrast.ts` 75.00%（12/16），其余最低 `directory/sync.ts` 83.07%，无任何模块任一项 < 50%。
-- **`src/core` 忽略指令计数为天花板**：`/* v8 ignore */` / `c8 ignore` 当前合计 0；该数字只许降不许升，升即视为降低分子分母可比性。
-- **证据根目录映射**：报告与证据一律以 **worktree** 为根（`.../worktrees/codebase_b2d550b56d98d0c5/wi_intake_7e1cad0afa235fc2`），**不是**产品主检出面；报告禁止只给 worktree 解析不到的相对路径。
+- **测量对象恰 22 个纯模块**（`src/core/**` 下全部非测试 `.ts`）：`text/{diff,normalize,merge,probe,lines,ruler}.ts`、`directory/{snapshot,compare,report,rows,filter,template,hash,sync}.ts`、`structured/{diff,locate,locateFallback,locateLine,parse}.ts`、`csv/align.ts`、`theme/contrast.ts`、`io.ts`。不含 `*.test.ts` / `*.test.tsx` / `__fixtures__/**` / 纯类型 `.d.ts`。
+- **测量口径唯一且单源**：provider 固定 v8，include `src/core/**`，exclude 恰 `**/*.test.ts` / `**/*.test.tsx` / `**/__fixtures__/**`。release step 用同一组字面量既跑 vitest（`json-summary` 产出到 `$RUNNER_TEMP/coverage-gate`）又原样传给门脚本（`--include` / 三个 `--exclude`），不允许「跑的口径」与「校验的口径」各写一份。baseline `command` 字段保留历史测量命令原文。
+- **基线文件 `.munk/baseline/coverage.json`**：`version` / `measuredAt {commit, date}` / `command` / `provider` / `scope {include, exclude}` / `ignoreDirectives {v8, c8}` / `floors` / `floorLedger` / `totals`（lines / branches / functions / statements 各带 `pct` 与 `covered`/`total`）/ `modules`（22 条相对路径）/ `decision`。`measuredAt.commit` 必须是实跑时 worktree 的 `git rev-parse HEAD`，不得估计或沿用旧提交。
+- **地板值**：`floors.totals = {lines: 98, branches: 90, functions: 99}`、`floors.moduleBranchesMin = 75`、`floors.moduleBranchesMinExempt = ["src/core/directory/hash.ts", "src/core/text/lines.ts"]`、`floors.ignoreDirectivesMax = 0`；`floorLedger` 仅在降低地板时追加 `{metric, from, to, reason}`（写法同 `test-debt.json` 的 `growth`）。
+- **现行判定：发版级硬门**（`decision.floor = true`、`decision.gate = "release-ci"`，理由为「按实测 98.12 / 90.27 / 99.5 直接钉地板，只进发版 CI」）。门只出现在 `.github/workflows/release.yml` 的 Quality gates job（`pnpm test` 之后、`pnpm build` 之前），不进 `.munk/code-gates.json`、不进条件 profile、不替代交付矩阵。
+- **门实现 `scripts/coverage-gate.mjs`**：纯 Node ESM、零新增依赖、零网络、只读；测量输入只接受本 job 新鲜产出的 `coverage-summary.json`，baseline 只提供策略与期望值；脚本内只保留计量口径常量（百分位取 `pct`、集合相等、豁免模块枚举），不保留 floor 数值副本。
+- **本次复测数字**（commit `fc584af`，`2026-11-03T16:38:42Z`）：core 总量 lines 98.12%（2090/2130）、branches 90.27%（1346/1491）、functions 99.5%（402/404）、statements 96.39%（2351/2439）；单模块最低 branches 为 `theme/contrast.ts` 75.00%（12/16），其余最低 `directory/sync.ts` 83.07%；两个豁免模块 branches total 为 0。
+- **ignore 指令为 0 天花板**：`src/core/**` 内 `v8 ignore` / `c8 ignore` 计数当前合计 0，只许降不许升。
+- **证据根目录映射**：报告与证据一律以 **worktree** 为根（`.../worktrees/codebase_b2d550b56d98d0c5/wi_intake_ddfee56630084627`），本 WI evidence 在 `.munk/changes/wi_intake_ddfee56630084627/evidence/`；禁止只给 worktree 解析不到的相对路径。
 
 ## 验收
 
-- **ac-baseline-22-modules**：`.munk/baseline/coverage.json` 的模块集合与 `src/core/**` 下 22 个非测试 `.ts` 文件完全相等（无多、无缺）；不包含 `*.test.ts`、`__fixtures__/**`、纯类型 / `.d.ts` 条目；每个条目都有数值型 `lines` / `branches` / `functions`。
-- **ac-baseline-matches-evidence**：baseline 中每个模块与 core 总量的百分比，与同一次运行的 `coverage-summary.json` 两位小数逐条相等；core 总量为 lines 98.12% (2090/2130)、branches 90.27% (1346/1491)、functions 99.5% (402/404)。
-- **ac-coverage-command-recorded**：证据里逐字记录唯一测量命令，包含 `--coverage.provider=v8`、`--coverage.include=src/core/**`、`--coverage.exclude=**/*.test.ts`、`--coverage.exclude=**/*.test.tsx`、`--coverage.exclude=**/__fixtures__/**`、`--coverage.reporter=text,lcov,json-summary`；原始日志含 `Coverage enabled with v8`、`Test Files 125 passed`、`Tests 2025 passed | 1 skipped`，退出码 0。
-- **ac-reproducible**：在 `b83511f` 上用同一命令冷跑复测，core 总量与 22 个模块的 lines / branches / functions 与 baseline 逐项一致（整数分子分母也一致）；出现差异必须停手如实写「未闭环」，不得改数字或换口径凑齐。
-- **ac-decision-inputs**：报告写出决策闸的两个输入：core 整体 branches 90.27% ≥ 85%，且单模块最低 branches 为 `theme/contrast.ts` 75.00% ≥ 60%；据此判定「只留报告、不钉地板」。
-- **ac-no-gate-added**：本轮不新增 `coverage-core` 门：`.munk/code-gates.json` 保持 version 1、门数与当时实测一致（本次核对为 27 门）、无 `coverage-core`；`scripts/` 不新增覆盖率门脚本；`vitest.config.mts` 不新增 coverage thresholds / include / exclude 配置。
-- **ac-no-test-or-source-change**：本项 `git diff --name-only` 在 `src/**`、`scripts/**`、`vitest.config.mts` 上为空；`src/core` 内 `/* v8 ignore */` 与 `c8 ignore` 计数保持 0（baseline 记为天花板，只许降）；不新增覆盖率 exclude 模式、不拆文件改分子分母、不写空断言。
-- **ac-no-release-surface-change**：`package.json` version、`CHANGELOG.md`、README 版本表、`.github/workflows/release.yml` dispatch 默认 tag、当前版 release notes、`docs/release-evidence/**` 零 diff；不改已公开 tag / Release / 资产。
-- **ac-report-tables**：交付报告包含 core 总量四项与 22 行模块表（lines / branches / functions），并给出证据绝对路径且注明根目录映射为 worktree 还是产品目录，禁止只给 worktree 解析不到的相对路径。
-- **ac-release-window-lock**：`code_gates` 在 v0.2.19 公开之前全绿时，不交棒 delivery、不合入 main；改为 `munk_report_owner` 报告「门已绿、等你放行合并」，等 Owner 放行后才走 delivery。
-- **ac-no-renderer-floor**：renderer 与 jsdom 的覆盖率不设地板、阈值或 gate；不改 `src/renderer/**` 与测试环境配置。
+- **ac-baseline-22-modules**：`.munk/baseline/coverage.json` 的 `modules` 键集合与 `src/core/**` 下 22 个非测试 `.ts` 文件完全相等（无多、无缺），不含测试 / fixtures / `.d.ts`，每条含数值型 lines / branches / functions。
+- **ac-baseline-matches-evidence**：baseline 的 totals 与 22 个模块百分比与同一次运行的 `coverage-summary.json` 两位小数逐条相等（lines 98.12% 2090/2130、branches 90.27% 1346/1491、functions 99.5% 402/404）。
+- **ac-coverage-command-recorded**：baseline `command` 与 `scope` 逐字记录测量口径（provider v8、include `src/core/**`、三个 exclude 字面量、reporter 含 json-summary），原始日志含 `Coverage enabled with v8`、`Test Files 125 passed`、`Tests 2025 passed | 1 skipped`、`exit=0`。
+- **ac-reproducible**：同口径冷跑复测时 totals 与 22 模块的 lines / branches / functions 与 baseline 逐项一致；出现差异必须停手写「未闭环」，不得改数字或换口径凑齐。
+- **ac-release-step-in-quality-gates**：`.github/workflows/release.yml` 的 `Quality gates` job 内新增且仅新增一个覆盖率门 step（位于 `pnpm test` 之后、`pnpm build` 之前），不设 `continue-on-error`，覆盖率命令与 `node scripts/coverage-gate.mjs` 在同一 step 内串行，任一失败即 job 失败；该 job 其余步骤逐字不变。
+- **ac-gate-script-single-source**：`scripts/coverage-gate.mjs` 存在且可被 `node` 直接执行；不新增 npm 依赖、不 import 仓库运行时源码、不访问网络；所有数字只从新鲜 summary 与 baseline 读取，脚本内不保留 floor 数值副本。
+- **ac-fresh-artifact-fail-closed**：未传 `--summary`、文件不存在、路径落在仓库内、`mtime` 早于 `--started-at` 任一条成立即非 0 退出并打印原因；不存在「产物缺失就跳过」或回退读仓内旧 summary 的分支。
+- **ac-totals-floors**：以新鲜 summary 的 `total` 为准，lines ≥98、branches ≥90、functions ≥99 同时成立才通过；低于时非 0 退出并点名指标与实测值；baseline `floors.totals` 恰为 `{98, 90, 99}`。
+- **ac-module-branches-floor**：除两个豁免模块外，每个模块 branches ≥75，低于者逐个点名并非 0 退出；豁免清单恰为 `directory/hash.ts` 与 `text/lines.ts`，且两者在新鲜 summary 中 `branches.total === 0`（0 分支模块不得被冒名豁免）。
+- **ac-module-set-equality**：新鲜 summary 的模块相对路径集合与 baseline `modules` 键集合完全相等；缺模块或多模块均非 0 退出并列出差异路径（与 scope 检查共同保证「缩小分母」当场变红）。
+- **ac-ignore-directives-zero**：扫描 `src/core/**` 的 `.ts` 源码，`v8 ignore` / `c8 ignore` 计数必须为 0；注入任一指令即非 0 退出并给出文件与计数。
+- **ac-scope-literal-equality**：workflow 把覆盖率命令的 include 与三个 exclude 字面量原样传给门；门要求与 baseline `scope` 逐字（含顺序）完全一致，改 include / 增 exclude / 换顺序均非 0 退出。
+- **ac-floors-ratchet-only**：地板只升不降；`floors.totals.*` / `moduleBranchesMin` 低于上一发布 tag 或上一次已提交 baseline 时必须有一条字段匹配的 `floorLedger` 记录（`metric` / `from` / `to` / 非空 `reason`）才放行；无历史锚点时打印 `first landing` 放行；禁止改脚本常量放宽。
+- **ac-baseline-freshness**：`measuredAt.commit` 为 40 位小写十六进制真实提交、从 HEAD 可达、且不早于最近的 semver tag；`measuredAt.date` 为合法 ISO 时间。当前值为 `fc584af…`（= `v0.2.19`，`2026-11-03T16:38:42Z`）；保留 `b83511f` 会报 baseline stale。
+- **ac-normal-tree-pass**：未修改树上按同口径产出新鲜 summary 后裸跑门脚本，退出码 0，逐项打印 totals、模块最低 branches、模块集合、ignore 计数、scope、ratchet、freshness 的 `ok` 行并打印门耗时。
+- **ac-reverse-selftest-totals**：复制 summary 把任一 totals 数字调低（如 lines 97 / branches 89），门须非 0 并点名该指标；恢复后回 0。临时改动不得留在交付树。
+- **ac-reverse-selftest-module**：复制 summary 把单模块 branches 调低（如 `theme/contrast.ts` 60），门须非 0 并点名该模块；恢复后回 0。
+- **ac-reverse-selftest-ratchet**：把 floor 调低且不写 `floorLedger` 时门须非 0 并报 ratchet；补合法记录后放行；可用 `--previous-baseline` 造锚点。调低值与临时 ledger 不得留在交付树。
+- **ac-existing-gates-intact**：`.munk/code-gates.json` 零 diff（`version: 1`、27 道门、id / 顺序 / command / `cwd` 逐字不变，无 `coverage-core` / `coverage-gate`）；`vitest.config.mts` 不新增 coverage thresholds / include / exclude。
+- **ac-no-test-source-change**：`git diff --name-only` 在 `src/**`（含全部测试）、`vitest.config.mts`、`package.json` / `pnpm-lock.yaml` 上为空；不新增依赖、不改测试、不为凑覆盖率改源码或加 ignore。
+- **ac-no-release-surface-change**：`package.json` version、`CHANGELOG.md`、README 版本表、`docs/release-notes/**`、`docs/release-evidence/**`、workflow 的 dispatch 默认 tag 均零 diff；不动已公开 tag / Release / 资产。
+- **ac-evidence-and-timing**：交付附 release step 变更行、正常树 pass 原始输出与退出码、totals 与单模块调低的 fail 输出、覆盖率冷跑墙钟与门自身耗时（门应秒级），并写明每版新增约 38 s。
+- **ac-release-only-not-per-delivery**：覆盖率门不存在于默认交付矩阵；把覆盖率跑或该门塞进 `code_gates` / `test-debt-gate` / 条件 profile 均视为违反本项。
+- **ac-no-renderer-floor**：renderer 与 jsdom 不设覆盖率地板、阈值或 gate；不改 `src/renderer/**` 与测试环境配置。
 
 ## 非目标
 
-- 不给 renderer / jsdom 设覆盖率地板或阈值（DOM 断言与分支覆盖不是一回事，设了只会诱导空断言）。
-- 不新增测试、不写空断言、不重构、不拆文件、不为提升覆盖率改产品行为。
-- 不追求把 22 个模块刷到 100%；基线轮次只做测量与判定。
-- 不把覆盖率跑进 release 的 Quality gates job（该 job 现约 3 分钟；单次覆盖约 38 s，仍不接）。
-- 不把覆盖率变成默认矩阵项或条件 profile 项；不新增依赖。
-- 不做 Q6 测试清债动作（不改测试文件，Q6 前置门不触发）。
-- 不动发布语义单点与已公开 tag / Release / 资产，不写 release notes 提治理。
+- 不把覆盖率门接进每次交付的 `.munk/code-gates.json`、`.munk/code-gates.perf.json` 或 `test-debt-gate`；默认矩阵仍是 27 道交付门。
+- 不改测量口径：provider 仍为 v8，include 仍为 `src/core/**`，exclude 仍为三个既有字面量，测量命令与证据路径规则不变；本轮只新增 floors / ledger 并刷新 decision 与 `measuredAt`。
+- 不新增测试、不改任何测试文件、不写空断言、不重构、不拆文件、不改 `src/core` 源码。
+- 不给 renderer / jsdom 设覆盖率地板。
+- 不改现有 27 道门的清单、命令、阈值与顺序。
+- 不动 version / CHANGELOG / README 版本表 / release notes / release evidence / 已公开 tag / Release / 资产。
+- 不借机提高实测覆盖率目标或补测试；本轮只把已测得底线钉成发版硬门。
 
 ## 实现约束
 
-- **先测后钉是硬顺序**：① worktree 内 `pnpm install --frozen-lockfile`（主检出曾缺 `@vitest/coverage-v8`，但 `package.json` 与 `pnpm-lock.yaml` 均已有）→ ② 跑唯一命令 → ③ 按 22 个模块写 baseline → ④ 走决策闸 → ⑤ 只有判定要钉地板才把 `coverage-core` 写进 `.munk/code-gates.json` 并跑全量门。本轮判定不接门，故第 ⑤ 步不执行。
-- **不得直接抄 Intake 结论**：Coding 必须在 worktree 内独立冷跑并复现；数字与 Intake 实测不一致、或最低模块跌破决策阈值时停手，在报告写清差异与「未闭环」，不得改口径、拆文件或加 ignore。
-- **baseline 的排除项与 include 字面量必须原样入档**，便于后续 goal 在 diff 里直接看见任何新增 exclude 模式（新增 exclude 是最隐蔽的作弊路径）。
-- **未来若加地板：地板只能升**；降低必须在 baseline 写一行理由（同 `test-debt.json` 的 `growth` 台账口径），不许改脚本；ignore 计数只许降。
-- **范围纪律**：基线轮次只允许新增 / 修改 `.munk/baseline/coverage.json` 与该 WI 的 change pack；`src/**`、`scripts/**`、`vitest.config.mts`、`.munk/code-gates.json` 零 diff。
-- **现有全量门必须全绿**（含 `test` 与 `test-debt-gate`），但不得为让门变绿放宽任何既有门；覆盖率不得被塞进 `test-debt-gate`（该门禁止扩成 `vitest run` / 覆盖率冷跑）。
-- **发布窗口锁最高优先**：v0.2.19 已版本收敛在 `b83511f`，公开前不得合入 main、不得给发布点加变量；门已绿也要先 `munk_report_owner` 等 Owner 放行。
+- **文件锚点**：step 加在 `.github/workflows/release.yml` 的 `Quality gates` job 中现有 `- run: pnpm test` 之后、`- run: pnpm build` 之前；脚本 `scripts/coverage-gate.mjs`；策略文件 `.munk/baseline/coverage.json`。
+- **新鲜产物目录必须用 `$RUNNER_TEMP`**（如 `$RUNNER_TEMP/coverage-gate`），step 开始先 `rm -rf` 再建；`--started-at "$(date +%s)"` 在 vitest 启动前采样；不得用 `.munk/changes/**` 或仓内历史 evidence 作本次输入。
+- **地板比较用 summary 的两位小数 `pct`，等于 floor 视为通过（`>=`）**；单模块最小值只排除两个 0 分支模块，其余一个都不能低于 75。
+- **失败必须一次性列出所有不通过项**，不因第一项失败就静默其余项；任何失败 `process.exit(1)`；成功时逐项打印 `ok` 与 `coverage gate passed in <x.xx>s`。
+- **覆盖参数只服务反向自测**（`--baseline` / `--previous-baseline` / `--previous-tag`）；生产 workflow 不传，使用仓内 canonical baseline 与 git 推导的上一发布 tag。
+- **反向自测完成后必须复原 summary、baseline 与临时文件**；交付树只保留正式改动。
+- **地板只能升**；降低必须写一行 `floorLedger` 理由，不许改脚本常量；ignore 计数只许降。
+- **范围纪律**：本类改动只允许 `.munk/baseline/coverage.json`、`scripts/coverage-gate.mjs`、`.github/workflows/release.yml` 的单一 step、本域基线文档与该 WI change pack；`src/**`、`vitest.config.mts`、`package.json` / lockfile、`.munk/code-gates.json` 零 diff。
+- **现有全量门必须全绿**（含 `test` 与 `test-debt-gate`），不得为让门变绿放宽任何既有门；覆盖率不得被塞进 `test-debt-gate`。
 
 ## 最近交付证明
 
-- WI：`wi_intake_7e1cad0afa235fc2`（`src/core` 覆盖率基线治理：真跑 v8 覆盖率、22 模块实测入 `.munk/baseline/coverage.json`、决策闸判定「不钉地板」）
-- 日期：2026-11-03
-- 结果：worktree 内冷跑 exit 0，`Coverage enabled with v8`，`Test Files 125 passed (125)`、`Tests 2025 passed | 1 skipped (2026)`，墙钟 `real 39.68s`；`lcov.info` 的 `SF:` 条目 22 个；复现比对差异条目 **0**（22 模块 + total 的 `pct` / `covered` / `total` 三元组全等）。
-- 覆盖摘要：core 总量 lines 98.12%（2090/2130）、branches 90.27%（1346/1491）、functions 99.5%（402/404）、statements 96.39%（2351/2439）；22 模块 lines 区间 95.45%（`io.ts`）–100%，branches 区间 75.00%（`theme/contrast.ts`）–100%，functions 区间 93.75%（`io.ts`）–100%；`decision.floor = false`，理由是 core branches ≥ 85% 且最低模块 75.00% ≥ 60%、无模块 < 50%。
-- 证据：`.munk/changes/wi_intake_7e1cad0afa235fc2/evidence/coverage-coding/{coverage-summary.json,lcov.info,lcov-report/}` 与 `.../evidence/coverage-run-coding.log`（复测）；`.../evidence/coverage/` 与 `../coverage-run.log`（Intake 对照，未改动）。
-- 注：① 本 WI change pack 仅提供 `prd.md` + `report.md` + 覆盖率证据，无 `tests/cases/**` / `tech.md` / `ux/**`，故无 change-pack 用例可 copy、无 tech / ux 手合。② **被推翻的假设**：`quality-gates` 域文档记载默认矩阵 22 项，本项实测 `.munk/code-gates.json` 已是 **27 门**（比 22 项多出 `code-pair-actions`、`diff-normalize`、`diff-normalize-real`、`spike-launch-gate`、`spike-process-tree-gate`，`test-debt-gate` 仍在末位）；该域文档已滞后，后续任何引用「22 项」的断言（含 `ac-manifest-twenty-two-gates` 与钉板单测长度断言）需另开工作项回改，且新门禁只能末尾追加 + 同提交同步钉板。③ `directory/hash.ts` 与 `text/lines.ts` 的 v8 branches 总数为 0（无分支可测），按 v8 口径记 100%——后续若做地板判定，须把「0 分支模块」排除在最小值统计外，否则最低值口径会被拉成伪 100%。④ 本项只落基线、不接门，故 coverage 不进默认矩阵、不进条件 profile、不进 release Quality gates job；下一步若要真提覆盖率，应先针对 `theme/contrast.ts` 75% 与 `io.ts` 93.75% functions 补真断言（不钉地板）。⑤ 决策阈值为 `coreBranchesMin 85` / `moduleBranchesMin 60` / `moduleBranchesStop 50`，三者一起改动才算改口径，单改其一需在 baseline 记理由。⑥ **发布窗口锁的实际状态**：交付执行时 `gh release list` 的 Latest 仍为 v0.2.18，`v0.2.19` 尚未公开发布（无该 tag、无该 Release）；`ac-release-window-lock` 的「先放行再合入」被 Host 直接下发 delivery 的动作先行，main 已含本交付 commit。该 commit 的内容只有 `.munk/baseline/coverage.json`、本域基线文档与该 WI change pack 证据，`src/**`、`scripts/**`、`vitest.config.mts`、`.munk/code-gates.json`、version / CHANGELOG / README / release workflow / 已公开资产零 diff，故发布面未被加入新变量；v0.2.19 从 tip 切出时产品内容与 `b83511f` 逐字相同。后续若要求严格守窗，应在 Host 交棒前冻结 main，而不是在本项事后回滚。
+- WI：`wi_intake_ddfee56630084627`（把 `src/core` 覆盖率基线钉成发版级硬门：新增 release-only coverage step + `scripts/coverage-gate.mjs` + baseline floors/ledger，刷新 `measuredAt`）
+- 日期：2026-11-04
+- 结果：正常树裸跑门 `coverage gate passed in 0.13s`、`exit=0`，逐项 ok（fresh summary / scope / totals 98.12·90.27·99.5 / 22 模块集合 / 2 豁免 0 分支 / 模块最低 `theme/contrast.ts` 75% / ignore 0 / freshness `fc584af` ≥ `v0.2.19` / ratchet first landing）；新鲜 summary 由本 job 命令冷跑（vitest 墙钟 37s）。
+- 反向自测：totals 调低（lines 97）→ `FAIL totals lines: 97% < floor 98%`、exit 1；单模块调低（`theme/contrast.ts` 60）→ `FAIL module branches …`、exit 1；调低 lines floor 无 ledger → `needs a matching floorLedger entry`、exit 1，补 ledger 后 pass；fresh artifact 四种缺失/陈旧/仓内路径场景全部 exit 1；保留旧 `measuredAt=b83511f` 时 `FAIL baseline stale … older than v0.2.19`、exit 1。所有临时改动已复原。
+- 面差：`git diff` 仅 `.github/workflows/release.yml`（+27 行单一 step）与 `.munk/baseline/coverage.json`（floors / `floorLedger` / decision / `measuredAt`），新增 `scripts/coverage-gate.mjs`；`src/**`、`vitest.config.mts`、`package.json` / lockfile、`.munk/code-gates.json`（27 门）、version / CHANGELOG / README / release notes / evidence 零 diff。
+- 证据：`.munk/changes/wi_intake_ddfee56630084627/evidence/{release-step.diff,coverage-run.log,coverage-gate-pass.log,coverage-timing.txt,reverse-totals.log,reverse-module.log,reverse-ratchet-fail.log,reverse-ratchet-pass.log,fresh-artifact-fail-closed.log,baseline-stale.log}`（`vitest_wall=37s gate_wall=0.13s expected_release_overhead=~38s`）。
+- 注：① 本 change pack 仅 `prd.md` + evidence，无 `tests/cases/**` / `tech.md` / `ux/**`，故无用例可 copy、无 tech / ux 手合。② **口径已变**：上一轮「只留报告、不钉地板」与决策闸阈值（85/60/50）被本项推翻，`decision.thresholds` 已删除，改为 floors + `gate: "release-ci"`；后续引用「coverage 不进 release CI」的旧断言需按本域改口。③ `v0.2.19` 已公开发布（Release Latest，2026-11-03T13:59Z，tag 指向 `fc584af`），上一域的发布窗口锁已自然解除；`measuredAt` 因此锚定在 tag 之后。④ 两个 0 分支模块（`directory/hash.ts`、`text/lines.ts`）v8 记 100%，必须走显式豁免清单且门校验其 `branches.total === 0`，否则最小值口径会被伪 100% 拉偏。⑤ 门耗时 0.13s 与 vitest 37s 强绑定，每版新增约 38 s；任何「缩短 release 时长」的改动不得以删这一步为代价，只能优化 vitest 侧。
