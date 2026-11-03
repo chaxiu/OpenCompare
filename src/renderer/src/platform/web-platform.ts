@@ -1,9 +1,15 @@
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import {
+  parseComparisonHistoryJson,
+  serializeComparisonHistory
+} from '@shared/history/model'
+import { COMPARISON_HISTORY_STORAGE_KEY } from '@shared/history/types'
+import {
   USER_SETTINGS_STORAGE_KEY,
   parseUserSettingsJson
 } from '@shared/platform/settings'
 import type {
+  ComparisonHistoryEntry,
   DirectoryEntry,
   DirectoryListing,
   FileDigest,
@@ -69,6 +75,48 @@ function writeStoredSettings(settings: UserSettings): void {
   if (storage === null) return
   try {
     storage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+  } catch {
+    // The in-memory record above is the same-run answer.
+  }
+}
+
+/**
+ * Last successful history write of this runtime. It answers reads when
+ * `localStorage` is missing or throws, exactly like the settings fallback.
+ */
+let memoryHistory: ComparisonHistoryEntry[] = []
+
+function historyStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+function readStoredHistory(): ComparisonHistoryEntry[] {
+  const storage = historyStorage()
+  if (storage !== null) {
+    try {
+      const raw = storage.getItem(COMPARISON_HISTORY_STORAGE_KEY)
+      // A corrupt document is an empty history, not the in-memory record.
+      return raw === null ? [] : parseComparisonHistoryJson(raw)
+    } catch {
+      // Unreadable storage falls through to the in-memory record.
+    }
+  }
+  return memoryHistory
+}
+
+function writeStoredHistory(entries: readonly ComparisonHistoryEntry[]): void {
+  memoryHistory = [...entries]
+  const storage = historyStorage()
+  if (storage === null) return
+  try {
+    storage.setItem(
+      COMPARISON_HISTORY_STORAGE_KEY,
+      JSON.stringify(serializeComparisonHistory(entries))
+    )
   } catch {
     // The in-memory record above is the same-run answer.
   }
@@ -404,6 +452,10 @@ export function createWebPlatformPort(): PlatformPort {
     // blocked storage API still reads back within this run.
     readUserSettings: async () => readStoredSettings(),
     writeUserSettings: async (settings) => writeStoredSettings(settings),
+    // Same contract as the desktop runtime: one storage slot, corrupt document =
+    // empty list, unavailable storage = the most recent in-memory record.
+    readComparisonHistory: async () => readStoredHistory(),
+    writeComparisonHistory: async (entries) => writeStoredHistory(entries),
     // The browser exposes no OS UI locale beyond the navigator's preference.
     systemLocale: async () => (typeof navigator === 'undefined' ? '' : navigator.language),
     // The browser runtime has no launch source (`argv` / URL scheme), so the

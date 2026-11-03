@@ -8,7 +8,15 @@
  */
 import type { TextBytesProbe } from '@core/text/probe'
 import type { CompareRequestPayload } from '../compareRequest'
+import type { ComparisonHistoryEntry } from '../history/types'
 import type { PerfBridge } from '../perf/types'
+
+export type {
+  ComparisonHistoryEntry,
+  ComparisonHistoryEnvelope,
+  ComparisonHistoryKind,
+  ComparisonHistorySwitches
+} from '../history/types'
 
 export type PlatformKind = 'electron' | 'web'
 
@@ -306,6 +314,16 @@ export interface PlatformPort {
   readUserSettings(): Promise<UserSettings | null>
   /** Persists the settings through the runtime's single storage slot. */
   writeUserSettings(settings: UserSettings): Promise<void>
+  /**
+   * The persisted comparison history, newest first. A missing, corrupt or
+   * schema-mismatched document reads as an empty list instead of rejecting.
+   */
+  readComparisonHistory(): Promise<ComparisonHistoryEntry[]>
+  /**
+   * Replaces the whole history document atomically. Only this call rejects on a
+   * failed write; the previous document stays byte-identical.
+   */
+  writeComparisonHistory(entries: readonly ComparisonHistoryEntry[]): Promise<void>
   /** The OS UI locale (`zh-CN`, `en-US`, …); `''` when the runtime has none. */
   systemLocale(): Promise<string>
   /**

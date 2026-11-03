@@ -30,9 +30,15 @@ import type { FileFilter } from 'electron'
 import { OperationCancelledError, mapWithLimit, toReadableIoError } from '@core/io'
 import { probeTextBytes } from '@core/text/probe'
 import { SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
+import {
+  parseComparisonHistoryEntries,
+  parseComparisonHistoryJson,
+  serializeComparisonHistory
+} from '@shared/history/model'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import { parseUserSettings, parseUserSettingsJson } from '@shared/platform/settings'
 import type {
+  ComparisonHistoryEntry,
   DigestFilesOptions,
   DigestFilesResult,
   DirectoryEntry,
@@ -827,6 +833,57 @@ async function writeUserSettings(settings: UserSettings): Promise<void> {
   await writeFileAtomically(target, JSON.stringify(settings))
 }
 
+/** Single comparison-history document under `userData`; no second storage slot. */
+const COMPARISON_HISTORY_FILE = 'comparison-history.json'
+
+function comparisonHistoryPath(): string {
+  return join(app.getPath('userData'), COMPARISON_HISTORY_FILE)
+}
+
+/**
+ * One log line at most. The count is enough to observe a read / write without
+ * ever putting a user path or a raw error message into the log.
+ */
+function logComparisonHistoryCount(count: number): void {
+  console.log(`comparison-history: ${count} entries`)
+}
+
+/**
+ * Reads the persisted history. Missing file, unreadable file, corrupt JSON,
+ * version mismatch and any invalid entry all read as the empty list; a broken
+ * document must never break startup.
+ */
+async function readComparisonHistory(): Promise<ComparisonHistoryEntry[]> {
+  let entries: ComparisonHistoryEntry[]
+  try {
+    entries = parseComparisonHistoryJson(await readFile(comparisonHistoryPath(), 'utf8'))
+  } catch {
+    entries = []
+  }
+  logComparisonHistoryCount(entries.length)
+  return entries
+}
+
+/**
+ * Replaces the history document atomically through the shared same-directory
+ * temp + rename write. Only this call rejects on failure; the previous document
+ * stays byte-identical and no temp file survives.
+ */
+async function writeComparisonHistory(
+  entries: readonly ComparisonHistoryEntry[]
+): Promise<void> {
+  const target = comparisonHistoryPath()
+  try {
+    await mkdir(dirname(target), { recursive: true })
+    await writeFileAtomically(target, JSON.stringify(serializeComparisonHistory(entries)))
+  } catch (error) {
+    // `error.message` may embed a path, so only the stable code reaches the log.
+    console.log(`comparison-history write failed: ${errorCode(error) ?? 'unknown'}`)
+    throw error
+  }
+  logComparisonHistoryCount(entries.length)
+}
+
 /** The OS locale exactly as Electron reports it; never truncated or remapped. */
 function systemLocale(): string {
   return app.getLocale()
@@ -1017,6 +1074,14 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     const parsed = parseUserSettings(settings)
     if (parsed === null) throw new TypeError('Expected user settings with a supported language.')
     return writeUserSettings(parsed)
+  })
+  // History payloads are validated by the shared schema before they reach disk;
+  // a malformed list rejects this call with `TypeError` and writes nothing.
+  ipcMain.handle(PLATFORM_CHANNELS.readComparisonHistory, () => readComparisonHistory())
+  ipcMain.handle(PLATFORM_CHANNELS.writeComparisonHistory, (_event, entries: unknown) => {
+    const parsed = parseComparisonHistoryEntries(entries)
+    if (parsed === null) throw new TypeError('Expected a valid comparison history list.')
+    return writeComparisonHistory(parsed)
   })
   ipcMain.handle(PLATFORM_CHANNELS.systemLocale, () => systemLocale())
 }

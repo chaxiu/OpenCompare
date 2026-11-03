@@ -27,6 +27,7 @@ import { probeTextBytes } from '@core/text/probe'
 import { TEXT_PROBE_CASES, expectTextProbeFacts, ipcPort } from '../../test/sharedHarness'
 import { buildSyncPlan, SyncTargetError } from '@core/directory/sync'
 import { DIRECTORY_SCENE, DIRECTORY_SAMPLE_PATHS, SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
+import { createComparisonHistoryEntry } from '@shared/history/model'
 import type {
   DigestFilesResult,
   DirectoryEntry,
@@ -1617,5 +1618,70 @@ describe('text file probe', () => {
     const missing = join(await scratchRoot(), 'missing.txt')
 
     await expect(platform.probeTextFile(missing)).rejects.toThrow(`无法读取文件 ${missing}`)
+  })
+})
+
+describe('electron comparison history', () => {
+  const historyFile = (): string => join(appState.userData, 'comparison-history.json')
+  const entries = () => [
+    createComparisonHistoryEntry({ kind: 'file', createdAt: 1_700_000_000_000,
+      paths: [join(appState.userData, '左 侧.txt'), join(appState.userData, 'right.txt')],
+      ignoreWhitespace: true, ignoreNewline: false, ignoreEncoding: true }),
+    createComparisonHistoryEntry({ kind: 'merge', createdAt: 1_700_000_001_000,
+      paths: [join(appState.userData, 'base.txt'), join(appState.userData, 'ours.txt'), join(appState.userData, 'theirs.txt')],
+      ignoreWhitespace: false, ignoreNewline: true, ignoreEncoding: false })
+  ]
+
+  it('writes one version-1 document and reads every field back', async () => {
+    const expected = entries()
+    await platform.writeComparisonHistory(expected)
+    await expect(readdir(appState.userData)).resolves.toEqual(['comparison-history.json'])
+    const document = JSON.parse(await readFile(historyFile(), 'utf8'))
+    expect(document).toEqual({ version: 1, entries: expected })
+    await expect(platform.readComparisonHistory()).resolves.toEqual(expected)
+  })
+
+  it('reads an invalid JSON or wrong-version document as empty without touching other files', async () => {
+    const other = join(appState.userData, 'keep.txt')
+    await writeFile(other, 'untouched', 'utf8')
+    for (const text of ['{not json', 'null', '{"version":2,"entries":[]}', '{"version":1,"entries":[{}]}']) {
+      await writeFile(historyFile(), text, 'utf8')
+      await expect(platform.readComparisonHistory()).resolves.toEqual([])
+    }
+    await expect(readFile(other, 'utf8')).resolves.toBe('untouched')
+  })
+
+  it('rejects only the failing write and keeps the previous bytes', async () => {
+    await platform.writeComparisonHistory(entries())
+    const before = await readFile(historyFile(), 'utf8')
+    await chmod(appState.userData, 0o500)
+    try {
+      await expect(platform.writeComparisonHistory(entries())).rejects.toThrow()
+      await expect(readFile(historyFile(), 'utf8')).resolves.toBe(before)
+      expect((await readdir(appState.userData)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    } finally {
+      await chmod(appState.userData, 0o700)
+    }
+  })
+
+  it('logs only a count or a stable code, never a path', async () => {
+    const lines: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation((message: unknown) => { lines.push(String(message)) })
+    try {
+      await platform.writeComparisonHistory(entries())
+      await platform.readComparisonHistory()
+      await writeFile(historyFile(), '{not json', 'utf8')
+      await platform.readComparisonHistory()
+      await chmod(appState.userData, 0o500)
+      await expect(platform.writeComparisonHistory(entries())).rejects.toThrow()
+      await chmod(appState.userData, 0o700)
+    } finally {
+      log.mockRestore()
+    }
+    expect(lines.length).toBeGreaterThanOrEqual(4)
+    for (const line of lines) {
+      expect(line).toMatch(/^comparison-history: \d+ entries$|^comparison-history write failed: [A-Za-z0-9_]+$/)
+      for (const item of entries()) for (const path of item.paths) expect(line).not.toContain(path)
+    }
   })
 })

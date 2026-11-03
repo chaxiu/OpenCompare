@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
+  ComparisonHistoryEntry,
   DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
@@ -325,6 +326,8 @@ export function ipcPort(
     realpath: (paths) => invoke(PLATFORM_CHANNELS.realpath, paths) as Promise<readonly string[]>,
     readUserSettings: () => invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
     writeUserSettings: (settings) => invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+    readComparisonHistory: () => invoke(PLATFORM_CHANNELS.readComparisonHistory) as Promise<ComparisonHistoryEntry[]>,
+    writeComparisonHistory: (entries) => invoke(PLATFORM_CHANNELS.writeComparisonHistory, entries) as Promise<void>,
     systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>
   }
 }

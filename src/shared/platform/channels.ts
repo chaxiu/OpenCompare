@@ -30,6 +30,8 @@ export const PLATFORM_CHANNELS = {
   realpath: 'platform:realpath',
   readUserSettings: 'platform:read-user-settings',
   writeUserSettings: 'platform:write-user-settings',
+  readComparisonHistory: 'platform:read-comparison-history',
+  writeComparisonHistory: 'platform:write-comparison-history',
   systemLocale: 'platform:system-locale',
   /** main → renderer: one compare request collected from the launch source. */
   compareRequest: 'platform:compare-request',

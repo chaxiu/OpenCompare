@@ -4,6 +4,7 @@ import type { CompareRequestPayload } from '@shared/compareRequest'
 import type { PerfHarnessConfig, PerfRendererEvent } from '@shared/perf/types'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
+  ComparisonHistoryEntry,
   DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
@@ -77,6 +78,15 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
   writeUserSettings: (settings) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+  readComparisonHistory: () =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.readComparisonHistory) as Promise<
+      ComparisonHistoryEntry[]
+    >,
+  writeComparisonHistory: (entries) =>
+    ipcRenderer.invoke(
+      PLATFORM_CHANNELS.writeComparisonHistory,
+      entries
+    ) as Promise<void>,
   systemLocale: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>,
   onCompareRequest: (listener) => {
