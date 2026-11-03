@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 48335
+    "repoTestLines": 48671
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1630
+    "repoTestCases": 1643
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 47937,
-      "to": 48335,
-      "reason": "add the history safety evidence: pure preflight side ordering and stable error codes, DOM coverage for missing / unreadable / type-changed reopen refusals with no tab or four-state residue, localized error notices and row badges, error scoped write failures, error removal and clearing on success, inline clear-history confirmation, mixed-kind 20-entry cap trimming and console path privacy",
-      "addedCases": 21
+      "from": 48335,
+      "to": 48671,
+      "reason": "add the dedicated history-safety gate: pure assertions for history entry add / dedupe / single removal / trim, the mixed-kind 20-record cap, bad path preflight with the leftmost failing side, the switch serialization roundtrip and reopen argument parsing, plus the manifest pin for the gate that also runs the existing historySafety and historyHome jsdom suites",
+      "addedCases": 13
     }
   ]
 }
