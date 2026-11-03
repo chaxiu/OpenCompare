@@ -3,22 +3,25 @@ import type { DiffStatus, SampleComposition } from '@shared/fixtures'
 import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
 import {
+  STATUS_BAR_CONTENT_PX,
   levelBandClasses,
-  levelRowClasses,
+  measureStatusBar,
   statusBarClasses
 } from '@renderer/workbench/shellLayout'
+import { useWindowWidth } from '@renderer/workbench/useWidthTier'
 import { DiffDot } from './DiffBadge'
 import { DIFF_LABEL_KEYS, DIFF_STATUSES } from './diffSemantics'
 import { cx } from './utils'
 
 export function StatusBar({ children }: { readonly children: ReactNode }): JSX.Element {
+  const width = useWindowWidth()
+  const { rows } = measureStatusBar(width, STATUS_BAR_CONTENT_PX)
   return (
     <footer
       data-shell-level="status"
       className={cx(
         'shrink-0 border-t border-line-subtle bg-surface-sunken text-2xs text-content-muted',
-        statusBarClasses(),
-        levelRowClasses('status'),
+        statusBarClasses(rows),
         levelBandClasses('status')
       )}
     >

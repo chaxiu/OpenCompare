@@ -21,6 +21,7 @@ import {
   levelBandClasses,
   levelHeaderClasses,
   levelRowClasses,
+  measureStatusBar,
   statusBarClasses
 } from './shellLayout'
 import type { ShellEntryId, ShellLevel, ToolbarView, WidthTier } from './shellLayout'
@@ -200,11 +201,16 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     const { container } = render(<Workbench platform={createWebPlatformPort()} />)
     await loadSamples()
 
-    for (const level of ['app', 'sessions', 'status'] as const) {
+    for (const level of ['app', 'sessions'] as const) {
       const element = levelElement(container, level)
       hasClasses(element, levelRowClasses(level))
       hasClasses(element, levelBandClasses(level))
     }
+
+    // The status layer height comes from the row-count helper, not the table.
+    const status = levelElement(container, 'status')
+    hasClasses(status, statusBarClasses(measureStatusBar(window.innerWidth).rows))
+    hasClasses(status, levelBandClasses('status'))
 
     const toolbar = levelElement(container, 'view-toolbar')
     hasClasses(toolbar, levelBandClasses('view-toolbar'))
@@ -439,7 +445,8 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     await loadSamples()
 
     const status = levelElement(container, 'status')
-    hasClasses(status, statusBarClasses())
+    const { rows } = measureStatusBar(window.innerWidth)
+    hasClasses(status, statusBarClasses(rows))
     const text = status.textContent ?? ''
     expect(text).toContain(zh('shell.status.session'))
     expect(text).toContain('web')
@@ -488,11 +495,24 @@ describe.each([960, 1024, 1280, 1440, 1920])('wrapping status bar at %ipx', (wid
     await loadSamples()
 
     const status = levelElement(container, 'status')
-    // The bar wraps its groups instead of hiding them behind a scroll channel.
-    hasClasses(status, statusBarClasses())
-    hasClasses(status, levelRowClasses('status'))
+    const { rows } = measureStatusBar(width)
+    // The bar wraps its groups instead of hiding them behind a scroll channel,
+    // and the footer height class is the helper output for the measured rows.
+    hasClasses(status, statusBarClasses(rows))
     hasClasses(status, levelBandClasses('status'))
     expect(classList(status).some((token) => token.startsWith('overflow-x'))).toBe(false)
+    const heightTokens = classList(status).filter(
+      (token) => token === 'h-8' || token === 'h-auto'
+    )
+    expect(heightTokens).toHaveLength(1)
+    if (rows === 1) {
+      expect(heightTokens).toEqual(['h-8'])
+      expect(classList(status)).not.toContain('h-auto')
+    } else {
+      expect(heightTokens).toEqual(['h-auto'])
+      expect(classList(status)).toContain('min-h-8')
+      expect(classList(status)).not.toContain('h-8')
+    }
 
     // 4/4 semantic cells of the directory sample (its conflict count is zero).
     const items = statusLegendItems(container)

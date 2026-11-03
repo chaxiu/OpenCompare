@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 46459
+    "repoTestLines": 46539
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1539
+    "repoTestCases": 1543
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46272,
-      "to": 46459,
-      "reason": "add the narrow-window status bar wrapping model with content-boundary rows plus legend / count / statistics visibility assertions in the existing shellLayout suites",
-      "addedCases": 11
+      "from": 46459,
+      "to": 46539,
+      "reason": "drive the wrapped status-bar height from measureStatusBar rows (statusBarHeightPx, h-auto/min-h-8) and sync chrome / contentRowBudget statusRows budgets in the existing shellLayout suites",
+      "addedCases": 4
     }
   ]
 }
