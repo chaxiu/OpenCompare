@@ -81,7 +81,7 @@ const treeScript = (dir: string, mode: TreeMode): string => {
       'writeFileSync(PID_FILE, String(grandchild.pid))',
       `process.stdout.write('grandchild=' + grandchild.pid + '\\n')`,
       `${mode === 'stubborn' ? "process.on('SIGTERM', () => {})" : ''}`,
-      `${mode === 'leader-exits' ? 'process.exit(0)' : ''}`,
+      `${mode === 'leader-exits' ? "process.on('exit', () => writeFileSync(PID_FILE + '.exited', '0')); process.exit(0)" : ''}`,
       'setInterval(() => {}, 1000)'
     ].join('\n')
   )
@@ -144,7 +144,7 @@ const successWorld = (dir: string): { world: World; launched: CapturedChild[] } 
 
 /**
  * Failure path: the real launchApp runs end to end (spawn + capture + the
- * catch-branch reap); the target wait is the only injected part.
+ * catch-branch reap); the target wait is the only injected part and resolves only after the leader's own exit marker, so diagnostics always carries the real exit code.
  */
 const failingWorld = (dir: string): World =>
   ({
@@ -155,7 +155,7 @@ const failingWorld = (dir: string): World =>
         args: [treeScript(dir, 'leader-exits')],
         cwd: dir,
         waitForTarget: async () => {
-          await waitFor(() => existsSync(pidFileOf(dir, 'leader-exits')))
+          await waitFor(() => existsSync(pidFileOf(dir, 'leader-exits') + '.exited'))
           return {
             target: null,
             reason: 'process-exited' as SpikeFailureReason,

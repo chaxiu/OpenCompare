@@ -11,6 +11,8 @@ import {
   SHELL_ENTRY_IDS,
   SHELL_LEVELS,
   SHELL_LEVEL_ORDER,
+  STATUS_BAR_CONTENT_PX,
+  STATUS_BAR_WIDTHS,
   TIER_WIDTHS,
   TOOLBAR_ROWS,
   chromeHeightPx,
@@ -21,8 +23,10 @@ import {
   levelHeightPx,
   levelRowClasses,
   mainContentHeightPx,
+  measureStatusBar,
   measureToolbar,
   resolveWidthTier,
+  statusBarClasses,
   toolbarBandHeightPx,
   viewToolbarRows,
   visibleRowCount
@@ -361,6 +365,59 @@ describe('toolbar width budgets', () => {
       'save'
     ])
     expect(viewToolbarRows('code-diff')).toBe(2)
+  })
+})
+
+describe('status bar width model', () => {
+  it('wraps the 1415px content at 960 / 1024 / 1280 instead of overflowing', () => {
+    for (const width of [960, 1024, 1280]) {
+      const budget = measureStatusBar(width)
+      expect(budget.required).toBe(STATUS_BAR_CONTENT_PX)
+      expect(budget.fits).toBe(false)
+      expect(budget.rows).toBeGreaterThanOrEqual(2)
+      // Wrapping carries the content: no row ever leaves the viewport.
+      expect(budget.rows * budget.available).toBeGreaterThanOrEqual(budget.required)
+    }
+  })
+
+  it('keeps 1440 / 1920 on one row', () => {
+    for (const width of [1440, 1920]) {
+      const budget = measureStatusBar(width)
+      expect(budget.fits).toBe(true)
+      expect(budget.rows).toBe(1)
+      expect(budget.available).toBeGreaterThanOrEqual(budget.required)
+    }
+  })
+
+  it('is driven by the content width, not by a width breakpoint', () => {
+    // The same 1920px window wraps when its content grows...
+    expect(measureStatusBar(1920, 3000).rows).toBeGreaterThan(1)
+    // ...and a narrow window can still fit a short bar on one row.
+    expect(measureStatusBar(960, 500).fits).toBe(true)
+    for (const width of STATUS_BAR_WIDTHS) {
+      const budget = measureStatusBar(width)
+      expect(budget.rows * budget.available).toBeGreaterThanOrEqual(STATUS_BAR_CONTENT_PX)
+    }
+  })
+
+  it('flips from one row to two exactly at the content boundary', () => {
+    for (const width of [960, 1024, 1280, 1440, 1920]) {
+      const { available } = measureStatusBar(width)
+      expect(measureStatusBar(width, available)).toMatchObject({ fits: true, rows: 1 })
+      expect(measureStatusBar(width, available + 1)).toMatchObject({ fits: false, rows: 2 })
+      expect(measureStatusBar(width, available * 2)).toMatchObject({ fits: false, rows: 2 })
+      expect(measureStatusBar(width, available * 2 + 1).rows).toBe(3)
+    }
+  })
+
+  it('renders a wrapping container with no horizontal scroll channel', () => {
+    const tokens = statusBarClasses().split(' ')
+    expect(tokens).toContain('flex')
+    expect(tokens).toContain('flex-wrap')
+    expect(tokens).toContain('gap-y-0')
+    expect(tokens.some((token) => token.startsWith('overflow-x'))).toBe(false)
+    // Two wrapped 16px text rows still fit the level's 32px height.
+    expect(levelHeightPx('status')).toBe(2 * 16)
   })
 })
 

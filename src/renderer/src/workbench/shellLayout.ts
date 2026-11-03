@@ -160,6 +160,53 @@ export function levelHeaderClasses(level: ShellLevel): string {
   return `${metrics.height} ${metrics.paddingX} ${metrics.gap}`
 }
 
+/**
+ * Status-bar widths the shell must stay readable at. 960 and 1280 sit between
+ * the three reference tiers but are part of the narrow-window acceptance.
+ */
+export const STATUS_BAR_WIDTHS: readonly number[] = [960, 1024, 1280, 1440, 1920]
+
+/**
+ * One-row content demand of the status bar, measured on the 1024px L3
+ * evidence: session + platform + probe + legend + stats need 1415px.
+ */
+export const STATUS_BAR_CONTENT_PX = 1415
+
+export interface StatusBarBudget {
+  /** Width left inside the level's horizontal inset. */
+  readonly available: number
+  /** Required width when every group sits on one row. */
+  readonly required: number
+  /** Single-row fit only: wrapping is not an overflow. */
+  readonly fits: boolean
+  /** Rows the wrapping bar occupies; content is never pushed out of view. */
+  readonly rows: number
+}
+
+/**
+ * Width model of the status bar. The wrapping container absorbs any content
+ * that does not fit one row, so the answer is always "single row" or
+ * "`rows` wrapped rows" — never an overflow. Driven by the content demand, not
+ * by a width breakpoint.
+ */
+export function measureStatusBar(
+  width: number,
+  required: number = STATUS_BAR_CONTENT_PX
+): StatusBarBudget {
+  const available = Math.max(1, width - PADDING_X_PX[SHELL_LEVELS.status.paddingX] * 2)
+  const rows = Math.max(1, Math.ceil(required / available))
+  return { available, required, fits: rows === 1, rows }
+}
+
+/**
+ * Layout utilities of the status bar itself: a wrapping flex row with no
+ * horizontal scroll channel. The row gap stays 0 so two 16px text rows fit the
+ * level's `h-8` height (only the wrapped rows are ever shown).
+ */
+export function statusBarClasses(): string {
+  return 'flex flex-wrap items-center gap-y-0'
+}
+
 /** Every existing workbench entry, in the order the delivery table lists them. */
 export type ShellEntryId =
   | 'open-file'
