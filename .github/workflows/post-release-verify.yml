@@ -14,8 +14,10 @@ name: post-release-verify
 # registry, `expected=15` and every judgment are identical across modes.
 #
 # The workflow holds no signing key and writes nothing: `contents: write` is
-# only what GitHub requires to read a draft release and its assets; `gh` is used
-# for `gh api` / `gh release download` GETs only, and no step calls
+# only what GitHub requires to read a draft release and its assets; `actions:
+# read` is only what `gh run download` needs to fetch the release run's
+# build-time sha256 manifests. `gh` is used for `gh api` / `gh release
+# download` / `gh run download` GETs only, and no step calls
 # `gh release edit|upload|create|delete`, `git tag` or `git push`. Publishing is
 # owned by `release.yml`'s `finalize` and happens after this run's aggregate
 # passes, never before.
@@ -43,15 +45,22 @@ on:
         options:
           - draft
           - published
+      release_run_id:
+        description: release.yml run id that holds this tag's build-time sha256 manifests
+        required: false
+        default: ''
+        type: string
 
 run-name: post-release-verify ${{ inputs.tag }}
 
 permissions:
   contents: write
+  actions: read
 
 env:
   TAG: ${{ inputs.tag }}
   MODE: ${{ inputs.mode }}
+  RELEASE_RUN_ID: ${{ inputs.release_run_id }}
 
 jobs:
   spike:
@@ -114,11 +123,28 @@ jobs:
       - name: Install xvfb
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
+      # Read-only: the release run archived one manifest per target. Missing
+      # artifacts are a hard stop, never a skipped digest comparison.
+      - name: Fetch the build-time sha256 manifests
+        if: inputs.release_run_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh run download "${RELEASE_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --pattern 'sha256-manifest-*' --dir sha256-manifests; then
+            echo "::error::缺构建期 sha256 清单：release run ${RELEASE_RUN_ID} 未取回任何 sha256-manifest-*." >&2
+            exit 1
+          fi
       - name: Verify the release assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --release-state="$MODE" --platform=${{ matrix.platform }} --out=verify-out
+        run: |
+          set -euo pipefail
+          manifest_args=()
+          if [ -n "${RELEASE_RUN_ID}" ]; then manifest_args=(--sha256-manifest-dir=sha256-manifests); fi
+          node scripts/verify-release.mjs --tag="$TAG" --layer=ci --release-state="$MODE" --platform=${{ matrix.platform }} --out=verify-out ${manifest_args[@]+"${manifest_args[@]}"}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

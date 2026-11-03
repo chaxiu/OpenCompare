@@ -350,7 +350,8 @@
         "post-release-verify-since.txt",
         "release-state.txt",
         "验证模式: ${mode}",
-        "gh workflow run post-release-verify.yml -f tag=\"${RELEASE_TAG}\" -f mode=\"${mode}\""
+        "gh workflow run post-release-verify.yml -f tag=\"${RELEASE_TAG}\" -f mode=\"${mode}\"",
+        "-f release_run_id=\"${GITHUB_RUN_ID}\""
       ],
       "absent": [],
       "patterns": [],
@@ -420,7 +421,12 @@
         "curl -sSIL -o /dev/null -w '%{http_code}'",
         "browser_download_url",
         "digest",
-        "openssl dgst -sha256",
+        "gh run download",
+        "--pattern 'sha256-manifest-*'",
+        "scripts/verify-release.mjs",
+        "--public-l1",
+        "--sha256-manifest-dir",
+        "--sample=",
         "::error::",
         "exit 1"
       ],
@@ -429,13 +435,49 @@
         "gh release upload"
       ],
       "patterns": [
-        "does not match release digest",
-        "returned HTTP"
+        "returned HTTP",
+        "缺构建期 sha256 清单"
       ],
       "absentPatterns": [
         "gh release (upload|edit|create|delete)",
         "continue-on-error"
       ]
+    },
+    {
+      "id": "compute-build-sha256-manifest",
+      "job": "release",
+      "name": "Compute the build-time sha256 manifest",
+      "tokens": [
+        "set -euo pipefail",
+        "scripts/verify-release.mjs",
+        "--build-sha256-manifest",
+        "--release-dir=release",
+        "--out=sha256-manifest",
+        "${RELEASE_TAG}",
+        "matrix.target"
+      ],
+      "absent": [
+        "gh release upload",
+        "sha256-manifest/"
+      ],
+      "patterns": [],
+      "absentPatterns": [
+        "continue-on-error"
+      ]
+    },
+    {
+      "id": "upload-installers",
+      "job": "release",
+      "name": "Upload installers to the tag's release",
+      "tokens": [
+        "assets=(release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.blockmap release/latest*.yml)",
+        "gh release upload \"${RELEASE_TAG}\" \"${assets[@]}\" --clobber --repo \"${GITHUB_REPOSITORY}\""
+      ],
+      "absent": [
+        "sha256-manifest"
+      ],
+      "patterns": [],
+      "absentPatterns": []
     }
   ],
   "stepOrder": [
@@ -467,6 +509,16 @@
       ],
       "mustBeLast": false,
       "job": "finalize"
+    },
+    {
+      "id": "release-manifest-order",
+      "names": [
+        "Compute the build-time sha256 manifest",
+        "Archive the build-time sha256 manifest",
+        "Upload installers to the tag's release"
+      ],
+      "mustBeLast": false,
+      "job": "release"
     }
   ],
   "postReleaseVerify": {
@@ -477,7 +529,8 @@
     "aggregateStep": "Assert the post-release verification aggregate passed",
     "tagRequired": true,
     "permissions": {
-      "contents": "write"
+      "contents": "write",
+      "actions": "read"
     },
     "forbiddenTriggers": [
       "release",
