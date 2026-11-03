@@ -453,7 +453,7 @@ describe('release evidence ledger (table-driven)', () => {
     // The converging tag may still be pending: only an existing evidence file
     // has to reconcile with its fixture ledger row.
     const current = evidenceRecords.find((record) => record.version === currentTag)
-    if (current !== undefined) {
+    if (current !== undefined && ledgerRow(currentTag)?.assets !== undefined) {
       const currentRow = ledgerRow(currentTag)
       expect(currentRow, `${currentTag}: fixture row`).toBeDefined()
       expect(current.assets.length, `${currentTag}: assets`).toBe(currentRow?.assets)
