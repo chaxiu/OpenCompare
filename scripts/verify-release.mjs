@@ -80,6 +80,15 @@ export const SPIKE_TARGET_TIMEOUT_MS = 60_000
 export const SPIKE_APP_SHELL_TIMEOUT_MS = 60_000
 export const SPIKE_PROCESS_EXIT_BUDGET_MS = 5_000
 
+/**
+ * Teardown budgets, same order of magnitude as the exit budget: after SIGKILL
+ * the reap must still resolve instead of waiting forever, and the CLI may only
+ * wait this long for stdout/stderr to drain before forcing the exit.
+ */
+export const SPIKE_PROCESS_KILL_WAIT_MS = 1_000
+export const SPIKE_PROCESS_POLL_INTERVAL_MS = 25
+export const SPIKE_EXIT_FLUSH_TIMEOUT_MS = 1_000
+
 /** Closed set of spike failure reasons; no other value may reach `spike.json`. */
 export const SPIKE_FAILURE_REASONS = ['process-exited', 'no-page-target', 'app-shell-timeout']
 
@@ -862,20 +871,114 @@ export function runCommand(command, args = [], options = {}) {
   }
 }
 
-function stopChild(child) {
-  return new Promise((done) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      done()
-      return
+/**
+ * Linux launches the spike in its own process group (`detached: true`), so the
+ * whole tree `xvfb-run` → `Xvfb` → Electron can be reaped through `-pid`.
+ * Windows has no process groups; the spike matrix never runs there, so it and
+ * every other platform keep the direct-child signal.
+ */
+export function spikeUsesProcessGroup(platform = process.platform) {
+  return platform === 'linux'
+}
+
+/**
+ * Signal the launched tree, never the CLI itself. A group kill is attempted
+ * first and the direct child is kept as a fallback; ESRCH (already gone) and
+ * EPERM (not ours) must not turn a reap into a hang.
+ */
+function signalChildTree(child, { processGroup, signal }) {
+  const pid = typeof child?.pid === 'number' ? child.pid : null
+  if (pid === null || pid <= 0) return
+  const targets = processGroup && process.platform !== 'win32' ? [-pid, pid] : [pid]
+  for (const target of targets) {
+    try {
+      process.kill(target, signal)
+    } catch {
+      // Nothing to reap, or no permission: the bounded wait still decides.
     }
-    child.removeAllListeners('exit')
-    child.once('exit', () => done())
-    child.kill('SIGTERM')
-    setTimeout(() => {
-      child.kill('SIGKILL')
-      done()
-    }, 5_000)
-  })
+  }
+}
+
+/** Group liveness on POSIX; a plain child liveness check everywhere else. */
+function childTreeAlive(child, { processGroup }) {
+  const pid = typeof child?.pid === 'number' ? child.pid : null
+  // A spawn that never produced a pid has nothing to reap.
+  if (pid === null || pid <= 0) return false
+  if (processGroup && process.platform !== 'win32') {
+    try {
+      process.kill(-pid, 0)
+      return true
+    } catch (error) {
+      // ESRCH means the whole group is gone; EPERM means it still exists.
+      if (error?.code === 'ESRCH') return false
+      return true
+    }
+  }
+  return child.exitCode === null && child.signalCode === null
+}
+
+async function waitUntilReaped(child, { processGroup, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs
+  while (childTreeAlive(child, { processGroup })) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await sleep(Math.min(SPIKE_PROCESS_POLL_INTERVAL_MS, remaining))
+  }
+  return true
+}
+
+/**
+ * Drop every handle the parent still holds on the tree: data/exit/error
+ * listeners first, then the pipes themselves. A surviving grandchild that
+ * inherited the write end can therefore never pin the CLI event loop.
+ */
+function releaseChildHandles(child) {
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (stream === null || stream === undefined) continue
+    stream.removeAllListeners()
+    if (stream.destroyed !== true) {
+      try {
+        stream.destroy()
+      } catch {
+        // Already closed by the child side.
+      }
+    }
+  }
+  for (const event of ['exit', 'close', 'error']) child.removeAllListeners(event)
+  try {
+    child.unref()
+  } catch {
+    // A child that already exited has nothing to unref.
+  }
+}
+
+/**
+ * Reap one launched tree: SIGTERM the group, then SIGKILL whatever survived
+ * the grace budget. Always resolves — the SIGKILL leg is bounded too — and
+ * always releases the captured pipes before returning.
+ *
+ * The leader is signalled even when it already exited: on Linux `xvfb-run` can
+ * be gone while `Xvfb` / Electron still hold the inherited pipes.
+ */
+export async function stopChild(
+  child,
+  {
+    processGroup = false,
+    graceMs = SPIKE_PROCESS_EXIT_BUDGET_MS,
+    killWaitMs = SPIKE_PROCESS_KILL_WAIT_MS
+  } = {}
+) {
+  if (child === null || child === undefined) return
+  const leaderReaped = child.exitCode !== null || child.signalCode !== null
+  if (processGroup || !leaderReaped) {
+    signalChildTree(child, { processGroup, signal: 'SIGTERM' })
+    const reaped = await waitUntilReaped(child, { processGroup, timeoutMs: graceMs })
+    if (!reaped) {
+      signalChildTree(child, { processGroup, signal: 'SIGKILL' })
+      await waitUntilReaped(child, { processGroup, timeoutMs: killWaitMs })
+    }
+  }
+  releaseChildHandles(child)
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -1090,6 +1193,58 @@ class CdpClient {
   }
 }
 
+/**
+ * Spawn one captured child and own its teardown. `detached` is only set when
+ * the caller asked for a process group, so macOS keeps the historical spawn and
+ * a fake process tree can exercise the Linux group path anywhere.
+ */
+export function spawnCapturedChild({
+  command,
+  args = [],
+  cwd,
+  env,
+  processGroup = false
+} = {}) {
+  const child = spawn(command, args, {
+    cwd,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: processGroup
+  })
+  const output = []
+  const stdoutChunks = []
+  const stderrChunks = []
+  child.stdout?.on('data', (chunk) => {
+    const text = String(chunk)
+    stdoutChunks.push(text)
+    output.push(text)
+  })
+  child.stderr?.on('data', (chunk) => {
+    const text = String(chunk)
+    stderrChunks.push(text)
+    output.push(text)
+  })
+  let exitInfo = null
+  child.once('exit', (code, signal) => {
+    exitInfo = { code, signal }
+  })
+  child.once('error', (spawnError) => {
+    exitInfo = { code: -1, signal: null }
+    stderrChunks.push(`spawn error: ${spawnError.message}\n`)
+    output.push(`spawn error: ${spawnError.message}\n`)
+  })
+  return {
+    child,
+    output,
+    alive: () => exitInfo === null && child.exitCode === null && child.signalCode === null,
+    exitCode: () => exitInfo?.code ?? child.exitCode ?? null,
+    signal: () => exitInfo?.signal ?? child.signalCode ?? null,
+    stdout: () => stdoutChunks.join(''),
+    stderr: () => stderrChunks.join(''),
+    stop: () => stopChild(child, { processGroup })
+  }
+}
+
 /** Real world: filesystem, commands, `gh`, CDP launches and heap sampling. */
 export function createWorld({ env = process.env } = {}) {
   return {
@@ -1128,43 +1283,32 @@ export function createWorld({ env = process.env } = {}) {
         }))
       }
     },
-    launchApp: async ({ command, args = [], port, cwd, env: extraEnv, timeoutMs, waitForTarget }) => {
+    launchApp: async ({
+      command,
+      args = [],
+      port,
+      cwd,
+      env: extraEnv,
+      timeoutMs,
+      waitForTarget,
+      processGroup = false
+    }) => {
       const launchStartedAt = new Date().toISOString()
-      const child = spawn(command, args, {
+      const proc = spawnCapturedChild({
+        command,
+        args,
         cwd,
         env: { ...env, ...extraEnv },
-        stdio: ['ignore', 'pipe', 'pipe']
+        processGroup
       })
-      const output = []
-      const stdoutChunks = []
-      const stderrChunks = []
-      child.stdout?.on('data', (chunk) => {
-        const text = String(chunk)
-        stdoutChunks.push(text)
-        output.push(text)
-      })
-      child.stderr?.on('data', (chunk) => {
-        const text = String(chunk)
-        stderrChunks.push(text)
-        output.push(text)
-      })
-      let exitInfo = null
-      child.once('exit', (code, signal) => {
-        exitInfo = { code, signal }
-      })
-      child.once('error', (spawnError) => {
-        exitInfo = { code: -1, signal: null }
-        stderrChunks.push(`spawn error: ${spawnError.message}\n`)
-        output.push(`spawn error: ${spawnError.message}\n`)
-      })
-      const childAlive = () =>
-        exitInfo === null && child.exitCode === null && child.signalCode === null
+      const { output } = proc
+      const childAlive = () => proc.alive()
       const diagnostics = (reason, wait) => ({
         reason,
-        exitCode: exitInfo?.code ?? child.exitCode ?? null,
-        signal: exitInfo?.signal ?? child.signalCode ?? null,
-        stdout: stdoutChunks.join(''),
-        stderr: stderrChunks.join(''),
+        exitCode: proc.exitCode(),
+        signal: proc.signal(),
+        stdout: proc.stdout(),
+        stderr: proc.stderr(),
         portProbe: wait?.portProbe ?? [],
         startedAt: launchStartedAt,
         finishedAt: new Date().toISOString()
@@ -1199,7 +1343,7 @@ export function createWorld({ env = process.env } = {}) {
           error?.diagnostics === undefined
             ? failure(childAlive() ? 'no-page-target' : 'process-exited', String(error?.message ?? error), wait)
             : error
-        await stopChild(child)
+        await proc.stop()
         throw wrapped
       }
       return {
@@ -1218,7 +1362,7 @@ export function createWorld({ env = process.env } = {}) {
         },
         stop: async () => {
           cdp.close()
-          await stopChild(child)
+          await proc.stop()
         }
       }
     }
@@ -2242,6 +2386,7 @@ async function runSpike({
     const descriptor = buildSpikeLaunchDescriptor({ platform, port, root, electronBinary })
     launch = await world.launchApp({
       ...descriptor,
+      processGroup: spikeUsesProcessGroup(platform),
       env: { HOME: home },
       port,
       timeoutMs: SPIKE_TARGET_TIMEOUT_MS
@@ -2303,6 +2448,44 @@ const USAGE = [
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --aggregate=<parts> --out=<dir>',
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --spike --out=<dir>'
 ].join('\n')
+
+/**
+ * Deterministic CLI exit. Every evidence file is already written with sync
+ * atomic writes before this runs, so the only thing left is the captured
+ * stdout/stderr: wait for their queued writes to flush, then exit. A bounded
+ * fallback timer keeps the exit deterministic even if a stream never drains.
+ */
+export function exitAfterFlush(code, { proc = process, timeoutMs = SPIKE_EXIT_FLUSH_TIMEOUT_MS } = {}) {
+  proc.exitCode = code
+  let finished = false
+  let timer
+  const finish = () => {
+    if (finished) return
+    finished = true
+    if (timer !== undefined) clearTimeout(timer)
+    proc.exit(code)
+  }
+  timer = setTimeout(finish, timeoutMs)
+  const streams = [proc.stdout, proc.stderr].filter(
+    (stream) => stream !== null && stream !== undefined && typeof stream.write === 'function'
+  )
+  let pending = streams.length
+  if (pending === 0) {
+    finish()
+    return
+  }
+  const onFlushed = () => {
+    pending -= 1
+    if (pending === 0) finish()
+  }
+  for (const stream of streams) {
+    try {
+      stream.write('', onFlushed)
+    } catch {
+      onFlushed()
+    }
+  }
+}
 
 /**
  * CLI entry. Returns the process exit code; the summary is written atomically
@@ -2423,11 +2606,11 @@ const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1]
 if (invokedPath !== '' && invokedPath === fileURLToPath(import.meta.url)) {
   runVerifyReleaseCli(process.argv.slice(2)).then(
     (code) => {
-      process.exitCode = code
+      exitAfterFlush(code)
     },
     (error) => {
       process.stderr.write(`verify-release ${error instanceof Error ? error.message : error}\n`)
-      process.exitCode = 1
+      exitAfterFlush(1)
     }
   )
 }

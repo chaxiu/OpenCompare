@@ -8,17 +8,19 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 44854
+    "repoTestLines": 45245
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1461
+    "repoTestCases": 1472
   },
   "harness": {
     "perFileMaxLines": 400,
     "totalMaxLines": 400,
-    "files": ["src/test/sharedHarness.tsx"]
+    "files": [
+      "src/test/sharedHarness.tsx"
+    ]
   },
   "literalWhitelist": {
     "sha256": [
@@ -29,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 44462,
-      "to": 44854,
-      "reason": "spike launch gate: platform descriptor, bounded target wait with liveness, closed failure reasons, dual diagnostic files, workflow parity",
-      "addedCases": 17
+      "from": 44854,
+      "to": 45245,
+      "reason": "spike process-tree gate: linux detached process group, SIGTERM then SIGKILL escalation, released stdout/stderr pipes, success/failure reap, deterministic CLI exit",
+      "addedCases": 11
     }
   ]
 }

@@ -349,7 +349,7 @@ describe('workflow parity', () => {
 })
 
 describe('gate registration and lessons', () => {
-  it('registers spike-launch-gate between diff-normalize-real and the template gates', () => {
+  it('registers spike-launch-gate between diff-normalize-real and the process-tree gate', () => {
     const manifest = JSON.parse(readFileSync(join(repoRoot, '.munk/code-gates.json'), 'utf8')) as {
       version: number
       gates: Array<{ id: string; cwd: string; command: string }>
@@ -363,7 +363,8 @@ describe('gate registration and lessons', () => {
     expect(existsSync(join(repoRoot, 'src/spike-launch-gate.test.ts'))).toBe(true)
     const ids = manifest.gates.map((entry) => entry.id)
     expect(ids.indexOf('spike-launch-gate')).toBe(ids.indexOf('diff-normalize-real') + 1)
-    expect(ids[ids.indexOf('spike-launch-gate') + 1]).toBe('template-default-unchecked')
+    expect(ids[ids.indexOf('spike-launch-gate') + 1]).toBe('spike-process-tree-gate')
+    expect(ids[ids.indexOf('spike-process-tree-gate') + 1]).toBe('template-default-unchecked')
     expect(ids.slice(-2)).toEqual(['verify-release-gate', 'test-debt-gate'])
     expect(manifest.version).toBe(1)
     for (const forbidden of ['&&', '||', '|', ';']) expect(gate?.command).not.toContain(forbidden)

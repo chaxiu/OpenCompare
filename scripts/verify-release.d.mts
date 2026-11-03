@@ -1,5 +1,7 @@
 /** Types for `scripts/verify-release.mjs` so the vitest gate can import it. */
 
+import type { ChildProcess } from 'node:child_process'
+
 export type Layer = 'local' | 'ci'
 export type CiPlatform = 'mac' | 'linux' | 'windows'
 export type StepStatus = 'pass' | 'fail' | 'skip'
@@ -189,6 +191,7 @@ export interface World {
     env?: Record<string, string>
     timeoutMs?: number
     waitForTarget?: (options: SpikeTargetWaitOptions) => Promise<SpikeTargetWaitResult>
+    processGroup?: boolean
   }): Promise<LaunchHandle>
 }
 
@@ -214,6 +217,9 @@ export const SPIKE_TARGET_POLL_INTERVAL_MS: number
 export const SPIKE_TARGET_TIMEOUT_MS: number
 export const SPIKE_APP_SHELL_TIMEOUT_MS: number
 export const SPIKE_PROCESS_EXIT_BUDGET_MS: number
+export const SPIKE_PROCESS_KILL_WAIT_MS: number
+export const SPIKE_PROCESS_POLL_INTERVAL_MS: number
+export const SPIKE_EXIT_FLUSH_TIMEOUT_MS: number
 export const SPIKE_FAILURE_REASONS: SpikeFailureReason[]
 export const LOCAL_FIXTURE_ROOTS: { left: string; right: string }
 export const MANUAL_NOT_COVERED: Array<{ id: string; label: string; reason: string }>
@@ -341,6 +347,44 @@ export function formatSpikeLaunchLog(record: {
   startedAt: string
   finishedAt: string
 }): string
+
+export function spikeUsesProcessGroup(platform?: string): boolean
+
+export interface CapturedChild {
+  child: ChildProcess
+  output: string[]
+  alive(): boolean
+  exitCode(): number | null
+  signal(): string | null
+  stdout(): string
+  stderr(): string
+  stop(): Promise<void>
+}
+
+export function spawnCapturedChild(options?: {
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string | undefined>
+  processGroup?: boolean
+}): CapturedChild
+
+export function stopChild(
+  child: unknown,
+  options?: { processGroup?: boolean; graceMs?: number; killWaitMs?: number }
+): Promise<void>
+
+export interface FlushExitProcess {
+  exitCode?: number | null
+  exit(code: number): void
+  stdout?: { write(chunk: string, done?: () => void): unknown } | null
+  stderr?: { write(chunk: string, done?: () => void): unknown } | null
+}
+
+export function exitAfterFlush(
+  code: number,
+  options?: { proc?: FlushExitProcess; timeoutMs?: number }
+): void
 
 export function writeTextAtomic(path: string, text: string): void
 
