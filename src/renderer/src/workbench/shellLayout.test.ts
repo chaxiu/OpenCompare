@@ -316,14 +316,17 @@ describe('toolbar width budgets', () => {
     expect(compact.rows.length).toBe(wide.rows.length)
   })
 
-  it('registers the four code-diff switch controls inside the existing row', () => {
+  it('registers the three code-diff switches and the pair actions inside the existing row', () => {
     const row = TOOLBAR_ROWS.find((item) => item.id === 'code-diff')
     expect(row?.controls.map((item) => item.id)).toEqual([
       'block-counter',
       'code-switch-newline',
       'code-switch-encoding',
+      'code-switch-whitespace',
       'code-diff-count',
       'code-diff-bytes',
+      'code-reload',
+      'code-swap',
       'reset',
       'open-left',
       'open-right'
@@ -336,8 +339,14 @@ describe('toolbar width budgets', () => {
       const compact = tier === 'compact' ? 'icon-only' : 'label'
       expect(controlPresentation('code-switch-newline', tier)).toBe(compact)
       expect(controlPresentation('code-switch-encoding', tier)).toBe(compact)
+      expect(controlPresentation('code-switch-whitespace', tier)).toBe(compact)
       expect(controlPresentation('code-diff-bytes', tier)).toBe(compact)
       expect(controlPresentation('code-diff-count', tier)).toBe('label')
+      // The two pair actions only spend their copy on the widest tier.
+      expect(controlPresentation('code-reload', tier)).toBe(
+        tier === 'wide' ? 'label' : 'icon-only'
+      )
+      expect(controlPresentation('code-swap', tier)).toBe(tier === 'wide' ? 'label' : 'icon-only')
     }
   })
 

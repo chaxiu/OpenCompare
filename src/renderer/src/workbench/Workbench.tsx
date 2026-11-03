@@ -44,6 +44,7 @@ import {
   openDrilldownSession,
   openFilePairSession,
   releaseSessionTree,
+  replaceFilePair,
   replaceFilePairSide,
   resolveDirectoryReturn
 } from './directoryCompare'
@@ -88,6 +89,7 @@ import {
   exportSideSnapshot,
   parseSnapshotText,
   readFileText,
+  readSideFileProbe,
   remoteSnapshotSides,
   snapshotFileFilter,
   snapshotFileName,
@@ -97,7 +99,7 @@ import {
 import type { ComparisonSides, SidePosition } from './snapshotOps'
 import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import { syncRefreshReasonCopy, syncTargetFailureCopy } from './syncFailureCopy'
-import type { CodeFileBuffer, WorkbenchSession } from './session'
+import type { CodeFileBuffer, FilePair, FilePairProbes, WorkbenchSession } from './session'
 import { entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
 import type { ShellEntryId } from './shellLayout'
 import { useWidthTier } from './useWidthTier'
@@ -477,6 +479,39 @@ export function Workbench({
     },
     []
   )
+
+  /**
+   * Commits an explicit reload / swap back to the session that owns the pair.
+   * The tab keeps its id and count; only the two bodies, the line stats and the
+   * probe facts move, so a parent directory comparison is never rescanned.
+   */
+  const handleSessionPairChange = useCallback(
+    (id: string, pair: FilePair, probes: FilePairProbes) => {
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === id ? replaceFilePair(session, pair, probes) : session
+        )
+      )
+    },
+    []
+  )
+
+  /**
+   * Re-reads one side of a file pair through the same seam the drilldown used:
+   * a snapshot-mounted path is served from its inlined body, a real path from
+   * the single-read platform probe.
+   */
+  async function readSessionSide(session: WorkbenchSession, path: string): Promise<PickedTextFile> {
+    const parent = session.parentDirectoryId
+      ? sessions.find((candidate) => candidate.id === session.parentDirectoryId)
+      : undefined
+    if (parent?.sides) {
+      const side = await readSideFileProbe(platform, parent.sides, path)
+      return { path, text: side.text, facts: side.facts }
+    }
+    const { text, ...facts } = await platform.probeTextFile(path)
+    return { path, text, facts }
+  }
 
   /**
    * Switches the visible tab. Every open directory tab keeps its own comparison
@@ -1415,6 +1450,8 @@ export function Workbench({
             probes={session.probes}
             switches={comparisonSwitches}
             onSwitchesChange={setComparisonSwitches}
+            readSide={(path) => readSessionSide(session, path)}
+            onPairChange={(pair, probes) => handleSessionPairChange(session.id, pair, probes)}
             mode={codeModes[session.id] ?? 'diff'}
             onModeChange={(mode) => handleCodeMode(session.id, mode)}
             platform={platform}

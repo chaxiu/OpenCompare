@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 45866
+    "repoTestLines": 46215
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1513
+    "repoTestCases": 1528
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 45690,
-      "to": 45866,
-      "reason": "build-time sha256 baseline: pure manifest/digest judgments plus the three-stage workflow contract and the executable public L1 step",
-      "addedCases": 16
+      "from": 46039,
+      "to": 46215,
+      "reason": "merge main (build-time sha256 baseline suite) into the text dual-pane ignore-whitespace / reload / swap work: combined repo test lines measured on the merged tree",
+      "addedCases": 13
     }
   ]
 }

@@ -14,12 +14,13 @@ import {
   FilePairError,
   openFilePairSession,
   releaseDirectoryComparison,
+  replaceFilePair,
   replaceFilePairSide,
   resolveDirectoryReturn
 } from './directoryCompare'
 import { classifyFile } from './fileKinds'
 import type { DrilldownTarget } from './fileKinds'
-import type { WorkbenchSession } from './session'
+import type { FilePairProbes, WorkbenchSession } from './session'
 import { describeSession } from './sessionDisplay'
 import { translate } from '@renderer/i18n/context'
 
@@ -436,5 +437,52 @@ describe('replacing one side of an open file session', () => {
     }
 
     expect(replaceFilePairSide(sample, 'left', { path: '/a.txt', text: 'a\n' })).toBe(sample)
+  })
+})
+
+describe('replacing the whole file pair', () => {
+  it('moves both bodies, stats and probes onto the same tab, leaving the source untouched', () => {
+    const parent = 'directory:a ↔ b'
+    const original = createDrilldownSession(
+      parent,
+      fileNode('src/core/engine.ts'),
+      TARGET,
+      'a\nb\n',
+      'a\nc\n'
+    )
+    const pair = {
+      left: { path: '/c/engine.ts', text: 'x\ny\nz\n' },
+      right: { path: '/d/engine.ts', text: 'x\nw\n' }
+    }
+    const probes: FilePairProbes = {
+      left: { path: '/c/engine.ts', encoding: 'UTF-8', newline: 'LF', bytes: 6, sha256: 'a'.repeat(64) }
+    }
+
+    const next = replaceFilePair(original, pair, probes)
+
+    expect(next).not.toBe(original)
+    expect(next.id).toBe(original.id)
+    expect(next.parentDirectoryId).toBe(parent)
+    // Stats are recomputed from the swapped bodies, not copied from the input.
+    expect(next.stats.map((stat) => stat.value)).toEqual([3, 2])
+    expect(next.adhoc?.pair).toBe(pair)
+    expect(next.probes).toBe(probes)
+    // The input session is never mutated: only a new object is returned.
+    expect(original.adhoc?.pair.left.text).toBe('a\nb\n')
+    expect(original.stats.map((stat) => stat.value)).toEqual([2, 2])
+  })
+
+  it('returns the same session when there is no ad-hoc pair', () => {
+    const sample: WorkbenchSession = {
+      id: 'session-code',
+      scene: 'code',
+      title: 'sample',
+      subtitle: 'sample',
+      columns: 3,
+      stats: []
+    }
+    const pair = { left: { path: '/a.ts', text: 'a\n' }, right: { path: '/b.ts', text: 'b\n' } }
+
+    expect(replaceFilePair(sample, pair, undefined)).toBe(sample)
   })
 })

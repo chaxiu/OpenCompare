@@ -14,7 +14,7 @@ import {
 } from '@core/text/merge'
 import type { MergeAccept, MergeModel, MergeRange, MergeResolutions } from '@core/text/merge'
 import type { CodeSceneFixture, TextSample } from '@shared/fixtures'
-import type { PlatformPort } from '@shared/platform/types'
+import type { PlatformPort, TextFileFacts } from '@shared/platform/types'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { DiffBadge, DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_ROW_HEIGHT, DiffPane } from '@renderer/components/DiffPane'
@@ -85,7 +85,7 @@ function CodeSwitch({
   showLabel,
   onToggle
 }: {
-  readonly id: 'ignore-newline' | 'ignore-encoding'
+  readonly id: 'ignore-newline' | 'ignore-encoding' | 'ignore-whitespace'
   readonly checked: boolean
   readonly label: string
   /** The copy is dropped on the compact tier; the switch stays operable. */
@@ -147,6 +147,8 @@ function CodeDiffView({
   onSwitchesChange,
   platform,
   toolbarLeading,
+  readSide,
+  onPairChange,
   onDirtyChange,
   onBufferChange,
   onOpenSide
@@ -162,6 +164,14 @@ function CodeDiffView({
   readonly switches: ComparisonSwitches
   readonly onSwitchesChange: (switches: ComparisonSwitches) => void
   readonly platform: PlatformPort
+  /**
+   * Reads one side of the pair for an explicit reload. The shell routes a
+   * drilldown path through its snapshot mounts; without it the platform probe
+   * reads the path directly.
+   */
+  readonly readSide?: (path: string) => Promise<PickedTextFile>
+  /** Commits a reloaded / swapped pair back to the session that owns it. */
+  readonly onPairChange?: (pair: FilePair, probes: FilePairProbes) => void
   /** Reports whether any side now differs from its loaded disk content. */
   readonly onDirtyChange?: (dirty: boolean) => void
   /** Reports the editable state up so a tab switch cannot drop unsaved work. */
@@ -173,7 +183,12 @@ function CodeDiffView({
   const tier = useWidthTier()
   const newlineLabelShown = controlPresentation('code-switch-newline', tier) === 'label'
   const encodingLabelShown = controlPresentation('code-switch-encoding', tier) === 'label'
+  const whitespaceLabelShown = controlPresentation('code-switch-whitespace', tier) === 'label'
   const bytesLabelShown = controlPresentation('code-diff-bytes', tier) === 'label'
+  const reloadLabelShown = controlPresentation('code-reload', tier) === 'label'
+  const swapLabelShown = controlPresentation('code-swap', tier) === 'label'
+  const openLeftLabelShown = controlPresentation('open-left', tier) === 'label'
+  const openRightLabelShown = controlPresentation('open-right', tier) === 'label'
   const initial = {
     leftPath: buffer?.leftPath ?? pair.left.path,
     rightPath: buffer?.rightPath ?? pair.right.path,
@@ -190,10 +205,17 @@ function CodeDiffView({
   const [rightSource, setRightSource] = useState(initial.rightSource)
   const [leftText, setLeftText] = useState(initial.leftText)
   const [rightText, setRightText] = useState(initial.rightText)
+  // The probe facts belong to the loaded body of one path. They move with an
+  // explicit reload or swap, so the byte signal always mirrors the panel.
+  const [leftFacts, setLeftFacts] = useState<TextFileFacts | undefined>(probes?.left)
+  const [rightFacts, setRightFacts] = useState<TextFileFacts | undefined>(probes?.right)
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const [active, setActive] = useState(0)
   // Bumped on every explicit jump so re-selecting the current block re-scrolls.
   const [jumpToken, setJumpToken] = useState(0)
+  // Reload / swap keep the viewport where it was, so the next block-scroll
+  // effect run (triggered by the new diff) is skipped once.
+  const skipBlockScroll = useRef(false)
 
   const leftScroll = useRef<HTMLDivElement>(null)
   const rightScroll = useRef<HTMLDivElement>(null)
@@ -228,32 +250,44 @@ function CodeDiffView({
   const diff = useMemo(() => {
     // A side's fixed probe facts may only speak for the loaded body: an edited
     // working copy (or a newly opened path) never borrows the stored sha256.
-    const leftFacts =
-      leftText === leftSource && probes?.left !== undefined && probes.left.path === leftPath
-        ? probes.left
+    const leftLoaded =
+      leftText === leftSource && leftFacts !== undefined && leftFacts.path === leftPath
+        ? leftFacts
         : null
-    const rightFacts =
-      rightText === rightSource && probes?.right !== undefined && probes.right.path === rightPath
-        ? probes.right
+    const rightLoaded =
+      rightText === rightSource && rightFacts !== undefined && rightFacts.path === rightPath
+        ? rightFacts
         : null
-    if (leftFacts && rightFacts) {
+    if (leftLoaded && rightLoaded) {
       const left: TextFacts = {
         text: leftText,
-        encoding: leftFacts.encoding,
-        sha256: leftFacts.sha256
+        encoding: leftLoaded.encoding,
+        sha256: leftLoaded.sha256
       }
       const right: TextFacts = {
         text: rightText,
-        encoding: rightFacts.encoding,
-        sha256: rightFacts.sha256
+        encoding: rightLoaded.encoding,
+        sha256: rightLoaded.sha256
       }
       return diffLineTextsWithFacts(left, right, switches)
     }
     return diffLineTexts(leftText, rightText, switches)
-  }, [leftText, rightText, leftSource, rightSource, leftPath, rightPath, probes, switches])
+  }, [
+    leftText,
+    rightText,
+    leftSource,
+    rightSource,
+    leftPath,
+    rightPath,
+    leftFacts,
+    rightFacts,
+    switches
+  ])
 
   /** One mutation for both clicks and keys; the effective value comes from `diff`. */
-  function toggleSwitch(key: 'ignoreNewline' | 'ignoreEncoding'): void {
+  function toggleSwitch(
+    key: 'ignoreNewline' | 'ignoreEncoding' | 'ignoreWhitespace'
+  ): void {
     onSwitchesChange({ ...switches, [key]: !switches[key] })
   }
 
@@ -262,6 +296,10 @@ function CodeDiffView({
   const activeBlock = activeIndex >= 0 ? diff.blocks[activeIndex] : null
 
   useEffect(() => {
+    if (skipBlockScroll.current) {
+      skipBlockScroll.current = false
+      return
+    }
     if (activeIndex < 0) return
     const top = diff.blocks[activeIndex].startRow * DIFF_ROW_HEIGHT
     for (const pane of [leftScroll.current, rightScroll.current]) {
@@ -362,16 +400,80 @@ function CodeDiffView({
         setLeftPath(picked.path)
         setLeftSource(picked.text)
         setLeftText(picked.text)
+        setLeftFacts(picked.facts)
       } else {
         setRightPath(picked.path)
         setRightSource(picked.text)
         setRightText(picked.text)
+        setRightFacts(picked.facts)
       }
       setActive(0)
       setNotice({ text: t('files.notice.opened', { path: picked.path }), tone: 'ok' })
     } catch (cause) {
       setNotice({ text: cause instanceof Error ? cause.message : String(cause), tone: 'error' })
     }
+  }
+
+  /**
+   * Re-reads the two recorded paths and commits them only when both reads
+   * succeed. A deleted / unreadable side keeps the whole previous result, so a
+   * new body can never be mixed with an old one.
+   */
+  async function reload(): Promise<void> {
+    const read = readSide
+    if (!read) return
+    const [nextLeft, nextRight] = await Promise.all([
+      read(leftPath).catch(() => null),
+      read(rightPath).catch(() => null)
+    ])
+    if (nextLeft === null || nextRight === null) {
+      const failed = [
+        nextLeft === null ? leftPath : null,
+        nextRight === null ? rightPath : null
+      ].filter((path): path is string => path !== null)
+      setNotice({ text: t('files.code.reloadFailed', { path: failed.join(' · ') }), tone: 'error' })
+      return
+    }
+
+    skipBlockScroll.current = true
+    setLeftSource(nextLeft.text)
+    setLeftText(nextLeft.text)
+    setLeftFacts(nextLeft.facts)
+    setRightSource(nextRight.text)
+    setRightText(nextRight.text)
+    setRightFacts(nextRight.facts)
+    onPairChange?.(
+      {
+        left: { path: nextLeft.path, text: nextLeft.text },
+        right: { path: nextRight.path, text: nextRight.text }
+      },
+      { left: nextLeft.facts, right: nextRight.facts }
+    )
+    setNotice({ text: t('files.notice.reloaded'), tone: 'ok' })
+  }
+
+  /**
+   * Mirrors the two panes and every derived value (paths, loaded bodies, probe
+   * facts) in one commit. Only the view / session swaps: no file is copied or
+   * written, and a parent directory comparison is never touched.
+   */
+  function swapSides(): void {
+    skipBlockScroll.current = true
+    setLeftPath(rightPath)
+    setRightPath(leftPath)
+    setLeftSource(rightSource)
+    setRightSource(leftSource)
+    setLeftText(rightText)
+    setRightText(leftText)
+    setLeftFacts(rightFacts)
+    setRightFacts(leftFacts)
+    onPairChange?.(
+      {
+        left: { path: rightPath, text: rightSource },
+        right: { path: leftPath, text: leftSource }
+      },
+      { left: rightFacts, right: leftFacts }
+    )
   }
 
   return (
@@ -425,6 +527,13 @@ function CodeDiffView({
           showLabel={encodingLabelShown}
           onToggle={() => toggleSwitch('ignoreEncoding')}
         />
+        <CodeSwitch
+          id="ignore-whitespace"
+          checked={switches.ignoreWhitespace}
+          label={t('files.code.ignoreWhitespace')}
+          showLabel={whitespaceLabelShown}
+          onToggle={() => toggleSwitch('ignoreWhitespace')}
+        />
         <span className="flex shrink-0 items-center gap-1.5 text-2xs text-content-muted">
           {t('files.code.differenceCount')}
           <span data-code-diff-count className="tabular font-mono text-content-secondary">
@@ -470,6 +579,33 @@ function CodeDiffView({
           {t('files.code.reset')}
         </ToolbarButton>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
+        <span data-code-pair-actions className="flex shrink-0 items-center gap-1.5">
+          {readSide ? (
+            <ToolbarButton
+              size="sm"
+              data-code-action="reload"
+              aria-label={t('files.code.reload')}
+              title={t('files.code.reload')}
+              icon={<Icon name={UI_ICON_ACTIONS.refresh} />}
+              onClick={() => void reload()}
+            >
+              {reloadLabelShown ? t('files.code.reload') : null}
+            </ToolbarButton>
+          ) : null}
+          {onPairChange ? (
+            <ToolbarButton
+              size="sm"
+              data-code-action="swap"
+              aria-label={t('files.code.swap')}
+              title={t('files.code.swap')}
+              icon={<Icon name={UI_ICON_ACTIONS.swap} />}
+              onClick={swapSides}
+            >
+              {swapLabelShown ? t('files.code.swap') : null}
+            </ToolbarButton>
+          ) : null}
+        </span>
+        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <span data-shell-entry="save" className="flex shrink-0 items-center gap-1.5">
           <ToolbarButton
             size="sm"
@@ -502,17 +638,21 @@ function CodeDiffView({
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
         <ToolbarButton
           size="sm"
+          aria-label={t('files.action.openLeft')}
+          title={t('files.action.openLeft')}
           icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
           onClick={() => void open('left')}
         >
-          {t('files.action.openLeft')}
+          {openLeftLabelShown ? t('files.action.openLeft') : null}
         </ToolbarButton>
         <ToolbarButton
           size="sm"
+          aria-label={t('files.action.openRight')}
+          title={t('files.action.openRight')}
           icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
           onClick={() => void open('right')}
         >
-          {t('files.action.openRight')}
+          {openRightLabelShown ? t('files.action.openRight') : null}
         </ToolbarButton>
         {notice ? (
           <span
@@ -938,6 +1078,8 @@ export function CodeView({
   probes,
   switches: controlledSwitches,
   onSwitchesChange,
+  readSide,
+  onPairChange,
   platform,
   toolbarLeading,
   onMergeStateChange,
@@ -961,6 +1103,10 @@ export function CodeView({
   /** Comparison switches kept by the shell; a standalone view keeps its own. */
   readonly switches?: ComparisonSwitches
   readonly onSwitchesChange?: (switches: ComparisonSwitches) => void
+  /** Reads one side again for an explicit reload (shell routes snapshot mounts). */
+  readonly readSide?: (path: string) => Promise<PickedTextFile>
+  /** Commits a reloaded / swapped pair back to the session that owns it. */
+  readonly onPairChange?: (pair: FilePair, probes: FilePairProbes) => void
   readonly platform: PlatformPort
   /** Drilldown back row handed down by the shell; first row of the level. */
   readonly toolbarLeading?: ReactNode
@@ -1066,6 +1212,8 @@ export function CodeView({
           probes={probes}
           switches={switches}
           onSwitchesChange={changeSwitches}
+          readSide={readSide}
+          onPairChange={onPairChange}
           platform={platform}
           toolbarLeading={modeRow}
           onDirtyChange={onDirtyChange}

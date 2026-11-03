@@ -378,6 +378,12 @@ export interface ToolbarControlSpec {
 
 const CONTROL_LABELS: Readonly<Record<WidthTier, EntryPresentation>> = ALL_LABELS
 const CONTROL_COMPACT_ICONS: Readonly<Record<WidthTier, EntryPresentation>> = COMPACT_ICONS
+/** Copy only on the widest tier, for actions that must yield to the counters. */
+const CONTROL_WIDE_LABELS: Readonly<Record<WidthTier, EntryPresentation>> = {
+  compact: 'icon-only',
+  regular: 'icon-only',
+  wide: 'label'
+}
 
 /** Copy of one non-entry control at one tier. */
 export function controlPresentation(id: string, tier: WidthTier): EntryPresentation {
@@ -397,6 +403,11 @@ function control(id: string, width: number): ToolbarControlSpec {
 /** An icon-bearing control that drops its copy on the compact tier. */
 function collapsible(id: string, label: number, iconOnly: number): ToolbarControlSpec {
   return { id, presentation: CONTROL_COMPACT_ICONS, width: { label, 'icon-only': iconOnly } }
+}
+
+/** An icon-bearing control that only shows its copy on the widest tier. */
+function collapsibleWide(id: string, label: number, iconOnly: number): ToolbarControlSpec {
+  return { id, presentation: CONTROL_WIDE_LABELS, width: { label, 'icon-only': iconOnly } }
 }
 
 export interface ToolbarRowSpec {
@@ -471,11 +482,14 @@ export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
       control('block-counter', 96),
       collapsible('code-switch-newline', 132, 26),
       collapsible('code-switch-encoding', 132, 26),
+      collapsible('code-switch-whitespace', 120, 26),
       control('code-diff-count', 60),
       collapsible('code-diff-bytes', 88, 26),
+      collapsibleWide('code-reload', 92, 26),
+      collapsibleWide('code-swap', 96, 26),
       control('reset', 60),
-      control('open-left', 91),
-      control('open-right', 91)
+      collapsible('open-left', 91, 26),
+      collapsible('open-right', 91, 26)
     ],
     extra: 88
   },

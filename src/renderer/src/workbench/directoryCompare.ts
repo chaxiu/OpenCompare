@@ -15,7 +15,7 @@ import type {
 import type { DrilldownTarget, FileKind } from './fileKinds'
 import { baseName, classifyFile } from './fileKinds'
 import { missingSidePath } from './sessionDisplay'
-import type { AdhocFilePair, FilePairProbes, WorkbenchSession } from './session'
+import type { AdhocFilePair, FilePair, FilePairProbes, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
 import { readSideFile, readSideFileProbe } from './snapshotOps'
@@ -302,6 +302,27 @@ export function replaceFilePairSide(
       adhoc.scene === 'code' && file.facts !== undefined
         ? { ...session.probes, [side]: file.facts }
         : session.probes
+  }
+}
+
+/**
+ * Commits a reloaded or swapped pair back onto its session. Both bodies, the
+ * line stats and the probe facts move in one update, so the status bar can
+ * never report one side of an older pair. The session identity, its parent
+ * directory and the parent's comparison tree are left untouched.
+ */
+export function replaceFilePair(
+  session: WorkbenchSession,
+  pair: FilePair,
+  probes: FilePairProbes | undefined
+): WorkbenchSession {
+  const adhoc = session.adhoc
+  if (!adhoc) return session
+  return {
+    ...session,
+    adhoc: { ...adhoc, pair },
+    stats: pairStats(pair),
+    probes
   }
 }
 

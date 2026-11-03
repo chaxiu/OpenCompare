@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sha256Hex } from '@core/directory/hash'
 import { diffLineTexts } from '@core/text/diff'
 import type { ComparisonOptions } from '@core/text/normalize'
@@ -8,6 +8,7 @@ import type { TextFileFacts } from '@shared/platform/types'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
+import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair, FilePairProbes } from '@renderer/workbench/session'
 
 const platform = createWebPlatformPort()
@@ -27,12 +28,26 @@ function facts(
 ): TextFileFacts {
   return { path, encoding, newline: 'LF', bytes: text.length, sha256: sha }
 }
-function renderDiff(left: string, right: string, probes?: FilePairProbes): ReturnType<typeof renderWithI18n> {
+function renderDiff(
+  left: string,
+  right: string,
+  probes?: FilePairProbes,
+  readSide?: (path: string) => Promise<PickedTextFile>,
+  onPairChange?: (pair: FilePair, probes: FilePairProbes) => void
+): ReturnType<typeof renderWithI18n> {
   const pair: FilePair = {
     left: { path: '/l.ts', text: left },
     right: { path: '/r.ts', text: right }
   }
-  return renderWithI18n(<CodeView pair={pair} probes={probes} platform={platform} />)
+  return renderWithI18n(
+    <CodeView
+      pair={pair}
+      probes={probes}
+      platform={platform}
+      readSide={readSide}
+      onPairChange={onPairChange}
+    />
+  )
 }
 function switchOf(id: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(`[data-code-switch="${id}"]`)
@@ -73,7 +88,37 @@ function reach(options: ComparisonOptions): void {
   if (!options.ignoreEncoding) fireEvent.click(switchOf('ignore-encoding'))
 }
 
-afterEach(cleanup)
+const WS_ON: ComparisonOptions = { ignoreNewline: true, ignoreEncoding: true, ignoreWhitespace: true }
+
+/** The two diff scroll panes, left then right (same query as the ruler tests). */
+function paneElements(container: HTMLElement): [HTMLDivElement, HTMLDivElement] {
+  const panes = Array.from(container.querySelectorAll<HTMLDivElement>('div.h-full.overflow-auto'))
+  if (panes.length !== 2) throw new Error(`expected 2 diff panes, found ${panes.length}`)
+  return [panes[0], panes[1]]
+}
+function paneText(container: HTMLElement, side: 0 | 1): string {
+  return paneElements(container)[side].textContent ?? ''
+}
+function markerCount(container: HTMLElement): number {
+  return container.querySelectorAll('[data-diff-ruler="true"] [data-diff-status]').length
+}
+/** Panel header titles in DOM order (left, right). */
+function panelTitles(): string[] {
+  const headers = document.querySelectorAll<HTMLElement>(
+    '[data-shell-level="panels"] section header span[title]'
+  )
+  return Array.from(headers).map((element) => element.getAttribute('title') ?? '')
+}
+function action(name: 'reload' | 'swap'): HTMLElement {
+  const element = document.querySelector<HTMLElement>(`[data-code-action="${name}"]`)
+  if (element === null) throw new Error(`missing pair action: ${name}`)
+  return element
+}
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe('code diff comparison switches', () => {
   it('starts both switches on inside the single view-toolbar band', () => {
@@ -207,5 +252,107 @@ describe('code diff comparison switches', () => {
     expect(countText()).toBe('0')
     expect(bytesSignal()).toBeNull()
     expect(nonSameRows()).toBe(0)
+  })
+})
+
+describe('code pair actions and whitespace switch', () => {
+  const WS = ['alpha \na\tb\na  b\n', 'alpha\na b\na b\n'] as const
+  const MIXED = ['alphx\nbeta \n', 'alpha\nbeta\n'] as const
+  const refetch = async (path: string): Promise<PickedTextFile> => {
+    const text = path === '/l.ts' ? 'zeta\ndelta\n' : 'zeta\nomega\n'
+    return { path, text, facts: facts(path, text, 'UTF-8') }
+  }
+
+  it('defaults ignore-whitespace off and erases whitespace-only differences on', () => {
+    const view = renderDiff(...WS)
+    expect([switchOf('ignore-whitespace').getAttribute('role'), checked('ignore-whitespace')]).toEqual(['switch', 'false'])
+    expect(Number(countText())).toBeGreaterThan(0)
+    expect(nonSameRows()).toBeGreaterThan(0)
+    fireEvent.click(switchOf('ignore-whitespace'))
+    expect([checked('ignore-whitespace'), countText(), nonSameRows(), markerCount(view.container)]).toEqual(['true', '0', 0, 0])
+    // Comparison ignores the whitespace; the panes still show every raw character.
+    expect(paneText(view.container, 0)).toContain('alpha ')
+    expect(paneText(view.container, 0)).toContain('\t')
+    fireEvent.click(switchOf('ignore-whitespace'))
+    expect([checked('ignore-whitespace'), Number(countText()) > 0]).toEqual(['false', true])
+  })
+
+  it('keeps real differences and derives count, tones and markers from one comparison', () => {
+    const pairs: readonly (readonly [string, string])[] = [WS, MIXED]
+    for (const pair of pairs) {
+      const view = renderDiff(...pair)
+      fireEvent.click(switchOf('ignore-whitespace'))
+      const { differenceCount } = diffLineTexts(pair[0], pair[1], WS_ON)
+      if (pair === MIXED) expect(differenceCount).toBeGreaterThan(0)
+      expect(countText()).toBe(String(differenceCount))
+      expect(nonSameRows() > 0).toBe(differenceCount > 0)
+      expect(markerCount(view.container) > 0).toBe(differenceCount > 0)
+      view.unmount()
+    }
+  })
+
+  it('reloads in place and keeps session, scroll, switches; reads only', async () => {
+    const write = vi.spyOn(platform, 'writeTextFile')
+    const onPairChange = vi.fn()
+    const view = renderDiff('alpha\nbeta\n', 'alpha\ngamma\n', undefined, refetch, onPairChange)
+    fireEvent.click(switchOf('ignore-whitespace'))
+    const panes = paneElements(view.container)
+    panes[0].scrollTop = 100
+    panes[1].scrollTop = 100
+    fireEvent.click(action('reload'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('已重新加载当前文件对'))
+    expect(panelTitles()).toEqual(['/l.ts', '/r.ts'])
+    expect([paneText(view.container, 0), paneText(view.container, 1)]).toEqual([expect.stringContaining('zeta'), expect.stringContaining('omega')])
+    const next = ['zeta\ndelta\n', 'zeta\nomega\n'] as const
+    expect(countText()).toBe(String(diffLineTexts(next[0], next[1], WS_ON).differenceCount))
+    expect(onPairChange).toHaveBeenCalledTimes(1)
+    expect(onPairChange.mock.calls[0][0]).toEqual({ left: { path: '/l.ts', text: next[0] }, right: { path: '/r.ts', text: next[1] } })
+    expect(onPairChange.mock.calls[0][1]).toEqual({ left: facts('/l.ts', next[0], 'UTF-8'), right: facts('/r.ts', next[1], 'UTF-8') })
+    expect(checked('ignore-whitespace')).toBe('true')
+    expect(paneElements(view.container).map((pane) => pane.scrollTop)).toEqual([100, 100])
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('keeps the whole previous result when one side cannot be read', async () => {
+    const readSide = async (path: string): Promise<PickedTextFile> => {
+      if (path === '/r.ts') throw new Error('ENOENT')
+      return { path, text: 'REPLACED\n', facts: facts(path, 'REPLACED\n', 'UTF-8') }
+    }
+    const view = renderDiff('alpha\nbeta\n', 'alpha\ngamma\n', undefined, readSide)
+    const snapshot = (): unknown[] => [countText(), nonSameRows(), markerCount(view.container), paneText(view.container, 0), paneText(view.container, 1)]
+    const before = snapshot()
+    fireEvent.click(action('reload'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('/r.ts'))
+    const notice = screen.getByRole('status').textContent ?? ''
+    expect([notice.includes('重新加载失败'), notice.includes('/r.ts')]).toEqual([true, true])
+    expect(snapshot()).toEqual(before)
+    // The successful left read is discarded: no half-updated pair.
+    expect(paneText(view.container, 0)).not.toContain('REPLACED')
+  })
+
+  it('swaps sides and swapping twice restores the original pair', () => {
+    const [left, right] = ['alpha\nbeta\n', 'alpha\n']
+    const write = vi.spyOn(platform, 'writeTextFile')
+    const onPairChange = vi.fn()
+    const view = renderDiff(left, right, undefined, undefined, onPairChange)
+    const before = [countText(), nonSameRows(), markerCount(view.container)]
+    expect(panelTitles()).toEqual(['/l.ts', '/r.ts'])
+    fireEvent.click(action('swap'))
+    expect(panelTitles()).toEqual(['/r.ts', '/l.ts'])
+    expect(countText()).toBe(String(diffLineTexts(right, left, ALL_ON).differenceCount))
+    expect(onPairChange.mock.calls[0][0]).toEqual({ left: { path: '/r.ts', text: right }, right: { path: '/l.ts', text: left } })
+    fireEvent.click(action('swap'))
+    expect(panelTitles()).toEqual(['/l.ts', '/r.ts'])
+    expect([countText(), nonSameRows(), markerCount(view.container)]).toEqual(before)
+    expect(onPairChange).toHaveBeenCalledTimes(2)
+    expect(onPairChange.mock.calls[1][0]).toEqual({ left: { path: '/l.ts', text: left }, right: { path: '/r.ts', text: right } })
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('names the pair actions and whitespace switch in en', () => {
+    const readSide = async (path: string): Promise<PickedTextFile> => ({ path, text: 'x\n' })
+    renderWithI18n(<CodeView pair={{ left: { path: '/l.ts', text: 'a\n' }, right: { path: '/r.ts', text: 'b\n' } }} platform={platform} readSide={readSide} onPairChange={vi.fn()} />, 'en')
+    for (const name of ['Reload', 'Swap sides']) expect(screen.getByRole('button', { name })).toBeDefined()
+    expect(screen.getByRole('switch', { name: 'Ignore whitespace' })).toBeDefined()
   })
 })

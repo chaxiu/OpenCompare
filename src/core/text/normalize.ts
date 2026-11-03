@@ -1,9 +1,12 @@
 /**
  * Comparison switches and normalization facts for the text diff.
  *
- * Both switches default to on: only an explicit `false` turns a comparison
- * strict. Normalization never rewrites text — it only decides what counts as a
- * difference — so characters, whitespace, case and line order still report.
+ * The newline / encoding switches default to on: only an explicit `false` turns
+ * a comparison strict. The whitespace switch defaults to off, so the strict
+ * per-character comparison stays the default and `true` is the only way to hide
+ * space / tab differences. Normalization never rewrites text — it only decides
+ * what counts as a difference — so characters, whitespace, case and line order
+ * still report.
  *
  * Every label and threshold comes from `probe.ts`; this module only decides
  * whether a difference is ignored or surfaced.
@@ -11,16 +14,19 @@
 import { detectNewline } from './probe'
 import type { EncodingLabel, NewlineKind } from './probe'
 
-/** The two normalization switches of one comparison. */
+/** The three normalization switches of one comparison. */
 export interface ComparisonOptions {
   readonly ignoreNewline?: boolean
   readonly ignoreEncoding?: boolean
+  /** Off by default: only an explicit `true` drops space / tab differences. */
+  readonly ignoreWhitespace?: boolean
 }
 
 /** The switch values actually applied by one comparison. */
 export interface ComparisonSwitches {
   readonly ignoreNewline: boolean
   readonly ignoreEncoding: boolean
+  readonly ignoreWhitespace: boolean
 }
 
 /** One side's probe facts: decoded text, encoding label and byte fingerprint. */
@@ -69,18 +75,41 @@ export interface EncodingNormalization {
 export interface DiffNormalization {
   readonly ignoreNewline: boolean
   readonly ignoreEncoding: boolean
+  readonly ignoreWhitespace: boolean
   readonly newline: NewlineNormalization
   readonly encoding: EncodingNormalization
 }
 
-/** Defaults both switches to `true`; only an explicit `false` is strict. */
+/**
+ * Defaults the newline / encoding switches to `true` and the whitespace switch
+ * to `false`; only an explicit value moves one away from its default.
+ */
 export function resolveComparisonSwitches(
   options: ComparisonOptions = {}
 ): ComparisonSwitches {
   return {
     ignoreNewline: options.ignoreNewline !== false,
-    ignoreEncoding: options.ignoreEncoding !== false
+    ignoreEncoding: options.ignoreEncoding !== false,
+    ignoreWhitespace: options.ignoreWhitespace === true
   }
+}
+
+/**
+ * The only two characters the "ignore whitespace" switch drops: U+0020 space
+ * and U+0009 tab. Every other character — including NBSP and other Unicode
+ * spaces — stays part of the compared text.
+ */
+export function isComparisonWhitespace(char: string): boolean {
+  return char === ' ' || char === '\t'
+}
+
+/** Whitespace-insensitive form of one line; display text is never rewritten. */
+export function stripComparisonWhitespace(text: string): string {
+  let stripped = ''
+  for (const char of text) {
+    if (!isComparisonWhitespace(char)) stripped += char
+  }
+  return stripped
 }
 
 /** Folds `\r\n` and lone `\r` to `\n`, leaving content and a missing final newline as-is. */
@@ -123,6 +152,7 @@ export function describeNormalization(
   return {
     ignoreNewline: switches.ignoreNewline,
     ignoreEncoding: switches.ignoreEncoding,
+    ignoreWhitespace: switches.ignoreWhitespace,
     newline: {
       left: leftNewline,
       right: rightNewline,
