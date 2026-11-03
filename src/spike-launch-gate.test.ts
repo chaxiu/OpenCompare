@@ -343,7 +343,7 @@ describe('workflow parity', () => {
 
   it('keeps the dispatch-only get-only posture and the spike gate before verify', () => {
     expect(Object.keys(workflow.on ?? {})).toEqual(['workflow_dispatch'])
-    expect(workflow.permissions).toEqual({ contents: 'write' })
+    expect(workflow.permissions).toEqual({ contents: 'write', actions: 'read' })
     expect([workflow.jobs?.verify?.needs].flat()).toContain('spike')
   })
 })

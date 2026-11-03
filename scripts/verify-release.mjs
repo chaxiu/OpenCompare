@@ -593,12 +593,23 @@ export function parseArgs(argv = []) {
     if (forbidden.includes(`--${key}`)) {
       return { error: `--${key} 不被接受：B 层阈值固定为 ${RETENTION_THRESHOLD_BYTES} B，不提供放宽开关` }
     }
-    if (key === 'spike') {
-      if (value !== undefined) return { error: `--spike 不接受取值` }
-      options.spike = true
+    if (key === 'spike' || key === 'build-sha256-manifest' || key === 'public-l1') {
+      if (value !== undefined) return { error: `--${key} 不接受取值` }
+      if (key === 'spike') options.spike = true
+      if (key === 'build-sha256-manifest') options.buildSha256Manifest = true
+      if (key === 'public-l1') options.publicL1 = true
       continue
     }
-    if (!['tag', 'layer', 'out', 'platform', 'aggregate', 'release-state'].includes(key)) {
+    const keyed = {
+      target: 'target',
+      'release-dir': 'releaseDir',
+      'release-json': 'releaseJson',
+      'sha256-manifest-dir': 'sha256ManifestDir',
+      sample: 'sample'
+    }
+    if (
+      !['tag', 'layer', 'out', 'platform', 'aggregate', 'release-state', ...Object.keys(keyed)].includes(key)
+    ) {
       return { error: `未知参数: --${key}` }
     }
     if (value === undefined) {
@@ -617,12 +628,39 @@ export function parseArgs(argv = []) {
       options.releaseState = value
       continue
     }
-    options[key] = value
+    options[keyed[key] ?? key] = value
   }
 
   if (options.tag === undefined) return { error: '缺少 --tag=vX.Y.Z' }
   if (!/^v\d+\.\d+\.\d+$/.test(options.tag)) {
     return { error: `--tag 必须是 vX.Y.Z: ${options.tag}` }
+  }
+  if (options.buildSha256Manifest === true) {
+    if (options.publicL1 === true) return { error: '--build-sha256-manifest 与 --public-l1 不能同时使用' }
+    if (!['mac', 'win', 'linux'].includes(options.target)) {
+      return { error: `--target 只能是 mac / win / linux: ${options.target ?? '(缺失)'}` }
+    }
+    if (options.releaseDir === undefined) return { error: '缺少 --release-dir=<dir>' }
+    if (options.out === undefined) return { error: '缺少 --out=<dir>' }
+    return { options }
+  }
+  if (options.publicL1 === true) {
+    if (options.buildSha256Manifest === true) {
+      return { error: '--build-sha256-manifest 与 --public-l1 不能同时使用' }
+    }
+    if (options.releaseJson === undefined) return { error: '缺少 --release-json=<file>' }
+    if (options.sha256ManifestDir === undefined) return { error: '缺少 --sha256-manifest-dir=<dir>' }
+    if (options.out === undefined) return { error: '缺少 --out=<dir>' }
+    return { options }
+  }
+  if (options.target !== undefined) return { error: '--target 只适用于 --build-sha256-manifest' }
+  if (options.releaseDir !== undefined) return { error: '--release-dir 只适用于 --build-sha256-manifest' }
+  if (options.releaseJson !== undefined) return { error: '--release-json 只适用于 --public-l1' }
+  if (options.sample !== undefined) return { error: '--sample 只适用于 --public-l1' }
+  if (options.sha256ManifestDir !== undefined) {
+    if (options.layer === 'local') return { error: '--sha256-manifest-dir 只适用于 --layer=ci' }
+    if (options.aggregate !== undefined) return { error: '--sha256-manifest-dir 不适用于 --aggregate' }
+    if (options.spike === true) return { error: '--sha256-manifest-dir 不适用于 --spike' }
   }
   if (options.layer === undefined) return { error: '缺少 --layer=local|ci' }
   if (options.layer !== 'local' && options.layer !== 'ci') {
@@ -917,6 +955,252 @@ function ensureWritableDir(dir) {
 
 export function sha256File(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+/* ------------------------------------------------------------------ */
+/* Build-time sha256 manifest                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The one upload glob source: the release matrix hashes exactly the files this
+ * list matches, and `release.yml` uploads the same set. The matcher is derived
+ * from this list, never written a second time.
+ */
+export const UPLOAD_ASSET_GLOBS = [
+  '*.dmg',
+  '*.zip',
+  '*.exe',
+  '*.AppImage',
+  '*.deb',
+  '*.blockmap',
+  'latest*.yml'
+]
+
+const globToRegExp = (glob) => {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')
+  return new RegExp(`^${escaped}$`)
+}
+const UPLOAD_ASSET_MATCHERS = UPLOAD_ASSET_GLOBS.map(globToRegExp)
+
+/** True when a local release file belongs to the release upload set. */
+export function matchesUploadAssetGlob(name) {
+  return UPLOAD_ASSET_MATCHERS.some((matcher) => matcher.test(String(name)))
+}
+
+/**
+ * The one local-file-name -> uploaded-asset-name mapping. GitHub rewrites
+ * spaces to dots on upload (the same rule `release-metadata` already records);
+ * the manifest keys and both digest assertions read this function only.
+ */
+export function uploadAssetName(name) {
+  return String(name ?? '').trim().replaceAll(' ', '.')
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/
+
+/** Normalises a GitHub digest (`sha256:<hex>`) to lowercase hex; empty stays empty. */
+function digestHex(value) {
+  return typeof value === 'string' ? value.replace(/^sha256:/i, '').toLowerCase() : ''
+}
+
+/**
+ * Builds the deterministic `{version, tag, target, files}` manifest from the
+ * same reads that produced the bytes. Names are mapped through
+ * `uploadAssetName`, sorted byte-wise, and every sha256 / byte count is checked
+ * before anything is written.
+ */
+export function buildSha256Manifest({ tag, target, files = [] } = {}) {
+  const problems = []
+  if (!['mac', 'win', 'linux'].includes(target)) problems.push(`清单 target 非法: ${target}`)
+  const byName = new Map()
+  for (const file of files) {
+    const name = uploadAssetName(file?.name)
+    if (name === '') {
+      problems.push('清单条目缺少文件名')
+      continue
+    }
+    const sha256 = typeof file?.sha256 === 'string' ? file.sha256.toLowerCase() : ''
+    if (!SHA256_HEX.test(sha256)) problems.push(`${name} sha256 非 64 位小写 hex`)
+    if (!Number.isInteger(file?.bytes) || file.bytes < 0) problems.push(`${name} bytes 非整数`)
+    const existing = byName.get(name)
+    if (existing !== undefined && existing.sha256 !== sha256) {
+      problems.push(`${name} 清单重复且冲突 期望 ${existing.sha256} 实测 ${sha256}`)
+      continue
+    }
+    byName.set(name, { name, sha256, bytes: file?.bytes })
+  }
+  const sorted = [...byName.values()].sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+  )
+  return {
+    ok: problems.length === 0,
+    problems,
+    manifest: { version: 1, tag: String(tag ?? ''), target, files: sorted }
+  }
+}
+
+/**
+ * The manifest key set must equal the upload set exactly: a glob hit missing
+ * from the manifest and a manifest key whose file does not exist both fail.
+ */
+export function judgeManifestCoverage({ releaseNames = [], manifestNames = [] } = {}) {
+  const uploadNames = new Set(releaseNames.map((name) => uploadAssetName(name)))
+  const listed = new Set(manifestNames.map((name) => String(name)))
+  const problems = []
+  for (const name of [...uploadNames].sort()) {
+    if (!listed.has(name)) problems.push(`${name} 命中上传 glob 却未进清单`)
+  }
+  for (const name of [...listed].sort()) {
+    if (!uploadNames.has(name)) problems.push(`${name} 清单有键但文件不存在`)
+  }
+  return { ok: problems.length === 0, problems }
+}
+
+/**
+ * Merges every target's manifest and compares GitHub's server digest against
+ * the build-time sha256, per asset. `digest` on the release is only a transport
+ * echo, so a truncated or swapped upload moves both values together; this is
+ * the comparison that pins the bytes that were actually hashed before upload.
+ */
+export function judgeBuildSha256({ releaseAssets = [], manifests = [] } = {}) {
+  const problems = []
+  const duplicates = []
+  const byName = new Map()
+  for (const manifest of manifests) {
+    for (const file of manifest?.files ?? []) {
+      const name = String(file?.name ?? '')
+      const sha256 = digestHex(file?.sha256)
+      const existing = byName.get(name)
+      if (existing === undefined) {
+        byName.set(name, { name, sha256, bytes: file?.bytes ?? null })
+        continue
+      }
+      if (existing.sha256 !== sha256) {
+        duplicates.push(name)
+        problems.push(`${name} 清单重复且冲突 期望 ${existing.sha256} 实测 ${sha256}`)
+      }
+    }
+  }
+  const seen = new Set()
+  const perAsset = []
+  let sample = null
+  for (const asset of releaseAssets) {
+    const name = String(asset?.name ?? '')
+    seen.add(name)
+    const raw = typeof asset?.sha256 === 'string' ? asset.sha256 : ''
+    const digest = digestHex(raw)
+    const build = byName.get(name)
+    const buildSha256 = build?.sha256 ?? null
+    perAsset.push({
+      name,
+      digest: raw === '' ? null : raw,
+      buildSha256,
+      bytes: Number.isFinite(asset?.size) ? asset.size : null
+    })
+    if (raw === '') {
+      problems.push(`${name} digest 为空`)
+      continue
+    }
+    if (buildSha256 === null) {
+      problems.push(`${name} 缺构建期 sha256`)
+      continue
+    }
+    if (digest !== buildSha256) {
+      problems.push(`${name} digest 期望(构建期) ${buildSha256} 实测 ${raw}`)
+    }
+    const size = Number.isFinite(asset?.size) ? asset.size : 0
+    if (sample === null || size < sample.size || (size === sample.size && name < sample.name)) {
+      sample = { name, size, sha256: digest }
+    }
+  }
+  for (const name of [...byName.keys()].sort()) {
+    if (!seen.has(name)) problems.push(`${name} 清单条目在发布上不存在`)
+  }
+  return {
+    ok: problems.length === 0,
+    problems,
+    perAsset,
+    count: perAsset.length,
+    duplicates: [...new Set(duplicates)].sort(),
+    sample
+  }
+}
+
+/**
+ * Reads every `*.json` manifest under `dir` (recursively, because
+ * `gh run download` nests one directory per artifact). An absent directory, an
+ * empty directory, an unparsable file or a bad field is a problem, never a
+ * silent skip.
+ */
+export function readSha256Manifests(world, dir, { tag } = {}) {
+  const problems = []
+  const manifests = []
+  const missing = `缺构建期 sha256 清单：${dir} 未取回任何 sha256-manifest-*`
+  if (typeof dir !== 'string' || dir === '' || world.exists(dir) !== true) {
+    return { ok: false, problems: [`${missing}（目录不存在）`], manifests: [] }
+  }
+  const files = []
+  const walk = (current) => {
+    let entries
+    try {
+      entries = world.readdir(current)
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const name = typeof entry === 'string' ? entry : entry?.name
+      if (typeof name !== 'string' || name === '') continue
+      const full = join(current, name)
+      const isDirectory =
+        typeof entry === 'string' ? world.isDirectory(full) : entry?.isDirectory?.() === true
+      if (isDirectory) {
+        walk(full)
+        continue
+      }
+      if (name.endsWith('.json')) files.push(full)
+    }
+  }
+  walk(dir)
+  if (files.length === 0) return { ok: false, problems: [missing], manifests: [] }
+  for (const path of files.sort()) {
+    let parsed
+    try {
+      parsed = JSON.parse(world.readText(path))
+    } catch {
+      problems.push(`${path} 清单不可解析`)
+      continue
+    }
+    if (parsed?.version !== 1) {
+      problems.push(`${path} 清单 version≠1`)
+      continue
+    }
+    if (typeof parsed?.tag !== 'string' || parsed.tag !== tag) {
+      problems.push(`清单 tag ${parsed?.tag} 与 --tag ${tag} 不等`)
+      continue
+    }
+    if (!['mac', 'win', 'linux'].includes(parsed?.target)) {
+      problems.push(`${path} 清单 target 非法`)
+      continue
+    }
+    if (!Array.isArray(parsed?.files)) {
+      problems.push(`${path} 清单 files 非法`)
+      continue
+    }
+    const filesOut = []
+    for (const file of parsed.files) {
+      const name = String(file?.name ?? '')
+      if (name === '') {
+        problems.push(`${path} 清单条目缺少文件名`)
+        continue
+      }
+      const sha256 = typeof file?.sha256 === 'string' ? file.sha256 : ''
+      if (!SHA256_HEX.test(sha256)) problems.push(`${path} ${name} sha256 非 64 位小写 hex`)
+      if (!Number.isInteger(file?.bytes) || file.bytes < 0) problems.push(`${path} ${name} bytes 非整数`)
+      filesOut.push({ name, sha256, bytes: file?.bytes })
+    }
+    manifests.push({ version: 1, tag: parsed.tag, target: parsed.target, files: filesOut })
+  }
+  return { ok: problems.length === 0, problems, manifests }
 }
 
 export function runCommand(command, args = [], options = {}) {
@@ -1626,7 +1910,7 @@ function launchFailureActual(error, extra = {}) {
   return actual
 }
 
-function createCheckContext({ world, tag, outDir, workRoot, state, environment, releaseState }) {
+function createCheckContext({ world, tag, outDir, workRoot, state, environment, releaseState, sha256ManifestDir }) {
   const log = []
   const exec = (command, args = [], options = {}) => {
     const result = world.run(command, args, options)
@@ -1642,6 +1926,7 @@ function createCheckContext({ world, tag, outDir, workRoot, state, environment, 
     state,
     environment,
     releaseState: releaseState ?? 'published',
+    sha256ManifestDir,
     exec,
     log,
     path: (name) => join(workRoot, name),
@@ -1686,7 +1971,11 @@ async function runIdentityMetadata(ctx) {
 }
 
 async function runIdentityBytes(ctx) {
-  const expected = { bytes: '逐资产相等', sha256: '逐资产相等' }
+  const expected = {
+    bytes: '逐资产相等',
+    sha256: '逐资产相等',
+    buildSha256: '每资产 digest == 构建期 sha256'
+  }
   const release = ctx.state.release
   if (release === undefined) {
     return fail(expected, { error: '先决步骤 identity-release-metadata 未取得 Release 元数据' })
@@ -1739,8 +2028,32 @@ async function runIdentityBytes(ctx) {
     }
   }
   ctx.state.assetsDir = dir
-  if (problems.length > 0) return fail(expected, { problems, assets: perAsset })
-  return pass(expected, { assets: perAsset })
+  let buildSha256
+  if (ctx.sha256ManifestDir === undefined) {
+    if (ctx.releaseState === 'draft') {
+      problems.push('缺构建期 sha256 清单：draft 验证未提供 --sha256-manifest-dir')
+      buildSha256 = { status: 'missing', assets: 0 }
+    } else {
+      buildSha256 = { status: 'not-provided', assets: 0 }
+    }
+  } else {
+    const loaded = readSha256Manifests(ctx.world, ctx.sha256ManifestDir, { tag: ctx.tag })
+    problems.push(...loaded.problems)
+    const judged = judgeBuildSha256({
+      releaseAssets: release.assets,
+      manifests: loaded.manifests
+    })
+    problems.push(...judged.problems)
+    buildSha256 = {
+      assets: judged.count,
+      perAsset: judged.perAsset,
+      duplicates: judged.duplicates,
+      sample: judged.sample
+    }
+  }
+  const actual = { assets: perAsset, buildSha256 }
+  if (problems.length > 0) return fail(expected, { ...actual, problems })
+  return pass(expected, actual)
 }
 
 /* ------------------------------------------------------------------ */
@@ -2521,7 +2834,7 @@ function isCiEnvironment(env) {
   return env.GITHUB_ACTIONS === 'true' || env.CI === 'true'
 }
 
-async function executeChecks({ checks, world, outDir, workRoot, tag, environment, state, stdout, releaseState }) {
+async function executeChecks({ checks, world, outDir, workRoot, tag, environment, state, stdout, releaseState, sha256ManifestDir }) {
   const steps = []
   const stepsDir = join(outDir, 'steps')
   const logsDir = join(outDir, 'logs')
@@ -2529,7 +2842,7 @@ async function executeChecks({ checks, world, outDir, workRoot, tag, environment
   mkdirSync(logsDir, { recursive: true })
   for (const [index, check] of checks.entries()) {
     const startedAt = new Date().toISOString()
-    const ctx = createCheckContext({ world, tag, outDir, workRoot, state, environment, releaseState })
+    const ctx = createCheckContext({ world, tag, outDir, workRoot, state, environment, releaseState, sha256ManifestDir })
     let outcome
     try {
       outcome = await check.run(ctx)
@@ -2746,11 +3059,116 @@ async function runSpike({
 
 const USAGE = [
   '用法:',
-  '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --out=<dir> [--platform=mac|linux|windows|all] [--release-state=published|draft]',
+  '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --out=<dir> [--platform=mac|linux|windows|all] [--release-state=published|draft] [--sha256-manifest-dir=<dir>]',
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=local --out=<dir>',
   '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --aggregate=<parts> --out=<dir>',
-  '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --spike --out=<dir>'
+  '  node scripts/verify-release.mjs --tag=vX.Y.Z --layer=ci --spike --out=<dir>',
+  '  node scripts/verify-release.mjs --build-sha256-manifest --tag=vX.Y.Z --target=mac|win|linux --release-dir=release --out=<dir>',
+  '  node scripts/verify-release.mjs --public-l1 --tag=vX.Y.Z --release-json=<file> --sha256-manifest-dir=<dir> [--sample=<file>] --out=<dir>'
 ].join('\n')
+
+/**
+ * `--build-sha256-manifest`: hashes exactly the files the upload glob matches,
+ * from the same `release/` directory `gh release upload` sends, and writes
+ * `<out>/<target>.json`. Any mismatch fails before anything is uploaded.
+ */
+function runBuildSha256Manifest({ options, outDir, world, stderr }) {
+  const releaseDir = resolve(options.releaseDir)
+  let entries
+  try {
+    entries = world.readdir(releaseDir)
+  } catch {
+    stderr(`::error::发布目录不可读: ${releaseDir}`)
+    return 1
+  }
+  const releaseNames = entries
+    .map((entry) => (typeof entry === 'string' ? entry : entry?.name))
+    .filter((name) => typeof name === 'string' && matchesUploadAssetGlob(name))
+    .filter((name) => world.isDirectory(join(releaseDir, name)) !== true)
+    .sort()
+  if (releaseNames.length === 0) {
+    stderr(`::error::${releaseDir} 下没有任何命中上传 glob 的产物`)
+    return 1
+  }
+  const files = releaseNames.map((name) => {
+    const path = join(releaseDir, name)
+    return { name, sha256: world.sha256(path), bytes: world.size(path) }
+  })
+  const built = buildSha256Manifest({ tag: options.tag, target: options.target, files })
+  if (!built.ok) {
+    for (const problem of built.problems) stderr(`::error::${problem}`)
+    return 1
+  }
+  const coverage = judgeManifestCoverage({
+    releaseNames,
+    manifestNames: built.manifest.files.map((file) => file.name)
+  })
+  if (!coverage.ok) {
+    for (const problem of coverage.problems) stderr(`::error::${problem}`)
+    return 1
+  }
+  writeJsonAtomic(join(outDir, `${options.target}.json`), built.manifest)
+  return 0
+}
+
+/**
+ * `--public-l1`: the one digest comparison after publishing. The YAML has
+ * already asserted `draft=false`, `html_url` and every asset URL returns 200;
+ * this reuses `judgeBuildSha256` so the comparison rule exists once.
+ */
+function runPublicL1({ options, outDir, world, stdout, stderr }) {
+  let release
+  try {
+    release = JSON.parse(world.readText(resolve(options.releaseJson)))
+  } catch (error) {
+    stderr(`::error::public L1 读不到 Release 元数据: ${error instanceof Error ? error.message : error}`)
+    return 1
+  }
+  const loaded = readSha256Manifests(world, resolve(options.sha256ManifestDir), { tag: options.tag })
+  const releaseAssets = (Array.isArray(release?.assets) ? release.assets : []).map((asset) => ({
+    name: asset?.name,
+    size: asset?.size,
+    sha256: typeof asset?.digest === 'string' ? asset.digest : ''
+  }))
+  const judged = judgeBuildSha256({ releaseAssets, manifests: loaded.manifests })
+  const problems = [...loaded.problems, ...judged.problems]
+  let sampleLine = null
+  if (typeof options.sample === 'string' && options.sample !== '') {
+    const path = resolve(options.sample)
+    const name = basename(path)
+    const entry = judged.perAsset.find((asset) => asset.name === name)
+    const actual = world.sha256(path)
+    if (entry === undefined || entry.buildSha256 === null) {
+      problems.push(`${name} 抽样文件不在构建期清单中`)
+    } else if (actual !== entry.buildSha256) {
+      problems.push(`${name} 抽样文件 sha256 期望(构建期) ${entry.buildSha256} 实测 ${actual}`)
+    } else {
+      sampleLine = `${name} sha256:${actual}`
+    }
+  } else if (judged.sample !== null) {
+    sampleLine = `${judged.sample.name} sha256:${judged.sample.sha256}`
+  }
+  const htmlUrl = typeof release?.html_url === 'string' ? release.html_url : ''
+  writeJsonAtomic(join(outDir, 'public-l1.json'), {
+    tag: options.tag,
+    htmlUrl,
+    assets: judged.count,
+    perAsset: judged.perAsset,
+    duplicates: judged.duplicates,
+    sample: judged.sample,
+    problems
+  })
+  if (problems.length > 0) {
+    for (const problem of problems) stderr(`::error::${problem}`)
+    return 1
+  }
+  stdout(
+    `public L1 PASS: ${htmlUrl} + ${judged.count} asset URLs 200, ` +
+      `${judged.count} assets digest == build sha256 (sample ${sampleLine ?? 'not-selected'})`
+  )
+  return 0
+}
+
 
 /**
  * Deterministic CLI exit. Every evidence file is already written with sync
@@ -2815,6 +3233,13 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
   const environment = buildEnvironment({ env, isCi: isCiEnvironment(env), now })
   const world = io.world ?? createWorld({ env })
 
+  if (options.buildSha256Manifest === true) {
+    return runBuildSha256Manifest({ options, outDir, world, stderr })
+  }
+  if (options.publicL1 === true) {
+    return runPublicL1({ options, outDir, world, stdout, stderr })
+  }
+
   if (options.spike === true) {
     return runSpike({
       tag: options.tag,
@@ -2872,7 +3297,9 @@ export async function runVerifyReleaseCli(argv = [], io = {}) {
       environment,
       state,
       stdout,
-      releaseState: options.releaseState ?? 'published'
+      releaseState: options.releaseState ?? 'published',
+      sha256ManifestDir:
+        options.sha256ManifestDir === undefined ? undefined : resolve(options.sha256ManifestDir)
     })
   } finally {
     rmSync(workRoot, { recursive: true, force: true })

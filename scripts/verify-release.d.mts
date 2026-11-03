@@ -4,6 +4,7 @@ import type { ChildProcess } from 'node:child_process'
 
 export type Layer = 'local' | 'ci'
 export type CiPlatform = 'mac' | 'linux' | 'windows'
+export type Sha256ManifestTarget = 'mac' | 'win' | 'linux'
 export type StepStatus = 'pass' | 'fail' | 'skip'
 export type ReleaseState = 'published' | 'draft'
 
@@ -20,6 +21,41 @@ export interface ReleaseMetadata {
   tag: string
   draft?: boolean
   assets: ReleaseAsset[]
+}
+
+export interface Sha256ManifestFile {
+  name: string
+  sha256: string
+  bytes: number
+}
+
+export interface Sha256Manifest {
+  version: 1
+  tag: string
+  target: Sha256ManifestTarget
+  files: Sha256ManifestFile[]
+}
+
+export interface BuildSha256ManifestResult {
+  ok: boolean
+  problems: string[]
+  manifest: Sha256Manifest
+}
+
+export interface BuildSha256Asset {
+  name: string
+  digest: string | null
+  buildSha256: string | null
+  bytes: number | null
+}
+
+export interface JudgeBuildSha256Result {
+  ok: boolean
+  problems: string[]
+  perAsset: BuildSha256Asset[]
+  count: number
+  duplicates: string[]
+  sample: { name: string; size: number; sha256: string } | null
 }
 
 export interface CheckOutcome {
@@ -291,16 +327,52 @@ export interface ParsedArgs {
   error?: string
   options?: {
     tag: string
-    layer: Layer
+    layer?: Layer
     out: string
     platform?: string
     aggregate?: string
     spike?: boolean
     releaseState?: ReleaseState
+    buildSha256Manifest?: boolean
+    publicL1?: boolean
+    target?: Sha256ManifestTarget
+    releaseDir?: string
+    releaseJson?: string
+    sha256ManifestDir?: string
+    sample?: string
   }
 }
 
 export function parseArgs(argv?: string[]): ParsedArgs
+
+export const UPLOAD_ASSET_GLOBS: string[]
+
+/** The one local-file-name -> uploaded-asset-name mapping (spaces become dots). */
+export function uploadAssetName(name: string): string
+
+export function matchesUploadAssetGlob(name: string): boolean
+
+export function buildSha256Manifest(options?: {
+  tag: string
+  target: Sha256ManifestTarget
+  files?: Array<{ name: string; sha256: string; bytes: number }>
+}): BuildSha256ManifestResult
+
+export function judgeManifestCoverage(options?: {
+  releaseNames?: string[]
+  manifestNames?: string[]
+}): { ok: boolean; problems: string[] }
+
+export function judgeBuildSha256(options?: {
+  releaseAssets?: Array<{ name: string; size?: number; sha256?: string | null }>
+  manifests?: Sha256Manifest[]
+}): JudgeBuildSha256Result
+
+export function readSha256Manifests(
+  world: World,
+  dir: string,
+  options?: { tag?: string }
+): { ok: boolean; problems: string[]; manifests: Sha256Manifest[] }
 
 export function releaseApiPath(options?: {
   tag?: string

@@ -722,6 +722,25 @@ jobs:
             console.error("::error::" + image + " trailer candidates LE=" + candidates[0] + " BE=" + candidates[1] + " do not match latest-linux.yml blockMapSize=" + declared + ".")
             process.exit(1)
           '
+      # Hash exactly the files the upload below sends, before anything leaves
+      # this runner: the same `release/` directory and the same glob list the
+      # script derives its matcher from. A file that cannot be read, a name that
+      # is not a 64-char lowercase hex sha256 or a coverage mismatch fails here,
+      # so the release matrix never uploads an unhashed asset.
+      - name: Compute the build-time sha256 manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-release.mjs --build-sha256-manifest --tag="${RELEASE_TAG}" --target="${{ matrix.target }}" --release-dir=release --out=sha256-manifest
+      # The manifest travels as a workflow artifact only: it never becomes a
+      # public release asset and is never part of `gh release upload` below.
+      - name: Archive the build-time sha256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha256-manifest-${{ env.RELEASE_TAG }}-${{ matrix.target }}
+          path: sha256-manifest
+          if-no-files-found: error
+          retention-days: 30
       # Upload this platform's artifacts into the single pre-created release.
       # `shell: bash` guarantees globbing works on the windows runner too.
       - name: Upload installers to the tag's release
@@ -751,6 +770,15 @@ jobs:
       contents: write
       actions: write
     steps:
+      # The public L1 step below runs the same `scripts/verify-release.mjs` as
+      # the draft verification, so the comparison rule exists once. Checkout and
+      # node are read-only setup at the top of the job: the publish gate order
+      # (resolve -> dispatch -> aggregate/artifact -> publish -> public checks)
+      # is unchanged.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       # Read-only: the tag's release must exist exactly once, and its `draft`
       # flag decides which transport mode the verification run uses. A missing,
       # duplicate or non-boolean release state fails before anything is
@@ -797,7 +825,7 @@ jobs:
           echo "${since}" > "${RUNNER_TEMP}/post-release-verify-since.txt"
           mode="$(cat "${RUNNER_TEMP}/release-state.txt")"
           echo "验证模式: ${mode}"
-          gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="${mode}"
+          gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="${mode}" -f release_run_id="${GITHUB_RUN_ID}"
       # A dispatch that resolves to no run is the exact failure this workflow
       # used to ship: a release with zero verification. Look for the run-name
       # that carries this tag and fail closed after five minutes instead of
@@ -1212,10 +1240,13 @@ jobs:
             echo "::error::The latest published release is ${latest}, not ${RELEASE_TAG}; this tag is not the latest release." >&2
             exit 1
           fi
-      # Public L1 is a lightweight post-publish smoke check. It proves the
-      # public release URL and every asset URL are reachable and that one
-      # asset's bytes still match the release metadata digest. It does NOT
-      # replace or relax the 15 draft checks that gated the publish above.
+      # Public L1 is a post-publish check that the public surface still matches
+      # the bytes this run hashed before uploading. It fetches this run's
+      # build-time sha256 manifests and compares every asset digest through
+      # `scripts/verify-release.mjs` (the one comparison rule); one sampled asset
+      # is downloaded as a transport smoke. `draft=false`, `html_url` and every
+      # `browser_download_url` 200 are still asserted here. It does NOT replace
+      # or relax the 15 draft checks that gated the publish above.
       - name: Run the public L1 checks after publishing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1263,16 +1294,17 @@ jobs:
           if [ "${status}" -ne 0 ]; then
             exit 1
           fi
-          picked="$(jq -r '[.assets[] | select((.digest // "") != "")] | sort_by(.size // 0) | .[0] | [(.name // ""), (.browser_download_url // ""), (.digest // "")] | @tsv' "${meta}")"
-          IFS=$'\t' read -r pick_name pick_url pick_digest <<< "${picked}"
-          if [ -z "${pick_digest}" ] || [ -z "${pick_url}" ]; then
-            echo "::error::No public asset of ${RELEASE_TAG} carries a digest; refusing to pass the sha256 L1." >&2
+          picked="$(jq -r '[.assets[] | select((.digest // "") != "")] | sort_by(.size // 0) | .[0] | [(.name // ""), (.browser_download_url // "")] | @tsv' "${meta}")"
+          IFS=$'\t' read -r pick_name pick_url <<< "${picked}"
+          if ! gh run download "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --pattern 'sha256-manifest-*' --dir "${workdir}/manifests"; then
+            echo "::error::缺构建期 sha256 清单：public L1 未取回任何 sha256-manifest-*（release run ${GITHUB_RUN_ID}）." >&2
             exit 1
           fi
-          curl -sSL -o "${workdir}/${pick_name}" "${pick_url}"
-          actual="sha256:$(openssl dgst -sha256 "${workdir}/${pick_name}" | awk '{print $NF}')"
-          if [ "${actual}" != "${pick_digest}" ]; then
-            echo "::error::Public asset ${pick_name} sha256 ${actual} does not match release digest ${pick_digest}." >&2
-            exit 1
+          sample_args=()
+          if [ -n "${pick_name}" ] && [ -n "${pick_url}" ]; then
+            curl -sSL -o "${workdir}/${pick_name}" "${pick_url}"
+            sample_args=(--sample="${workdir}/${pick_name}")
           fi
-          echo "public L1 PASS: ${html_url} + $(wc -l < "${workdir}/assets.tsv" | tr -d ' ') asset URLs 200, ${pick_name} sha256 matches ${pick_digest}."
+          node scripts/verify-release.mjs --public-l1 --tag="${RELEASE_TAG}" \
+            --release-json="${meta}" --sha256-manifest-dir="${workdir}/manifests" \
+            --out="${workdir}/l1" ${sample_args[@]+"${sample_args[@]}"}
