@@ -51,11 +51,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Boot Electron and connect over CDP (Linux)
+      - name: Install xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run -a node scripts/verify-release.mjs --tag="$TAG" --layer=ci --spike --out=verify-out
-      - name: Boot Electron and connect over CDP (macOS)
-        if: runner.os == 'macOS'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      # The same command shape on every OS: the platform difference (xvfb
+      # ownership, --no-sandbox, --disable-dev-shm-usage) lives only in the
+      # launch descriptor inside scripts/verify-release.mjs.
+      - name: Boot Electron and connect over CDP
         run: node scripts/verify-release.mjs --tag="$TAG" --layer=ci --spike --out=verify-out
       - uses: actions/upload-artifact@v4
         if: always()

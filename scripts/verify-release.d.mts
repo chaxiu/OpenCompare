@@ -116,9 +116,56 @@ export interface CdpPort {
 export interface LaunchHandle {
   cdp: CdpPort
   output: string[]
+  diagnostics?(): SpikeDiagnostics
   collectGarbage(): Promise<void>
   readRetainedHeap(): Promise<number | null>
   stop(): Promise<void>
+}
+
+export type SpikeFailureReason = 'process-exited' | 'no-page-target' | 'app-shell-timeout'
+
+export interface SpikePortProbe {
+  at: string
+  elapsedMs: number
+  ok: boolean
+  pageTargets: number
+  url: string | null
+  error: string | null
+}
+
+export interface SpikeDiagnostics {
+  reason: SpikeFailureReason | null
+  exitCode: number | null
+  signal: string | null
+  stdout: string
+  stderr: string
+  portProbe: SpikePortProbe[]
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface SpikeLaunchDescriptor {
+  command: string
+  args: string[]
+  cwd: string
+}
+
+export interface SpikeTargetWaitResult {
+  target: { type?: string; url?: string; webSocketDebuggerUrl: string } | null
+  reason: SpikeFailureReason | null
+  portProbe: SpikePortProbe[]
+  startedAt: string
+  finishedAt: string
+}
+
+export interface SpikeTargetWaitOptions {
+  port: number
+  timeoutMs?: number
+  intervalMs?: number
+  probe?: (port: number) => Promise<unknown>
+  childAlive?: () => boolean
+  now?: () => number
+  sleepFn?: (ms: number) => Promise<void>
 }
 
 export interface World {
@@ -141,6 +188,7 @@ export interface World {
     cwd?: string
     env?: Record<string, string>
     timeoutMs?: number
+    waitForTarget?: (options: SpikeTargetWaitOptions) => Promise<SpikeTargetWaitResult>
   }): Promise<LaunchHandle>
 }
 
@@ -162,6 +210,11 @@ export const STEP_STATUSES: StepStatus[]
 export const LOCAL_ROUND_COUNT: number
 export const RETENTION_THRESHOLD_BYTES: number
 export const CANCEL_NOISE_PATTERN: RegExp
+export const SPIKE_TARGET_POLL_INTERVAL_MS: number
+export const SPIKE_TARGET_TIMEOUT_MS: number
+export const SPIKE_APP_SHELL_TIMEOUT_MS: number
+export const SPIKE_PROCESS_EXIT_BUDGET_MS: number
+export const SPIKE_FAILURE_REASONS: SpikeFailureReason[]
 export const LOCAL_FIXTURE_ROOTS: { left: string; right: string }
 export const MANUAL_NOT_COVERED: Array<{ id: string; label: string; reason: string }>
 export const SMOKE_TREE: FourStateCounts
@@ -262,6 +315,35 @@ export function writeJsonAtomic(path: string, value: unknown): void
 
 export function sha256File(path: string): string
 
+export function buildSpikeLaunchDescriptor(options?: {
+  platform?: string
+  port: number
+  root?: string
+  electronBinary?: string
+}): SpikeLaunchDescriptor
+
+export function waitForSpikePageTarget(
+  options?: SpikeTargetWaitOptions
+): Promise<SpikeTargetWaitResult>
+
+export function formatSpikeLaunchLog(record: {
+  id: string
+  tag: string
+  conclusion: string
+  reason: SpikeFailureReason | null
+  url: string | null
+  error: string | null
+  exitCode: number | null
+  signal: string | null
+  stdout: string
+  stderr: string
+  portProbe: SpikePortProbe[]
+  startedAt: string
+  finishedAt: string
+}): string
+
+export function writeTextAtomic(path: string, text: string): void
+
 export function runCommand(
   command: string,
   args?: string[],
@@ -284,5 +366,6 @@ export function runVerifyReleaseCli(
     stderr?: (line: string) => void
     now?: () => Date
     world?: World
+    platform?: string
   }
 ): Promise<number>
