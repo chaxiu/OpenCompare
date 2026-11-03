@@ -80,6 +80,11 @@
 - **ac-evidence-sections**：`docs/release-evidence/<tag>.md` 与既有证据同构，含 tag / 发布点、公开 Release、Release CI、资产表（名称 / 字节 / sha256 / 公开 URL）、双语正文门、签名与公证、L1 结论、未覆盖面，引用一律绝对路径。
 - **ac-status-verified-once**：全文恰好一处 `status:` 且取值为 `verified` 或 `blocked`，不出现 `pending`；`verified` 分支缺任一必需标记即失败。
 - **ac-blocked-no-fabrication**：`status: blocked` 时只记录就绪门命令原始输出、缺失项与待人工动作，不含任何「通过」记录、产物 sha256 或本地 / 仓库 `release/` 产物，并已升级 Owner。
+- **ac-v0218-verified / ac-v0218-assets**：`docs/release-evidence/v0.2.18.md` 全文恰一处 `status: verified`，不再出现「未打 tag / 无 Release / blocked」结论；含 tag 对象、tag → commit、`publishedAt=2026-11-03T05:51:29Z`、`isDraft=false` / `isPrerelease=false`、Release 地址与 12 行资产表；表内 name / bytes / sha256 与 `gh api repos/chaxiu/OpenCompare/releases/tags/v0.2.18` 的 `assets[].name/size/digest` 逐行一致，sha256 为小写 64 位十六进制。
+- **ac-v0219-new / ac-v0219-assets / ac-v0219-gates / ac-v0219-l1**：`docs/release-evidence/v0.2.19.md` 首行含版本与中文标题、全文恰一处 `status: verified`，含 tag 对象 `e47e07dd74b0476274622500800121e66c855daf` → commit `fc584af0efea2fa75903ebb2d66bee99c0c20c9b`、`publishedAt=2026-11-03T13:59:51Z`、`isDraft=false` / `isPrerelease=false` 与 12 行资产表（name / bytes / sha256 同 `gh api` 逐行一致，三份 `latest*.yml` 标为清单而非安装包）；并记录发布 run `41648064270` 五 job success、draft verify run `41649092805` aggregate 15/15（mac 8/8、win 6/6、linux 9/9）、public L1 PASS 与 L1 真机场次 `trun_ccf0d240216eb4fa`（四态 `35 / 80 / 41 / 326,099` 逐位同基线、取消 37 ms、六类日志 0），不预写未发生的 pass/fail。
+- **ac-readme-line5 / ac-latest-verified**：两版 `README` 第 5 行标签均为 `v0.2.19` 且链接指向 `https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.19`，第 3 行双语互链与其余正文不变；由 `docs/release-evidence/*.md` 的 verified 状态与夹具 `evidence.ledger` 派生的最新 verified tag 为 `v0.2.19`，`judgePublishedAnchor` 对两版第 5 行返回 `{ ok: true, issues: [] }`。
+- **ac-fixture-ledger**：`src/main/__fixtures__/release-packaging.json#evidence.ledger` 中 `v0.2.18` 为 `{ status: verified, assets: 12 }` 并新增 `v0.2.19` 同形条目，`evidenceFiles` 版本集合与 ledger 版本集合一一对应；`currentVersion` 保持 `v0.2.17`，`docs/release-evidence-ledger.json` 的 5 条历史行不动。
+- **ac-tests-green / ac-diff-scope / ac-no-release-action / ac-evidence-reproducible / ac-delivery-window**：`pnpm test`（含 `release-evidence` / `release-packaging` / `release-version-gate` / `release-artifacts-and-brand`）全绿且不删、跳过或弱化既有断言；diff 只落两版 README、两份证据与夹具 ledger，`package.json#version` 仍 `0.2.19`；未推 tag / dispatch / 改动已公开 Release 正文与资产；每个 bytes 与 sha256 可由单次 `gh api … --jq '.assets[]|[.name,.size,.digest]|@tsv'` 复核，取不到写 `blocked` + 来源、不臆造；交付说明逐条写「未发布：`<sha>` `<标题>` `<原因=22:00 后内容顺延下一窗口>`」。
 - **ac-config-unit-tests**：发布配置断言单测覆盖元数据、打包目标、发布配置、6 Secrets 接线、fail-closed、签名身份、`appId`、版本对齐与唯一 Release，`pnpm test` 通过且不引入 Electron / DOM 依赖。
 - **ac-gates-green**：`code-gates.json` 全部门禁（install / lint / typecheck / build / build:web / test）通过，打包目标与 `v*` tag 触发条件不变。
 - **ac-code-gates**：`.munk/code-gates.json` 按顺序全量执行、退出码 0、无一跳过，不新增 gate 项、不新建测试门文件。
@@ -111,7 +116,7 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_c710b16442c88abf`（v0.2.19 版本收敛与双语发布说明，`deliveryIntent: local merge`）；日期：2026-11-03。
-- 结果：`code_gates` 27 门全绿（attempt 001）；改动仅 `package.json`（version 单行）、`.github/workflows/release.yml`（dispatch default 单 hunk）、`docs/release-process.md`（同字面量）、`CHANGELOG.md` 新增 `## v0.2.19` 段、`src/main/release-version-gate.test.ts`（`noteFacts` token）与新增 `docs/release-notes/v0.2.19.md`、`docs/release-notes/v0.2.19.zh-CN.md`；`README*`、`docs/release-evidence/**`、`__fixtures__` 与产品源码零 diff。
-- 验收落点：`ac-notes-scope-current-window`（v0.2.18..main 三项用户可见变化，过滤 CI / 发布验证提交）、`ac-notes-ignore-whitespace` / `ac-notes-reload-in-place` / `ac-notes-swap-panels`（双语 token 逐项对齐）、`ac-notes-portable-section`、`ac-version-facts-tokens`、`ac-evidence-and-product-untouched`、`ac-delivery-merge-only`。
-- 关键点：`releaseFacts` 由 `pkg.version` 派生，notes 路径必须为 `v0.2.19.md` / `v0.2.19.zh-CN.md`；`judgeReleaseHistory` 允许当前 tag 无证据文件，故不写 v0.2.19 证据不破门禁；本轮只 local merge 到 main，未打 tag / push / dispatch。
+- WI：`wi_intake_c9b8cc720af0c622`（**回填 v0.2.18 / v0.2.19 发布证据与 README 版本行**，`deliveryIntent: local merge`）；日期：2026-11-04。
+- 结果：`docs/release-evidence/v0.2.18.md` 由 `blocked` 改为 `verified`，新增 `docs/release-evidence/v0.2.19.md`（两版各 12 行资产表，bytes / sha256 与 `gh api` 逐行一致）；两版 README 第 5 行升到 `v0.2.19` 并指向对应 Release；夹具 `evidence.ledger` 加 `v0.2.19` 行、`v0.2.18` 改 `{ status: verified, assets: 12 }`。
+- 改动面：`README.md`、`README.zh-CN.md`、`docs/release-evidence/v0.2.18.md`、新增 `docs/release-evidence/v0.2.19.md`、`src/main/__fixtures__/release-packaging.json`；`package.json#version` 仍 `0.2.19`，`.github/**`、notes、`CHANGELOG.md` 与产品源码零 diff。
+- 关键点：最新 verified 由证据目录 + 夹具 ledger 既有机制派生（`currentVersion` 保持 `v0.2.17`，`docs/release-evidence-ledger.json` 5 条历史行不动）；v0.2.19 证据记录发布 run 五 job、draft verify 15/15（8/6/9）、public L1 与 L1 真机 `trun_ccf0d240216eb4fa` 四态，全程未推 tag / dispatch / 改公开 Release。
