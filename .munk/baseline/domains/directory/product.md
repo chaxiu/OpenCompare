@@ -1,90 +1,164 @@
 # Domain: directory
 
-目录域：`src/core/` 纯算法目录对比引擎（相对路径配对、四类状态、大小/mtime 短路 + SHA-256 内容确认、增量缓存），双栏目录对比视图（展开/折叠、逐行徽章、目录后代聚合计数、五档过滤、百万级窗口化），取数与下钻（真实目录 / 内置样本；双击差异文件下钻并可一键返回且往返不丢目录树状态）。在只读对比之上还承载两项高阶目录操作：**文件夹单向增量复制 / 镜像同步（Dry-run 预览后写入）** 与 **跨层级散乱目录树按模板归位 / 提取器**。本域不做文件级差异算法本体（行级 / 3-way merge 归代码域）。
+目录 / 文件夹场景的对比、单向镜像同步与模板归位：`src/core/directory/` 纯算法（相对路径配对、四态、size/mtime 短路 + SHA-256 确认、增量缓存）驱动双栏目录树与下钻。在只读对比之上覆盖 Dry-run 预览后的单向增量 / 镜像同步（字节级落盘、失败回滚、链接按形态落盘）与散乱树按模板归位（计划 / 执行 / 复核）。文件级差异算法不属本域。
 
 ## 范围
 
-- **对比引擎（`src/core/directory/`，纯算法，零 Electron/DOM）**：经 `PlatformPort` 递归扫描左右两棵树，按**相对路径**配对；每文件产出 `same` / `added`（右独有）/ `removed`（左独有）/ `modified`，目录状态由后代聚合。先比 size、再比 mtime，都不足以判定才经 `digestFiles` 对**原始字节**取 SHA-256 确认；已比对条目按 `(path, size, modifiedMs)` 缓存，重复比对不重复读内容。
-- **视图与窗口化**：左右双栏树、展开/折叠、`DiffBadge` 语义徽章、目录行聚合计数、五档过滤（全部 / 仅差异 / 左独有 / 右独有 / 相同，过滤后保留匹配项及其祖先）。`src/core/directory/rows.ts` 的 `buildDirectoryRowModel(root, filter, side, collapsedPaths)` 一次前序遍历产出可视行索引（只持节点引用），`TreeView` 用 `@tanstack/react-virtual` 只渲染视口 + `ROW_OVERSCAN = 10`，总高 = 行数 × `DIRECTORY_ROW_HEIGHT`（24px）。
-- **超大行数滚动映射**：`rows.length * 24` 超过浏览器布局上限（2^24 px）会静默截断尾部（实测 1,516,096 行时 53.9% 不可达）；`DIRECTORY_MAX_TREE_HEIGHT = 16_777_215` + `createDirectoryScrollMap(rowCount, viewportHeight)` 在未超限时退化为恒等映射（`row * 24`），超限时容器钉在该高度、每行共享可达偏移（`offsetForIndex` 严格递增、末行落在 `maxScrollOffset`），`rowPositionForOffset` / `rowTop` 驱动渲染窗口。
-- **取数与下钻**：左右各经 `PlatformPort.selectDirectory` 选真实目录（Web 降级提示）；内置样本目录一键加载。双击差异文件按类型下钻（代码/文本 → `CodeView`；CSV/TSV → `CsvView`；JSON/YAML → `StructuredView`；单侧独有则另一侧为空），生成 `file:{parentId}::{relativePath}` 会话并记 `parentDirectoryId`——两个目录会话对同一相对路径互不覆盖；文件视图顶部「返回上级目录视图」一步回到来源会话，`resolveDirectoryReturn(sessions, sourceId)` 决定落点（来源 → 其他可用目录会话 → `null` 并提示）。
-- **往返状态保持**：过滤档、折叠集合、左右滚动位置、选中项由工作台壳层按目录会话 id 保存并受控回填（受控 props + `useLayoutEffect`），下钻卸载重建后原样恢复，不同会话互不串味；仅运行期内存，不跨重启。
-- **同步计划与执行器**：`buildSyncPlan` 按方向产出 `copy` / `update` / 镜像模式 `delete`（默认不勾、可逐项或组级全选），带逐项路径 / 字节与分组汇总；`executeSyncPlan` 经 `PlatformPort` 写真实磁盘、自动建父目录，镜像删除**只删显式传入的 `deletePaths`**（缺省 / 空集零删除），写入后使受影响路径的比对缓存失效，同方向重复执行后计划为空（幂等）。
-- **Dry-run 弹窗与可执行判定单一来源**：`workbench/directoryOps.ts` 的纯函数 `syncPreviewAction(preview, deletePaths)` 一次给出 copy / update / delete（只数已勾且确在 delete 组的路径）/ align 计数、`planned` 与 `executable`；摘要句、删除分组「已选 N」、确认按钮 `disabled`、`sync-real-gate` 断言全读这一份，`canApplySyncPreview` 委托它。`syncPreviewGuidance` 返回 `changes` / `empty` / `noExecutable` 三态（有待对齐链接时必为 `changes`）；待对齐链接是独立第四组；无任何可执行项时确认禁用并给原因，忙碌态禁用确认且「取消」变为中止执行；取消不写任何文件；成功后自动重跑对比并替换会话。
-- **写盘保真与失败安全**：`SyncIo` 全程原始字节（`readFileBytes` / `writeFileBytes`），覆盖 / 删除前备份与回滚重建同路径（PNG / 非 UTF-8 字节逐字节一致）；主进程 `writeFileAtomically`（同目录临时文件 + `rename`）与 mtime 整毫秒回填共用一条实现（`Math.floor(ms)` 比较，亚毫秒差不误判 `modified`）。执行前整轮预检（`checkWritable` 只问不写 → 父链逐层目录 → 同名目录 `EISDIR`），**零写入**；逐项原子写、撤销动作先入栈再动盘、失败 / 取消逆序回滚（单步失败不中断、容忍 `ENOENT` / `EACCES`）、成功路径零 `.tmp`。
-- **错误语义与可读提示**：取消为 `OperationCancelledError`（`name` / `code === 'ECANCELED'`、不带系统码），失败为 `SyncTargetError`（目标路径 + OS 码），写后校验不一致为 `SyncVerificationError`（**不回滚**，带 `mismatched` / `paths` / 刷新后 `comparison`），仅刷新失败为 `SyncRefreshError`（写入已完成，带三项计数，不回滚）；渲染层按 `SyncTargetError.path` / `.code` 经 `syncFailureCopy` 映射到 `shell.sync.*` 词典，剥掉 `Error invoking remote method` 包装；失败 / 取消不替换会话、弹窗保留可重试；刷新失败则关闭已落盘预览并提示写入已完成。
-- **符号链接口径（归 `symlink-semantics` 域）**：`scanDirectory` 把链接作为叶节点（`linkTarget` / `linkTargetKind`），不跟随、不展开、不占 `index`、不取目标正文摘要；对比按目标串出四态，链接 vs 普通项 → 单条 `modified`。同步对链接按字面串创建（相对不解析、悬空照建、不写穿），目标侧已有条目按原形态备份 / 恢复；两侧链接 target 相同、仅 lstat mtime 不同时经 `setSymbolicLinkModifiedMs`（`lutimes`）对齐，清单在预览期生成（`SyncPreview.linkAlignments`），不计入 copied / updated / deleted。
-- **模板归位匹配与计划**：以模板 A 的相对路径槽位为骨架，用「文件名 + SHA-256」从散乱树 B 匹配，产出 `matched` / `missing` / `conflict(content-mismatch|ambiguous)` / `unused`；`createTemplatePlan` 展开为恰好一条 `matched` / `placed` / `missing` / `conflict`（`unused` 单列），带源 sha256、`modifiedMs`、`overwrite`、`occupiedByDirectory`、`defaultChecked`，构建零磁盘访问（覆盖检测来自注入的 `existingFiles` / `existingDirectories` / `existingFileHashes`）；内容相同的已落位槽位判 `placed`（既不 executable 也不 rejected，永不写）。
-- **模板归位解析 / 执行 / 复核**：`resolveTemplatePlan` 是唯一可执行清单出口（只有已勾 `matched` 与「已勾且候选在集内」的 `conflict` 可执行；重复勾选收敛、同源保留路径排序第一条、输出按 `relativePath` 稳定排序）；`executeTemplatePlan` 只写 `executable`，按源 `modifiedMs` 落盘，源漂移零写入记 `source-drift`，取消只停在未开始条目（预取消零写入零建目录）；`verifyTemplateExtraction` 逐条按父目录列表判存在 / 目录占用、按 `sha256Hex` 重算、`mtimeSec` 秒级比较。
-- **模板归位入口与动作**：对话框两步（选根 → Dry-run）+ 第三态结果；A 只读，B / 输出根支持选择、拖入、键入（复用 `normalizePathValue` + `homeDirectory`），根冲突以稳定 `TemplateRootError` 码拒绝且零扫描零写入。行级动作严格 `copy | move`（默认 copy，移动必须显式勾选），`resolveTemplatePlan` 的 `actions` / `copyCount` / `moveCount` 是唯一来源；移动按「写目标 → 重读存在 + sha256 + mtime 与**当前源**比对 → 删除计划记录的 `sourcePath`」执行，任一校验失败保留源与目标并继续后续行，不删模板 A / 输出根文件；结果清单按路径去重、带动作与源删除状态；重扫清空勾选 / 移动 / 候选选择。
-- **大小写折叠与路径越界**：`foldCase` 是唯一折叠口径（精确候选优先，无精确才回退；唯一命中且 hash 相同 `matched` / 不同 `content-mismatch` / 多 case 变体 `ambiguous`；输出根同理 `placed` / `overwrite` / `occupiedByDirectory`，多变体永不猜）；`templatePathIssue` 是唯一路径判定（空串 / 绝对路径 / 盘符 / UNC / `..` / 落在根自身 → `path-escape`），计划默认不勾、解析 `rejected`、执行零写入且其余行继续；折叠只用于比较，不参与写盘路径构造。
-- **批量取数、并发、进度与取消**：`scanDirectory` 改为队列 + 批量 `listDirectories`（`DEFAULT_DIRECTORY_BATCH_SIZE = 8`）+ `mapWithLimit`（`DEFAULT_TRAVERSAL_CONCURRENCY = 16`）；批量只改取数方式，树结构 / 排序 / 四态 / `skipped` 口径与串行一致，槽位缺失即整次 reject 不返回部分树。可选 `onProgress` 每结算一个真实批次回报一次（`files` / `bytes` 为跨相位单调不减的流水线累计，`phaseFiles` / `phaseBytes` 为相位内增量）；摘要按 `DEFAULT_DIGEST_BATCH_SIZE = 64` 分块。核心层 `signal` 在批次边界检查，在飞批次经 `abortable` 竞速立即 reject，取消绝不返回部分结果、不计 `skipped`、不写未结算块缓存。
-- **横切契约**：内容读取有界并发与句柄错误归 `io-concurrency`；字节摘要归 `content-digest`；不可读项容错（`leftSkipped` / `rightSkipped`、坏项不进状态计数）归 `io-tolerance`；视图面文案经 `useI18n().t(...)` 渲染、词典归 `i18n`；HTML 报告归 `directory-report`；新增平台能力（`readFileBytes` / `writeFileBytes` / `setSymbolicLinkModifiedMs` / `checkWritable`）归 `foundation`。
+- **对比引擎（`core/directory/compare.ts`）**：相对路径配对，四态 `same` / `added`（右独有）/ `removed`（左独有）/ `modified`，目录态由后代聚合；size → mtime 短路，不足以判定时按原始字节取 SHA-256，`(path, size, modifiedMs)` 缓存去重。
+- **双栏视图**：左右树、展开 / 折叠、行差异徽章、目录行后代聚合计数、五档过滤（全部 / 仅差异 / 左独有 / 右独有 / 相同）；`rows.ts` 纯行模型 + `TreeView` 虚拟化（`createDirectoryScrollMap`），≥150 万行尾部仍可达。
+- **取数与下钻**：真实目录选择 / 样本一键加载；差异文件按类型下钻代码 / CSV / 结构化视图，会话带 `parentDirectoryId`，「返回上级」一步回源并保持过滤 / 折叠 / 滚动 / 选中。
+- **扫描取数**：批量 `listDirectories` + 有界并发（默认 16），可选 `onProgress`（scan / digest 两相）与 `AbortSignal`；不可读项计 `skipped` 而不中止。
+- **同步预览**：`buildSyncPlan` 产出 copy / update（镜像另含 delete）；`syncPreviewAction` 单点给出四类计数、`planned`、`executable` 与 `guidance`，`canApplySyncPreview` 委托它。
+- **同步执行**：写前零落盘预检、逐项原子字节写、撤销先入栈、失败或取消逆序回滚；镜像只删勾选路径；摘要校验 `SyncVerificationError` 与刷新失败 `SyncRefreshError` 分形态。
+- **符号链接**：链接作叶条目按 target 判四态，同步按形态落盘（先 unlink 链接本身再 `lutimes` 对齐），不跟随、不写穿；同 target 仅 mtime 不同者作待对齐、不进计划。
+- **模板归位**：`matchTemplate` → `createTemplatePlan` → `resolveTemplatePlan`（唯一可执行出口）→ `executeTemplatePlan` → `verifyTemplateExtraction`；三步对话框（选根 / Dry-run / 结果），动作 `copy | move`，移动须显式勾选且写后校验通过才删源。
+- **展示词表**：目录四态用过滤页签词，经 `DIRECTORY_STATUS_LABEL_KEYS` 单源注入徽章与两处图例；文本 diff 词表不动。
 
 ## 验收
 
-- **ac-engine-classify / ac-engine-incremental**：按相对路径配对产出四类状态，靠 SHA-256 判定「size 相同内容不同」；size + mtime 相同的文件对不读内容即判 `same`，重复比对不重复读数 / 哈希（计数桩可验）。
-- **ac-tree-ui / ac-filter / ac-runtime-stats**：双栏树可展开/折叠、逐行徽章、目录行显示后代聚合计数；五档过滤切换后只留匹配项及祖先；统计全部来自运行时比较（样本 answer key 不再作输入）。
-- **ac-local-directory / ac-sample-directory**：Electron 下左右各选真实目录并对比（Web 有可理解降级）；内置样本一键加载，`pnpm dev` 与 `pnpm dev:web` 均可复现。
-- **ac-drilldown-code / ac-drilldown-typed / ac-drilldown-opens-file-view**：双击差异代码/文本、CSV/TSV、JSON/YAML 分别下钻到对应视图并携带左右内容（单侧独有另一侧为空），每个下钻独立会话且目录标签仍在。
-- **ac-back-to-parent-directory / ac-roundtrip-repeatable / ac-drilldown-isolation / ac-parent-fallback**：文件视图有明确返回导航且可反复往返；两个目录会话对同一相对路径下钻互不覆盖；来源会话不可用时落到可用目录会话并提示，不崩溃。
-- **ac-filter-preserved / ac-expand-preserved / ac-scroll-preserved / ac-selection-preserved**：往返后过滤档、折叠集合、左右滚动位置、选中项与高亮全部保持，不重置为全展开。
-- **ac-windowing-bounded / ac-scroll-map-full-reach / ac-windowing-semantics-kept**：DOM 行数与总条目解耦、`role="tree"` / `aria-level` / `title` 契约不变；`DIRECTORY_MAX_TREE_HEIGHT` 下尾部行可达、`offsetForIndex` 严格递增且末行落 `maxScrollOffset`；五档过滤、投影、折叠、选中、下钻与四态计数与改造前逐项相等。
-- **ac-sync-plan / ac-sync-plan-same-modified / ac-plan-three-groups-exact**：计划按方向产出 copy / update（镜像含 delete），`same` 不进清单，分组 `count` / `bytes` 与实际磁盘逐条对应，左右方向互为镜像。
-- **ac-sync-dryrun-dialog / ac-dialog-executable-summary / ac-only-unchecked-delete-blocked**：弹窗常驻三组 + 待对齐链接组，摘要与传入勾选集合同源；只有未勾删除项时确认禁用并给原因；忙碌态禁用确认并显示进行中文案。
-- **ac-sync-apply-refresh / ac-idempotent-second-dry-run / ac-refresh-single-source**：确认后真实写入、自动重跑对比并刷新（`counts` / `skipped` 与独立重算完全相等），同方向再执行计划为空（不因 mtime 精度 / 分隔符 / 中文空格路径出现幽灵条目）。
-- **ac-sync-mirror-delete / ac-delete-default-unchecked / ac-delete-selected-only / ac-unchecked-untouched**：镜像删除初始全部未勾；未传 `deletePaths` 或空集零删除；只删勾选项，未勾项内容与 mtime 不变；口径不得回退为「默认勾选」。
-- **ac-real-apply-content-structure / ac-mtime-preserved-fast-path-same / ac-binary-* **：落盘相对路径与 ≥4 层嵌套保真、中文与空格路径可定位、UTF-8 与二进制（含 `0x00` / 非 UTF-8 / 0 字节）逐字节一致；写入后按毫秒归一相等且重新对比判 `same`，内容不同仍必须 SHA-256 确认。
-- **ac-preflight-unwritable-target / ac-preflight-occupied-target / ac-preflight-no-target-writes / ac-refusal-snapshot-identical**：只读根与同名目录占用在第一个写入前拒绝，`writeTextFile` 调用 0 次、目标快照逐项等于执行前、无 `*.tmp` / 探测文件残留。
-- **ac-atomic-write-no-partial / ac-undo-before-write / ac-postwrite-failure-restores-target / ac-rollback-on-failure**：任何失败点都不出现零字节 / 截断文件；覆盖与删除在动盘前登记撤销项（含「rename 成功而 utimes 失败」「delete 先删再抛」），失败后已覆盖内容与 mtime 复原、已删文件重现、本次新建文件与多层目录消失，同一 preview 可立即重试成功。
-- **ac-cancel-mid-plan / ac-cancel-signal-observable / ac-cancel-from-dialog-aborts**：执行中取消按同一撤销路径回滚、无半写 / 无 `.tmp`；取消拒绝形态与失败可区分且不带系统码；弹窗「取消」调用 `abort()` 而非关闭弹窗，取消后立即 Dry-run 反映真实磁盘。
-- **ac-session-state-preserved / ac-cancel-session-preview-preserved / ac-failure-session-preview-preserved / ac-retry-after-failure**：失败 / 取消不替换会话、`busy` 复位、弹窗保留可重试且确认可用；同一弹窗重试成功后关闭并提示、会话被新比较替换。
-- **ac-readable-error-with-code / ac-cancel-notice-readable / ac-failure-notice-readable / ac-preview-failure-no-ipc-wrapper / ac-refresh-failure-readable / ac-refresh-failure-notice**：失败提示为中文句子含路径与对应 OS 码、不含 `Error invoking remote method`；取消提示含「同步已取消 / 已回滚」且无系统码；刷新失败用 `SyncRefreshError`、提示写入已完成 + 三项计数并关闭已落盘预览。
-- **ac-symlink-same-aligned-mtime / ac-symlink-write-no-follow**：链接按字面串创建 / 备份 / 恢复、绝不写穿；仅 mtime 秒级差异的两链接对经 `lutimes` 对齐（不计入三计数、不入 plan item），对齐后二次 Dry-run 为空且 `canApplySyncPreview === false`。
-- **ac-template-match / ac-placed-same-content / ac-placed-conflict-candidate / ac-counts-single-source**：文件名 + sha256 匹配产出四类；目标已存在且摘要等于可用源判 `placed`（不勾、永不执行），`templateFileCount === matched + missing + conflict + placed`。
-- **ac-template-plan-single-source / ac-plan-single-source / ac-default-checked-set**：`resolveTemplatePlan` 是唯一可执行清单，分区计数 / 可执行数 / 写入集合 / Apply 禁用同读它；matched 且无覆盖、未被目录占用才默认勾选，`overwrite` / `conflict` / `missing` / `occupiedByDirectory` 默认不勾。
-- **ac-execute-verify / ac-gate-sha-mtime-tamper / ac-cancel-zero-write**：只写 `executable`、按源 `modifiedMs` 落盘、逐条重算 sha256 与秒级 mtime；篡改 / 删除 / 前移 ≥1 秒分别报 `hash` / `missing` / `mtime`，亚秒差不报；预览后不执行 / 预取消 / Dry-run 取消三路径零 `writeTextFile` / `ensureDirectory` / `deleteFile`。
-- **ac-name-casefold-match / ac-name-exact-priority / ac-name-multi-variant-ambiguous / ac-plan-case-* / ac-verify-casefold-ok / ac-verify-still-strict**：精确优先、折叠回退、多变体永不猜；写后复核用 listing 的实际路径读内容（`Logo.png` 写在 `logo.png` 上仍 `ok`），`hash` / `mtime` 判据不放宽。
-- **ac-path-reject-list / ac-path-plan-non-executable / ac-path-resolve-reject / ac-path-execute-refuses / ac-path-shared-predicate**：`templatePathIssue` 对空串 / 绝对路径 / 盘符 / UNC / `..` / 根自身返回 `path-escape`，默认不勾、解析 `rejected`、执行零写入，三道闸共用一条谓词。
-- **ac-action-set-exact / ac-single-source-action-executable / ac-default-copy-source-untouched / ac-move-requires-explicit-selection**：动作仅 `copy | move`，`actions` 覆盖全部有源行；未勾选行恒 `copy`，`movePaths` 只对已勾可执行行生效，默认执行后 B 逐文件不变且零删除；整批「设为移动」只重标已勾可执行行、绝不自动勾选。
-- **ac-move-write-verify-delete-order / ac-move-verify-fail-keeps-source / ac-move-delete-fail-keeps-source / ac-no-rollback-successes**：写后校验与结果复核共用同一判定函数；校验失败不调用 `deleteFile`、源与目标均保留；删源失败记 `move-delete-failed` 且源保留；无 `.tmp`、不回滚已成功行。
-- **ac-result-matches-disk / ac-rescan-same-session / ac-rescan-zero-residue / ac-placed-after-move**：结果为每个成功目标恰一条（去重）并带动作与源删除状态；重扫清空勾选 / 移动 / 候选，移动成功源从 B 消失、槽位判 `placed` 且默认不勾，残留 0。
-- **ac-scale-real-disk-fixture / ac-gate-registered / ac-gates**：`sync-real-gate` 用真实 `mkdtemp`（两侧各 ≥1,000 文件、≥4 层、四态齐备、中文与空格路径），不 mock 文件系统、不用 `/samples`；五条模板门禁 + `sync-real-gate` 为单 argv 矩阵项；`pnpm typecheck` / `lint` / `test` / 各门禁全绿。
+- **ac-engine-classify**：相对路径配对四态正确，「大小相同但内容不同」由 SHA-256 判 `modified`。
+- **ac-engine-incremental**：size 与 mtime 均相同即判 `same` 不读内容；重复比对不重复读内容 / 哈希。
+- **ac-tree-ui**：双栏树可展开折叠、逐行差异徽章、目录行显示后代聚合计数。
+- **ac-filter**：五档过滤齐全，切换后仅保留匹配条目与祖先目录，统计随动。
+- **ac-runtime-stats**：状态栏 / 图例 / 徽章统计来自运行时比较，不读样本 answer key。
+- **ac-local-directory**：左右可选真实目录并触发对比，Web 模式有可理解降级；样本一键加载在 dev 与 dev:web 均可复现。
+- **ac-drilldown-code**：差异代码 / 文本、CSV/TSV、JSON/YAML 分别下钻对应视图并带左右内容，单侧独有时对侧为空。
+- **ac-drilldown-opens-file-view**：真实目录下钻共用同一会话模型，每次生成独立标签且目录标签保留。
+- **ac-back-to-parent-directory**：文件视图有明确「返回上级目录视图」导航，一步回到发起会话。
+- **ac-roundtrip-repeatable**：连续「下钻 → 返回」多次行为一致，无需刷新 / 重启。
+- **ac-filter-preserved**：往返后过滤档、展开折叠集合、两侧滚动位置、选中行与高亮均与下钻前一致。
+- **ac-drilldown-isolation**：两个目录会话对同一相对路径下钻互不覆盖。
+- **ac-parent-fallback**：来源会话不可用则落其他目录会话并提示，无可用会话停留文件视图，不崩溃。
+- **ac-sync-plan**：按方向产出 copy / update（镜像另含 delete）清单，逐项带路径与字节数、分组与合计汇总，same 不进组，左右互为镜像。
+- **ac-sync-dryrun-dialog**：两方向均可弹 Dry-run 弹窗分组展示并含字节与路径汇总，取消后目标侧零写入。
+- **ac-sync-mirror-delete**：目标独有项列待删除且初始全未勾，提供组级全选 / 清空与逐项复选框；只删勾选项，未勾项与缺省 / 空 `deletePaths` 恒零删除。
+- **ac-plan-carries-link-target**：链接 copy / update 项 `linkTarget` 等于 `readlink`、普通文件为 `undefined`；链接路径不进字节读取与摘要，悬空链接不报错。
+- **ac-dialog-executable-summary**：执行条目数与实际勾选集一致；无任何可执行项（含仅未勾删除）时确认禁用并给出可见原因，忙碌态禁用并显示进行中。
+- **ac-single-predicate**：`syncPreviewAction` 是四类计数、`planned`、`executable` 与 `guidance` 的唯一实现，摘要、合计、Apply 禁用与组头「已选 N」同读；delete 只数镜像计划内已勾路径。
+- **ac-i18n-keys-complete**：`groupCountSelected` 在 zh / en 成对、占位符一致、en 零汉字。
+- **ac-mirror-behaviours-indexed**：四条镜像行为在门禁 `description` 有可点名落点与测试文件映射（矩阵形状归 `quality-gates`）。
+- **ac-sync-apply-refresh**：确认后经 `PlatformPort` 实写并重跑对比、以刷新结果替换会话；计数与独立重比一致，同向再执行计划为空。
+- **ac-real-apply-content-structure**：落盘内容逐字节一致、相对路径与 ≥4 层嵌套不变、中文与空格路径可原样找到；mtime 毫秒归一后重新对比判 `same`。
+- **ac-idempotent-second-dry-run**：重复执行后三组 `count` / `items` 与合计全空、对齐清单为空、不可执行，多轮重复成立。
+- **ac-binary-png-byte-exact**：PNG、含 `0x00` 与非 UTF-8 序列的随机字节、0 字节空文件经 copy 与 update 后字节数与 sha256 等于源、mtime 一致。
+- **ac-rollback-binary-restore**：覆盖或删除后失败 / 取消回滚为原始字节（逐字节 + sha256）与 mtime，无替换字符。
+- **ac-completion-requires-source-equivalence**：每个写入目标 sha256 与字节数均等于源才 resolve；成功后除未勾删除残留无差异。
+- **ac-completion-blocked-on-mismatch**：任一目标与源不一致（含链接 mtime 对齐失败）即 reject `SyncVerificationError`（条数 + 路径样例），走 danger、不回滚。
+- **ac-verification-scope-written-only**：校验只读本轮写入目标 + 各自源 + 已勾删除项存在性，不整树二次哈希。
+- **ac-unchecked-delete-not-failure**：镜像下未勾删除项的残留不算失败，提示仍为成功。
+
+- **ac-completion-notice-truthful**：copied / updated / deleted / alignedLinks 与实际落盘逐项一致，完成提示四个数字同源（仅对齐时也报出 aligned 数）。
+- **ac-link-copy-relative-and-dangling**：四方向 × 增量 / 镜像组合下源侧独有链接（相对、悬空、指向目录）落盘后仍是 symlink，`readlink` 逐字、路径不变、mtime 秒级一致，不物化子树、不改被指向文件。
+- **ac-link-update-replaces-target**：同路径链接换 target 或换成普通文件时按目标形态落盘，旧链接不写穿、被指向文件字节与 mtime 不变。
+- **ac-target-link-not-written-through**：对目标侧链接的 update / delete 先 unlink 链接本身；指向同步对之外的文件前后 sha256 与 mtime 完全一致。
+- **ac-mirror-delete-link-only**：镜像删除目标独有链接只移除链接自身，指向的文件 / 目录及其子条目仍在；链接进 delete 组默认不勾。
+- **ac-link-delete-rollback**：删除链接后失败 / 取消，回滚重建仍是 symlink，`readlink` 与 mtime 秒级回到运行前。
+- **ac-verification-link-by-form**：链接按 `lstat` + `readlink`（+ mtime 秒级）校验，不取内容摘要；悬空链接 resolve 成功，错 target 或未对齐 reject。
+- **ac-symlink-same-aligned-mtime**：同 target 仅 lstat mtime 不同的链接对，落盘后目标链接自身 mtime 秒级对齐源；判等与四态、快照格式不变，对齐不进计划且与三组 items 不相交，二次 Dry-run 全空。
+- **ac-link-align-visible-and-applicable**：仅待对齐链接时 Apply 可点、渲染对齐分组与逐条路径、不渲染空态句；镜像下未勾删除项不挡住对齐，链接已对齐时仅未勾删除项仍使之为 `false`。
+- **ac-link-align-applied**：执行后链接形态、`readlink`、秒级 mtime 与源一致，`alignedLinks` 等于对数且 copied / updated / deleted 为 0；普通文件零改动，计划与四态计数不变。
+- **ac-counts-and-delete-optin-unchanged**：新建计 copy、替换计 update、删链接计 delete、对齐计 alignedLinks，字节口径沿用 lstat size；三组分类、四态与快照 / 导出格式不变。
+- **ac-file-overwrite-rollback-unchanged**：普通文件覆盖失败的回滚语义与既有断言不变，binary / completion / symlink / idempotent 用例零回归。
+- **ac-preflight-unwritable-target**：目标只读或被同名目录占用时在第一项写入前拒绝，`writeTextFile` 调用 0 次，目标快照（路径 / 字节 / mtime / 目录）逐项一致且无 `*.tmp`，错误含路径与系统码。
+- **ac-atomic-write-no-partial**：写入经同目录临时文件 + `rename`，任何时刻不出现零字节 / 截断文件，成功与失败路径都不残留 `*.tmp`。
+- **ac-rollback-on-failure**：覆盖 / 删除前先入撤销栈再动盘（含「写已落盘而 reject」窗口），失败按逆序回滚：内容与毫秒 mtime 复原、已删文件重现、本次新建文件与目录消失；同 preview 重试可全量成功。
+- **ac-cancel-mid-plan**：执行中途取消（含弹窗「取消」）以取消结束，目标逐项恢复执行前状态，无半写文件 / `*.tmp` / 残留新建目录。
+- **ac-cancel-signal-observable**：取消为 `OperationCancelledError`（`code === 'ECANCELED'`、无系统码）、失败为带路径与系统码的 `SyncTargetError`；提示含「已取消 / 已回滚」，取消后冷 Dry-run 与该时刻磁盘一致。
+- **ac-readable-error-with-code**：失败提示为中文且含目标路径与对应系统码、不含 `Error invoking remote method`；Dry-run 读失败同样去包装、不开弹窗、`busy` 复位。
+- **ac-session-state-preserved**：失败或取消不产出新比较，会话 id、树、四态、过滤与选中保持，`busy` 复位，预览保留且确认恢复可点。
+- **ac-retry-after-failure**：同一弹窗失败后重试成功，弹窗关闭并提示完成，会话被新比较替换。
+- **ac-refresh-failure-readable**：写入成功后刷新失败 reject `SyncRefreshError`（带三项计数、不回滚），danger 通知说明写入已完成并关闭已落盘预览，会话不替换。
+- **ac-existing-contracts-kept**：未勾删除项在失败 / 取消后 0 删除、取消与失败可区分、省略 `deletePaths` 零删除、只读根断言升级到 `checkWritable` 后仍通过。
+- **ac-batch-multi-dir-per-call**：≥8 目录的扫描中至少一次批量调用携带 ≥2 个目录，且调用次数少于目录数。
+- **ac-default-concurrency-16**：默认在飞批量峰值 ≥16 且不超单一来源常量；显式收窄（如 4）时峰值 ≤4 且树 / `index` / 四态 / `skipped` 一致。
+- **ac-parity-temp-fixture**：真实临时 fixture 与样本目录上，批量 / 并发扫描的树、`index`、`skipped`、四态等于串行基线，旧 `scanDirectory(rootPath, list)` 形态可用。
+- **ac-skipped-semantics**：不可读项各计 `skipped` 1、不可列子树计 1 且不进树、链接不计；`.git` / `node_modules` 照列；根目录不可列时以错误 reject 而非空树。
+- **ac-progress-scan-monotonic**：scan / digest 的 `files` / `bytes` 跨相位单调不减，digest 以扫描末态为基数不从 0 起算，`phaseFiles` / `phaseBytes` 表示相位内增量。
+- **ac-progress-digest-chunks**：按 64（可覆盖）分块，每结算一块才回报一次并写该块缓存；未结算不报、结束后不再报，无定时器插值。
+- **ac-cancel-error-type**：扫描或摘要阶段 abort 后 1 秒内以取消 reject，不再发起新批次，不计 `skipped`、不返回部分结果，被中断块不写缓存。
+- **ac-cancel-then-recompare**：取消不新增 / 替换会话、不产生比较；重跑成功且四态与基线一致，无句柄残留。
+- **ac-scale-real-disk-fixture**：门禁用 `mkdtemp` 真实目录（两侧 ≥1,000 文件、≥4 层、中文与空格路径），不用样本 / 内存盘 / mock 顶替；单 argv 登记为 `sync-real-gate`，时长 20–40 秒。
+- **ac-rows-filter-parity**：五档 × 两侧行模型的 `(relativePath, name, kind, depth, status)` 序列等于既有投影先序结果（含顺序与遗留空目录行），`visibleCounts` 与四态计数同源。
+- **ac-rows-collapse-parity**：折叠等于「先序但跳过折叠子树」，折叠目录自身行保留、位置不变；空集合与全展开一致。
+- **ac-row-model-no-clone**：行模型节点与树节点同引用，构造前后身份不变；`DirectoryView` 不再调用过滤 / 投影函数（计数为 0）。
+- **ac-bounded-dom-50k**：1200×640 下每栏树行 ≤80、双栏 DOM ≤5000；5,000 行与 5 万+ 行渲染量相同（±2 / ≤10%），反复滚动不增长，展开 ≥2 万子项目录后仍有界。
+- **ac-scroll-far-rows**：滚到接近底部时渲染索引严格递增无重复并覆盖首末可见行，各字段与行模型一致；逐档切换过滤为对应前缀窗口，空档不渲染行并显示既有空态文案。
+- **ac-drilldown-restore**：过滤 + 折叠 + 选中 + 非零滚动后卸载再同状态重挂载，`scrollTop` 复原（±1）、选中在渲染窗口内、折叠子项不渲染；超大行数下同样成立。
+- **ac-height-capped**：`rows.length * 24 > 16_777_215` 时容器内联高度 ≤16,777,215px，行数较小时高度恰为行数 ×24。
+- **ac-last-row-reachable**：1,516,096 行下滚到最大偏移可渲染末行且内容一致；0 / 1/4 / 1/2 / 3/4 / 末行与尾部目录所在索引均可命中，`offsetForIndex` 严格递增。
+- **ac-template-match**：匹配器以文件名 + SHA-256 把散乱树 B 映射到模板 A 槽位，产出 matched / missing / conflict / unused；索引匹配使 1,000+ 文件线性完成、不重复读内容。
+- **ac-four-outcomes-one-to-one**：每槽位恰好一条 matched / placed / missing / conflict 条目、`unused` 单列，分区计数等于数组长度、槽位总数等于 `templateFileCount`、`targetPath` 由 `joinRelativePath` 派生；条目带源 sha256 与 `modifiedMs`。
+- **ac-default-unchecked**：仅「matched 且目标无既有文件、未被目录占用」默认勾选；conflict、path-escape、覆盖、目录占用、missing 一律不勾，未勾时零写入零删除。
+- **ac-resolve-unique-manifest**：`resolveTemplatePlan` 是唯一可执行出口——只收已勾 matched 与「已勾且候选在集内」的 conflict，其余进 `rejected` 带稳定原因（未勾 / 冲突未解析 / 候选集外 / 目标被目录占用 / 重复源），同源只留排序第一条，计数、Apply 禁用与写入集合全读它。
+- **ac-rejected-row-copy**：conflict 行内候选单选与勾选解耦，未选候选不可勾、换候选同步源身份、清空即取消勾选并计 `conflict-unresolved`；`rejected` 每种原因逐行本地化，被占用行即使勾选也零写入。
+- **ac-overwrite-not-silent**：覆盖与目录占用分别可区分、覆盖行默认不勾、占用即使勾选也进拒绝零写入；覆盖检测读真实输出根（含大小写折叠键），输出根缺失时标注「将创建」且全部 `overwrite === false`。
+- **ac-placed-same-content**：目标 sha256 等于该行可用源（matched 源或 conflict 任一候选）即 `placed`、不勾、永不 executable（显式勾选也不计数），已落位行独立分区呈现、无勾选框与覆盖提示。
+- **ac-mtime-sec-preserved**：复核逐条重算 `sha256Hex` 并比秒级 `mtimeSec`，失败区分 `missing` / `directory` / `hash` / `mtime` / `unreadable` 且 `verified + failed === entries.length`；亚秒不误判，大小写不同但 hash 与 mtime 一致判通过。
+- **ac-source-drift-guard**：执行期重读源 sha256 漂移的条目零写入计 `source-drift`，其余已选条目照常执行。
+- **ac-cancel-zero-write**：不执行、预取消 `AbortSignal`、Dry-run 取消三条路径均零 `writeTextFile` / `ensureDirectory` / `deleteFile`，输出根与 B 树逐条不变、无 `*.tmp`；中途取消只停在未开始条目。
+- **ac-preview-zero-write**：预览只对落在槽位上的既有输出文件读一次正文并复用摘要，不读无关文件、不重复哈希同一路径，零写入零建目录。
+- **ac-apply-writes-checked-only**：只写 `resolved.executable` 的 `targetPath`（第三参为该行 `modifiedMs`），未勾行零写入，条数等于 `executableCount`，写路径只走 `executeTemplatePlan`。
+- **ac-apply-then-verify**：确认后进入「结果」步骤不关闭；写入 / 失败取自同一次 `TemplateExecution`、复核取自同一次 `TemplateVerification`，成功路径 `verified === writtenCount && failed === 0`，每目标一条记录带动作与源删除状态，失败行显示本地化原因。
+- **ac-move-write-verify-delete-order**：移动按「写目标 → 校验存在 / sha256 / 秒级 mtime 对当前源 → `deleteFile(sourcePath)`」执行，删除路径不重拼、不碰模板 A 与输出根；失败只记该行（`move-target-*` / `move-delete-failed`），源与目标保留、已成功行不回滚。
+- **ac-move-requires-explicit-selection**：动作严格 `copy | move`，`movePaths` 只对已勾选且可执行行生效，未勾 / missing / placed / rejected / path-escape 行零执行零删除；默认全为 copy、源零删除；行内展示「B 相对路径 → 输出根相对路径 + 动作」。
+- **ac-rescan-same-session**：同会话重扫零写入重建、清空勾选 / 移动 / 候选并回 Dry-run：已写槽位为 `placed` 不勾、pending 0；改动已落位正文后 conflict 回到 conflict、matched 保持 `overwrite` 不勾；missing / unused 口径不变，`*.tmp` 与移动源残留为 0。
+- **ac-template-a-is-left-root**：模板 A 只读会话左根；B 与输出根支持选择 / 对话框内拖入（不冒泡）/ 键入绝对路径与 `~`（复用 `normalizePathValue`）；快照左根、B 缺失 / 非目录 / 等于 A、输出根非法以稳定码拒绝且零扫描零写入，全链路无 `/samples`。
+- **ac-large-list-virtualized**：1,000+ 条 Dry-run 与结果清单共用单表窗口化，DOM 行数显著小于总数，滚到末尾仍可勾选并读到最后一条复核结果，计数不截断。
+- **ac-readonly-refusal-localized**：写前 `checkWritable` 零落盘预检，只读根在首次写入前以 `TemplateApplyError`（含路径与 `EACCES` / `EPERM` / `EROFS`）拒绝且零新建；恢复权限后同 resolved plan 重试通过；失败路径无 `*.tmp` 与半写文件。
+- **ac-e2e-scale**：真实 `mkdtemp` 上模板 A ≥1,000 槽位、B ≥1,000 文件、最深 ≥4 段、含中文与空格，四类齐备且两类冲突并存；跑通 dry-run → 显式勾选 → apply → 逐条 sha256 / `mtimeSec` 复核，未勾与占用行零写入。
+- **ac-e2e-evidence-manifest**：门禁文件可独立冷启动通过并钉住默认勾选真值集、选择并集等于写入集合、独立重算 sha256 与秒级 mtime；e2e 写出 manifest（三根、planCounts、selection、逐条摘要与断言名），提交件落 `qa/` 并自洽校验。
+- **ac-name-casefold-match**：精确大小写候选优先，无精确才走 case-fold：同 hash 判 matched、不同判 `content-mismatch`、多变体判 `ambiguous`，case-only 命中被消费不再落进 unused，槽位路径大小写仍按模板 A。
+- **ac-matchslots-casefold**：输出扫描中的 case-only 路径按同一口径匹配，不因大小写差异报 missing。
+- **ac-path-reject-list**：纯判定函数对空串、绝对路径、盘符 / UNC、含 `..` 段与落在根自身返回稳定 `path-escape`，正常相对路径通过；命中行不默认勾选、解析进 `rejected`、执行零写入记 `failed` 且其余行继续。
+- **ac-gate-case-collision**：新增 `template-case-collision` / `template-path-contained` 两条单 argv 门禁（纯函数与内存夹具，平台无关），既有门禁 id / 命令逐字不变只追加；单测覆盖 case-only 匹配 / 计划 / 复核。
+- **ac-apfs-e2e**：APFS 大小写不敏感卷上（探针为 false 时显式 skip）验证 Dry-run 覆盖判定与不勾、未勾 Apply 树快照不变、显式勾选写入后复核全通过、重扫为 placed，并覆盖默认复制、显式移动与校验失败保留源三腿。
+- **ac-right-only-row-badge**：目录行徽标 en 为 `Right only` / `Left only`、zh 为 `右独有` / `左独有`，不出现文件级词，对侧树不渲染该行。
+- **ac-directory-toolbar-legend**：工具栏图例与壳层状态栏图例同用目录词表且数值等于 `visibleCounts`，过滤态下图例标签与数值同步。
+- **ac-text-diff-labels-untouched**：文本 / 代码 diff 仍用 `Added` / `Removed` / `Modified`（zh 新增 / 删除 / 修改），通用组件不传目录词表时行为不变，`DIFF_LABEL_KEYS` 不被全局改写，旧词断言同批改判。
+- **ac-filter-counts-and-state-unchanged**：`matchesFilter` / `visibleDirectoryCounts` / `countTreeFiles` 语义与数值不变（right-only 计 added 1、left-only 计 removed 1，`differences` 为非 same 汇总）。
+- **ac-i18n-pairing**：新增文案 zh / en 键集合与 `{placeholder}` 一致、en 渲染无汉字，OS 码与路径原样，既有键同步测试通过。
+- **ac-no-prod-semantics-change**：算法 / 计划 / 解析 / 执行 / 复核语义与四态、快照、导出格式不变；依赖与版本不 bump、不打 tag、不改已公开 Release；平台缝只按「新增能力 + 可选参数」演进。
+- **ac-no-regression**：目录四态、同步、快照、报告、下钻与 i18n 既有套件零回归；门禁文件不 import 样本、不出现样本挂载字面路径，既有断言不删不跳不放宽。
+- **ac-gates-green**：`install` / `lint` / `typecheck` / `build` / `build-web` / `test` 与既有专项门禁全绿，矩阵项只在末尾追加。
+- **ac-known-issues-posture**：两版 README 的 Known issues 与能力区与引擎事实逐条对应（增量只新增覆盖、镜像删除默认不勾、无 watcher），不得升级为更强承诺。
+- **ac-lessons-written**：`docs/lessons.md` 与 `AGENTS.md` 收录「可执行判定必须 UI 与门禁同源」约束，不新增文档文件。
 
 ## 非目标
 
-- **不做文件级差异算法本体**：行级 / 行内 diff、3-way merge、CSV 主键对齐、JSON/YAML 语义归一化归对应域；下钻只把内容带入视图只读呈现。
-- **不做双向 / 三向同步**：同步为单向覆盖；不做内容级合并冲突策略、回滚备份目录 / 版本历史 / 回收站、暂停 / 恢复 / 断点续传、取消后自动重试、跨设备（`EXDEV`）回退、刷新失败后的自动回滚或重试。
-- **不清理镜像删除产生的空目录**（只清理本次执行新建的目录）；权限 / 属主 / 模式位 / ACL 复制不做；目标同路径是真实目录时按 `EISDIR` 拒绝，不做类型替换。
-- **不做持续 / 定时自动同步与 watcher**，不做增量重扫调度；同步按需触发。
-- **不做模板归位的模糊 / 相似度匹配**：仅精确文件名 + SHA-256（含大小写折叠回退），不做重命名识别、路径占位符模板、正则 / 脚本模板引擎、冲突合并、实时监听与远端。
-- **模板归位不做执行中途的 UI 级取消**（纯核 `AbortSignal` 契约保留但不接 UI）；失败不回滚已写条目（只保证未勾项零写入、当前条目无半成品）；不把输出根作为右侧建新对比或自动刷新右侧树。
-- **不做目录级下钻与导航栈**：不做面包屑、前进 / 后退历史、键盘导航、右键菜单、多选 / 区间选择；往返状态不跨重启持久化，不引入全局状态库。
-- 不做会话关闭与未保存提示、原位保存与结果导出（属会话 / 保存子项）；不做三向或超过两个目录的对比；不做快捷键、命令面板、主题切换；不做打包分发与发布。
-- **不新增默认忽略规则**：`.git` / `node_modules` / 隐藏文件照列；不把不可读条目 / 不可列子树改成整次失败，不把 `EMFILE` / `ENFILE` 吞成 `skipped`；符号链接只计 1 条叶条目。
-- 不新增 `webContents.send` 类 main → renderer 进度事件；不新增持久化缓存、不改缓存键 `(path, size, modifiedMs)`；平台读通道保持字节缝，不退回文本穿行。
-- 不把 `ScannedTree` / `DirectoryComparison` 搬去主进程或 worker；不做 Hex 二进制对比、`.xlsx` 解析、远端 FTP / SFTP；不假装虚拟化（不先全量渲染再隐藏、不缩减 fixture 达标）。
+- 不做文件级差异算法本体（行级 / 行内字符级 diff、3-way merge、CSV 主键对齐、JSON·YAML 语义 diff）；下钻只把内容带进视图只读呈现。
+- 不做双向 / 三向同步与内容级合并冲突策略；同步恒为单向左→右或右→左。
+- 不做回滚备份目录 / 版本历史 / 回收站、暂停恢复 / 断点续传、取消后自动重试、`EXDEV` 回退；不清理执行前已存在的目录。
+- 不做权限 / 属主 / ACL / 模式位复制；目标同路径为真实目录时按 `EISDIR` 拒绝不做类型替换；不做 Hex / 二进制 diff、`.xlsx`、FTP / SFTP。
+- 不做持续 / 定时自动同步与文件系统 watcher，同步按需触发；不给快照 / 同步 / 模板加后台调度。
+- 不做模板归位的模糊 / 相似度匹配（只文件名 + SHA-256）、重命名识别、路径占位符或脚本模板引擎、双向同步、冲突合并与远端。
+- 不做模板执行中途的 UI 级取消按钮（纯核 `AbortSignal` 契约保留）、失败后回滚或撤销已写条目、把输出根作为右侧建立新对比。
+- 不做目录级下钻与导航栈（面包屑、前进后退、键盘导航、右键菜单、多选）；往返状态只存运行期内存，不跨重启 / 窗口持久化。
+- 不做三向或超过两个目录的对比；不做快捷键 / 命令面板 / 主题切换；不做打包分发、签名、公证、自动更新。
+- 不新增默认忽略规则（`.git` / `node_modules` / 隐藏文件照列）；不改缓存键 `(path, size, modifiedMs)` 与失效语义；不把 `ScannedTree` / `DirectoryComparison` 搬去主进程或 worker。
+- 不「先全量渲染再隐藏」；不改样本 answer key；不改 `.munk/baseline/**`（由 Delivery 折入）。
 
 ## 实现约束
 
-- 技术栈冻结：Electron + electron-vite + React 19 + TS + Tailwind v4 + Lucide；不引入第二套 UI / 样式方案；token 唯一来源 `src/renderer/src/assets/main.css`，差异色走 `--color-diff-*`。
-- 分层：目录对比 / 同步 / 模板算法在 `src/core/directory/`，零 Electron / DOM / `node:*` 依赖，纯函数或「纯函数 + 注入 IO」；renderer 只经 `PlatformPort`，新能力同时补 Electron IPC 与 Web 内存实现并登记 `channels.ts` 白名单。SHA-256 必须跨 Node / 浏览器 / renderer 可用（核心比对保持同步纯函数）。
-- **同源判定只留一处**：`syncPreviewAction`（可执行 / 计数 / 摘要）、`syncPreviewGuidance`（三态文案）、`resolveTemplatePlan`（可写集合 / 动作）、`foldCase`（折叠）、`templatePathIssue`（越界）、`buildDirectoryRowModel` / `createDirectoryScrollMap`（行模型与滚动映射）各只有一个实现，UI / 门禁 / 执行器全部复用；禁止内联第二份。
-- **删除语义单一实现**：`deletePaths` 缺省 = 零删除在 `sync.test.ts` 内直接断言；非镜像分支传 `[]` 而非 `undefined`；任何调用点不得因漏参删目标文件。
-- **失败安全只在 `src/core/directory/sync.ts` 扩展**：`SyncIo` 提供 `removeDirectory` / `statPath` / `listDirectory` / `checkWritable`（只问不写，禁止探测文件），`signal` 贯通到每项检查点；三种错误类型（`SyncTargetError` / `SyncVerificationError` / `SyncRefreshError`）不得混用；回滚备份字节保真、撤销先入栈再动盘、逆序执行且单步失败不中断。
-- **mtime 归一只用于 size + mtime 快路径**，粒度 `Math.floor(ms)`；Electron 回填用数值秒 + 亚微秒抬升；内容不同仍须 SHA-256 确认，禁止用 mtime 伪造 `same`。
-- **原子写单一实现**：`platform:write-text-file` / `writeFileBytes` 共用主进程 `writeFileAtomically`（同目录临时文件 + `rename`，失败清理），不引 `EXDEV` 回退；删除 / 建目录失败经 `readableFileFailure` / `readableDirectoryFailure` 转中文含路径与 OS 码。
-- **模板纯核只认注入 IO**：`createTemplatePlan` / `resolveTemplatePlan` 零 IO（覆盖检测来自注入清单），`executeTemplatePlan` / `verifyTemplateExtraction` 只经各自 IO；复用 `joinRelativePath` / `sha256Hex` / `OperationCancelledError`，不复制第二份实现、不新增磁盘抽象。覆盖检测必须读真实输出根（否则 `overwrite` 恒 false 且默认勾选静默覆盖），预览阶段零写入。
-- **模板写路径只留一条**：写入只走 `executeTemplatePlan`；旧 `extractTemplateMatches` / `applyTemplateExtract` renderer 写路径不得复活；拒绝码用 `TemplateRootError` 稳定码 + 词典本地化，不直接渲染平台中文 message；根规范化复用 `@shared/compareRequest` 的 `normalizePathValue`。
-- **移动语义**：删源只认计划记录的 `sourcePath`，绝不用 `sourceRelativePath` 重拼；写后校验与结果复核同一函数；重扫时 `missing` 槽位须读输出根摘要才能判 `placed`；新增失败 reason 时同步补 zh / en 成对词条。
-- **行模型与虚拟化**：`DIRECTORY_ROW_HEIGHT = 24` 单一常量；行模型只按内容变化重建（折叠集合为稳定 `readonly string[]`）；虚拟化锚定 `Panel` body（`initialOffset` 取 shell 保存的 `scrollTop`），返回挂载时虚拟窗口与恢复位置一致。
-- **遍历复用既有并发工具**：`mapWithLimit` / `toReadableIoError`，不引 `p-limit` / `p-queue`；`DEFAULT_TRAVERSAL_CONCURRENCY`(16) 与 `DEFAULT_STAT_CONCURRENCY`(16) 是独立常量，`DEFAULT_IO_CONCURRENCY`(8) 不得被抬高替代；批次挂起必须 `abortable` 竞速，被放弃 promise 挂 `catch`。
-- **测试落位**：真实磁盘门禁 `src/sync-real-gate.test.ts`（`mkdtemp` + electron handler map，不 mock 文件系统）与五条模板门禁 + `template-e2e-real`；只读用例用 `chmod` 构造、root 身份仅跳过该条；二进制样本用代码内 `Buffer` / base64，不新增资源文件；不新增 code-gates 矩阵项。
+- 技术栈冻结：Electron `^37.10.3` + electron-vite + React 19 + TS + Tailwind CSS v4 + Lucide React；不引入第二套 UI 库 / 样式。
+- 分层：对比 / 同步 / 模板算法在 `src/core/directory/`（`compare.ts` / `rows.ts` / `sync.ts` / `template.ts`），零 Electron / DOM，纯函数或「纯函数 + 注入 IO」，可被 vitest 直测；renderer 只经 `PlatformPort` 取数。
+- SHA-256 用 Node / 浏览器 / Electron 三端可跑的同步实现，renderer 不引 `node:*`。
+- 写盘走字节缝 `readFileBytes` / `writeFileBytes`（+ `ensureDirectory` / `deleteFile` / `setSymbolicLinkModifiedMs`），内容不以 UTF-8 字符串穿过同步写路径；原子写（临时文件 + `rename`）只有一条实现。
+- 写入后必须使受影响路径的比对缓存失效（清 `ComparisonCache.hashes`），Web 内存实现同步更新 size / mtime。
+- mtime 归一只用于 size + mtime 快路径、粒度毫秒（`Math.floor`）；内容不同仍由 SHA-256 判 `modified`，禁止抹平 mtime 伪造 `same`。
+- 失败安全只在 `sync.ts` 扩展：`SyncTargetError` / `SyncRefreshError` / `SyncVerificationError` 互不复用；撤销先入栈、逆序回滚、单步失败不中断且容忍 `ENOENT` / `EACCES`；`readableSyncFailure` 只剥 IPC 包装。
+- 判定各只有一份实现：`syncPreviewAction` / `canApplySyncPreview`、`resolveTemplatePlan`、`foldCase` 与 `templatePathIssue`；UI 与门禁同读，禁止内联第二份。
+- 模板归位只认注入 IO：`createTemplatePlan` 零 IO（覆盖检测靠注入清单），写入只走 `executeTemplatePlan`，复核只走 `verifyTemplateExtraction`；`setup` / `dry-run` / `result` 同在一个 `TemplateDialog`。
+- 平台缝按「新增能力 + 可选参数」演进：`PlatformPort` + `PLATFORM_CHANNELS` + preload 白名单 + Electron handler + Web 同签名实现；Web 无链接能力时同签名拒绝。
+- 行模型纯函数提供 `length` / `at(index)` / `visibleDirectoryCounts`，`DIRECTORY_ROW_HEIGHT = 24` 单源，`createDirectoryScrollMap` 处理 >2^24 px 上限；虚拟化锚定 `Panel` body。
+- 目录树状态不依赖挂载生命周期：展开 / 选中为受控 props，滚动经 `onBodyScroll` 上报，壳层按会话 id 保存并在返回时回填，不引全局状态库。
+- 视觉：token 唯一来源 `main.css`，差异色走 `--color-diff-*`，组件不写死颜色 / 尺寸；目录四态词表经 `DIRECTORY_STATUS_LABEL_KEYS` 单源注入。
+- 进度与取消是可选尾参：跨相位累计单调、每批次最多一次、无定时器插值；批次挂起用 `abortable` 竞速且被放弃 promise 必须挂 `catch`。
+- 测试：真实磁盘用例用 `mkdtemp` + `vi.mock('electron')` handler map + 生产 `PlatformPort`，`chmod` 场景 root 下 `skipIf`，不 mock 文件系统；失败信息带稳定类别前缀便于定位。
 
 ## 最近交付证明
 
-- WI：`wi_intake_abb0a2b075d1f867`（**模板归位补齐逐条动作列与显式移动**：默认复制、移动必须显式勾选、写后校验通过才删源；`kind: feature`）
+- WI：`wi_intake_abb0a2b075d1f867`（模板归位补齐逐条动作列与显式移动：默认复制、移动必须显式勾选、写后校验通过才删源，`kind: feature`）
 - 日期：2026-11-02
-- 结果：`code_gates` passed（20 gates，attempt 001，`.munk/runs/run_intake_abb0a2b075d1f867/code-gates/attempts/001/manifest.json`）；`pnpm test` 111 files / 1624 passed + 1 skipped（1625）、35.33s；新增 `template-move-actions` 6 tests / 11ms、`template-move-verify` 6 tests / 89ms，`template-e2e-real` 10 tests / 1.88s（新增 APFS 三腿「默认复制 / 显式移动 / 校验失败保留源」）、`sync-real-gate` 33 tests；矩阵 18 → 20 仅在末尾追加两条，既有 18 条 id / 命令 / `cwd` 逐字未动；`package.json#version` 仍 `0.2.16`，发布件零改动；`needSelfTest=false`。
-- 覆盖摘要：① **动作契约单源**——`TemplateAction` 严格 `copy | move`，match / candidate 携带 `sourceRelativePath`（由 B 扫描索引给出），计划条目带 `sourceRelativePath` / `targetRelativePath` / `defaultAction`；`resolveTemplatePlan` 增 `movePaths`、`actions`（未勾选行恒 `copy`、无源行无条目）、`copyCount` / `moveCount`，行内动作列 / 移动复选框 / 底部三计数 / Apply 禁用同读一份；默认执行后 B 逐文件 sha256 / `mtimeSec` 不变、零删除。② **显式选择**——`movePaths` 只对已勾可执行行生效，未勾 / missing / placed / rejected / path-escape 行即使传入也零执行；整批按钮只重标 `resolved.executable` 且绝不自动勾选；取消勾选同步清移动选择。③ **移动执行**——写目标 → 重读存在 + sha256 + 秒级 mtime 与当前源比对 → 才 `deleteFile(sourcePath)`；注入缺失 / hash / mtime / 不可读时源与目标均保留、后续行继续；删源被拒记 `move-delete-failed`；无 `.tmp`、不滚已成功行。④ **结果与重扫**——结果按路径去重、带动作与源删除状态（移动 `sourceDeleted === true`、复制校验源仍在），`entries.length === writtenCount`；重扫清空勾选 / 移动 / 候选，移动成功槽位判 `placed` 且默认不勾。⑤ **门禁与真实磁盘**——预览后不执行 / 预取消 / Dry-run 取消三路径零写入零删除；`template-e2e-real` 在真实 `mkdtemp` 且探针确认大小写不敏感的 APFS 卷上跑通三腿。
-- 注：① 本 WI change pack 仅提供 `prd.md` 与 `evidence/template-move-e2e.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），验收落档在 `qa/template-move-actions.md`。② **`actions` 是行级动作的唯一来源**——对话框不得再从 `checked` / `overwrite` / `candidate` 推「这行会移动吗」，移动复选框 `disabled` 必须同时满足「有动作映射」且「在 `resolved.executable` 里」。③ **删源只认 `sourcePath`**，用相对路径重拼会在 B 根变动或大小写折叠卷上删错文件；重扫 `missing` 槽位必须读输出根摘要，否则移动成功后永远显示缺失。④ **写后校验必须与结果复核同函数**，两处各写一份会让「执行通过但结果报失败」；新增失败 reason 同步补 zh / en 词条。⑤ **批量移动不是批量勾选**：顺带勾选冲突 / 越界行会直接推翻 `ac-hazard-rows-default-unchecked`。⑥ **APFS 三腿依赖运行时探针**：探针 false 时必须显式 skip 并打印原因，不得改成无断言 pass。
+- 结果：code_gates passed（20 gates；`pnpm test` 111 files / 1624 passed + 1 skipped；`needSelfTest=false`，不做实机 GUI 验收）。
+- 改动面：`TemplateAction` 严格 `copy | move`，由 `resolveTemplatePlan` 单点产出 `actions` / `copyCount` / `moveCount`；计划条目带 `sourceRelativePath` / `targetRelativePath` / `defaultAction`；执行器按「写目标 → 校验存在 / sha256 / 秒级 mtime → `deleteFile(sourcePath)`」移动，失败保留源与目标、不回滚已成功行。
+- 验收落点：`ac-move-requires-explicit-selection` / `ac-move-write-verify-delete-order` / `ac-rescan-same-session` / `ac-cancel-zero-write` / `ac-apfs-e2e`；矩阵 18 → 20 只在末尾追加两条，既有 id / 命令未动，`package.json#version` 仍为 `0.2.16`。
