@@ -27,6 +27,13 @@ export interface FilePair {
   readonly right: TextSample
 }
 
+/** The three real file bodies of a three-way merge session. */
+export interface MergeFileSides {
+  readonly base: TextSample
+  readonly ours: TextSample
+  readonly theirs: TextSample
+}
+
 /**
  * Editable state of one code file pair, owned by the session rather than the
  * view: a tab switch may unmount the view, but the unsaved working copies (and
@@ -71,6 +78,11 @@ export interface WorkbenchSession extends FixtureSession {
   /** Parsed CSV/TSV tables, present for the CSV scene only. */
   readonly tables?: CsvTables
   readonly adhoc?: AdhocFilePair
+  /**
+   * The three real merge inputs of a three-way merge session. Present only for
+   * a session established from three real files, never for the built-in sample.
+   */
+  readonly merge?: MergeFileSides
   /**
    * The original probe facts of both sides of a code file pair. They are fixed
    * when a side is loaded and never re-derived from the working copy, so the

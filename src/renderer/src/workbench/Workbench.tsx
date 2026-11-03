@@ -12,7 +12,7 @@ import {
   trimComparisonHistory,
   upsertComparisonHistory
 } from '@shared/history/model'
-import type { ComparisonHistoryEntry } from '@shared/history/types'
+import type { ComparisonHistoryEntry, ComparisonHistoryKind } from '@shared/history/types'
 import { createComparisonCache } from '@core/directory/compare'
 import type { DirectoryDiffNode } from '@core/directory/compare'
 import { visibleDirectoryCounts } from '@core/directory/rows'
@@ -109,6 +109,8 @@ import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import { syncRefreshReasonCopy, syncTargetFailureCopy } from './syncFailureCopy'
 import { historyCandidate, historyIdFor, withHistorySwitches } from './historyHomeModel'
 import { HistoryHome } from './historyHome'
+import { buildMergeSession, mergeSessionErrorMessage } from './mergeSession'
+import type { MergePaths } from '@shared/mergeRequest'
 import type { CodeFileBuffer, FilePair, FilePairProbes, WorkbenchSession } from './session'
 import { entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
 import type { ShellEntryId } from './shellLayout'
@@ -862,7 +864,7 @@ export function Workbench({
    * id its session keeps, so later switch changes can update exactly that row.
    */
   function recordHistory(
-    kind: 'directory' | 'file',
+    kind: ComparisonHistoryKind,
     paths: readonly string[],
     switches: ComparisonSwitches = comparisonSwitches
   ): string {
@@ -895,12 +897,25 @@ export function Workbench({
    */
   async function reopenHistoryEntry(entry: ComparisonHistoryEntry): Promise<void> {
     const plan = resolveComparisonHistoryReopen(entry)
-    if (!plan.ok || plan.kind === 'merge') {
+    if (!plan.ok) {
       report(copyNotice('shell.history.reopenFailed'))
       return
     }
     const switches = plan.switches
     const fail = (): void => report(copyNotice('shell.history.reopenFailed'))
+    if (plan.kind === 'merge') {
+      // A merge session never consumes the three comparison switches: reopening
+      // only re-reads the three files and leaves the shell preference untouched.
+      await openMergeRequest(
+        {
+          base: plan.paths[0] ?? '',
+          ours: plan.paths[1] ?? '',
+          theirs: plan.paths[2] ?? ''
+        },
+        fail
+      )
+      return
+    }
     if (plan.kind === 'directory') {
       const opened = await runSidesCompare(
         directorySides(plan.paths[0] ?? '', plan.paths[1] ?? ''),
@@ -1080,6 +1095,31 @@ export function Workbench({
       })
     }
     return openFilePair(request.left, request.right, onError, { recordHistory: true })
+  }
+
+  /**
+   * Builds a real three-way merge session from three validated absolute paths.
+   * All three bodies are read before anything is committed, so a failed read
+   * never leaves a tab, a history row or an active-session change behind.
+   */
+  async function openMergeRequest(
+    paths: MergePaths,
+    onError: (message: string) => void
+  ): Promise<boolean> {
+    setDirectoryBusy(true)
+    setNotice(null)
+    try {
+      const session = await buildMergeSession(platform, paths.base, paths.ours, paths.theirs)
+      const historyId = recordHistory('merge', [paths.base, paths.ours, paths.theirs])
+      upsertSession({ ...session, historyId })
+      setStatus('ready')
+      return true
+    } catch (cause) {
+      onError(mergeSessionErrorMessage(cause, t))
+      return false
+    } finally {
+      setDirectoryBusy(false)
+    }
   }
 
   /** Open file: left file then right file, no sample involved. */
@@ -1637,6 +1677,17 @@ export function Workbench({
         )
       }
       case 'code':
+        if (session.merge !== undefined) {
+          return (
+            <CodeView
+              key={session.id}
+              mergeSides={session.merge}
+              platform={platform}
+              toolbarLeading={toolbarLeading}
+              onMergeStateChange={(state) => handleMergeState(session.id, state)}
+            />
+          )
+        }
         return session.adhoc ? (
           <CodeView
             key={session.id}
@@ -2017,6 +2068,7 @@ export function Workbench({
           platform={platform}
           onClose={closeCompareDialog}
           openRequest={openCompareRequest}
+          openMergeRequest={openMergeRequest}
           onPickFiles={pickFilesFromDialog}
           onPickDirectories={pickDirectoriesFromDialog}
         />

@@ -7,7 +7,7 @@ used.
 
 ## Captured commit
 
-- commit: `e6977e268e4868027d83bcc9538ab364abc9a150`
+- commit: `23aaade22da619ef088172ef947a8cdccae8048a`
 - both images were rebuilt on a clean working tree at exactly that commit
   (`git status --porcelain` was empty and `HEAD` equalled this commit before the
   build), running `pnpm build` and then the capture script below in that order,
@@ -23,15 +23,16 @@ used.
 ## Rebuild evidence
 
 The rebuild on the clean tree above printed
-`wrote docs/assets/opencompare-workbench.png (284137 bytes)` and
-`wrote docs/assets/opencompare-file-diff.png (322235 bytes)`. Both rebuilt files
+`wrote docs/assets/opencompare-workbench.png (288659 bytes)` and
+`wrote docs/assets/opencompare-file-diff.png (324378 bytes)`. Both rebuilt files
 differ from the previously committed images (`git diff` reports binary changes
-for both), so the rebuilt PNGs replaced the old ones.
+for both), so the rebuilt PNGs replaced the old ones — the renderer now carries
+the real three-way merge entry in the new-compare dialog.
 
 | Image | Previous sha256 | Rebuilt sha256 (committed) |
 | --- | --- | --- |
-| `docs/assets/opencompare-workbench.png` | `8eaa4b8cec8e3762aed47f81d62991fe39630c1a8378a3eed46fae37a61a85a1` | `88849c0b2b93247d0af6b07834653def7f7e72f1fd64ae769a684ea989c104d5` |
-| `docs/assets/opencompare-file-diff.png` | `c5f3c6af062bb1ea2b6f669d086cfc8e048a5d97f47c55ca17d049eda3768807` | `6ae7b6c47cb80cedd0eef03d1e5e6ced16d53dc9c7722c17c0a74179b5f0a84c` |
+| `docs/assets/opencompare-workbench.png` | `88849c0b2b93247d0af6b07834653def7f7e72f1fd64ae769a684ea989c104d5` | `1ac905aefac3ade6c9e0ddeb154c3c60374ee24cf51aa5d4466d566183464326` |
+| `docs/assets/opencompare-file-diff.png` | `6ae7b6c47cb80cedd0eef03d1e5e6ced16d53dc9c7722c17c0a74179b5f0a84c` | `cc8506a15ac3cdff408968eacf0d882058cb4d70bbc7b0a1afc4ec5ecdc706f0` |
 
 `src/main/release-artifacts-and-brand.test.ts` guards this record: the captured
 commit must resolve, be an ancestor of `HEAD`, and leave `src/renderer` with a
