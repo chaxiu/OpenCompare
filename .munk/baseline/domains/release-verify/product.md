@@ -13,6 +13,7 @@
 - **终局判定单一来源**：最终 fail-closed 结论只由导出纯函数 `judgeReleaseGate(summary, { expectedIds, exists })` 产出（`ok === true` 当且仅当 `validateSummary` 无问题且 `summary.status === 'pass'`）；`runVerifyReleaseCli` 的 `--aggregate` 分支与普通执行分支共用该函数，退出码只由 `ok ? 0 : 1` 派生，失败时回写 `summary.status='fail'` 与 `summary.problems`，脚本内不再保留任何一份内联最终判定。
 - **只读 workflow（触发面自 `wi_intake_51f535e26a03b97f` 起收敛为仅 `workflow_dispatch`）**：`.github/workflows/post-release-verify.yml` 只由 `workflow_dispatch`（输入 `tag`，`required: true`）触发，顶层 `run-name: post-release-verify ${{ inputs.tag }}` 使同一 tag 的 run 可按 `displayTitle` 唯一核对；`release: types: [published]` 已删除，因为 Release 由 `release.yml` 的 `finalize` 用 `secrets.GITHUB_TOKEN` 公开、该 token 产生的事件不触发新 run。顶层 `permissions: contents: read`，零 `secrets.*`，只调 `gh api` / `gh release download`；派发与派发后的 fail-closed 校验（查 run / aggregate / artifact）归 `domains/release` 的 `finalize`。`spike` job（ubuntu + macOS 起窗）先于平台矩阵，矩阵 `needs: spike`；每个 job 用 `actions/upload-artifact` 归档 `<out>`（artifact 名含 tag 与 run id）。
 - **门禁与教训沉淀**：`.munk/code-gates.json` 末尾追加 `verify-release-gate`（`pnpm test src/verify-release-gate.test.ts`）；`docs/lessons.md` 新增第 11 节记录 B 层内存口径、v0.2.16 证据与旧 `d1≥d2≥d3` 废止理由，并注明 CI 不跑内存腿。
+- **spike 收尾与确定性退出**：Linux 起窗进独立进程组（`detached: true`，`spikeUsesProcessGroup` 仅 `linux` 为真），`stopChild` 对负 pid 整组 SIGTERM、`SPIKE_PROCESS_EXIT_BUDGET_MS` 内未收干净再整组 SIGKILL，并总是销毁 `stdout`/`stderr` 与解绑 data/exit/error 监听；成功与失败路径共用同一 stop。证据落盘后 CLI 入口用 `exitAfterFlush` 先 drain 再退出（`SPIKE_EXIT_FLUSH_TIMEOUT_MS` 兜底），库函数不调 `process.exit`。
 - **spike 启动描述单一来源与诊断落盘**：`buildSpikeLaunchDescriptor({ platform, port, root, electronBinary })` 是唯一平台差异点——Linux 返回 `xvfb-run -a <electron> . --no-sandbox --disable-dev-shm-usage --remote-debugging-port=<port>`，darwin 返回 `<electron> . --remote-debugging-port=<port>`（语义与历史一致），两者共用同一被测入口（仓库根 `.`）；workflow 的 spike 步骤不再由外层 `xvfb-run` 包裹，Linux 侧显式安装 xvfb。等待改为有界轮询 + 子进程存活检查（`waitForSpikePageTarget`），失败原因封闭为 `SPIKE_FAILURE_REASONS` 三值；失败与成功都原子落 `spike.json` + `spike-launch.log`（Electron stdout/stderr、xvfb 包装输出、逐条 `/json/list` 探针），随 `verify-out` 上传。
 
 ## 验收
@@ -77,6 +78,18 @@
 - **ac-no-release-mutation**：不改 `package.json#version`（保持 0.2.18）、不新建 tag、不改 v0.2.17 已公开 Release 与资产、不重写历史 run；`release.yml` 的发版语义不变。
 - **ac-lessons-record**：`docs/lessons.md` 第 12 节记录根因证据（RUN#41557584455 artifact / Electron 无输出 / 120s 超时 / aggregate `total=0`）、修复口径（平台启动描述单一来源 + 诊断字段契约）与断言位置，由门禁以 markers 断言该节存在。
 
+### spike 收尾契约：进程组 kill、管道释放与确定性退出（WI `wi_intake_b3be192f93d073b2`）
+
+- **ac-linux-group-kill**：Linux 的 spike 子进程以 `detached: true` 建立独立进程组；stop 先对 `-pid` 整组 SIGTERM，预算内仍有存活则整组 SIGKILL 并在有界 `killWaitMs` 内 resolve；组信号之外的直接子进程信号作为补充，`ESRCH` / `EPERM` 一律容忍。用真实父子孙链（孙进程继承 stdout/stderr 写端）验证 stop 返回后父、孙 `kill(pid, 0)` 均失败，零幸存者。
+- **ac-stdio-released**：stop 返回后子进程 `stdout` / `stderr` 均为 destroyed，且 `exit` 与两条流的 `data` 监听数为 0，不留未 unref 的管道句柄。
+- **ac-success-path-reaped / ac-failure-path-reaped**：`conclusion=window-booted` 与 `process-exited` / `no-page-target` / `app-shell-timeout` 共用同一收尾实现；成功路径证据字段（`conclusion` / `reason=null` / `url` / `portProbe`）不丢，失败路径诊断契约不回归，两条路径都零孤儿。
+- **ac-cli-deterministic-exit**：独立 Node 驱动进程跑成功路径，不施加外部 kill，固定预算（≤15 s，不延长 `SPIKE_*` 超时）内退出码 0，且 `spike.json` 与 `spike-launch.log` 完整落盘。
+- **ac-evidence-flushed-before-exit**：`exitAfterFlush` 只挂在模块入口（库函数零调用），先等 stdout/stderr 排队写入 drain，`SPIKE_EXIT_FLUSH_TIMEOUT_MS` 兜底强制退出；退出后 `spike.json` 可 parse、`spike-launch.log` 含启动行与至少一条 `/json/list` 探针。
+- **ac-macos-parity**：macOS 不加 `detached`、启动描述与输出语义不变；`buildSpikeLaunchDescriptor` 与既有 macOS 记录字段零改动。
+- **ac-gate-registered / ac-no-relax**：新增 `spike-process-tree-gate` 进入 `.munk/code-gates.json` 与 `pnpm test`（不启 Electron/xvfb、不联网、硬超时）；`expected=15`、`judgeReleaseGate`、`validateSummary` 与三个 `SPIKE_*` 预算均不放宽；workflow 触发面 / 权限 / job 超时不变。
+- **ac-repro-before-fix / ac-lessons-updated**：改动前在 RUN#41560874002 真证据上复核，并用假进程树在旧代码上复现「stop 后孙进程存活、父进程不退出」；`docs/lessons.md` 新增第 13 节记录 run / artifact / 根因 / 收尾契约，由门禁 markers 断言。
+- **ac-real-run-closed**：合入 main 后再 dispatch 一次 `post-release-verify`，双 OS spike job success 且正常结束、三条 verify 腿真跑、aggregate `total>0` 含真实 pass/fail；新 run 链接回填。**截至本轮仍未执行。**
+
 ## 非目标
 
 - 不改 `release.yml` 的发布通道、门禁口径、双语组装、finalize 逻辑；不新增签名密钥；不修改已公开 tag / Release / 资产 / 正文。
@@ -94,12 +107,19 @@
 - **取消腿合成树规模固定并记入证据**（单侧 ≤500 MiB，远小于 6.4 GiB），规模由脚本保证取消点可命中，不为命中取消点引入产品侧延时或测试开关。
 - **spike 先于全量**：workflow 内置最小 spike job（ubuntu + macOS 起窗），全量矩阵 `needs: spike`；spike 失败时矩阵不运行。macOS 起不来时只记录静态断言范围与本机冷启动证据，退化不得写成 pass / skip / warn。
 - **平台差异只许一处、诊断必须可注入**：spike 的 `command` / `args` / `cwd` 只能由 `buildSpikeLaunchDescriptor` 产生，workflow 与脚本内不得再出现第二份平台分支；等待逻辑的时钟、探针、sleep、子进程存活判定全部参数注入，门禁用假对象驱动，禁止在门禁里启动真实 Electron / xvfb / 联网。失败预算与重试参数以导出常量表达，不提供放宽阈值的运行开关。诊断优先于结论：`spike.json` 的 `reason` 只能取自封闭集合，`spike-launch.log` 必须能独立解释「进程没起来」还是「target 没暴露」。
+- **收尾一次性、可注入、不延长预算**：Linux 组信号 + SIGTERM→SIGKILL 升级 + 管道释放只在 `stopChild` / `spawnCapturedChild` 一处实现，成功与失败路径共用；`process.exit` 只在脚本入口经 `exitAfterFlush` 使用，库函数不得退出进程；`SPIKE_PROCESS_EXIT_BUDGET_MS` / `SPIKE_TARGET_TIMEOUT_MS` / `SPIKE_APP_SHELL_TIMEOUT_MS` 不得为「治挂起」调大，门禁用 `process.execPath` + 临时假脚本构造真实进程树，不启 Electron / xvfb。
 - **终局判定只能有一处**：`buildSummary` 仍负责生成 `status`，最终 fail-closed 结论只由 `judgeReleaseGate` 给出；该函数必须纯（不读文件、不读 `process.env`、不发网络、不依赖时钟），`exists` 由调用方注入（CLI 默认 `existsSync`，测试传 `() => true/false`）；新增检查或字段时同步更新 `expectedIds` 与纯函数用例，禁止在 CLI 分支内再写一份判定。
 - **证据与断言落点**：`src/verify-release-gate.test.ts`（纯函数 + 注入 fixture，不连网、不启 Electron、不访问本机 6.4 GiB 路径）+ `.munk/code-gates.json` 的 `verify-release-gate`；`pnpm test` 必须包含该文件并通过。
 
 ## 最近交付证明
 
-- WI：`wi_intake_8e3fc0daaf9eda16`（**修复 post-release-verify Linux spike 的 Electron/CDP 启动，并硬化失败诊断**：spike 平台差异收敛到唯一 `buildSpikeLaunchDescriptor`，Linux 自持 `xvfb-run -a` + `--no-sandbox` + `--disable-dev-shm-usage`，workflow 两 OS 同命令形状且 Linux 步骤前显式装 xvfb；CDP 等待改为有界轮询 + 子进程存活检查，失败原因封闭为 `process-exited` / `no-page-target` / `app-shell-timeout`，失败与成功都原子落 `spike.json` + `spike-launch.log` 并随 `verify-out` 上传；`deliveryIntent: local merge`，`needSelfTest=false`）
+- WI：`wi_intake_b3be192f93d073b2`（**Linux spike 成功启动后不退出与孤儿进程收尾**：Linux 起窗进独立进程组，stop 对 `-pid` 整组 SIGTERM→SIGKILL 并有界 resolve，随后无条件 destroy `stdout`/`stderr` 与解绑监听；成功与失败路径共用同一 stop；证据落盘后 `exitAfterFlush` drain-aware 退出，`process.exit` 只在模块入口；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-03
+- 结果：`code_gates` passed（**26 gates**，attempt 001 全 exit 0，`.munk/runs/run_intake_b3be192f93d073b2/code-gates/attempts/001`，`latest.json` `ok: true` / `"code_gates passed (26 gates, attempt 001)"`、`failedGateIds: []`）；`test` 门 125 files / **1961 passed + 1 skipped**（1962）；新增 `spike-process-tree-gate` 单跑 11 tests / 830ms（不启真实窗口、不联网）。
+- 改动面（本域相关）：`scripts/verify-release.mjs` +279/−50（`spikeUsesProcessGroup` / `spawnCapturedChild` / `stopChild` / `exitAfterFlush` 与 3 个新预算常量）；`scripts/verify-release.d.mts` +44；`src/spike-process-tree-gate.test.ts` 新增 386 行；`.munk/code-gates.json` 新门禁（紧跟 `spike-launch-gate`、在模板门禁之前）；`src/munk-gates.test.ts` pin 25 → 26；`.munk/baseline/test-debt.json` `growth` 44,854 → 45,245（+391 ≤400）、`repoTestCases` floor 1461 → 1472；`docs/lessons.md` 第 13 节。零 diff：`package.json#version`（0.2.18）、`post-release-verify.yml`、`release.yml`、`src/verify-release-gate.test.ts`、`expectedCheckIds`（仍 15 项）、任何 `SPIKE_*` 预算值。
+- 注：① 本 WI change pack **只有 `prd.md`**，无 `tests/cases/**` / `tech.md` / `ux/**`；逐条 AC、改动前复现记录（旧 `a46a6f4` 脚本 + 假进程树：两种形态均「stop 后孙进程存活 + 父进程 7s 不退出」，修复后同驱动零幸存并自己退出）落档在 `qa/spike-process-tree-teardown.md`。② **根因是「只杀直接子进程 + 不释放管道」**：旧 `stopChild` 在 leader 已退出时直接返回，孙进程持 `stdout`/`stderr` 写端钉住父事件循环；因此 `conclusion=window-booted` 的成功路径同样中招，后续不得只在 catch 分支收尾、也不得以延长 `SPIKE_*` 预算掩盖。③ **实机证据仍缺**：`ac-real-run-closed`（修复后双 OS spike job success、三 verify 腿真跑、aggregate `total>0`）与合入 main 后的 dispatch 取证**尚未执行**，本项不得据此声称发布验收已恢复。
+
+- 历史（上一轮）：`wi_intake_8e3fc0daaf9eda16`（**修复 post-release-verify Linux spike 的 Electron/CDP 启动，并硬化失败诊断**：spike 平台差异收敛到唯一 `buildSpikeLaunchDescriptor`，Linux 自持 `xvfb-run -a` + `--no-sandbox` + `--disable-dev-shm-usage`，workflow 两 OS 同命令形状且 Linux 步骤前显式装 xvfb；CDP 等待改为有界轮询 + 子进程存活检查，失败原因封闭为 `process-exited` / `no-page-target` / `app-shell-timeout`，失败与成功都原子落 `spike.json` + `spike-launch.log` 并随 `verify-out` 上传；`deliveryIntent: local merge`，`needSelfTest=false`）
 - 日期：2026-11-03
 - 结果：`code_gates` passed（**25 gates**，attempt 001 全 exit 0，`.munk/runs/run_intake_8e3fc0daaf9eda16/code-gates/attempts/001`，`latest.json` `ok: true` / `"code_gates passed (25 gates, attempt 001)"`、`failedGateIds: []`）；`test` 门 124 files / **1950 passed + 1 skipped**（1951）、31.01s；新增 `spike-launch-gate` 单跑 17 tests / 12ms（不启真实窗口、不联网）。
 - 改动面（本域相关）：`scripts/verify-release.mjs` +332/−50（导出 `buildSpikeLaunchDescriptor` / `waitForSpikePageTarget` / `formatSpikeLaunchLog` 与 4 个预算常量、3 值 `SPIKE_FAILURE_REASONS`；`runSpike` 捕获 stdout/stderr/exitCode/signal 并写双诊断文件）；`scripts/verify-release.d.mts` +83（类型声明）；`.github/workflows/post-release-verify.yml` 两 OS 合并为一条 spike 命令 + Linux `apt-get install -y xvfb`；`src/spike-launch-gate.test.ts` 新增 388 行；`.munk/code-gates.json` 在 `diff-normalize-real` 后插入 `spike-launch-gate`；`src/munk-gates.test.ts` pin 24 → 25；`.munk/baseline/test-debt.json` `growth` 44,462 → 44,854（+392 ≤400）、`repoTestCases` floor 1419 → 1461；`docs/lessons.md` 第 12 节。零 diff：`package.json#version`（0.2.18）、`release.yml`、`src/core/**`、`src/renderer/**`、`src/main/**`、`expectedCheckIds`（仍 15 项）。

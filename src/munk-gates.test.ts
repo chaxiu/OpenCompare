@@ -48,6 +48,10 @@ const EXPECTED_GATES = [
     command: 'pnpm test src/spike-launch-gate.test.ts'
   },
   {
+    id: 'spike-process-tree-gate',
+    command: 'pnpm test src/spike-process-tree-gate.test.ts'
+  },
+  {
     id: 'template-default-unchecked',
     command: 'pnpm test src/template-gate-default-unchecked.test.ts'
   },
@@ -147,16 +151,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly twenty-five pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty-six pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(25)
+    expect(defaultManifest.gates).toHaveLength(26)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the twenty-five commands verbatim with cwd "."', () => {
+  it('keeps the twenty-six commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
