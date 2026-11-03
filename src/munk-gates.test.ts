@@ -87,7 +87,13 @@ const EXPECTED_GATES = [
     id: 'template-move-verify',
     command: 'pnpm test src/template-gate-move-verify.test.ts'
   },
-  { id: 'verify-release-gate', command: 'pnpm test src/verify-release-gate.test.ts' }, { id: 'test-debt-gate', command: 'node scripts/test-debt-gate.mjs' }
+  {
+    id: 'history-safety',
+    command:
+      'pnpm test src/history-safety-gate.test.ts src/renderer/src/workbench/historySafety.dom.test.tsx src/renderer/src/workbench/historyHome.dom.test.tsx'
+  },
+  { id: 'verify-release-gate', command: 'pnpm test src/verify-release-gate.test.ts' },
+  { id: 'test-debt-gate', command: 'node scripts/test-debt-gate.mjs' }
 ] as const
 
 /** The nine template placement gate files, mapped by gate id. */
@@ -139,6 +145,34 @@ const TEMPLATE_GATES = [
   }
 ] as const
 
+/**
+ * The one history-safety gate: the pure model / preflight evidence plus the two
+ * existing jsdom suites, mapped by the stable behaviour markers in the manifest.
+ */
+const HISTORY_GATE = {
+  id: 'history-safety',
+  command:
+    'pnpm test src/history-safety-gate.test.ts src/renderer/src/workbench/historySafety.dom.test.tsx src/renderer/src/workbench/historyHome.dom.test.tsx',
+  files: [
+    'src/history-safety-gate.test.ts',
+    'src/renderer/src/workbench/historySafety.dom.test.tsx',
+    'src/renderer/src/workbench/historyHome.dom.test.tsx'
+  ],
+  markers: [
+    'history entry add, dedupe, single removal and trim',
+    'the explicit clear',
+    'mixed-kind 20-record cap trimmed newest-first',
+    'bad path detection with the leftmost failing side',
+    'switch serialization roundtrip',
+    'reopen argument parsing',
+    'the empty history list',
+    'reopening a directory, file pair or merge',
+    'error row marker with single removal',
+    'empty envelope after a remount or restart',
+    'path privacy in console output'
+  ]
+} as const
+
 /** Sample-mount / built-in fixture references the template gates may never carry. */
 const SAMPLE_MARKERS = ['@shared/fixtures', 'DIRECTORY_SAMPLE_PATHS', ['', 'samples'].join('/')]
 
@@ -157,16 +191,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly twenty-eight pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly twenty-nine pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(28)
+    expect(defaultManifest.gates).toHaveLength(29)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the twenty-eight commands verbatim with cwd "."', () => {
+  it('keeps the twenty-nine commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
@@ -227,8 +261,17 @@ describe('default code-gates matrix', () => {
   })
 
   it('registers the nine template placement gates before the release driver gate', () => {
-    const tail = defaultManifest.gates.slice(-(TEMPLATE_GATES.length + 2), -2)
-    expect(tail.map((gate) => gate.id)).toEqual(TEMPLATE_GATES.map((gate) => gate.id))
+    const ids = defaultManifest.gates.map((gate) => gate.id)
+    const start = ids.indexOf(TEMPLATE_GATES[0].id)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(ids.slice(start, start + TEMPLATE_GATES.length)).toEqual(
+      TEMPLATE_GATES.map((gate) => gate.id)
+    )
+    expect(ids.slice(start + TEMPLATE_GATES.length)).toEqual([
+      'history-safety',
+      'verify-release-gate',
+      'test-debt-gate'
+    ])
     expect(defaultManifest.gates.slice(-2).map((gate) => gate.id)).toEqual(['verify-release-gate', 'test-debt-gate'])
     for (const expected of TEMPLATE_GATES) {
       const gate = gateById(defaultManifest, expected.id)
@@ -243,6 +286,31 @@ describe('default code-gates matrix', () => {
       for (const forbidden of SINGLE_ARGV_FORBIDDEN) {
         expect(gate?.command, `manifest: ${expected.id} is single argv`).not.toContain(forbidden)
       }
+    }
+  })
+
+  it('registers the history-safety gate with its three files and behaviour map', () => {
+    const ids = defaultManifest.gates.map((gate) => gate.id)
+    const gate = gateById(defaultManifest, HISTORY_GATE.id)
+    expect(gate, `manifest: gate ${HISTORY_GATE.id}`).toBeDefined()
+    expect(ids.indexOf(HISTORY_GATE.id)).toBe(ids.indexOf('template-move-verify') + 1)
+    expect(ids.indexOf(HISTORY_GATE.id)).toBe(ids.indexOf('verify-release-gate') - 1)
+    expect(gate?.cwd).toBe('.')
+    expect(gate?.command).toBe(HISTORY_GATE.command)
+    for (const forbidden of SINGLE_ARGV_FORBIDDEN) {
+      expect(gate?.command, `manifest: ${HISTORY_GATE.id} is single argv`).not.toContain(forbidden)
+    }
+    for (const file of HISTORY_GATE.files) {
+      expect(gate?.command, `manifest: command names ${file}`).toContain(file)
+      expect(existsSync(resolve(process.cwd(), file)), `manifest: ${file} exists`).toBe(true)
+    }
+    const description = defaultManifest.description
+    expect(description, 'manifest: mapped gate id').toContain(`\`${HISTORY_GATE.id}\``)
+    for (const file of HISTORY_GATE.files) {
+      expect(description, `manifest: mapped test file ${file}`).toContain(file)
+    }
+    for (const marker of HISTORY_GATE.markers) {
+      expect(description.toLowerCase(), `manifest: history marker "${marker}"`).toContain(marker)
     }
   })
 
