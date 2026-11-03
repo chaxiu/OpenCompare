@@ -19,6 +19,7 @@
 - **证据归档**：真实产物经只读就绪门、仓库外下载、字节 + sha256 与签名复核后写入 `docs/release-evidence/<tag>.md`（`verified` / `blocked`，产物不入库），台账登记版本、状态与资产数。
 - **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、两张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
 - **发布配置断言单测**：Node 环境读取仓库根配置与文档做断言，拆为 packaging（打包 / 发布配置 + 证据台账）、version-gate（版本门 / 祖先门 / 重跑入口 / 门面结构）、artifacts-and-brand（品牌 / 协议 / 产物名 / 单 Release）三层。
+- **README 截图出处与门面治理断言**：两张 `docs/assets/*.png` 由 `node scripts/capture-readme-screenshots.mjs` 在本次 `pnpm build` 产物（`out/main` + `out/preload` + `out/renderer`）上重拍，输入为脚本自建的真实 `/tmp` 目录树与真实文件对，不读 `src/shared/fixtures/**`、不用旧图或拼图；`docs/screenshots.md` 的 `Captured commit` 为仓内可解析的 40 位十六进制 commit 并保留 Reproduce 一行。门面断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture（`screenshots` 行）：两版 README 都引用两图、两图存在且 size > 0 / PNG 签名、记录 commit 可由本地 `git cat-file -e` 解析；只用 `node:fs` 与本地 git 子进程，不联网。`repoTestLines` 超 ceiling 时只按既有 ratchet 规则写 growth 条目（增量 ≤ 400 行），floor 只上调。
 - **版本收敛轮**：发版前单独一轮只收敛版本事实——`package.json#version`、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、`docs/release-process.md` 的同一字面量、`CHANGELOG.md` 新段、双语 notes 与版本门测试 token；产品源码、证据台账与 README 状态行零 diff，不执行任何发版动作。
 
 ## 验收
@@ -80,17 +81,26 @@
 - **ac-evidence-sections**：`docs/release-evidence/<tag>.md` 与既有证据同构，含 tag / 发布点、公开 Release、Release CI、资产表（名称 / 字节 / sha256 / 公开 URL）、双语正文门、签名与公证、L1 结论、未覆盖面，引用一律绝对路径。
 - **ac-status-verified-once**：全文恰好一处 `status:` 且取值为 `verified` 或 `blocked`，不出现 `pending`；`verified` 分支缺任一必需标记即失败。
 - **ac-blocked-no-fabrication**：`status: blocked` 时只记录就绪门命令原始输出、缺失项与待人工动作，不含任何「通过」记录、产物 sha256 或本地 / 仓库 `release/` 产物，并已升级 Owner。
-- **ac-v0218-verified / ac-v0218-assets**：`docs/release-evidence/v0.2.18.md` 全文恰一处 `status: verified`，不再出现「未打 tag / 无 Release / blocked」结论；含 tag 对象、tag → commit、`publishedAt=2026-11-03T05:51:29Z`、`isDraft=false` / `isPrerelease=false`、Release 地址与 12 行资产表；表内 name / bytes / sha256 与 `gh api repos/chaxiu/OpenCompare/releases/tags/v0.2.18` 的 `assets[].name/size/digest` 逐行一致，sha256 为小写 64 位十六进制。
-- **ac-v0219-new / ac-v0219-assets / ac-v0219-gates / ac-v0219-l1**：`docs/release-evidence/v0.2.19.md` 首行含版本与中文标题、全文恰一处 `status: verified`，含 tag 对象 `e47e07dd74b0476274622500800121e66c855daf` → commit `fc584af0efea2fa75903ebb2d66bee99c0c20c9b`、`publishedAt=2026-11-03T13:59:51Z`、`isDraft=false` / `isPrerelease=false` 与 12 行资产表（name / bytes / sha256 同 `gh api` 逐行一致，三份 `latest*.yml` 标为清单而非安装包）；并记录发布 run `41648064270` 五 job success、draft verify run `41649092805` aggregate 15/15（mac 8/8、win 6/6、linux 9/9）、public L1 PASS 与 L1 真机场次 `trun_ccf0d240216eb4fa`（四态 `35 / 80 / 41 / 326,099` 逐位同基线、取消 37 ms、六类日志 0），不预写未发生的 pass/fail。
-- **ac-readme-line5 / ac-latest-verified**：两版 `README` 第 5 行标签均为 `v0.2.19` 且链接指向 `https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.19`，第 3 行双语互链与其余正文不变；由 `docs/release-evidence/*.md` 的 verified 状态与夹具 `evidence.ledger` 派生的最新 verified tag 为 `v0.2.19`，`judgePublishedAnchor` 对两版第 5 行返回 `{ ok: true, issues: [] }`。
-- **ac-fixture-ledger**：`src/main/__fixtures__/release-packaging.json#evidence.ledger` 中 `v0.2.18` 为 `{ status: verified, assets: 12 }` 并新增 `v0.2.19` 同形条目，`evidenceFiles` 版本集合与 ledger 版本集合一一对应；`currentVersion` 保持 `v0.2.17`，`docs/release-evidence-ledger.json` 的 5 条历史行不动。
-- **ac-tests-green / ac-diff-scope / ac-no-release-action / ac-evidence-reproducible / ac-delivery-window**：`pnpm test`（含 `release-evidence` / `release-packaging` / `release-version-gate` / `release-artifacts-and-brand`）全绿且不删、跳过或弱化既有断言；diff 只落两版 README、两份证据与夹具 ledger，`package.json#version` 仍 `0.2.19`；未推 tag / dispatch / 改动已公开 Release 正文与资产；每个 bytes 与 sha256 可由单次 `gh api … --jq '.assets[]|[.name,.size,.digest]|@tsv'` 复核，取不到写 `blocked` + 来源、不臆造；交付说明逐条写「未发布：`<sha>` `<标题>` `<原因=22:00 后内容顺延下一窗口>`」。
+- **ac-v0218-verified / ac-v0218-assets / ac-v0219-new / ac-v0219-assets / ac-v0219-gates / ac-v0219-l1**：`docs/release-evidence/v0.2.18.md` / `v0.2.19.md` 各全文恰一处 `status: verified`，含 tag 对象 → commit、`publishedAt`、`isDraft=false` / `isPrerelease=false` 与 12 行资产表；表内 name / bytes / sha256 与 `gh api repos/chaxiu/OpenCompare/releases/tags/<tag>` 的 `assets[].name/size/digest` 逐行一致（sha256 小写 64 位十六进制）；v0.2.19 另记录发布 run `41648064270` 五 job、draft verify run `41649092805` aggregate 15/15（8/6/9）、public L1 PASS 与 L1 真机 `trun_ccf0d240216eb4fa`（四态 `35 / 80 / 41 / 326,099`），不预写未发生的 pass/fail。
+- **ac-readme-line5 / ac-latest-verified / ac-fixture-ledger**：两版 README 第 5 行指向最新 verified tag 的 Release，第 3 行双语互链与其余正文不变；最新 verified 由 `docs/release-evidence/*.md` 的 `status: verified` 与 `src/main/__fixtures__/release-packaging.json#evidence.ledger` 派生（`currentVersion` 不参与，`docs/release-evidence-ledger.json` 历史行不动），`judgePublishedAnchor` 返回 `{ ok: true, issues: [] }`。
+- **ac-tests-green / ac-diff-scope / ac-no-release-action / ac-evidence-reproducible / ac-delivery-window**：`pnpm test`（含 release 四套件）全绿且不删 / 跳过 / 弱化既有断言；取证轮 diff 只落两版 README、证据与夹具 ledger；未推 tag / dispatch / 改已公开 Release；bytes 与 sha256 可由单次 `gh api … --jq '.assets[]|[.name,.size,.digest]|@tsv'` 复核，取不到写 `blocked` + 来源、不臆造。
 - **ac-config-unit-tests**：发布配置断言单测覆盖元数据、打包目标、发布配置、6 Secrets 接线、fail-closed、签名身份、`appId`、版本对齐与唯一 Release，`pnpm test` 通过且不引入 Electron / DOM 依赖。
-- **ac-gates-green**：`code-gates.json` 全部门禁（install / lint / typecheck / build / build:web / test）通过，打包目标与 `v*` tag 触发条件不变。
+- **ac-gates-green**：`code-gates.json` 全部门禁（install / lint / typecheck / build / build:web / test / `test-debt-gate`）通过，打包目标与 `v*` tag 触发条件不变；不得为凑绿放宽任何门禁。
 - **ac-code-gates**：`.munk/code-gates.json` 按顺序全量执行、退出码 0、无一跳过，不新增 gate 项、不新建测试门文件。
 - **ac-finalize-permissions**：`finalize` 声明 job 级 `permissions` 且同时含 `contents: write` 与 `actions: write`（两项 `toEqual` 钉死，job 级覆盖不丢 `contents`）。
 - **ac-finalize-dispatch**：publish 之前存在步骤执行 `gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="$(cat "${RUNNER_TEMP}/release-state.txt")"`，步骤正文零版本字面量；mode 由只读的 `Resolve the tag's release state` 读出（draft / published）。
 - **ac-finalize-aggregate-gate**：派发后 300 s 内按 `displayTitle` 含 tag 且 `createdAt >= since` 匹配本次 run，查不到即失败；随后有界等待 `aggregate` 为 `success`（failure / cancelled / timed_out / 非 success / 超时均失败），artifact 名含 tag 与 `run_id`；该 gate 先于 `Make the tag's release public`，失败即保持 draft。
+- **ac-screenshots-regenerated**：两张 PNG 均由 `node scripts/capture-readme-screenshots.mjs` 在本次 `pnpm build` 产物（`out/main` + `out/preload` + `out/renderer`）上重新生成，与旧 commit `ef70939` 版本字节不同，均为合法 PNG（签名 `89 50 4E 47`）且字节数 > 0。
+- **ac-screenshots-current-shell**：截图肉眼可确认是当前 shell——顶栏与工作流工具栏无 demo 入口，会话 tab 与工具栏归位；若 UI 与 `docs/screenshots.md` 描述不符，只记录并上报，不在本项改 UI。
+- **ac-screenshots-real-inputs**：截图输入为脚本自建的真实 `/tmp` 目录树与真实文件对；脚本不读取 `src/shared/fixtures/**`，不使用旧图或内置样本。
+- **ac-screenshots-doc-commit**：`docs/screenshots.md` 的 `Captured commit` 为 40 位十六进制 commit，等于本次构建实际所在的 commit，且 `git cat-file -e <sha>^{commit}` 在仓内成功；Reproduce 一行仍保留。
+- **ac-readme-both-images**：`README.md` 与 `README.zh-CN.md` 各引用 `docs/assets/opencompare-workbench.png` 与 `docs/assets/opencompare-file-diff.png`，两版路径一致；两版第 5 行版本行与改动前逐字节相同。
+- **ac-gov-test-extended**：三条门面断言落在既有 `src/main/release-artifacts-and-brand.test.ts` 及其 fixture（`screenshots` 行），不新增测试文件；至少覆盖「两版 README 引用」「文件存在且 size > 0」「commit 可由本地 git 解析」三点。
+- **ac-gov-offline**：新增断言只用 `node:fs` 与本地 `git` 子进程（`spawnSync` / `execFileSync`），不发起 HTTP / fetch / 网络拉取；不依赖 CI 浅克隆之外的数据（发布门禁 `fetch-depth: 0` 已保证历史可见）。
+- **ac-coverage-audit-four**：对四处口径给出逐条覆盖映射（文件 + 用例名）：(1) 顶栏与工作流工具栏 demo 入口为 0、设置内 5 类示例可达；(2) 图标全部 `currentColor`、图标按钮 `aria-label`、无 emoji / 文字充当图标；(3) 两套主题 token 同名 + WCAG 对比度 + 四态 ΔE + 亮 / 暗 / 跟随系统三态持久化；(4) tab 三级截断 + title tooltip 预算。已有覆盖不重写；只对真实缺口在既有文件内补断言，且测试用例总数不下降。本轮新增缺口断言：`App.theme.test.tsx` 已存 `system` 模式启动即跟随系统、`SessionTabs.test.tsx` regular 档 title、`shellLayout.dom.test.tsx` 单字符非字母数字且无 `data-icon` 的按钮不得无 `aria-label`；主题 / tab / 图标的域归属分别见 `domains/theme`、`domains/workbench`、`domains/icon-system`，本域只记录门面侧断言位置。
+- **ac-test-debt-green**：`node scripts/test-debt-gate.mjs` 通过；新增断言使 `repoTestLines` 超 ceiling 时按既有 ratchet 规则更新 `.munk/baseline/test-debt.json` 的 growth 条目（`from` = 上一提交 ceiling、`to` = 新 ceiling、写明 reason 与 `addedCases`，增量 ≤ 400 行），只上调不下调 floor。
+- **ac-scope-frozen**：相对 main，`package.json#version`、`CHANGELOG.md`、`docs/release-notes/**`、`docs/release-evidence/**`、`.github/workflows/release.yml`、README 第 5 行、`src/core/**` 与 `src/main/**` 的算法 / IPC 语义零 diff；不新增 / 不改公开 tag、Release 或资产。
+- **ac-delivery-receipt**：交付回执写明本次构建 commit、两张 PNG 的字节数与像素尺寸、新增断言点清单，以及四处口径中「已有覆盖」与「本轮新增」的分项说明。
 
 ## 非目标
 
@@ -113,10 +123,13 @@
 - 品牌资产唯一入库位置为 `build/`，生成脚本只用 Node 标准库与本机系统工具；`electron-builder.yml` 只加必需字段、不重排既有配置。
 - 版本单一来源 `package.json#version`；`currentTag` 派生、`latestPublishedTag` 单独钉住，发布通道在收敛 / 收尾 / 取证轮全程只读（不打 tag、不 push、不 dispatch、不写 Release）。
 - 门禁命令为单条 argv；提交前 `pnpm lint && pnpm typecheck && pnpm test`；`.munk/code-gates.json` 全绿且不新增 gate 项。
+- **截图与门面断言批次的改动面**：只改两张 `docs/assets/*.png`、`docs/screenshots.md`，README 仅在引用缺失时修正；断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture 与 `test-debt` ratchet 字段；单条提交，交付时工作区干净，不为单个验收点新开测试文件、不重排既有套件或减少用例数。
 
 ## 最近交付证明
 
-- WI：`wi_intake_c9b8cc720af0c622`（**回填 v0.2.18 / v0.2.19 发布证据与 README 版本行**，`deliveryIntent: local merge`）；日期：2026-11-04。
-- 结果：`docs/release-evidence/v0.2.18.md` 由 `blocked` 改为 `verified`，新增 `docs/release-evidence/v0.2.19.md`（两版各 12 行资产表，bytes / sha256 与 `gh api` 逐行一致）；两版 README 第 5 行升到 `v0.2.19` 并指向对应 Release；夹具 `evidence.ledger` 加 `v0.2.19` 行、`v0.2.18` 改 `{ status: verified, assets: 12 }`。
-- 改动面：`README.md`、`README.zh-CN.md`、`docs/release-evidence/v0.2.18.md`、新增 `docs/release-evidence/v0.2.19.md`、`src/main/__fixtures__/release-packaging.json`；`package.json#version` 仍 `0.2.19`，`.github/**`、notes、`CHANGELOG.md` 与产品源码零 diff。
-- 关键点：最新 verified 由证据目录 + 夹具 ledger 既有机制派生（`currentVersion` 保持 `v0.2.17`，`docs/release-evidence-ledger.json` 5 条历史行不动）；v0.2.19 证据记录发布 run 五 job、draft verify 15/15（8/6/9）、public L1 与 L1 真机 `trun_ccf0d240216eb4fa` 四态，全程未推 tag / dispatch / 改公开 Release。
+- WI：`wi_intake_af13634404b7dbb1`（README 两张真实构建截图重拍 + 截图出处记录 + 门面治理断言与四处口径缺口补齐；`deliveryIntent: local merge`，`needSelfTest=false`）
+- 日期：2026-11-04
+- 结果：`code_gates` passed（27 gates，attempt 001，`.munk/runs/run_intake_af13634404b7dbb1/code-gates/attempts/001`；`pnpm test` 125 files / 2058 passed + 1 skipped（2059）；`test-debt-gate` 实测 `repoTestLines` 46272 = ceiling 46272、`repoTestCases` 1532 ≥ floor 1528）。
+- 改动面：`docs/assets/opencompare-workbench.png`（285,712 B / 2560×1584）与 `opencompare-file-diff.png`（318,863 B / 2560×1584）由真实构建与真实 `/tmp` 输入重拍；`docs/screenshots.md` 的 `Captured commit` 改为 `dc781cd1d5ac922927a3c59bb9f86ebe68f072a0`；`src/main/release-artifacts-and-brand.test.ts` + fixture 新增 `screenshots` 三条断言，`App.theme.test.tsx` / `SessionTabs.test.tsx` / `shellLayout.dom.test.tsx` 各补 1 条缺口用例；`.munk/baseline/test-debt.json` 只走 growth 46215→46272（+4 cases）。两版 README 零 diff。
+- 验收落点：`ac-screenshots-regenerated` / `ac-screenshots-doc-commit` / `ac-readme-both-images` / `ac-gov-test-extended` / `ac-gov-offline` / `ac-test-debt-green` 满足；`ac-coverage-audit-four` 的既有覆盖不变，只补三条真实缺口。
+- 注：① 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例。② 截图的 `Captured commit` 记的是**构建所在的 main 祖先** `dc781cd`，不是 WI 分支 tip——`ac-screenshots-doc-commit` 只要求仓内可解析，勿改成交付 commit。③ `ac-gates-green` 本轮扩为含 `test-debt-gate`；新增断言只走 ratchet growth，floor 不下调。

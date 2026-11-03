@@ -8,7 +8,7 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 46215
+    "repoTestLines": 46272
   },
   "floors": {
     "appTestCases": 94,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46039,
-      "to": 46215,
-      "reason": "merge main (build-time sha256 baseline suite) into the text dual-pane ignore-whitespace / reload / swap work: combined repo test lines measured on the merged tree",
-      "addedCases": 13
+      "from": 46215,
+      "to": 46272,
+      "reason": "add README screenshot references / non-empty PNG / resolvable capture-commit governance assertions plus the text-as-icon, regular-tier tooltip and stored system-mode gaps in existing suites",
+      "addedCases": 4
     }
   ]
 }

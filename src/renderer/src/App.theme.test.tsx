@@ -306,6 +306,18 @@ describe('theme switching', () => {
     })
   })
 
+  it('launches a stored system mode by following the OS preference', async () => {
+    const scheme = installScheme(false)
+    installPlatform(portWithSettings({ language: 'en', theme: 'system' }))
+    render(<App />)
+    await screen.findByRole('heading', { name: EMPTY_EN })
+    expect(appliedTheme()).toBe('dark')
+    expect(scheme.listenerCount()).toBe(1)
+
+    act(() => scheme.setLight(true))
+    expect(appliedTheme()).toBe('light')
+  })
+
   it('never drops the other field in a language + theme sequence', async () => {
     const writes: UserSettings[] = []
     installPlatform(

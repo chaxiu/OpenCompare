@@ -667,6 +667,20 @@
       "absentPatterns": []
     }
   ],
+  "screenshots": {
+    "id": "readme-screenshots",
+    "readmes": [
+      "README.md",
+      "README.zh-CN.md"
+    ],
+    "assets": [
+      "docs/assets/opencompare-workbench.png",
+      "docs/assets/opencompare-file-diff.png"
+    ],
+    "record": "docs/screenshots.md",
+    "commitPattern": "- commit: `([0-9a-f]{40})`",
+    "reproduce": "node scripts/capture-readme-screenshots.mjs"
+  },
   "notesSections": [
     {
       "id": "notes-en-portable",

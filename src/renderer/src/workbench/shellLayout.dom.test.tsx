@@ -546,5 +546,17 @@ describe('workbench icon surface', () => {
       .map((button) => button.outerHTML)
 
     expect(unnamed).toEqual([])
+
+    const glyphOnly = Array.from(container.querySelectorAll('button'))
+      .filter(isRendered)
+      .filter((button) => {
+        const text = (button.textContent ?? '').trim()
+        return [...text].length === 1 && !/[\p{L}\p{N}]/u.test(text)
+      })
+      .filter((button) => button.querySelector('svg[data-icon]') === null)
+      .filter((button) => (button.getAttribute('aria-label') ?? '').trim().length === 0)
+      .map((button) => button.outerHTML)
+
+    expect(glyphOnly).toEqual([])
   })
 })
