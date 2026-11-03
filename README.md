@@ -2,7 +2,7 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-> Latest public release: [v0.2.17](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.17) — Developer ID signed and Apple-notarized macOS build.
+> Latest public release: [v0.2.19](https://github.com/chaxiu/OpenCompare/releases/tag/v0.2.19) — Developer ID signed and Apple-notarized macOS build.
 
 [![Latest release](https://img.shields.io/github/v/release/chaxiu/OpenCompare)](https://github.com/chaxiu/OpenCompare/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 

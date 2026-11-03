@@ -992,7 +992,14 @@
       {
         "id": "evidence-v0.2.18",
         "version": "v0.2.18",
-        "status": "blocked"
+        "status": "verified",
+        "assets": 12
+      },
+      {
+        "id": "evidence-v0.2.19",
+        "version": "v0.2.19",
+        "status": "verified",
+        "assets": 12
       }
     ],
     "currentVersion": {
