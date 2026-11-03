@@ -27,6 +27,7 @@ import {
   measureToolbar,
   resolveWidthTier,
   statusBarClasses,
+  statusBarHeightPx,
   toolbarBandHeightPx,
   viewToolbarRows,
   visibleRowCount
@@ -129,6 +130,22 @@ describe('shell level table', () => {
       expect(chromeHeightPx('ready')).toBe(112)
       expect(mainContentHeightPx('ready')).toBe(768 - 112)
     }
+  })
+
+  it('adds only the 1px border budget once the status bar wraps', () => {
+    // 112px stays the single-row baseline; wrapping only adds the border px.
+    expect(chromeHeightPx('ready', 2)).toBe(113)
+    expect(chromeHeightPx('ready', 2)).toBe(
+      112 + (statusBarHeightPx(2) - statusBarHeightPx(1))
+    )
+    expect(chromeHeightPx('empty', 2)).toBe(77)
+    expect(mainContentHeightPx('ready', 2)).toBe(768 - 113)
+    expect(mainContentHeightPx('ready', 2)).toBe(mainContentHeightPx('ready') - 1)
+
+    const single = contentRowBudget('ready', 'directory', 24)
+    const wrapped = contentRowBudget('ready', 'directory', 24, false, 2)
+    expect(wrapped.chrome).toBe(113)
+    expect(wrapped.area).toBe(single.area - 1)
   })
 
   it('does not lose a visible row against the pre-change bands', () => {
@@ -416,8 +433,51 @@ describe('status bar width model', () => {
     expect(tokens).toContain('flex-wrap')
     expect(tokens).toContain('gap-y-0')
     expect(tokens.some((token) => token.startsWith('overflow-x'))).toBe(false)
-    // Two wrapped 16px text rows still fit the level's 32px height.
+    // The single-row baseline keeps the level's 32px height.
     expect(levelHeightPx('status')).toBe(2 * 16)
+  })
+
+  it('derives the declared height from the wrapped row count', () => {
+    expect(statusBarHeightPx(1)).toBe(32)
+    expect(statusBarHeightPx(2)).toBe(2 * 16 + 1)
+    expect(statusBarHeightPx(3)).toBe(3 * 16 + 1)
+    for (let rows = 1; rows <= 3; rows += 1) {
+      // Content box loses only the 1px border; wrapping reaches exact equality.
+      expect(statusBarHeightPx(rows) - 1).toBeGreaterThanOrEqual(rows * 16)
+    }
+    expect(statusBarHeightPx(2) - 1).toBe(2 * 16)
+    expect(statusBarHeightPx(3) - 1).toBe(3 * 16)
+  })
+
+  it('maps the five reference widths onto the row-count height classes', () => {
+    for (const width of [960, 1024, 1280]) {
+      const { rows } = measureStatusBar(width)
+      expect(rows).toBeGreaterThanOrEqual(2)
+      expect(statusBarHeightPx(rows)).toBe(rows * 16 + 1)
+    }
+    for (const width of [1440, 1920]) {
+      const { rows } = measureStatusBar(width)
+      expect(rows).toBe(1)
+      expect(statusBarHeightPx(rows)).toBe(32)
+    }
+  })
+
+  it('keeps a single height utility per row count', () => {
+    for (const width of [960, 1024, 1280, 1440, 1920]) {
+      const { rows } = measureStatusBar(width)
+      const tokens = statusBarClasses(rows).split(' ')
+      const heightTokens = tokens.filter((token) => token === 'h-8' || token === 'h-auto')
+      expect(heightTokens).toHaveLength(1)
+      if (rows === 1) {
+        expect(tokens).toContain('h-8')
+        expect(tokens).not.toContain('h-auto')
+        expect(tokens).not.toContain('min-h-8')
+      } else {
+        expect(tokens).toContain('h-auto')
+        expect(tokens).toContain('min-h-8')
+        expect(tokens).not.toContain('h-8')
+      }
+    }
   })
 })
 

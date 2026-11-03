@@ -198,13 +198,34 @@ export function measureStatusBar(
   return { available, required, fits: rows === 1, rows }
 }
 
+/** Height of one wrapped status-bar text row, in px (`text-2xs` line box). */
+const STATUS_BAR_ROW_PX = 16
+
+/** `border-t` of the status bar, counted into its declared border-box height. */
+const STATUS_BAR_BORDER_PX = 1
+
+/**
+ * Declared border-box height of the status bar for `rows` wrapped rows.
+ *
+ * One row stays on the `h-8` step (32px, border included). From two rows on the
+ * height becomes `rows * 16 + 1`: the 16px rows plus the 1px `border-t`, so the
+ * content box always fits `rows * 16` and `scrollHeight <= clientHeight`.
+ */
+export function statusBarHeightPx(rows: number): number {
+  const safeRows = Math.max(1, Math.trunc(rows))
+  if (safeRows === 1) return HEIGHT_PX['h-8']
+  return safeRows * STATUS_BAR_ROW_PX + STATUS_BAR_BORDER_PX
+}
+
 /**
  * Layout utilities of the status bar itself: a wrapping flex row with no
- * horizontal scroll channel. The row gap stays 0 so two 16px text rows fit the
- * level's `h-8` height (only the wrapped rows are ever shown).
+ * horizontal scroll channel. The row gap stays 0; the height is the only
+ * status-layer height source — `h-8` on a single row, `h-auto min-h-8` once
+ * the content model wraps (declared height then follows the content).
  */
-export function statusBarClasses(): string {
-  return 'flex flex-wrap items-center gap-y-0'
+export function statusBarClasses(rows = 1): string {
+  const height = rows >= 2 ? 'h-auto min-h-8' : 'h-8'
+  return `flex flex-wrap items-center gap-y-0 ${SHELL_LEVELS.status.gap} ${height}`
 }
 
 /** Every existing workbench entry, in the order the delivery table lists them. */
@@ -662,15 +683,17 @@ export const CHROME_BASELINE_PX = 112
 export const REFERENCE_VIEWPORT_HEIGHT_PX = 768
 
 /** Top chrome sum: application head + (ready only) session head + status bar. */
-export function chromeHeightPx(state: 'empty' | 'ready'): number {
+export function chromeHeightPx(state: 'empty' | 'ready', statusRows = 1): number {
   return (
-    levelHeightPx('app') + (state === 'ready' ? levelHeightPx('sessions') : 0) + levelHeightPx('status')
+    levelHeightPx('app') +
+    (state === 'ready' ? levelHeightPx('sessions') : 0) +
+    statusBarHeightPx(statusRows)
   )
 }
 
 /** Height left for the work area under the chrome. */
-export function mainContentHeightPx(state: 'empty' | 'ready'): number {
-  return REFERENCE_VIEWPORT_HEIGHT_PX - chromeHeightPx(state)
+export function mainContentHeightPx(state: 'empty' | 'ready', statusRows = 1): number {
+  return REFERENCE_VIEWPORT_HEIGHT_PX - chromeHeightPx(state, statusRows)
 }
 
 /** Toolbar rows one view renders (the drilldown lead row only when drilled). */
@@ -730,9 +753,10 @@ export function contentRowBudget(
   state: 'empty' | 'ready',
   view: ToolbarView,
   rowPx: number,
-  drilldown = false
+  drilldown = false,
+  statusRows = 1
 ): ContentRowBudget {
-  const chrome = chromeHeightPx(state)
+  const chrome = chromeHeightPx(state, statusRows)
   const toolbar = toolbarBandHeightPx(viewToolbarRows(view, drilldown))
   const panelsInset = SPACING_PX[SHELL_LEVELS.panels.paddingY] * 2
   const panelHeader = levelHeightPx('panels')
