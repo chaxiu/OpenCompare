@@ -116,5 +116,34 @@ describe.each([
     expect(legendCounts(statusLegend as HTMLElement, dictionary)).toEqual(counts)
     expect(statusLegend?.textContent).not.toMatch(textDiffWords)
     expect(toolbarLegend?.textContent).not.toMatch(textDiffWords)
+
+    // The status bar wraps its groups instead of hiding them behind a scroll
+    // channel, and every legend cell keeps its dot, count and label in view.
+    const footer = statusBar as HTMLElement
+    const footerClasses = (footer.getAttribute('class') ?? '').split(/\s+/)
+    expect(footerClasses).toContain('flex-wrap')
+    expect(footerClasses.some((token) => token.startsWith('overflow-x'))).toBe(false)
+    for (const status of LEGEND_STATUSES) {
+      const cell = Array.from((statusLegend as HTMLElement).children).find((child) =>
+        (child.textContent ?? '').includes(dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]])
+      )
+      expect(cell).toBeDefined()
+      expect(footer.contains(cell as Element)).toBe(true)
+      expect(cell?.querySelector('.tabular')?.textContent).toMatch(/^\d+$/)
+    }
+
+    // Source / Target file counts and the Differences value stay visible.
+    for (const key of [
+      'shell.stat.sourceFiles',
+      'shell.stat.targetFiles',
+      'shell.stat.differences'
+    ] as const) {
+      const entry = Array.from(footer.querySelectorAll('span')).find(
+        (span) => span.firstElementChild?.textContent === dictionary[key]
+      )
+      expect(entry).toBeDefined()
+      expect(footer.contains(entry as Element)).toBe(true)
+      expect(entry?.querySelector('.tabular')?.textContent).toMatch(/^\d+$/)
+    }
   }, 60_000)
 })

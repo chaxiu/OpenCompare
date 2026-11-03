@@ -4,8 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ICON_NAMES, ICON_SIZES, strokeWidthFor } from '@renderer/assets/icons'
 import type { IconSize } from '@renderer/assets/icons'
+import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { translate } from '@renderer/i18n/context'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
+import type { DiffStatus } from '@shared/fixtures'
 import { Workbench } from './Workbench'
 import {
   SHELL_ENTRIES,
@@ -17,7 +20,8 @@ import {
   entryPresentation,
   levelBandClasses,
   levelHeaderClasses,
-  levelRowClasses
+  levelRowClasses,
+  statusBarClasses
 } from './shellLayout'
 import type { ShellEntryId, ShellLevel, ToolbarView, WidthTier } from './shellLayout'
 
@@ -435,6 +439,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     await loadSamples()
 
     const status = levelElement(container, 'status')
+    hasClasses(status, statusBarClasses())
     const text = status.textContent ?? ''
     expect(text).toContain(zh('shell.status.session'))
     expect(text).toContain('web')
@@ -445,9 +450,105 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     expect(text.indexOf(zh('shell.status.platform'))).toBeLessThan(
       text.indexOf(zh('common.diff.same'))
     )
+    // The four semantic legend cells come before the trailing statistics.
+    expect(text.indexOf(zh('common.diff.removed'))).toBeLessThan(
+      text.indexOf(zh('shell.stat.sourceFiles'))
+    )
     // Every number in the status bar stays tabular.
     for (const value of Array.from(status.querySelectorAll('.tabular'))) {
       expect(isRendered(value)).toBe(true)
+    }
+  })
+})
+
+/** Legend cells of the status bar, in rendered order. */
+function statusLegendItems(container: HTMLElement): readonly HTMLElement[] {
+  const legend = levelElement(container, 'status').querySelector('[data-shell-legend]')
+  if (!(legend instanceof HTMLElement)) throw new Error('missing status bar legend')
+  return Array.from(legend.querySelectorAll<HTMLElement>('[data-legend-status]'))
+}
+
+/** One labelled status-bar entry, located by its leading label. */
+function statusEntry(container: HTMLElement, label: string): HTMLElement {
+  const footer = levelElement(container, 'status')
+  const entry = Array.from(footer.querySelectorAll<HTMLElement>('span')).find(
+    (span) => span.firstElementChild?.textContent === label
+  )
+  if (entry === undefined) throw new Error(`missing status entry: ${label}`)
+  return entry
+}
+
+describe.each([960, 1024, 1280, 1440, 1920])('wrapping status bar at %ipx', (width) => {
+  beforeEach(() => {
+    setWindowWidth(width)
+  })
+
+  it('keeps every legend cell, its count and the statistics visible', async () => {
+    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    await loadSamples()
+
+    const status = levelElement(container, 'status')
+    // The bar wraps its groups instead of hiding them behind a scroll channel.
+    hasClasses(status, statusBarClasses())
+    hasClasses(status, levelRowClasses('status'))
+    hasClasses(status, levelBandClasses('status'))
+    expect(classList(status).some((token) => token.startsWith('overflow-x'))).toBe(false)
+
+    // 4/4 semantic cells of the directory sample (its conflict count is zero).
+    const items = statusLegendItems(container)
+    expect(items.map((item) => item.getAttribute('data-legend-status'))).toEqual([
+      'same',
+      'added',
+      'removed',
+      'modified'
+    ])
+    for (const item of items) {
+      expect(status.contains(item)).toBe(true)
+      expect(isRendered(item)).toBe(true)
+      const status_ = item.getAttribute('data-legend-status') ?? ''
+      const dot = item.querySelector(`span[aria-hidden][class*="bg-diff-${status_}"]`)
+      expect(dot).not.toBeNull()
+      const count = item.querySelector('.tabular')
+      expect(count).not.toBeNull()
+      expect(count?.textContent).toMatch(/^\d+$/)
+      expect(isRendered(count as Element)).toBe(true)
+      // The label sits inside the same cell as dot and count, using the
+      // directory vocabulary of the active directory session.
+      expect(item.textContent).toContain(zh(DIRECTORY_STATUS_LABEL_KEYS[status_ as DiffStatus]))
+    }
+
+    // Source / Target statistics stay visible with their values.
+    for (const key of ['shell.stat.sourceFiles', 'shell.stat.targetFiles'] as const) {
+      const entry = statusEntry(container, zh(key))
+      expect(status.contains(entry)).toBe(true)
+      expect(isRendered(entry)).toBe(true)
+      const value = entry.querySelector('.tabular')
+      expect(value?.textContent).toMatch(/^\d+$/)
+      expect(isRendered(value as Element)).toBe(true)
+    }
+  })
+})
+
+describe('status bar conflict legend', () => {
+  beforeEach(() => {
+    setWindowWidth(TIER_WIDTHS.compact)
+  })
+
+  it('adds the conflict cell only when the composition reports conflicts', async () => {
+    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    await loadSamples()
+
+    expect(statusLegendItems(container)).toHaveLength(4)
+    showSession(/3-Way Merge/)
+    await waitFor(() => expect(statusLegendItems(container)).toHaveLength(5))
+    expect(
+      statusLegendItems(container).map((item) => item.getAttribute('data-legend-status'))
+    ).toEqual(['same', 'added', 'removed', 'modified', 'conflict'])
+    for (const item of statusLegendItems(container)) {
+      expect(isRendered(item)).toBe(true)
+      expect(item.textContent).toContain(
+        zh(DIFF_LABEL_KEYS[item.getAttribute('data-legend-status') as DiffStatus])
+      )
     }
   })
 })

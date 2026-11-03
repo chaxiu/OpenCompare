@@ -2,7 +2,11 @@ import type { JSX, ReactNode } from 'react'
 import type { DiffStatus, SampleComposition } from '@shared/fixtures'
 import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
-import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
+import {
+  levelBandClasses,
+  levelRowClasses,
+  statusBarClasses
+} from '@renderer/workbench/shellLayout'
 import { DiffDot } from './DiffBadge'
 import { DIFF_LABEL_KEYS, DIFF_STATUSES } from './diffSemantics'
 import { cx } from './utils'
@@ -12,7 +16,8 @@ export function StatusBar({ children }: { readonly children: ReactNode }): JSX.E
     <footer
       data-shell-level="status"
       className={cx(
-        'flex shrink-0 items-center overflow-x-auto border-t border-line-subtle bg-surface-sunken text-2xs text-content-muted',
+        'shrink-0 border-t border-line-subtle bg-surface-sunken text-2xs text-content-muted',
+        statusBarClasses(),
         levelRowClasses('status'),
         levelBandClasses('status')
       )}
@@ -51,10 +56,14 @@ export function CompositionLegend({
 }): JSX.Element {
   const { t } = useI18n()
   return (
-    <span className="flex shrink-0 items-center gap-2.5">
+    <span data-shell-legend className="flex shrink-0 items-center gap-2.5">
       {DIFF_STATUSES.filter((status) => status !== 'conflict' || composition.conflict > 0).map(
         (status) => (
-          <span key={status} className="flex items-center gap-1 whitespace-nowrap">
+          <span
+            key={status}
+            data-legend-status={status}
+            className="flex items-center gap-1 whitespace-nowrap"
+          >
             <DiffDot status={status} />
             <span className="tabular font-mono text-content-secondary">{composition[status]}</span>
             <span>{t(labelKeys[status])}</span>

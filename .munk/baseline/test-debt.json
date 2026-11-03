@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 46272
+    "repoTestLines": 46459
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1528
+    "repoTestCases": 1539
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46215,
-      "to": 46272,
-      "reason": "add README screenshot references / non-empty PNG / resolvable capture-commit governance assertions plus the text-as-icon, regular-tier tooltip and stored system-mode gaps in existing suites",
-      "addedCases": 4
+      "from": 46272,
+      "to": 46459,
+      "reason": "add the narrow-window status bar wrapping model with content-boundary rows plus legend / count / statistics visibility assertions in the existing shellLayout suites",
+      "addedCases": 11
     }
   ]
 }
