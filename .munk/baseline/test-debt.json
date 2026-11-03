@@ -1,14 +1,14 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "db82de3e4c215b412bc110de7cd74d5c8bb3ea8d",
-    "date": "2026-11-03"
+    "commit": "e079a5ef7c29d79fd6113005278f5e7853a7ace7",
+    "date": "2026-11-04"
   },
   "ceilings": {
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 46539
+    "repoTestLines": 46563
   },
   "floors": {
     "appTestCases": 94,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46459,
-      "to": 46539,
-      "reason": "drive the wrapped status-bar height from measureStatusBar rows (statusBarHeightPx, h-auto/min-h-8) and sync chrome / contentRowBudget statusRows budgets in the existing shellLayout suites",
-      "addedCases": 4
+      "from": 46539,
+      "to": 46563,
+      "reason": "pin the rebuilt README screenshots (PNG size/shape/gitignore/tracked) and the captured-commit to HEAD whole-directory src/renderer zero-diff provenance assertion in the existing release-artifacts suite",
+      "addedCases": 1
     }
   ]
 }

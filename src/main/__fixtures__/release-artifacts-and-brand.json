@@ -679,7 +679,16 @@
     ],
     "record": "docs/screenshots.md",
     "commitPattern": "- commit: `([0-9a-f]{40})`",
-    "reproduce": "node scripts/capture-readme-screenshots.mjs"
+    "reproduce": "node scripts/capture-readme-screenshots.mjs",
+    "width": 2560,
+    "height": 1584,
+    "minBytes": 10240,
+    "rendererDir": "src/renderer",
+    "cleanTreeTokens": [
+      "clean working tree",
+      "pnpm build"
+    ],
+    "rerunHint": "请重跑 `pnpm screenshots` 并更新 docs/screenshots.md"
   },
   "notesSections": [
     {
