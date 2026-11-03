@@ -19,7 +19,7 @@
 - **证据归档**：真实产物经只读就绪门、仓库外下载、字节 + sha256 与签名复核后写入 `docs/release-evidence/<tag>.md`（`verified` / `blocked`，产物不入库），台账登记版本、状态与资产数。
 - **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、两张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
 - **发布配置断言单测**：Node 环境读取仓库根配置与文档做断言，拆为 packaging（打包 / 发布配置 + 证据台账）、version-gate（版本门 / 祖先门 / 重跑入口 / 门面结构）、artifacts-and-brand（品牌 / 协议 / 产物名 / 单 Release）三层。
-- **README 截图出处与门面治理断言**：两张 `docs/assets/*.png` 由 `node scripts/capture-readme-screenshots.mjs` 在本次 `pnpm build` 产物（`out/main` + `out/preload` + `out/renderer`）上重拍，输入为脚本自建的真实 `/tmp` 目录树与真实文件对，不读 `src/shared/fixtures/**`、不用旧图或拼图；`docs/screenshots.md` 的 `Captured commit` 为仓内可解析的 40 位十六进制 commit 并保留 Reproduce 一行。门面断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture（`screenshots` 行）：两版 README 都引用两图、两图存在且 size > 0 / PNG 签名、记录 commit 可由本地 `git cat-file -e` 解析；只用 `node:fs` 与本地 git 子进程，不联网。`repoTestLines` 超 ceiling 时只按既有 ratchet 规则写 growth 条目（增量 ≤ 400 行），floor 只上调。
+- **README 截图出处与门面治理断言**：两张 `docs/assets/*.png` 必须在干净工作树（`git status --porcelain` 为空）、HEAD = 开工时 main HEAD 上先 `pnpm build` 再跑 `node scripts/capture-readme-screenshots.mjs` 重拍，输入为脚本自建的真实 `/tmp` 目录树与真实文件对，不读 `src/shared/fixtures/**`、不用旧图或拼图；按实测落 A（重建 sha256 与旧图不同 → 替换图片）或 B（逐字节相同 → 保留旧图并记 sha256 对照）之一，不得混写。`docs/screenshots.md` 记录该构建 commit（40 位十六进制、可解析、HEAD 祖先）与 `src/renderer` 到 HEAD 的全目录零 diff。门面断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture（`screenshots` 行）：PNG 签名 / 宽高 2560×1584 / 体积 / 未被 gitignore 且被 git 跟踪、两版 README 引用、provenance 解析与零 diff。只用 `node:fs` 与本地 git 子进程，不联网。`repoTestLines` 超 ceiling 时只按既有 ratchet 规则写 growth 条目（增量 ≤ 400 行），floor 只上调。
 - **版本收敛轮**：发版前单独一轮只收敛版本事实——`package.json#version`、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、`docs/release-process.md` 的同一字面量、`CHANGELOG.md` 新段、双语 notes 与版本门测试 token；产品源码、证据台账与 README 状态行零 diff，不执行任何发版动作。
 
 ## 验收
@@ -90,12 +90,16 @@
 - **ac-finalize-permissions**：`finalize` 声明 job 级 `permissions` 且同时含 `contents: write` 与 `actions: write`（两项 `toEqual` 钉死，job 级覆盖不丢 `contents`）。
 - **ac-finalize-dispatch**：publish 之前存在步骤执行 `gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="$(cat "${RUNNER_TEMP}/release-state.txt")"`，步骤正文零版本字面量；mode 由只读的 `Resolve the tag's release state` 读出（draft / published）。
 - **ac-finalize-aggregate-gate**：派发后 300 s 内按 `displayTitle` 含 tag 且 `createdAt >= since` 匹配本次 run，查不到即失败；随后有界等待 `aggregate` 为 `success`（failure / cancelled / timed_out / 非 success / 超时均失败），artifact 名含 tag 与 `run_id`；该 gate 先于 `Make the tag's release public`，失败即保持 draft。
-- **ac-screenshots-regenerated**：两张 PNG 均由 `node scripts/capture-readme-screenshots.mjs` 在本次 `pnpm build` 产物（`out/main` + `out/preload` + `out/renderer`）上重新生成，与旧 commit `ef70939` 版本字节不同，均为合法 PNG（签名 `89 50 4E 47`）且字节数 > 0。
+- **ac-capture-clean-head**：采集前 `git status --porcelain` 为空且 HEAD 等于开工时 main HEAD，执行顺序为 `pnpm build` → `node scripts/capture-readme-screenshots.mjs`；`docs/screenshots.md` 写明该 commit 与「在该 commit 的干净工作树上重建」。
+- **ac-capture-real-source**：两图由脚本经 `out/main` + `out/renderer` 真实 Electron 窗口 + DevTools 协议、真实 `/tmp/oc-readme-*` 树与真实文件对产出，运行输出含两行 `wrote docs/assets/<file> (N bytes)`，不读 `src/shared/fixtures/**`、不用旧图或拼接图；真实窗口起不来不得出图。
+- **ac-png-branch-decided**：恰好落地 A 或 B 之一并在 `docs/screenshots.md` 写明依据——A 记旧 / 新 sha256 与「已替换」，B 记「重建 sha256 = 仓内 sha256」对照 + 构建命令 + commit；两种口径不得同时出现。
+- **ac-png-format**：两图均为有效 PNG（前 4 字节 `89 50 4E 47`）、尺寸 2560×1584、体积 > 10240 字节。
 - **ac-screenshots-current-shell**：截图肉眼可确认是当前 shell——顶栏与工作流工具栏无 demo 入口，会话 tab 与工具栏归位；若 UI 与 `docs/screenshots.md` 描述不符，只记录并上报，不在本项改 UI。
-- **ac-screenshots-real-inputs**：截图输入为脚本自建的真实 `/tmp` 目录树与真实文件对；脚本不读取 `src/shared/fixtures/**`，不使用旧图或内置样本。
-- **ac-screenshots-doc-commit**：`docs/screenshots.md` 的 `Captured commit` 为 40 位十六进制 commit，等于本次构建实际所在的 commit，且 `git cat-file -e <sha>^{commit}` 在仓内成功；Reproduce 一行仍保留。
-- **ac-readme-both-images**：`README.md` 与 `README.zh-CN.md` 各引用 `docs/assets/opencompare-workbench.png` 与 `docs/assets/opencompare-file-diff.png`，两版路径一致；两版第 5 行版本行与改动前逐字节相同。
-- **ac-gov-test-extended**：三条门面断言落在既有 `src/main/release-artifacts-and-brand.test.ts` 及其 fixture（`screenshots` 行），不新增测试文件；至少覆盖「两版 README 引用」「文件存在且 size > 0」「commit 可由本地 git 解析」三点。
+- **ac-provenance-resolvable**：`docs/screenshots.md` 的 captured commit 为 40 位小写 hex，`git cat-file -e <sha>^{commit}` 与 `git merge-base --is-ancestor <sha> HEAD` 均退出 0（不可解析或非祖先即 fail）。
+- **ac-provenance-renderer-zero-diff**：以 `git diff --quiet <captured>..HEAD -- src/renderer` 全目录判定；非 0 时失败文案含 `git diff --name-only` 的实际文件清单与「请重跑 `pnpm screenshots` 并更新 docs/screenshots.md」，禁止硬编码文件名或只比对部分文件（`dc781cd` 作 captured commit 时必须报出全部 8 个变更文件）。
+- **ac-readme-unchanged**：两版 `README*.md` 对两图的引用仍在，9 个二级标题集合与第 5 行版本行不变，`git diff --exit-code -- README.md README.zh-CN.md` 为空。
+- **ac-png-gate-extended**：PNG / provenance 断言都落在既有 `src/main/release-artifacts-and-brand.test.ts` 截图 describe 内、期望值放既有 fixture `.screenshots`；不新建测试文件、不新增依赖、不联网。
+- **ac-negative-selftest / ac-scope-diff**：把 captured commit 改回 `dc781cd` 时该测试文件必须 fail 并列出 8 个文件与重跑提示，恢复后 pass（命令 + 输出写入交付说明）；改动只落两张 PNG（仅 A）、`docs/screenshots.md`、该测试与其 fixture，`git diff --name-only <start>..HEAD -- src/renderer` 为空。
 - **ac-gov-offline**：新增断言只用 `node:fs` 与本地 `git` 子进程（`spawnSync` / `execFileSync`），不发起 HTTP / fetch / 网络拉取；不依赖 CI 浅克隆之外的数据（发布门禁 `fetch-depth: 0` 已保证历史可见）。
 - **ac-coverage-audit-four**：对四处口径给出逐条覆盖映射（文件 + 用例名）：(1) 顶栏与工作流工具栏 demo 入口为 0、设置内 5 类示例可达；(2) 图标全部 `currentColor`、图标按钮 `aria-label`、无 emoji / 文字充当图标；(3) 两套主题 token 同名 + WCAG 对比度 + 四态 ΔE + 亮 / 暗 / 跟随系统三态持久化；(4) tab 三级截断 + title tooltip 预算。已有覆盖不重写；只对真实缺口在既有文件内补断言，且测试用例总数不下降。本轮新增缺口断言：`App.theme.test.tsx` 已存 `system` 模式启动即跟随系统、`SessionTabs.test.tsx` regular 档 title、`shellLayout.dom.test.tsx` 单字符非字母数字且无 `data-icon` 的按钮不得无 `aria-label`；主题 / tab / 图标的域归属分别见 `domains/theme`、`domains/workbench`、`domains/icon-system`，本域只记录门面侧断言位置。
 - **ac-test-debt-green**：`node scripts/test-debt-gate.mjs` 通过；新增断言使 `repoTestLines` 超 ceiling 时按既有 ratchet 规则更新 `.munk/baseline/test-debt.json` 的 growth 条目（`from` = 上一提交 ceiling、`to` = 新 ceiling、写明 reason 与 `addedCases`，增量 ≤ 400 行），只上调不下调 floor。
@@ -127,9 +131,9 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_af13634404b7dbb1`（README 两张真实构建截图重拍 + 截图出处记录 + 门面治理断言与四处口径缺口补齐；`deliveryIntent: local merge`，`needSelfTest=false`）
+- WI：`wi_intake_0fe51dec7e7a9795`（README 截图 provenance 修复：在最新 main 干净树重拍并钉成回归断言；`deliveryIntent: local merge`）
 - 日期：2026-11-04
-- 结果：`code_gates` passed（27 gates，attempt 001，`.munk/runs/run_intake_af13634404b7dbb1/code-gates/attempts/001`；`pnpm test` 125 files / 2058 passed + 1 skipped（2059）；`test-debt-gate` 实测 `repoTestLines` 46272 = ceiling 46272、`repoTestCases` 1532 ≥ floor 1528）。
-- 改动面：`docs/assets/opencompare-workbench.png`（285,712 B / 2560×1584）与 `opencompare-file-diff.png`（318,863 B / 2560×1584）由真实构建与真实 `/tmp` 输入重拍；`docs/screenshots.md` 的 `Captured commit` 改为 `dc781cd1d5ac922927a3c59bb9f86ebe68f072a0`；`src/main/release-artifacts-and-brand.test.ts` + fixture 新增 `screenshots` 三条断言，`App.theme.test.tsx` / `SessionTabs.test.tsx` / `shellLayout.dom.test.tsx` 各补 1 条缺口用例；`.munk/baseline/test-debt.json` 只走 growth 46215→46272（+4 cases）。两版 README 零 diff。
-- 验收落点：`ac-screenshots-regenerated` / `ac-screenshots-doc-commit` / `ac-readme-both-images` / `ac-gov-test-extended` / `ac-gov-offline` / `ac-test-debt-green` 满足；`ac-coverage-audit-four` 的既有覆盖不变，只补三条真实缺口。
-- 注：① 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例。② 截图的 `Captured commit` 记的是**构建所在的 main 祖先** `dc781cd`，不是 WI 分支 tip——`ac-screenshots-doc-commit` 只要求仓内可解析，勿改成交付 commit。③ `ac-gates-green` 本轮扩为含 `test-debt-gate`；新增断言只走 ratchet growth，floor 不下调。
+- 结果：`code_gates` passed；重建前后均由真实窗口采集，反向自测（captured commit 改回 `dc781cd` → 红，报出 8 个 `src/renderer` 变更文件；恢复 → 绿）留证于交付说明。
+- 改动面：在干净树 HEAD `e079a5ef7c29d79fd6113005278f5e7853a7ace7` 上先 `pnpm build` 再跑采集脚本；两图重建 2560×1584（`opencompare-workbench.png` 291,046 B、`opencompare-file-diff.png` 324,539 B），sha256 与旧图不同 → 落 **A** 分支替换。`docs/screenshots.md` 记该 commit、干净树重建措辞与旧 / 新 sha256 对照；`release-artifacts-and-brand.test.ts` + fixture 增 PNG 宽高 / 体积 / gitignore / 被跟踪与 provenance 祖先 + `src/renderer` 全目录零 diff 断言（失败带变更清单与重跑提示）；`test-debt` 只走 growth 46539→46563（+1 case），两版 README 零 diff。
+- 验收落点：`ac-capture-clean-head` / `ac-capture-real-source` / `ac-png-branch-decided` / `ac-png-format` / `ac-provenance-resolvable` / `ac-provenance-renderer-zero-diff` / `ac-readme-unchanged` / `ac-png-gate-extended` / `ac-negative-selftest` / `ac-scope-diff` 满足。
+- 注：① 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例。② captured commit 不再要求等于 WI tip，只要求可解析、为 HEAD 祖先且 `src/renderer` 零 diff——版本收敛等非渲染层提交不算过期。③ 断言禁止硬编码文件名，`dc781cd` 场景必须报出全部 8 个变更文件。

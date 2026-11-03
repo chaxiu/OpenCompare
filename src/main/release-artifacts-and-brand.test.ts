@@ -24,7 +24,10 @@ interface DocsRow {
   absent: Strings; absentPatterns: Strings
 }
 interface NotesRow { id: string; doc: string; heading: string; sentences: number; sentenceSeparator: string; code: Strings; text: Strings; absent: Strings }
-interface Screenshots { id: string; readmes: Strings; assets: Strings; record: string; commitPattern: string; reproduce: string }
+interface Screenshots {
+  id: string; readmes: Strings; assets: Strings; record: string; commitPattern: string; reproduce: string
+  width: number; height: number; minBytes: number; rendererDir: string; cleanTreeTokens: Strings; rerunHint: string
+}
 interface RenderRow { id: string; builderPath: string; arch: string; ext: string; expected: string }
 interface WinCase { id: string; script: 'version' | 'feed' | 'assets'; artifacts?: 'both' | 'zip-only' | 'exe-only' | 'none'; latest?: 'installer-only' | 'with-zip'; omit?: 'none' | 'zip' | 'exe'; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings }
 interface Fixture {
@@ -226,11 +229,18 @@ describe('readme screenshots and capture provenance', () => {
     }
   })
 
-  it('ships both screenshots as non-empty PNG files', () => {
+  it('ships both screenshots as committed 2560x1584 PNG files', () => {
+    const { width, height, minBytes } = fixture.screenshots
     for (const asset of fixture.screenshots.assets) {
       const bytes = readBytes(join(repoRoot, asset))
-      expect(bytes.length, `${asset} bytes`).toBeGreaterThan(0)
+      expect(bytes.length, `${asset} bytes`).toBeGreaterThan(minBytes)
       expect([...bytes.subarray(0, 4)], `${asset} PNG signature`).toEqual([0x89, 0x50, 0x4e, 0x47])
+      expect(bytes.readUInt32BE(16), `${asset} width`).toBe(width)
+      expect(bytes.readUInt32BE(20), `${asset} height`).toBe(height)
+      const ignored = spawnSync('git', ['check-ignore', '--quiet', '--', asset], { cwd: repoRoot })
+      expect(ignored.status, `${asset} must not be gitignored`).toBe(1)
+      const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', asset], { cwd: repoRoot })
+      expect(tracked.status, `${asset} must be tracked`).toBe(0)
     }
   })
 
@@ -240,7 +250,21 @@ describe('readme screenshots and capture provenance', () => {
     expect(commit, 'captured commit shape').toMatch(/^[0-9a-f]{40}$/)
     const lookup = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: repoRoot })
     expect(lookup.status, `git cat-file ${commit}`).toBe(0)
-    expectTokens(record, [fixture.screenshots.reproduce], fixture.screenshots.id)
+    expectTokens(record, [fixture.screenshots.reproduce, ...fixture.screenshots.cleanTreeTokens], fixture.screenshots.id)
+  })
+
+  it('keeps the whole renderer unchanged since the captured commit', () => {
+    useRow(fixture.screenshots.id)
+    const { record: recordPath, commitPattern, rendererDir, rerunHint } = fixture.screenshots
+    const commit = new RegExp(commitPattern).exec(readText(recordPath))?.[1] ?? ''
+    const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], { cwd: repoRoot })
+    expect(ancestor.status, `git merge-base --is-ancestor ${commit} HEAD`).toBe(0)
+    const range = `${commit}..HEAD`
+    const quiet = spawnSync('git', ['diff', '--quiet', range, '--', rendererDir], { cwd: repoRoot })
+    if (quiet.status !== 0) {
+      const changed = spawnSync('git', ['diff', '--name-only', range, '--', rendererDir], { cwd: repoRoot, encoding: 'utf8' })
+      expect.fail(`${rerunHint}\n${rendererDir} changed since the captured commit ${commit}:\n${changed.stdout.trim()}`)
+    }
   })
 })
 
