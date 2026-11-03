@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 45690
+    "repoTestLines": 46039
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1497
+    "repoTestCases": 1515
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 45623,
-      "to": 45690,
-      "reason": "post-release aggregate: cross-machine parts/** evidence re-basing keeps 15/15 pass and still fails closed when one artifact log is missing",
-      "addedCases": 3
+      "from": 45690,
+      "to": 46039,
+      "reason": "text dual-pane ignore-whitespace / explicit reload / swap coverage: core diff cases plus CodeView jsdom and workbench status-persistence tests",
+      "addedCases": 15
     }
   ]
 }

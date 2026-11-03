@@ -157,6 +157,7 @@ export const UI_ICON_ACTIONS = {
   changeArrow: 'arrow-right',
   refresh: 'refresh-cw',
   reset: 'rotate-ccw',
+  swap: 'shuffle',
   remoteSample: 'cloud',
   overwriteLeft: 'arrow-left',
   overwriteRight: 'arrow-right',

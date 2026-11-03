@@ -12,7 +12,8 @@
   - `normalization.newline: { left, right, different, ignored }`：左右原始换行标签（`CRLF|LF|CR|Mixed|None`）、是否不同、是否被忽略。
   - `normalization.encoding: { left, right, different, ignored, comparable, byteDifference }`：左右编码标签（无事实为 `null`）、标签是否不同、是否被忽略、两侧事实是否齐备、严格模式下是否存在「文本相同而字节不同」的可见信号。
   - `differenceCount = blocks.length + (byteDifference ? 1 : 0)`；`identical = differenceCount === 0`。
-- **真差异不可吞**：字符替换、空白（行尾空格 / 缩进）、大小写、行顺序在四种开关组合下都必须报告差异（差异块 ≥ 1、`differenceCount ≥ 1`、至少一行非 `same`）。
+- **空白归一（第三个开关，2026-11-03）**：新增 `ignoreWhitespace`，缺省与 `undefined` 均为 `false`（严格逐字符比较是默认），显式 `true` 才忽略。忽略时行级比较用只去掉 U+0020 空格与 U+0009 制表符的文本（行尾空白、行内连续多余空白、制表符与空格互换都归入空白差异），行终止符与编码归一互不越权；展示用原文逐字保留（`display` 与 `compare` 分离，不 trim / 不折叠）。行内高亮在去空白文本上跑字符 diff，再按索引映回原文，纯空白差异不产生 changed 段。因比较文本被折叠，`same` 行两侧的原始显示文本允许逐字不同。
+- **真差异不可吞**：字符替换、空白（行尾空格 / 缩进）、大小写、行顺序在四种换行 / 编码开关组合下都必须报告差异（差异块 ≥ 1、`differenceCount ≥ 1`、至少一行非 `same`）；空白差异只在 `ignoreWhitespace=true` 时被忽略。
 - **可回归门**：`.munk/code-gates.json` 新增且仅新增一条 `diff-normalize` 门，命令为单 argv `pnpm test src/core/text/normalize.test.ts src/core/text/diff.test.ts src/core/text/merge.test.ts`。
 - **真实外部文件证据门（2026-11-02，`wi_ws_2e24bfab81f0fb32`）**：判定语义不重做，只把已发布的探测 / 归一 / 视图链路钉在**真实磁盘字节**上。固定绝对根 `join(os.tmpdir(), 'opencompare-diff-normalize-evidence')` 每次先清空再生成两组（`thousand` 恰 1000 逻辑行、无尾随空行；`five-megabyte` 的 `utf8-*` ≥ 5 MiB 且 ≥ 1000 行），每组同一份逻辑文本落成六个 `.txt` 变体：`utf8-lf` / `utf8-crlf` / `utf8bom-lf` / `utf16le-crlf` / `gbk-lf` / `utf8-crlf-mutated`（仅改一行一个字符）。生成确定性（禁 `Math.random()` / 时间戳 / 网络），GBK 来自固定字符→字节表且写盘后用 `decodeText` 回读逐字相等，运行时不支持 GBK 解码即失败。门以 `createWebPlatformPort()` 为底、只覆写 `probeTextFile` / `readTextFile` / `statPath`，探测一律 `probeTextBytes(readFileSync(path))`（与 Electron / Web 同一纯函数）；`thousand` 组走真实 `Workbench` / `CodeView` DOM 全链路，`five-megabyte` 组只经 `diffLineTextsWithFacts` 核心级比较、不渲染进 jsdom。门在 stdout 打印 `OPENCOMPARE_DIFF_NORMALIZE_EVIDENCE <JSON>`，仅在显式设置 `OPENCOMPARE_EVIDENCE_OUT` 时落盘；提交 `docs/evidence/diff-normalize-real-files.json` / `.md` 作为机器可读与人读证据。门清单只加一条 `diff-normalize-real`（插在既有 `diff-normalize` 之后，总数 23 → 24），`src/munk-gates.test.ts` 同步 24 条面量与邻位断言。
 
@@ -28,6 +29,11 @@
 - **ac-no-facts-safe**：仅文本入口在 `{ ignoreEncoding: false }` 下不崩溃，`normalization.encoding.comparable === false`、`byteDifference === false`，判定只基于文本（文本不同仍报差异）。
 - **ac-real-diff-all-combos**：四种开关组合 × {单字符替换、行尾空格、大小写变化、行顺序交换} 共 16 组，每组均 `identical === false`、`differenceCount ≥ 1`、`blocks.length ≥ 1`、至少一行非 `same`。
 - **ac-count-single-source**：每次比较只有一个 `differenceCount`，且 `identical === (differenceCount === 0)`；纯文本对 `differenceCount === blocks.length`；带字节信号时 `differenceCount === blocks.length + 1`；不存在第二份内联计数逻辑。
+- **ac-whitespace-default-off**：`resolveComparisonSwitches({})` 的 `ignoreWhitespace === false`；不传该选项时同一对「仅空白不同」的输入仍是非 `same` 行、`differenceCount ≥ 1`。
+- **ac-whitespace-strip-scope**：`{ ignoreWhitespace: true }` 下，行尾空格、制表符与空格互换、行内连续多余空白三种输入 `differenceCount === 0` / 无非 `same` 行；忽略集合仅为 U+0020 与 U+0009，其它空白字符（如 U+00A0）仍按普通字符比较。
+- **ac-whitespace-inline-mapped**：开启后去空白相等的行 `leftSegments` / `rightSegments` 全为 `changed === false` 且文本逐字等于原文；去空白后仍不相等的行，changed 段去空白后两侧仍不相等，且原文空白在未变更段中原样出现。
+- **ac-whitespace-keeps-real-diff**：开启后单字符替换 / 大小写变化 / 行序交换仍 `differenceCount ≥ 1`、存在非 `same` 行；`differenceCount` 不再把纯空白行计为差异。
+- **ac-whitespace-gate-registered**：上述断言落在既有 `src/core/text/diff.test.ts`（并入既有 `diff-normalize` 与新门 `code-pair-actions` 的覆盖），不新增恒真断言、不放宽既有 16 组合断言。
 - **ac-signal-labels**：`normalization.newline.left/right` 取值仅 `CRLF|LF|CR|Mixed|None`，`normalization.encoding.left/right` 取值仅 `UTF-8|UTF-8 BOM|UTF-16LE|UTF-16BE|GBK|Unknown` 或 `null`（无事实），未在比较层另立标签或阈值。
 - **ac-no-mutation**：比较不修改传入的文本与事实对象；`overwriteBlock`、`replaceLines`、`splitLines` 的既有断言不改动即通过。
 - **ac-merge-unchanged**：`src/core/text/merge.test.ts` 全部现有断言（含样本三向合并冲突块）不改动即通过；`src/core/text/merge.ts` 无行为变更。
@@ -58,7 +64,7 @@
 
 ## 非目标
 
-- 不做两个开关的界面控件、`CodeView` 工具栏 / 状态栏、会话模型携带探测事实（由 `code-diff-switches` 承担并已交付）；证据门只消费既有 DOM 契约与判定结果，不新增生产测试钩子。
+- 不做三个开关的界面控件（含「忽略空白」的工具栏接线，归 `code-diff-switches`）、`CodeView` 工具栏 / 状态栏、显式重载与交换（归 `code-pair-actions`）、会话模型携带探测事实；证据门只消费既有 DOM 契约与判定结果，不新增生产测试钩子。
 - 证据门只做 jsdom + 真实磁盘字节：不把 5 MB 组渲染进 DOM、不做真实窗口点击 / 截图 / 真机验收（`needSelfTest=false`），最终窗口可操作性归 Product Ops。
 - 不改既有 23 条门的 id / 命令 / `cwd`，不新增 `pnpm` script（复用 `pnpm test <file>`），不改 `vitest.config.mts`；门只插在 `diff-normalize` 之后保持模板门 tail 切片不变。
 - 不新增依赖（尤其不引 `iconv-lite`）、不下载夹具、无网络 / 外部服务；不 bump 版本，不改 README / CHANGELOG / release notes / tag。
@@ -89,8 +95,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_2e24bfab81f0fb32`（真实外部文件开 / 关两态证据门 + 千行 DOM / 5 MiB 核心级可复现数据；`kind: feature`）
-- 日期：2026-11-02
-- 结果：code_gates passed（24 gates，attempt 001，`.munk/runs/run_ws_d20db508638dbc3f/code-gates/attempts/001`；`pnpm test` 123 files / 1924 passed + 1 skipped（1925）、30.20 s；新门单跑 1 file / 10 tests、4.79 s；`diff-normalize` 门 3 files / 47 tests、101 ms；`test-debt-gate` ok（`repoTestLines` 44398 ≤ ceiling、`repoTestCases` 1441 ≥ floor 1419）；`needSelfTest=false`）。
-- 覆盖摘要：**新增 `src/test/diffNormalizeRealFixture.ts`（589 行，非 `.test.*` 故不计测试债）**——固定根 `join(os.tmpdir(), 'opencompare-diff-normalize-evidence')`，每次 `rmSync` 后重建 `thousand`（恰 1000 逻辑行）与 `five-megabyte`（UTF-8 侧 5,478,090 B、1200 行）两组、每组六变体（UTF-8 LF / UTF-8 CRLF / UTF-8 BOM LF / UTF-16LE CRLF / GBK LF / 单字符变异 CRLF），确定性生成、GBK 走固定字符→字节表且 `decodeText` 回读逐字相等；`createDiskPlatformPort()` 以 `createWebPlatformPort()` 为底只覆写 `probeTextFile` / `readTextFile` / `statPath`，探测一律 `probeTextBytes(readFileSync(path))`；证据组装与 `pinnedFields` 同在此模块。**新增 `src/diff-normalize-real-gate.test.tsx`（383 行 / 10 个 `it`）**——真实 `Workbench` 打开千行组 `utf8-crlf` ↔ `gbk-lf`，读数 `0 → 1 → 0` 且每次等于同一次比较的 `differenceCount` / `blocks.length`，状态栏四值 `['CRLF','UTF-8','LF','GBK']` 全程不变，两开关为可聚焦 `role="switch"`、单击与 Space 各翻转一次、两栏各 1000 行；核心级 5 MiB 组默认全 0、严格后换行/编码信号与真实字符差异均报出、关闭后重算最大 203.75 ms < 10 s 预算；print `OPENCOMPARE_DIFF_NORMALIZE_EVIDENCE <JSON>`，`OPENCOMPARE_EVIDENCE_OUT` 落 `docs/evidence/diff-normalize-real-files.json`，并提交人读 `.md`。**门清单**——`.munk/code-gates.json` 在 `diff-normalize` 之后插入一条 `diff-normalize-real`（`cwd: "."`、单 argv `pnpm test src/diff-normalize-real-gate.test.tsx`），总数 23 → 24，其余 23 条 id / 命令逐字未动，`description` 追加 4 条 marker 与文件路径；`src/munk-gates.test.ts` 同步 `EXPECTED_GATES` / 长度 24 / 新门邻位与 marker 断言，既有模板门 tail、末两项、单 argv、禁 perf 断言保留。`test-debt.json` 仅 growth（repoTestLines 43999 → 44398、addedCases 11）。六变体 sha256 全部运行时从磁盘字节重算（无字面量），门回读已提交 JSON 的 `bytes` / `sha256` / 各状态 `differenceCount` / `blocks.length` 与现场逐项相等。
-- 注：① 本 WI change pack 仅含 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；验收按 prd AC 落档为本域新增的 `qa/diff-normalize-real-files.md`（非 change-pack 用例）。② 门文件自身 383 行、辅助模块 589 行：把夹具与证据组装留在非测试模块是让 `addedCases` 只增 11 而 `repoTestLines` 增量 399 满足 ≤400 的关键，后续加断言先拆非测试模块而不是继续堆门文件。③ 证据 JSON 被门回读钉住：重生成必须先跑 `OPENCOMPARE_EVIDENCE_OUT=docs/evidence/diff-normalize-real-files.json pnpm test src/diff-normalize-real-gate.test.tsx` 再写 `.md`，且耗时 / 绝对路径不得进入 pinned 字段，否则换机器即假红。④ 新门 4.79 s（明显重于 `diff-normalize` 的 101 ms），仍是 jsdom + 真实小文件、不启 Electron，留在默认矩阵；若将来放大到分钟级应并入单文件 e2e 而不是再加矩阵项。⑤ **门禁插队先例**：本域连续两轮把门插在 `diff-normalize` 之后而非末尾，与 `domains/quality-gates` 仍写的「只在末尾追加 / 现行 22 项」口径冲突——该域尚未折叠 23 / 24 两轮，后续 Planner 需开一项把门禁清单域与 `tech/overview.md` 计数对齐，不要引用旧 22 项说法。
+- WI：`wi_intake_fdbf73a8407f5c10`（新增第三个比较开关「忽略空白」：语义落地 `src/core/text`，默认严格逐字符；`kind: feature`）
+- 日期：2026-11-03
+- 结果：code_gates passed（27 gates，attempt 001，`.munk/runs/run_intake_fdbf73a8407f5c10/code-gates/attempts/001`；`pnpm test` 125 files / 2009 passed + 1 skipped（2010）；`diff-normalize` 与新增 `code-pair-actions` 门均绿；`test-debt` 声明 `repoTestLines 45690 → 46039`、`repoTestCases` floor 1497 → 1515、`addedCases 15`）。
+- 覆盖摘要：`normalize.ts` 增 `ignoreWhitespace`（缺省 `false`，仅 `true` 生效）与 `isComparisonWhitespace` / `stripComparisonWhitespace`（只认 U+0020 / U+0009）；`diff.ts` 把每行拆成 `display`（原文）与 `compare`（去空白 + 终止符），行级对齐与 `same` 行判定用 `compare`，但 `same` 行两侧保留各自原文；`inlineSegments` 增加 `ignoreWhitespace` 参数，在去空白文本上跑 `diffChars` 再把每个 run 按索引映回原文并合并同色调 run，纯空白差异不产生 changed 段；`diffLineTexts` / `diffLineTextsWithFacts` 的开关透传与 `differenceCount` 口径不变。`diff.test.ts` 新增 6 例（默认严格、仅空白相等且原文保留、真实差异计数一次、行内只高亮非空白、换行差异不被空白开关吞、关闭时 segments 与旧行为一致）。
+- 后续注意：① 忽略集合只有空格与制表符，U+00A0 等其它空白仍按普通字符比较（当前无显式断言，属补强点）；② 空白模式下 `same` 行的左右原始文本可以逐字不同，任何「same 即左右文本相等」的假设都会失效；③ 门禁清单计数已漂移到 27 项（`domains/quality-gates` 与 `tech/overview.md` 仍写 22 / 24），后续 Planner 需单开一项对齐，不要引用旧计数。
