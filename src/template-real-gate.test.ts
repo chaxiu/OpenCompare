@@ -18,6 +18,7 @@ import { resolveTemplatePlan } from '@core/directory/template'
 import { applyTemplatePlan, previewTemplate, TemplateApplyError } from '@renderer/workbench/directoryOps'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
+  ComparisonHistoryEntry,
   DigestFilesResult,
   DirectoryEntry,
   DirectoryListing,
@@ -97,6 +98,10 @@ const platform: PlatformPort = {
     invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
   writeUserSettings: (settings) =>
     invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+  readComparisonHistory: () =>
+    invoke(PLATFORM_CHANNELS.readComparisonHistory) as Promise<ComparisonHistoryEntry[]>,
+  writeComparisonHistory: (entries) =>
+    invoke(PLATFORM_CHANNELS.writeComparisonHistory, entries) as Promise<void>,
   systemLocale: () => invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>
 }
 

@@ -68,6 +68,8 @@ describe('preload bridge', () => {
         'realpath',
         'readUserSettings',
         'writeUserSettings',
+        'readComparisonHistory',
+        'writeComparisonHistory',
         'systemLocale',
         'onCompareRequest',
         'compareRequestsReady',
@@ -106,6 +108,27 @@ describe('preload bridge', () => {
 
     await platform.systemLocale()
     expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.systemLocale)
+  })
+
+  it('forwards comparison history over its two whitelisted channels', async () => {
+    await platform.readComparisonHistory()
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.readComparisonHistory)
+    expect(PLATFORM_CHANNELS.readComparisonHistory).toBe('platform:read-comparison-history')
+
+    const entries = [
+      {
+        id: 'opaque',
+        kind: 'file' as const,
+        paths: ['/tmp/a', '/tmp/b'],
+        createdAt: 1,
+        ignoreWhitespace: false,
+        ignoreNewline: true,
+        ignoreEncoding: true
+      }
+    ]
+    await platform.writeComparisonHistory(entries)
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.writeComparisonHistory, entries)
+    expect(PLATFORM_CHANNELS.writeComparisonHistory).toBe('platform:write-comparison-history')
   })
 
   it('forwards the measurement config and round events over their channels', async () => {

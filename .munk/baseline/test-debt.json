@@ -8,7 +8,7 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 46563
+    "repoTestLines": 46959
   },
   "floors": {
     "appTestCases": 94,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 46539,
-      "to": 46563,
-      "reason": "pin the rebuilt README screenshots (PNG size/shape/gitignore/tracked) and the captured-commit to HEAD whole-directory src/renderer zero-diff provenance assertion in the existing release-artifacts suite",
-      "addedCases": 1
+      "from": 46563,
+      "to": 46959,
+      "reason": "add the comparison-history pure model suite, the real temporary-path id opacity check, the Electron atomic read/write and write-failure evidence, the web localStorage/memory fallback contract, the preload channel forwarding assertions and the dedicated history-store gate",
+      "addedCases": 25
     }
   ]
 }

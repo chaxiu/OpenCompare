@@ -389,3 +389,36 @@ describe('web text file probe', () => {
     await expect(platform.probeTextFile('/memory/missing.txt')).rejects.toThrow('No such virtual path')
   })
 })
+
+describe('web comparison history', () => {
+  beforeEach(() => { localStorage.clear() })
+  const twoEntries = () => [
+    { id: 'abc123', kind: 'directory' as const, paths: ['/left 中文', '/right'], createdAt: 10,
+      ignoreWhitespace: true, ignoreNewline: false, ignoreEncoding: true },
+    { id: 'def456', kind: 'merge' as const, paths: ['/base', '/ours', '/theirs'], createdAt: 20,
+      ignoreWhitespace: false, ignoreNewline: true, ignoreEncoding: false, error: 'missing' }
+  ]
+
+  it('round-trips the same list through the single localStorage key', async () => {
+    const expected = twoEntries()
+    await createWebPlatformPort().writeComparisonHistory(expected)
+    await expect(createWebPlatformPort().readComparisonHistory()).resolves.toEqual(expected)
+    expect(localStorage.length).toBe(1)
+    expect(localStorage.key(0)).toBe('opencompare.comparisonHistory')
+    expect(JSON.parse(localStorage.getItem('opencompare.comparisonHistory') ?? '')).toEqual({ version: 1, entries: expected })
+  })
+
+  it('reads corrupt storage as an empty list instead of the memory record', async () => {
+    const platform = createWebPlatformPort()
+    await platform.writeComparisonHistory(twoEntries())
+    localStorage.setItem('opencompare.comparisonHistory', '{not json')
+    await expect(platform.readComparisonHistory()).resolves.toEqual([])
+  })
+
+  it('falls back to the last successful memory record when storage throws', async () => {
+    const platform = createWebPlatformPort()
+    await platform.writeComparisonHistory(twoEntries())
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    await expect(platform.readComparisonHistory()).resolves.toEqual(twoEntries())
+  })
+})
