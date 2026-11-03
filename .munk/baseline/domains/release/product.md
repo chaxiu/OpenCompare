@@ -19,6 +19,7 @@
 - **证据归档**：真实产物经只读就绪门、仓库外下载、字节 + sha256 与签名复核后写入 `docs/release-evidence/<tag>.md`（`verified` / `blocked`，产物不入库），台账登记版本、状态与资产数。
 - **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、两张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
 - **发布配置断言单测**：Node 环境读取仓库根配置与文档做断言，拆为 packaging（打包 / 发布配置 + 证据台账）、version-gate（版本门 / 祖先门 / 重跑入口 / 门面结构）、artifacts-and-brand（品牌 / 协议 / 产物名 / 单 Release）三层。
+- **版本收敛轮**：发版前单独一轮只收敛版本事实——`package.json#version`、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、`docs/release-process.md` 的同一字面量、`CHANGELOG.md` 新段、双语 notes 与版本门测试 token；产品源码、证据台账与 README 状态行零 diff，不执行任何发版动作。
 
 ## 验收
 
@@ -60,6 +61,17 @@
 - **ac-notes-stale-signing-claim-removed**：两文件不再出现 `This release does not change the signing or notarization configuration` / `本版未改动签名与公证配置`；macOS 段改为「凭据注入范围收窄到仅 macOS 目标」的限定表述（EN 含 `macOS target` + `unchanged`，ZH 含「仅 macOS 目标」+「口径本身不变」），仍保留 `Developer ID` 与 `notarized` / `公证`。
 - **ac-notes-body-assembly-safe**：两文件不含 `<details>` / `<summary>` / `</details>` 与独占一行的 `---`，`release.yml` 的双语折叠组装与 gate 段落切分不受影响；第 1 行标题仍含 `v0.2.18`、第 3 行语言互链不变。
 - **ac-notes-doc-only-diff-scope**：相对改动前基线 `git diff --name-status` 只有两处 `M`（`docs/release-notes/v0.2.18.md`、`docs/release-notes/v0.2.18.zh-CN.md`）；`src/**`、`scripts/**`、`.github/**`、`package.json`、`CHANGELOG.md`、`docs/release-evidence/**` 与历史 notes 零 diff。
+- **ac-notes-scope-current-window**：收敛轮双语 notes 只写「上一已发布 tag..当前」的用户可见变化，`What changed` 覆盖三项——忽略空白差异开关（默认关闭）、当前文件对显式重载、左右面板显式交换；该窗口内的 CI / 发布验证提交不得写成用户特性，全文不出现 `will support` / `coming soon` / `即将支持` / `后续将` 一类未来承诺。
+- **ac-notes-ignore-whitespace**：两版都写明「忽略空白差异」默认关闭，开启只吞空格 / 制表符，行级高亮 / 行内高亮 / 差异计数读同一份比较结果，状态栏仍显示原始值（EN 含 `ignore whitespace`、`off by default`、`spaces`、`tabs`、`one comparison result`、`status bar`；ZH 含「忽略空白差异」「默认关闭」「空格」「制表符」「同一份比较结果」「状态栏」）。
+- **ac-notes-reload-in-place**：两版都写明显式重载当前文件对不新建会话、保留滚动位置与开关状态，读取失败就地提示并保留上一次结果（EN 含 `same session`、`scroll`、`switches`、`keeps the previous result`；ZH 含「不新建会话」「滚动」「开关」「保留上一次结果」）。
+- **ac-notes-swap-panels**：两版都写明左右面板交换把内容、状态栏原始值、指示条与计数一并左右对调，且可再交换复原（EN 含 `swap`、`status bar`、`ruler`、`counts` 与 `restores` / `swap back`；ZH 含「交换」「状态栏」「指示条」「计数」与「复原」/「再交换」）。
+- **ac-notes-portable-section**：两版保留 H3 `Windows portable download` / `Windows 免安装包`，该节正文恰 2 句并含 `.zip`、`NSIS`、`no installation step` / `无安装步骤`；H3 位置与 6 节结构不动。
+- **ac-notes-switch-line**：两份 notes 第 3 行为当前 tag 的中英固定绝对互链（逐字含 `English | [简体中文](` 与 `| 简体中文` 形态），全文各恰 1 条 markdown 链接，无 `./` 相对链接、无 `](v<version>` 形态。
+- **ac-notes-no-overclaim**：`Not in this release` / `不做的事` 覆盖「除上述三项外不改比较语义与 IPC、不改导出 / 快照格式」，且不宣称未通过验证的产物姿态。
+- **ac-version-facts-tokens**：`release-version-gate.test.ts` 的 `noteFacts` token 组随当前版本收敛，与 notes / `CHANGELOG.md` 各 token 要求逐项一致；用例数量与 `expect(` 数不降。
+- **ac-version-literal-confined**：版本字面量只落在 `.md` / `.json` / `.yml`；`src/` / `scripts/` / `docs/` 的 `.ts` / `.tsx` 对当前 / 已发布版本字面量命中 0。
+- **ac-evidence-and-product-untouched**：`docs/release-evidence/**` 与 `__fixtures__` 证据台账零新增零修改（当前 tag 无证据文件不报缺证据）；`src/core` / `src/renderer` / `src/preload` / `src/shared` 零 diff，`src/main` 仅版本事实测试文件改动。
+- **ac-delivery-merge-only**：版本收敛轮 delivery 只做合入默认分支的 local merge，不打 tag / 不 push / 不 dispatch / 不写 Release，回执写明版本、发布点 sha 与两份双语 notes 路径。
 - **ac-published-tag-decoupled**：最新已发布 tag 由证据台账与 `docs/release-evidence/*.md` 的 verified 数据派生，`package.json#version` 不进入该判定；当前版本锚与已发布锚各自单点、互不派生，当前 tag 无证据文件不报缺证据。
 - **ac-published-anchor**：两版 `README.md` 第 5 行只指向最新已发布 tag 的公开 Release（各恰 1 个 `releases/tag/` 链接），收敛未发布窗口里不出现当前未发布版本与「待发布」字样。
 - **ac-readme-en-default**：`README.md` 首行为 `# OpenCompare`；除第 3 行语言切换外全文零汉字（`\p{Script=Han}` 0 命中），不含中文二级标题。
@@ -99,7 +111,7 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_8830df87d702ce36`（v0.2.18 双语发布说明纠偏，`kind: fix`，`deliveryIntent: local merge`，`needSelfTest=false`）；日期：2026-11-03。
-- 结果：`code_gates` 全绿；改动仅 `docs/release-notes/v0.2.18.md` 与 `v0.2.18.zh-CN.md`（各 +3/−1），`src/**` / `scripts/**` / `.github/**` / `package.json` / `CHANGELOG.md` / `docs/release-evidence/**` / 历史 notes 零 diff。
-- 验收落点：`ac-notes-signing-scope-correction`（Windows 段新增 `NotSigned` / `UnknownError` / `CSC_LINK` / `v0.2.17` 说明段落）、`ac-notes-stale-signing-claim-removed`（删除「未改动签名配置」旧句，改述凭据注入收窄到 macOS 目标）、`ac-notes-body-assembly-safe` 与 `ac-notes-doc-only-diff-scope`。
-- 关键点：签名凭据已由 `matrix.target == 'mac'` 收窄注入，v0.2.17 的 Windows 安装包 `UnknownError` 属旧资产缺陷；v0.2.18 证据仍为 `blocked`，notes 只描述 CI 配置与产物姿态，不宣称已过 post-release-verify。
+- WI：`wi_intake_c710b16442c88abf`（v0.2.19 版本收敛与双语发布说明，`deliveryIntent: local merge`）；日期：2026-11-03。
+- 结果：`code_gates` 27 门全绿（attempt 001）；改动仅 `package.json`（version 单行）、`.github/workflows/release.yml`（dispatch default 单 hunk）、`docs/release-process.md`（同字面量）、`CHANGELOG.md` 新增 `## v0.2.19` 段、`src/main/release-version-gate.test.ts`（`noteFacts` token）与新增 `docs/release-notes/v0.2.19.md`、`docs/release-notes/v0.2.19.zh-CN.md`；`README*`、`docs/release-evidence/**`、`__fixtures__` 与产品源码零 diff。
+- 验收落点：`ac-notes-scope-current-window`（v0.2.18..main 三项用户可见变化，过滤 CI / 发布验证提交）、`ac-notes-ignore-whitespace` / `ac-notes-reload-in-place` / `ac-notes-swap-panels`（双语 token 逐项对齐）、`ac-notes-portable-section`、`ac-version-facts-tokens`、`ac-evidence-and-product-untouched`、`ac-delivery-merge-only`。
+- 关键点：`releaseFacts` 由 `pkg.version` 派生，notes 路径必须为 `v0.2.19.md` / `v0.2.19.zh-CN.md`；`judgeReleaseHistory` 允许当前 tag 无证据文件，故不写 v0.2.19 证据不破门禁；本轮只 local merge 到 main，未打 tag / push / dispatch。
