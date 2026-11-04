@@ -1024,6 +1024,11 @@
         "version": "v0.2.19",
         "status": "verified",
         "assets": 12
+      },
+      {
+        "id": "evidence-v0.2.20",
+        "version": "v0.2.20",
+        "status": "blocked"
       }
     ],
     "currentVersion": {
