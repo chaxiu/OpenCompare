@@ -1,0 +1,44 @@
+name: Coverage gate preflight
+
+# Read-only, pre-tag rehearsal on the same ubuntu-latest runner image as
+# release.yml: run the coverage gate positive pass, then prove it is not
+# vacuously green with the `--negative floor` and `--negative stale` passes.
+# This never pushes a tag, never edits `.munk/baseline/coverage.json`, never
+# touches releases or artifacts, and never reads secrets.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Rehearsal tag label to record in the run name (no tag is created)'
+        required: false
+        default: 'v0.0.0-preflight'
+        type: string
+
+run-name: coverage-gate preflight ${{ inputs.tag || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  coverage-preflight:
+    name: Coverage gate positive + negative rehearsal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Coverage gate positive
+        run: node scripts/coverage-gate-preflight.mjs
+      - name: Coverage gate negative floor
+        run: node scripts/coverage-gate-preflight.mjs --negative floor
+      - name: Coverage gate negative stale
+        run: node scripts/coverage-gate-preflight.mjs --negative stale

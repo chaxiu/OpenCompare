@@ -1,0 +1,8 @@
+workflow: /Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_intake_cd7cb20c206d9bfe/.github/workflows/coverage-gate-preflight.yml
+test: /Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_intake_cd7cb20c206d9bfe/scripts/coverage-gate-preflight-workflow.test.mjs
+
+$ git status --short
+ M .munk/baseline/coverage.json
+?? .github/workflows/coverage-gate-preflight.yml
+?? .munk/changes/wi_intake_cd7cb20c206d9bfe/
+?? scripts/coverage-gate-preflight-workflow.test.mjs
