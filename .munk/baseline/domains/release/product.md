@@ -20,7 +20,7 @@
 - **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、两张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
 - **发布配置断言单测**：Node 环境读取仓库根配置与文档做断言，拆为 packaging（打包 / 发布配置 + 证据台账）、version-gate（版本门 / 祖先门 / 重跑入口 / 门面结构）、artifacts-and-brand（品牌 / 协议 / 产物名 / 单 Release）三层。
 - **README 截图出处与门面治理断言**：两张 `docs/assets/*.png` 必须在干净工作树（`git status --porcelain` 为空）、HEAD = 开工时 main HEAD 上先 `pnpm build` 再跑 `node scripts/capture-readme-screenshots.mjs` 重拍，输入为脚本自建的真实 `/tmp` 目录树与真实文件对，不读 `src/shared/fixtures/**`、不用旧图或拼图；按实测落 A（重建 sha256 与旧图不同 → 替换图片）或 B（逐字节相同 → 保留旧图并记 sha256 对照）之一，不得混写。`docs/screenshots.md` 记录该构建 commit（40 位十六进制、可解析、HEAD 祖先）与 `src/renderer` 到 HEAD 的全目录零 diff。门面断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture（`screenshots` 行）：PNG 签名 / 宽高 2560×1584 / 体积 / 未被 gitignore 且被 git 跟踪、两版 README 引用、provenance 解析与零 diff。只用 `node:fs` 与本地 git 子进程，不联网。`repoTestLines` 超 ceiling 时只按既有 ratchet 规则写 growth 条目（增量 ≤ 400 行），floor 只上调。
-- **版本收敛轮**：发版前单独一轮只收敛版本事实——`package.json#version`、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、`docs/release-process.md` 的同一字面量、`CHANGELOG.md` 新段、双语 notes 与版本门测试 token；产品源码、证据台账与 README 状态行零 diff，不执行任何发版动作。
+- **版本收敛轮**：发版前单独一轮只收敛版本事实——`package.json#version`、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、`docs/release-process.md` 的同一字面量、`CHANGELOG.md` 新段、双语 notes 与版本门测试 token；产品源码、证据台账与 README 状态行零 diff，不执行任何发版动作（版本锚点契约的现行口径与白名单见 `domains/release-version-anchor`）。
 
 ## 验收
 
