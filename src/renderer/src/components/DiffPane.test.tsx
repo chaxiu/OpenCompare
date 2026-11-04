@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { JSX } from 'react'
 import type { DiffBlock, DiffRow } from '@core/text/diff'
 import type { DiffStatus } from '@shared/fixtures'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from '@renderer/views/CodeView'
 import { DIFF_ROW_HEIGHT, DiffPane } from './DiffPane'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
 
 /**
  * jsdom has no layout: the virtualizer needs a real viewport height to size its
@@ -22,26 +23,7 @@ const LARGE_ROW_COUNT = 350_000
 const SMALL_ROW_COUNT = 46
 const MODIFIED_EVERY = 97
 
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => VIEWPORT_HEIGHT
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport({ height: VIEWPORT_HEIGHT })
 
 afterEach(cleanup)
 

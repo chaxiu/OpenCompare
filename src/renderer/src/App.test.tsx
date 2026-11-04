@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CSV_SCENE, DIRECTORY_SAMPLE_PATHS, STRUCTURED_SCENE } from '@shared/fixtures'
 import type { CompareRequestPayload } from '@shared/compareRequest'
-import type { PlatformPort } from '@shared/platform/types'
+import type { DirectoryEntry, PlatformPort } from '@shared/platform/types'
 import { compareDirectories, createComparisonCache } from '@core/directory/compare'
 import { probeTextBytes } from '@core/text/probe'
 import { zh } from './i18n/messages'
@@ -36,6 +36,8 @@ import {
   writeFiles,
   EXTERNAL_TEMPLATE_FILES,
 } from '../../test/sharedHarness'
+import { installJsdomViewport } from '../../test/jsdomViewport'
+import { clickMore, closeMore, moreItem } from '../../test/shellMenu'
 
 /**
  * Counts real row-model builds, so a tab switch can prove that only the active
@@ -53,30 +55,7 @@ vi.mock('@core/directory/rows', async (importOriginal) => {
   }
 })
 
-/**
- * jsdom reports zero-sized elements, which would give the virtualised tree no
- * viewport at all. A fixed 1200×640 client box stands in for the real panel.
- */
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200,
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640,
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 beforeEach(() => {
   localStorage.setItem('opencompare.userSettings', JSON.stringify({ language: 'zh' }))
@@ -109,41 +88,6 @@ function appHeaderTabLists(): number {
   return header.querySelectorAll('[role="tablist"]').length
 }
 
-/** The active view's single toolbar overflow trigger. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-
-/** Opens the overflow menu idempotently and returns it. */
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-
-/** Closes the overflow menu when it is still open. */
-function closeMore(): void {
-  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
-    fireEvent.keyDown(document, { key: 'Escape' })
-  }
-}
-
-/** One overflow item, matched by its visible label inside the accessible name. */
-function moreItem(label: string | RegExp): HTMLElement {
-  return within(openMore()).getByRole('menuitem', {
-    name: typeof label === 'string' ? (name: string) => name.includes(label) : label
-  })
-}
-
-/** Runs one secondary action through the overflow menu. */
-function clickMore(label: string | RegExp): void {
-  fireEvent.click(moreItem(label))
-}
-
 /** One diff-semantic count from the visible view legend. */
 function legendCount(status: string): number {
   return Number(document.querySelector(`[data-legend-status="${status}"] .tabular`)?.textContent)
@@ -173,6 +117,28 @@ function sampleEntry(id: string): HTMLElement {
   const button = dialog.querySelector(`[data-sample-entry="${id}"]`)
   if (!(button instanceof HTMLElement)) throw new Error(`missing sample entry: ${id}`)
   return button
+}
+
+/** A port whose left directory listing appends one injected entry on both channels. */
+function leftEntryPort(base: PlatformPort, entry: DirectoryEntry): PlatformPort {
+  return {
+    ...base,
+    listDirectory: async (path) => [
+      ...(await base.listDirectory(path)),
+      ...(path === DIRECTORY_SAMPLE_PATHS.left ? [entry] : []),
+    ],
+    listDirectories: async (paths) =>
+      Promise.all(
+        paths.map(async (path) => {
+          const entries = await base.listDirectory(path)
+          return {
+            path,
+            ok: true as const,
+            entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, entry] : entries,
+          }
+        })
+      ),
+  }
 }
 
 /** Opens the settings sample section and starts one built-in scene. */
@@ -906,23 +872,7 @@ describe('real file workbench', () => {
       broken: true,
       skippedReason: '不可读条目：没有访问权限（EACCES）',
     }
-    const platform: PlatformPort = {
-      ...base,
-      listDirectory: async (path) => [...(await base.listDirectory(path)), ...(path === DIRECTORY_SAMPLE_PATHS.left ? [unreadable] : [])],
-      // The real scan goes through the batch channel, so the injected broken
-      // entry has to be visible there too.
-      listDirectories: async (paths) =>
-        Promise.all(
-          paths.map(async (path) => {
-            const entries = await base.listDirectory(path)
-            return {
-              path,
-              ok: true as const,
-              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, unreadable] : entries,
-            }
-          })
-        ),
-    }
+    const platform = leftEntryPort(base, unreadable)
 
     mountWorkbench(platform)
     dropPaths(screen.getByRole('main'), [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right])
@@ -950,22 +900,7 @@ describe('real file workbench', () => {
       linkTargetKind: 'directory' as const,
     }
     const readTextFile = vi.fn((path: string) => base.readTextFile(path))
-    const platform: PlatformPort = {
-      ...base,
-      readTextFile,
-      listDirectory: async (path) => [...(await base.listDirectory(path)), ...(path === DIRECTORY_SAMPLE_PATHS.left ? [dirLink] : [])],
-      listDirectories: async (paths) =>
-        Promise.all(
-          paths.map(async (path) => {
-            const entries = await base.listDirectory(path)
-            return {
-              path,
-              ok: true as const,
-              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, dirLink] : entries,
-            }
-          })
-        ),
-    }
+    const platform: PlatformPort = { ...leftEntryPort(base, dirLink), readTextFile }
 
     mountWorkbench(platform)
     dropPaths(screen.getByRole('main'), [DIRECTORY_SAMPLE_PATHS.left, DIRECTORY_SAMPLE_PATHS.right])
@@ -994,20 +929,11 @@ describe('real file workbench', () => {
       linkTargetKind: 'file' as const,
     }
     const platform: PlatformPort = {
-      ...base,
-      probeTextFile: async (path) => path === `${DIRECTORY_SAMPLE_PATHS.left}/linked-engine.ts` ? { path, ...probeTextBytes(new TextEncoder().encode('LINKED TARGET BODY')) } : base.probeTextFile(path),
-      listDirectory: async (path) => [...(await base.listDirectory(path)), ...(path === DIRECTORY_SAMPLE_PATHS.left ? [fileLink] : [])],
-      listDirectories: async (paths) =>
-        Promise.all(
-          paths.map(async (path) => {
-            const entries = await base.listDirectory(path)
-            return {
-              path,
-              ok: true as const,
-              entries: path === DIRECTORY_SAMPLE_PATHS.left ? [...entries, fileLink] : entries,
-            }
-          })
-        ),
+      ...leftEntryPort(base, fileLink),
+      probeTextFile: async (path) =>
+        path === `${DIRECTORY_SAMPLE_PATHS.left}/linked-engine.ts`
+          ? { path, ...probeTextBytes(new TextEncoder().encode('LINKED TARGET BODY')) }
+          : base.probeTextFile(path),
     }
 
     mountWorkbench(platform)

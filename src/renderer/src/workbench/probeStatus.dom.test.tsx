@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { detectNewline } from '@core/text/probe'
 import { sha256Hex } from '@core/directory/hash'
 import { CODE_SCENE } from '@shared/fixtures'
@@ -9,6 +9,7 @@ import { en, zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from './Workbench'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
 
 const LEFT = '/memory/probe/left.ts'
 const RIGHT = '/memory/probe/right.ts'
@@ -33,16 +34,7 @@ const FACTS: Record<string, Omit<TextFileFacts, 'path'>> = {
   [SAME_RIGHT]: { encoding: 'UTF-8', newline: 'LF', bytes: 10, sha256: sha256Hex(TEXTS[SAME_RIGHT]) }
 }
 const LABEL_KEYS = ['shell.status.leftNewline', 'shell.status.leftEncoding', 'shell.status.rightNewline', 'shell.status.rightEncoding'] as const
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1200 })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-})
+installJsdomViewport()
 
 afterEach(cleanup)
 

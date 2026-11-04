@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ICON_NAMES, ICON_SIZES, strokeWidthFor } from '@renderer/assets/icons'
 import type { IconSize } from '@renderer/assets/icons'
 import { translate } from '@renderer/i18n/context'
@@ -22,34 +22,17 @@ import {
   statusBarClasses
 } from './shellLayout'
 import type { ShellEntryId, ShellLevel, ToolbarView, WidthTier } from './shellLayout'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
 
 const zh = translate('zh')
 const TIERS: readonly WidthTier[] = ['compact', 'regular', 'wide']
+const READY_LEVELS = ['app', 'sessions', 'view-toolbar', 'panels', 'status'] as const
 
-/**
- * jsdom reports zero-sized elements, which would leave the virtualised trees
- * without a viewport. Fixed boxes stand in for the real panels.
- */
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+installJsdomViewport()
+
 const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
 
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
 afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
   if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
 })
 
@@ -65,6 +48,11 @@ afterEach(() => {
 /** Pins the window width before a render, exactly like a real resize would. */
 function setWindowWidth(width: number): void {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+}
+
+/** Mounts the shell with the default web platform. */
+function renderShell(): ReturnType<typeof render> {
+  return render(<Workbench platform={createWebPlatformPort()} />)
 }
 
 function classList(element: Element): readonly string[] {
@@ -160,16 +148,10 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
   })
 
   it('renders the five shell levels in order, once each', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
-    expect(renderedLevels(container)).toEqual([
-      'app',
-      'sessions',
-      'view-toolbar',
-      'panels',
-      'status'
-    ])
+    expect(renderedLevels(container)).toEqual(READY_LEVELS)
   })
 
   it('shows the event band only between the session head and the view toolbar', async () => {
@@ -206,7 +188,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
   })
 
   it('matches every level metric to the single layout table', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     for (const level of ['app', 'sessions'] as const) {
@@ -254,7 +236,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
   })
 
   it('keeps every toolbar row on one line', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     for (const level of ['app', 'view-toolbar'] as const) {
@@ -275,7 +257,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
 
   it('keeps a narrow directory toolbar on one row with no scroll channel', async () => {
     setWindowWidth(960)
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     // Exactly one view-toolbar band owns the single row.
@@ -337,7 +319,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
   })
 
   it('renders every entry once with the presentation the table declares', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     const states: readonly { readonly view: ToolbarView; readonly show: () => void }[] = [
@@ -413,7 +395,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
   })
 
   it('keeps the drilldown back entry first on the view-toolbar level', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
@@ -432,17 +414,11 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
 
     fireEvent.click(back)
     await waitFor(() => expect(container.querySelector('[data-shell-entry="drilldown-back"]')).toBeNull())
-    expect(renderedLevels(container)).toEqual([
-      'app',
-      'sessions',
-      'view-toolbar',
-      'panels',
-      'status'
-    ])
+    expect(renderedLevels(container)).toEqual(READY_LEVELS)
   })
 
   it('keeps the csv drilldown back entry on the first row as well', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
@@ -460,17 +436,11 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
       within(firstRow).getByRole('button', { name: zh('shell.notice.returnAction') })
     ).toBeDefined()
     expect(renderedEntries(toolbar)[0]).toBe('drilldown-back')
-    expect(renderedLevels(container)).toEqual([
-      'app',
-      'sessions',
-      'view-toolbar',
-      'panels',
-      'status'
-    ])
+    expect(renderedLevels(container)).toEqual(READY_LEVELS)
   })
 
   it('shows only the scene statistics, without session / platform / legend', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     const status = levelElement(container, 'status')
@@ -510,7 +480,7 @@ describe.each([960, 1024, 1280, 1440, 1920])('status bar at %ipx', (width) => {
   })
 
   it('keeps one row of scene metrics and statistics without a legend', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     const status = levelElement(container, 'status')
@@ -544,7 +514,7 @@ describe('status bar merge metrics', () => {
   })
 
   it('reports the conflict count without a conflict legend', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     expect(
@@ -567,7 +537,7 @@ describe('status bar probe facts', () => {
   })
 
   it('shows only the deduped newline / encoding facts of the active diff', async () => {
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     showSession(/3-Way Merge/)
@@ -603,7 +573,7 @@ describe('status bar probe facts', () => {
 describe('workbench shell entry manifest', () => {
   it('covers all eighteen entries across the ready views, none of them twice', async () => {
     setWindowWidth(TIER_WIDTHS.compact)
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     const seen = new Set<ShellEntryId>()
@@ -660,7 +630,7 @@ describe('workbench shell entry manifest', () => {
 describe('workbench icon surface', () => {
   it('draws every icon at 16, 20 or 24 with the matching optical stroke', async () => {
     setWindowWidth(TIER_WIDTHS.compact)
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     const check = (): void => {
@@ -699,7 +669,7 @@ describe('workbench icon surface', () => {
 
   it('leaves no icon-only button without an accessible name', async () => {
     setWindowWidth(TIER_WIDTHS.compact)
-    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    const { container } = renderShell()
     await loadSamples()
 
     const unnamed = Array.from(container.querySelectorAll('button'))

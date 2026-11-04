@@ -8,6 +8,7 @@ import type { TextFileFacts } from '@shared/platform/types'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
+import { moreItem as menuItem, moreTrigger, openMore } from '../../../test/shellMenu'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair, FilePairProbes } from '@renderer/workbench/session'
 
@@ -57,28 +58,6 @@ const SWITCH_LABELS: Record<string, string> = {
 const ACTION_LABELS: Record<'reload' | 'swap', string> = {
   reload: '重新加载',
   swap: '交换左右'
-}
-
-/** The single toolbar overflow trigger. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-
-/** Opens the overflow menu and returns it. */
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-
-function menuItem(label: string): HTMLElement {
-  return within(openMore()).getByRole('menuitem', {
-    name: (name: string) => name.includes(label)
-  })
 }
 
 /** One comparison switch, now a menu item; the leading [x] is the checked state. */

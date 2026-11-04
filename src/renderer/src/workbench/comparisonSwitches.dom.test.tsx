@@ -7,6 +7,7 @@ import { zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from './Workbench'
+import { closeMore, moreItem as menuItem } from '../../../test/shellMenu'
 
 const LEFT = '/memory/switch/left.ts'
 const RIGHT = '/memory/switch/right.ts'
@@ -67,34 +68,6 @@ const SWITCH_LABELS: Record<SwitchId, string> = {
   'ignore-newline': zh['files.code.ignoreNewline'],
   'ignore-encoding': zh['files.code.ignoreEncoding'],
   'ignore-whitespace': zh['files.code.ignoreWhitespace']
-}
-
-/** The single toolbar overflow trigger; every comparison switch lives inside. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-
-/** Opens the overflow menu and returns it, idempotently. */
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-
-function closeMore(): void {
-  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
-    fireEvent.keyDown(document, { key: 'Escape' })
-  }
-}
-
-function menuItem(label: string): HTMLElement {
-  return within(openMore()).getByRole('menuitem', {
-    name: (name: string) => name.includes(label)
-  })
 }
 
 function switchOf(id: SwitchId): HTMLElement {

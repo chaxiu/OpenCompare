@@ -28,6 +28,7 @@ import { zh } from '@renderer/i18n/messages'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DirectoryView } from './DirectoryView'
 import { DIRECTORY_STATUS_LABEL_KEYS, FILTER_LABEL_KEYS } from './directoryCopy'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
 
 vi.mock('@core/directory/filter', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@core/directory/filter')>()
@@ -38,30 +39,7 @@ vi.mock('@core/directory/filter', async (importOriginal) => {
   }
 })
 
-/**
- * jsdom reports zero-sized elements, which would give the virtualiser no
- * viewport at all. A fixed 1200×640 client box stands in for the real panel.
- */
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(cleanup)
 

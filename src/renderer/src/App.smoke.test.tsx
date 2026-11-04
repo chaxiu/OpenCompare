@@ -6,6 +6,7 @@ import { App } from './App'
 import { en, zh } from './i18n/messages'
 import type { MessageKey } from './i18n/messages'
 import { createWebPlatformPort } from './platform/web-platform'
+import { closeMore, openMore } from '../../test/shellMenu'
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
 const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
@@ -93,27 +94,6 @@ function selectScene(icon: string): void {
   )
   if (!(node instanceof HTMLElement)) throw new Error(`missing session tab for ${icon}`)
   fireEvent.click(within(node).getByRole('tab'))
-}
-
-/** The active view's single toolbar overflow trigger. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-
-function closeMore(): void {
-  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
-    fireEvent.keyDown(document, { key: 'Escape' })
-  }
 }
 
 /** Starts the four built-in scenes through the settings sample entries. */

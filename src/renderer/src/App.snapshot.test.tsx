@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { SnapshotDocument } from '@shared/snapshot'
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
@@ -13,6 +13,8 @@ import { renderWithI18n } from './i18n/testing'
 import { en, zh } from './i18n/messages'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
+import { installJsdomViewport } from '../../test/jsdomViewport'
+import { moreItem } from '../../test/shellMenu'
 import {
   compareSides,
   exportSideSnapshot,
@@ -30,30 +32,7 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
 })
 
-/**
- * jsdom reports zero-sized elements, which would give the virtualised tree no
- * viewport at all. A fixed 1200×640 client box stands in for the real panel.
- */
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(() => {
   cleanup()
@@ -82,28 +61,6 @@ async function loadWorkbench(): Promise<void> {
 
 function selectedFileInto(label: string, file: File): void {
   fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } })
-}
-
-/** The active view's single toolbar overflow trigger. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-
-/** One overflow item, matched by its visible label inside the accessible name. */
-function moreItem(label: string): HTMLElement {
-  return within(openMore()).getByRole('menuitem', {
-    name: (name: string) => name.includes(label)
-  })
 }
 
 /** One diff-semantic count from the visible view legend. */

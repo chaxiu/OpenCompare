@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { JSX } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import { visibleDirectoryCounts } from '@core/directory/rows'
@@ -31,31 +31,14 @@ import {
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { DirectoryView } from './DirectoryView'
 import { TemplateDialog } from './TemplateDialog'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
+import { closeMore, moreItem } from '../../../test/shellMenu'
 
 const HAN = /\p{Script=Han}/u
 const IPC_WRAPPER = 'Error invoking remote method'
 const webPlatform: PlatformPort = createWebPlatformPort()
 
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(cleanup)
 
@@ -253,34 +236,6 @@ function View({ comparison }: { readonly comparison: DirectoryComparison }): JSX
       onConfirmTemplate={templateOutcome}
     />
   )
-}
-
-/** The active view's single toolbar overflow trigger. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-
-function closeMore(): void {
-  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
-    fireEvent.keyDown(document, { key: 'Escape' })
-  }
-}
-
-/** One overflow item, matched by its visible label inside the accessible name. */
-function moreItem(label: string): HTMLElement {
-  return within(openMore()).getByRole('menuitem', {
-    name: (name: string) => name.includes(label)
-  })
 }
 
 const TOOLBAR: readonly (readonly [MessageKey, MessageKey])[] = [

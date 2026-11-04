@@ -11,6 +11,7 @@ import type { MessageKey } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from './Workbench'
+import { closeMore, moreItem as menuItem } from '../../../test/shellMenu'
 
 const BASE = '/memory/merge/base.txt'
 const OURS = '/memory/merge/ours.txt'
@@ -43,29 +44,6 @@ const SWITCH_LABELS: Record<string, string> = {
   'ignore-newline': copy('files.code.ignoreNewline'),
   'ignore-encoding': copy('files.code.ignoreEncoding'),
   'ignore-whitespace': copy('files.code.ignoreWhitespace')
-}
-/** The active view's single toolbar overflow trigger. */
-function moreTrigger(): HTMLElement {
-  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
-  if (trigger === null) throw new Error('missing more trigger')
-  return trigger
-}
-function openMore(): HTMLElement {
-  const trigger = moreTrigger()
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  const menu = screen.queryByRole('menu')
-  if (menu === null) throw new Error('more menu did not open')
-  return menu
-}
-function closeMore(): void {
-  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
-    fireEvent.keyDown(document, { key: 'Escape' })
-  }
-}
-function menuItem(label: string): HTMLElement {
-  return within(openMore()).getByRole('menuitem', {
-    name: (name: string) => name.includes(label)
-  })
 }
 /** One comparison switch, now a menu item; the leading [x] is the checked state. */
 function switchItem(id: string): HTMLElement {

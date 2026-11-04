@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CODE_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
 import { diffLineTexts } from '@core/text/diff'
@@ -8,25 +8,9 @@ import type { DiffBlock } from '@core/text/diff'
 import { DIFF_ROW_HEIGHT } from '@renderer/components/DiffPane'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from '@renderer/workbench/Workbench'
+import { installJsdomViewport } from '../../test/jsdomViewport'
 
-/**
- * jsdom reports zero-sized elements, which would give the virtualised directory
- * tree and the ruler no viewport at all. Fixed boxes stand in for the panels.
- */
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1200 })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 640 })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 beforeEach(() => {
   localStorage.setItem('opencompare.userSettings', JSON.stringify({ language: 'zh' }))

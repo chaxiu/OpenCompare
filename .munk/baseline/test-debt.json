@@ -1,19 +1,19 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "036fd8f7eee5dbf1421e50e82a71b346dcb3f60e",
+    "commit": "7bd2c9c5540862fa5cfeeab3937f652a956b4932",
     "date": "2026-11-05"
   },
   "ceilings": {
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 49021
+    "repoTestLines": 49338
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1677
+    "repoTestCases": 1689
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 48671,
-      "to": 49021,
-      "reason": "add the visual-foundation token and control contracts: read main.css for the type scale, spacing base, radii, control heights and both theme palettes (including the 12% chip tints and the light desaturation literals), prove the pre-token baseline commit is in history and still carries the old stylesheet, and pin the 32px button / 28x16 toggle / 20px chip / 30px tab contracts plus the spacing scan over the files this item touched",
-      "addedCases": 34
+      "from": 49021,
+      "to": 49338,
+      "reason": "add the shell-tightening coverage for this item: one-row toolbar band and overflow reachability, 24px status bar and encoding dedupe, address-bar copy through PlatformPort, active-panel indicator, 28px tree rows and 22px code rows, 2px ruler track plus viewport rectangle, and the before/after evidence contract; dedupe the repeated jsdom viewport and more-menu scaffolding into src/test helpers so the net test growth stays under the declared allowance",
+      "addedCases": 12
     }
   ]
 }
