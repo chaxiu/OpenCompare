@@ -43,6 +43,37 @@ function chooseFile(name: string, text: string): void {
   fireEvent.change(input, { target: { files: [new File([text], name, { type: 'text/plain' })] } })
 }
 
+/** The code view's single overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+/** Opens the overflow menu and returns it. */
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+/** One overflow item, matched by the visible label inside its accessible name. */
+function moreItem(label: string | RegExp): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name:
+      typeof label === 'string'
+        ? (name: string) => name.includes(label)
+        : label
+  })
+}
+
+/** Runs one secondary action through the overflow menu. */
+function clickMore(label: string | RegExp): void {
+  fireEvent.click(moreItem(label))
+}
+
 const FIXTURE: CodeSceneFixture = {
   scene: 'code',
   composition: { same: 0, added: 0, removed: 0, modified: 0, conflict: 2 },
@@ -75,7 +106,7 @@ describe('two-column diff', () => {
     expect(screen.getByText('1/1')).toBeDefined()
     expect(screen.queryByText('red')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    clickMore('重置')
     expect(screen.getByText('1/2')).toBeDefined()
     expect(screen.getByText('red')).toBeDefined()
   })
@@ -129,7 +160,7 @@ describe('local file entry points', () => {
     render(<CodeView fixture={FIXTURE} defaultMode="diff" platform={platform} />)
     expect(screen.getByText('1/2')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    clickMore('打开左文件')
     chooseFile('left.ts', FIXTURE.diff.right.text)
 
     // Identical bodies: the difference blocks collapse and the panel follows the path.
@@ -184,7 +215,7 @@ describe('in-place save and dirty marker', () => {
     expect(screen.getByRole('button', { name: '保存右文件' }).hasAttribute('disabled')).toBe(false)
     expect(screen.getByRole('button', { name: '保存左文件' }).hasAttribute('disabled')).toBe(true)
 
-    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    clickMore('重置')
     expect(screen.queryByText('未保存：右')).toBeNull()
     expect(screen.queryByText('已修改（未保存）')).toBeNull()
   })
@@ -272,7 +303,7 @@ describe('unsaved side labels', () => {
     fireEvent.click(screen.getByRole('button', { name: '覆写到左' }))
     expect(screen.getByText('未保存：左')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    clickMore('重置')
     fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
     expect(screen.getByText('未保存：右')).toBeDefined()
 
@@ -290,7 +321,7 @@ describe('unsaved side labels', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Overwrite to left' }))
     expect(screen.getByText('Unsaved: left')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    clickMore('Reset')
     fireEvent.click(screen.getByRole('button', { name: 'Overwrite to right' }))
     expect(screen.getByText('Unsaved: right')).toBeDefined()
     expect(screen.getByText('Modified (unsaved)')).toBeDefined()
@@ -314,11 +345,12 @@ describe('English diff copy', () => {
     expect(screen.getByText('Difference blocks')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Overwrite to right' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Overwrite to left' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeDefined()
     expect(screen.getByText('left')).toBeDefined()
     expect(screen.getByText('right')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Open left file' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Open right file' })).toBeDefined()
+    // Reset and the two open actions live in the single overflow menu.
+    expect(moreItem('Reset')).toBeDefined()
+    expect(moreItem('Open left file')).toBeDefined()
+    expect(moreItem('Open right file')).toBeDefined()
 
     const saveLeft = screen.getByRole('button', { name: 'Save left file' })
     expect(saveLeft.getAttribute('title')).toBe(
@@ -328,7 +360,7 @@ describe('English diff copy', () => {
       'Write the right edits back to their disk path in place (no save dialog)'
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open left file' }))
+    clickMore('Open left file')
     expect(selectFile).toHaveBeenCalledWith({ title: 'Open left local file', filters: [textFileFilter('Code / text')] })
     expect(screen.getByText('1/2')).toBeDefined()
     expect(container.textContent).not.toMatch(/\p{Script=Han}/u)
@@ -344,7 +376,7 @@ describe('English diff copy', () => {
       />
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    clickMore('打开左文件')
     expect(selectFile).toHaveBeenCalledWith({
       title: '打开左侧本地文件',
       filters: [textFileFilter('代码 / 文本')]
@@ -403,7 +435,11 @@ describe('English merge copy', () => {
     expect(screen.getAllByRole('button', { name: 'Accept Theirs' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Accept Both' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Accept Base' }).length).toBeGreaterThan(0)
-    expect((screen.getByRole('button', { name: 'Copy' }) as HTMLButtonElement).disabled).toBe(true)
+    // Copy is a menu item gated on a fully resolved merge.
+    expect(moreItem('Copy').textContent).toContain(
+      'Unresolved blocks are kept as conflict markers'
+    )
+    fireEvent.keyDown(document, { key: 'Escape' })
     expect(
       (screen.getByRole('button', { name: 'Export merged text' }) as HTMLButtonElement).disabled
     ).toBe(true)
@@ -445,13 +481,13 @@ describe('English merge copy', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Accept Ours' })[0])
     expect(screen.getByText('0/2')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    clickMore('Copy')
     expect(await screen.findByText('Copied to clipboard')).toBeDefined()
     expect(writeText).toHaveBeenCalledTimes(1)
 
     // A rejected clipboard write falls back to the English failure hint.
     writeText.mockRejectedValueOnce(new Error('denied'))
-    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    clickMore('Copy')
     expect(await screen.findByText('Copy failed, select the preview text manually')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Export merged text' }))

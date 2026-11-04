@@ -14,6 +14,7 @@ export const shell = {
   'shell.toolbar.openFileTitle': '依次选择左右两个真实文件开始对比',
   'shell.toolbar.openFolder': '打开文件夹',
   'shell.toolbar.openFolderTitle': '依次选择左右两个真实文件夹开始对比',
+  'shell.toolbar.more': '更多',
   'shell.empty.title': '打开真实文件或文件夹开始对比',
   'shell.empty.description':
     '在「新建对比」中直接输入或粘贴左右两个真实路径，全程不弹系统对话框；也可以经系统选择器依次选择两侧，或直接把两个真实路径拖入窗口。',
@@ -91,8 +92,10 @@ export const shell = {
   'shell.closeUnsaved.discard': '放弃修改并关闭',
   'shell.closeUnsaved.body':
     '需要保留修改时，请先「继续编辑」，在该会话内用「保存左文件 / 保存右文件」写回磁盘后再关闭。',
-  'shell.status.session': '会话',
-  'shell.status.platform': '运行平台',
+  'shell.panel.copyPath': '复制完整路径',
+  'shell.panel.copied': '已复制路径',
+  'shell.status.newline': '换行',
+  'shell.status.encoding': '编码',
   'shell.status.leftNewline': '左换行',
   'shell.status.leftEncoding': '左编码',
   'shell.status.rightNewline': '右换行',

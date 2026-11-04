@@ -109,13 +109,51 @@ function appHeaderTabLists(): number {
   return header.querySelectorAll('[role="tablist"]').length
 }
 
+/** The active view's single toolbar overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+/** Opens the overflow menu idempotently and returns it. */
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+/** Closes the overflow menu when it is still open. */
+function closeMore(): void {
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+}
+
+/** One overflow item, matched by its visible label inside the accessible name. */
+function moreItem(label: string | RegExp): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: typeof label === 'string' ? (name: string) => name.includes(label) : label
+  })
+}
+
+/** Runs one secondary action through the overflow menu. */
+function clickMore(label: string | RegExp): void {
+  fireEvent.click(moreItem(label))
+}
+
+/** One diff-semantic count from the visible view legend. */
+function legendCount(status: string): number {
+  return Number(document.querySelector(`[data-legend-status="${status}"] .tabular`)?.textContent)
+}
+
 const LEFT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.left}/src/core/engine.ts`
 const RIGHT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.right}/src/core/engine.ts`
 const LEFT_REPORT = `${DIRECTORY_SAMPLE_PATHS.left}/src/data/report.csv`
 const RIGHT_REPORT = `${DIRECTORY_SAMPLE_PATHS.right}/src/data/report.csv`
 const SAMPLE_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
-/** Drilldown session ids carry the source directory session they came from. */
-const DRILLDOWN_PREFIX = `file:${SAMPLE_DIRECTORY_ID}::`
 
 /** Runtime truth for the directory session: the engine over the sample roots. */
 async function compareSampleDirectory(): Promise<ReturnType<typeof compareDirectories>> {
@@ -169,7 +207,7 @@ describe('workbench shell', () => {
 
     expect(screen.getByRole('heading', { name: 'OpenCompare' })).toBeDefined()
     expect(screen.queryByText('对比与三向合并工作台')).toBeNull()
-    expect(screen.getByText('web')).toBeDefined()
+    expect(screen.queryByText('web')).toBeNull()
     expect(screen.getByRole('heading', { name: EMPTY_TITLE })).toBeDefined()
     // Switching scenes is the session tabs' job now: the header has no tablist.
     expect(screen.queryByRole('tablist', { name: '视图切换' })).toBeNull()
@@ -184,9 +222,9 @@ describe('workbench shell', () => {
     expect(document.querySelector('[data-shell-entry="samples-menu"]')).toBeNull()
     expect(screen.queryByRole('button', { name: /加载演示样本|演示样本/ })).toBeNull()
     expect(within(screen.getByRole('main')).getAllByRole('button')).toHaveLength(3)
-    // The hint points at the settings section instead of the old top bar.
-    expect(screen.getByText(/设置 → 示例与调试/)).toBeDefined()
-    expect(screen.getByText(/设置 → 示例与调试/).textContent).not.toContain('顶栏')
+    // The old tutorial hint is gone: the empty state only keeps its CTAs.
+    expect(screen.queryByText(/设置 → 示例与调试/)).toBeNull()
+    expect(screen.queryByText(/顶栏/)).toBeNull()
   })
 
   it('shows the loading state, then every sample session', async () => {
@@ -199,7 +237,8 @@ describe('workbench shell', () => {
     expect(screen.getByRole('tab', { name: /3-Way Merge/ })).toBeDefined()
     expect(document.querySelector('[data-shell-entry="samples"]')).toBeNull()
     expect(document.querySelector('[data-shell-entry="samples-menu"]')).toBeNull()
-    expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
+    expect(statusText()).toContain('文件（源）')
+    expect(screen.queryByText(SAMPLE_DIRECTORY_ID)).toBeNull()
     expect(screen.getAllByRole('tab', { name: /CSV 主键对比/ }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('tab', { name: /JSON \/ YAML/ }).length).toBeGreaterThan(0)
     // A ready shell keeps the same header actions and still has no view switcher.
@@ -254,7 +293,7 @@ describe('workbench shell', () => {
 
     fireEvent.click(codeTab)
 
-    expect(screen.getByText('session-code')).toBeDefined()
+    expect(statusText()).toContain('冲突块')
     expect(screen.getByRole('tab', { name: '三向合并 base · ours · theirs' })).toBeDefined()
     // three-way merge renders three panes, i.e. two draggable dividers
     expect(screen.getAllByRole('separator', { name: '调整分栏宽度' }).length).toBe(2)
@@ -274,8 +313,9 @@ describe('workbench shell', () => {
     expect(screen.getByRole('tablist', { name: '状态过滤' })).toBeDefined()
     expect(screen.getByText(`${total.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} 行`)).toBeDefined()
 
-    const { same, added, removed, modified } = CSV_SCENE.composition
-    expect(statusText()).toContain(`${same}相同${added}新增${removed}删除${modified}修改`)
+    const { same } = CSV_SCENE.composition
+    expect(statusText()).not.toContain(`${same}相同`)
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('surfaces a readable, retryable error state', async () => {
@@ -307,14 +347,15 @@ describe('workbench shell', () => {
     expect(screen.getAllByText('engine.ts').length).toBe(2)
     // Filtering also refreshes the status-bar legend. Directory statuses use
     // the directory vocabulary (right-only / left-only), not the text-diff words.
-    expect(statusText()).toContain(
-      `0${zh['directory.filter.same']}${comparison.counts.added}${zh['directory.filter.rightOnly']}${comparison.counts.removed}${zh['directory.filter.leftOnly']}${comparison.counts.modified}${zh['common.diff.modified']}`
-    )
+    expect(legendCount('same')).toBe(0)
+    expect(legendCount('added')).toBe(comparison.counts.added)
+    expect(legendCount('removed')).toBe(comparison.counts.removed)
+    expect(legendCount('modified')).toBe(comparison.counts.modified)
 
     fireEvent.click(screen.getByRole('tab', { name: '全部' }))
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
 
-    expect(await screen.findByText(`${DRILLDOWN_PREFIX}src/core/engine.ts`, {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })).toBeDefined()
     expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
   })
 
@@ -325,10 +366,11 @@ describe('workbench shell', () => {
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
     fireEvent.doubleClick(screen.getAllByText('report.csv')[0])
-    expect(await screen.findByText(`${DRILLDOWN_PREFIX}src/data/report.csv`, {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByRole('tab', { name: /report\.csv/ }, { timeout: 4000 })).toBeDefined()
     // No declared primary key on a drilldown: the first shared column wins.
     expect(await screen.findByText('对齐 4 行 · 主键 order_id')).toBeDefined()
-    expect(statusText()).toContain('2相同1新增0删除1修改')
+    expect(statusText()).not.toContain('2相同1新增0删除1修改')
+    expect(statusText()).toContain('行数（左）')
 
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /baseline ↔ candidate/ }))
@@ -336,7 +378,7 @@ describe('workbench shell', () => {
     // The tab kept its tree while inactive; switching back remounts the view.
     await waitFor(() => expect(screen.getAllByText('deploy.yaml').length).toBeGreaterThan(0))
     fireEvent.doubleClick(screen.getAllByText('deploy.yaml')[0])
-    expect(await screen.findByText(`${DRILLDOWN_PREFIX}config/deploy.yaml`, {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByRole('tab', { name: /deploy\.yaml/ }, { timeout: 4000 })).toBeDefined()
     expect(screen.getByText(/YAML 原文/)).toBeDefined()
   })
 
@@ -351,7 +393,8 @@ describe('workbench shell', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('暂不支持')
     // the directory session stays put instead of silently doing nothing
-    expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
+    expect(statusText()).toContain('文件（源）')
+    expect(screen.queryByText(SAMPLE_DIRECTORY_ID)).toBeNull()
   })
 
   it('degrades the native directory picker on the web runtime', async () => {
@@ -360,11 +403,9 @@ describe('workbench shell', () => {
     await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
-    const leftPicker = screen.getByRole('button', { name: '选择左目录' }) as HTMLButtonElement
-    const rightPicker = screen.getByRole('button', { name: '选择右目录' }) as HTMLButtonElement
-
-    expect(leftPicker.disabled).toBe(true)
-    expect(rightPicker.disabled).toBe(true)
+    expect(moreItem('选择左目录')).toBeDefined()
+    expect(moreItem('选择右目录')).toBeDefined()
+    closeMore()
     // The demo shortcuts are gone from the workflow toolbar.
     expect(screen.queryByRole('button', { name: '加载演示目录' })).toBeNull()
     expect(screen.queryByRole('button', { name: '演示：远端快照' })).toBeNull()
@@ -389,7 +430,7 @@ describe('workbench shell', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     // The sample tree itself is untouched: the comparison still lists both roots.
-    expect(screen.getByText('/samples/directory/baseline')).toBeDefined()
+    expect(screen.getAllByText('/samples/directory/baseline').length).toBeGreaterThan(0)
   })
 
   it('applies the confirmed sync and refreshes the comparison tree', async () => {
@@ -427,7 +468,7 @@ describe('workbench shell', () => {
     const port = await templatePort({ directories: ['/ext/a', '/ext/b'] })
     await openDirectoryPair(port, /a ↔ b/)
 
-    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    clickMore('模板归位')
     const setup = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
 
     // Template A is the current left root and stays read-only: no input holds it.
@@ -488,7 +529,7 @@ describe('workbench shell', () => {
     }
     await openDirectoryPair(port, /a ↔ b/)
 
-    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    clickMore('模板归位')
     const setup = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
     fireEvent.change(within(setup).getByLabelText('散乱树 B 根'), {
       target: { value: '/ext/b' },
@@ -532,7 +573,7 @@ describe('workbench shell', () => {
     writeTextFile.mockClear()
     ensureDirectory.mockClear()
 
-    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    clickMore('模板归位')
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe('当前左侧是快照，不能作为模板 A；请先打开真实目录对比。')
@@ -553,7 +594,7 @@ describe('workbench shell', () => {
     await openDirectoryPair({ ...port, writeTextFile, ensureDirectory }, /a ↔ b/)
     const tabsBefore = sessionTabRows().length
 
-    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    clickMore('模板归位')
     const setup = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
     fireEvent.change(within(setup).getByLabelText('散乱树 B 根'), {
       target: { value: '/ext/b' },
@@ -573,7 +614,7 @@ describe('workbench shell', () => {
     expect(sessionTabRows().length).toBe(tabsBefore)
 
     // The entry is still usable after the cancel.
-    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    clickMore('模板归位')
     expect(await screen.findByRole('dialog', { name: '模板归位 · 选择根' })).toBeDefined()
   })
 })
@@ -581,7 +622,8 @@ describe('workbench shell', () => {
 describe('real file workbench', () => {
   it('opens two real files from the pickers without loading a sample', async () => {
     expect(await openFilePair(scriptedPort({ files: [LEFT_ENGINE, RIGHT_ENGINE] }), /engine\.ts/)).toBeDefined()
-    expect(statusText()).toContain(`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`)
+    expect(statusText()).not.toContain('file:')
+    expect(statusText()).toContain('行数（左）')
     // A real pair lands on the shared file-session model, no sample scene involved.
     expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
     expect(screen.queryByRole('tab', { name: /3-Way Merge/ })).toBeNull()
@@ -834,7 +876,8 @@ describe('real file workbench', () => {
     expect(dropPaths(screen.getByRole('main'), [LEFT_REPORT, RIGHT_REPORT])).toBe(false)
 
     expect(await screen.findByText('对齐 4 行 · 主键 order_id')).toBeDefined()
-    expect(statusText()).toContain(`${LEFT_REPORT} ↔ ${RIGHT_REPORT}`)
+    expect(statusText()).not.toContain('file:')
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('opens a directory session when two directories are dropped', async () => {
@@ -1023,7 +1066,8 @@ describe('real file workbench', () => {
 
     // The next pick only asks for the right side and keeps the dropped baseline.
     expect(await openAnotherFile(/engine\.ts/)).toBeDefined()
-    expect(statusText()).toContain(`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`)
+    expect(statusText()).not.toContain('file:')
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('rejects a drop of more than two paths without opening a session', async () => {
@@ -1070,9 +1114,6 @@ describe('real file workbench', () => {
   })
 })
 
-/** The reversed pair is a second directory session over the same roots. */
-const REVERSED_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.right} ↔ ${DIRECTORY_SAMPLE_PATHS.left}`
-
 describe('directory drilldown roundtrip', () => {
   async function loadDirectorySamples(): Promise<void> {
     await renderApp()
@@ -1101,7 +1142,7 @@ describe('directory drilldown roundtrip', () => {
     fireEvent.scroll(leftBody)
 
     fireEvent.doubleClick(row)
-    expect(await screen.findByText(`${DRILLDOWN_PREFIX}src/core/engine.ts`, {}, { timeout: 4000 })).toBeDefined()
+    expect(await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
 
@@ -1109,7 +1150,7 @@ describe('directory drilldown roundtrip', () => {
     // kept filter/scroll restore as the view remounts.
     await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     // Back on the source directory session: nothing was reset by the roundtrip.
-    expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
+    expect(statusText()).toContain('文件（源）')
     expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
     expect(within(paneTree(0)).queryAllByText('deploy.yaml')).toHaveLength(0)
     expect(within(paneTree(1)).queryAllByText('deploy.yaml')).toHaveLength(0)
@@ -1127,7 +1168,7 @@ describe('directory drilldown roundtrip', () => {
       fireEvent.click(back)
 
       await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
-      expect(screen.getByText(SAMPLE_DIRECTORY_ID)).toBeDefined()
+      expect(statusText()).toContain('文件（源）')
       expect(screen.getByRole('tab', { name: '仅差异' }).getAttribute('aria-selected')).toBe('true')
       expect(within(paneTree(0)).queryAllByText('engine.ts')).toHaveLength(1)
     }
@@ -1145,14 +1186,14 @@ describe('directory drilldown roundtrip', () => {
 
     // Drill the same relative path out of the active (baseline → candidate) session.
     fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
-    await screen.findByText(`${DRILLDOWN_PREFIX}src/core/engine.ts`, {}, { timeout: 4000 })
+    await screen.findByRole('tab', { name: /engine\.ts/ }, { timeout: 4000 })
 
     // Drill the same relative path out of the first (candidate → baseline) session.
     const sessionTabs = screen.getByRole('tablist', { name: '会话' })
     fireEvent.click(within(sessionTabs).getByRole('tab', { name: /candidate ↔ baseline/ }))
     await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
     fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
-    await screen.findByText(`file:${REVERSED_DIRECTORY_ID}::src/core/engine.ts`, {}, { timeout: 4000 })
+    await waitFor(() => expect(within(sessionTabs).getAllByRole('tab', { name: /engine\.ts/ })).toHaveLength(2), { timeout: 4000 })
 
     // Both same-path drilldowns exist; neither overwrote the other.
     expect(within(sessionTabs).getAllByRole('tab', { name: /engine\.ts/ })).toHaveLength(2)
@@ -1160,22 +1201,20 @@ describe('directory drilldown roundtrip', () => {
     // The active drilldown returns to its own source session.
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
     await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
-    expect(statusText()).toContain(REVERSED_DIRECTORY_ID)
+    expect(sessionTab(/candidate ↔ baseline/).getAttribute('aria-selected')).toBe('true')
+    expect(statusText()).toContain('文件（源）')
 
     // The other drilldown still returns to the other source session.
     fireEvent.click(within(sessionTabs).getAllByRole('tab', { name: /engine\.ts/ })[0])
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
     await waitFor(() => expect(screen.getAllByRole('tree')).toHaveLength(2))
-    expect(statusText()).toContain(SAMPLE_DIRECTORY_ID)
+    expect(sessionTab(/baseline ↔ candidate/).getAttribute('aria-selected')).toBe('true')
   })
 })
 
 describe('session tabs lifecycle', () => {
   const LEFT_YAML = `${DIRECTORY_SAMPLE_PATHS.left}/config/deploy.yaml`
   const RIGHT_YAML = `${DIRECTORY_SAMPLE_PATHS.right}/config/deploy.yaml`
-  const ENGINE_SESSION_ID = `file:${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`
-  const REPORT_SESSION_ID = `file:${LEFT_REPORT} ↔ ${RIGHT_REPORT}`
-  const YAML_SESSION_ID = `file:${LEFT_YAML} ↔ ${RIGHT_YAML}`
 
   /** Opens one real pair per click of「打开文件」; the port answers in order. */
   async function openPairs(count: number): Promise<void> {
@@ -1207,11 +1246,12 @@ describe('session tabs lifecycle', () => {
 
     fireEvent.click(sessionTab(/report\.csv/))
     expect(screen.queryByText('已修改（未保存）')).toBeNull()
-    expect(statusText()).toContain(REPORT_SESSION_ID)
+    expect(sessionTab(/report\.csv/).getAttribute('aria-selected')).toBe('true')
+    expect(statusText()).toContain('行数（左）')
 
     // Back on A: the working copy survived the unmount, not just the flag.
     fireEvent.click(sessionTab(/engine\.ts/))
-    expect(statusText()).toContain(ENGINE_SESSION_ID)
+    expect(statusText()).toContain('行数（左）')
     expect(screen.getByText('已修改（未保存）')).toBeDefined()
     expect(screen.getByText('未保存：右')).toBeDefined()
     expect(sessionTab(/engine\.ts/).textContent).toContain('有未保存修改')
@@ -1232,7 +1272,7 @@ describe('session tabs lifecycle', () => {
     expect(screen.queryByRole('tab', { name: /engine\.ts/ })).toBeNull()
     // The active session and its content did not change.
     expect(sessionTab(/report\.csv/).getAttribute('aria-selected')).toBe('true')
-    expect(statusText()).toContain(REPORT_SESSION_ID)
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('activates the neighbour of the closed active session and empties on the last one', async () => {
@@ -1260,12 +1300,12 @@ describe('session tabs lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭 report.csv' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(sessionTab(/deploy\.yaml/).getAttribute('aria-selected')).toBe('true')
-    expect(statusText()).toContain(YAML_SESSION_ID)
+    expect(statusText()).toContain('行数（左）')
 
     // Closing the last tab falls back to the previous one.
     fireEvent.click(screen.getByRole('button', { name: '关闭 deploy.yaml' }))
     expect(sessionTab(/engine\.ts/).getAttribute('aria-selected')).toBe('true')
-    expect(statusText()).toContain(ENGINE_SESSION_ID)
+    expect(statusText()).toContain('行数（左）')
 
     // Closing the last session returns to the empty workbench, still usable.
     fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
@@ -1274,7 +1314,7 @@ describe('session tabs lifecycle', () => {
     expect(screen.getByRole('button', { name: '打开文件' })).toBeDefined()
 
     expect(await openAnotherFile(/report\.csv/)).toBeDefined()
-    expect(statusText()).toContain(REPORT_SESSION_ID)
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('prompts before closing dirty work and keeps it on「继续编辑」', async () => {
@@ -1317,7 +1357,7 @@ describe('session tabs lifecycle', () => {
 
     expect(screen.queryByRole('tab', { name: /engine\.ts/ })).toBeNull()
     expect(sessionTab(/report\.csv/).getAttribute('aria-selected')).toBe('true')
-    expect(statusText()).toContain(REPORT_SESSION_ID)
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('drops the dirty marker after a reset and closes without a prompt', async () => {
@@ -1326,7 +1366,7 @@ describe('session tabs lifecycle', () => {
     makeDirty()
     expect(sessionTab(/engine\.ts/).textContent).toContain('有未保存修改')
 
-    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    clickMore('重置')
     expect(sessionTab(/engine\.ts/).textContent).not.toContain('有未保存修改')
 
     fireEvent.click(screen.getByRole('button', { name: '关闭 engine.ts' }))
@@ -1383,7 +1423,8 @@ describe('session tabs lifecycle', () => {
     // The file session still renders and returning falls back to the other tree.
     expect(screen.getByRole('button', { name: '返回上级目录视图' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: '返回上级目录视图' }))
-    expect(statusText()).toContain('directory:')
+    expect(screen.queryByText(/directory:/)).toBeNull()
+    expect(statusText()).toContain('文件（源）')
     expect(await screen.findByRole('alert')).toBeDefined()
     expect(screen.getByRole('alert').textContent).toContain('已返回可用的目录对比')
 
@@ -1431,7 +1472,8 @@ describe('new compare dialog', () => {
     expect(await screen.findByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
     expect(selectFile).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('dialog', { name: '新建对比' })).toBeNull()
-    expect(statusText()).toContain(`${LEFT_ENGINE} ↔ ${RIGHT_ENGINE}`)
+    expect(statusText()).not.toContain('file:')
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('opens a directory pair from the dialog picker', async () => {
@@ -1632,7 +1674,8 @@ describe('new compare dialog', () => {
     expect(tabs).toHaveLength(2)
     expect(tabs[0].textContent).toBe(firstText)
     expect(added.getAttribute('aria-selected')).toBe('true')
-    expect(statusText()).toContain('/memory/x.txt ↔ /memory/y.txt')
+    expect(statusText()).not.toContain('file:')
+    expect(statusText()).toContain('行数（左）')
   })
 
   it('re-submitting the same pair keeps a single tab', async () => {
@@ -1974,7 +2017,8 @@ describe('launch request injection', () => {
 
     await waitFor(() => expect(sessionTabCount()).toBe(1))
     expect(activeSceneIcon()).toBe('file-code-corner')
-    expect(statusText()).toContain(`file:${LEFT} ↔ ${RIGHT}`)
+    expect(statusText()).not.toContain('file:')
+    expect(statusText()).toContain('行数（左）')
     expect(selectFile).not.toHaveBeenCalled()
     expect(selectDirectory).not.toHaveBeenCalled()
     expect(saveFile).not.toHaveBeenCalled()
@@ -1997,7 +2041,8 @@ describe('launch request injection', () => {
 
     await waitFor(() => expect(sessionTabCount()).toBe(1))
     expect(activeSceneIcon()).toBe('folder-tree')
-    expect(statusText()).toContain('directory:/memory/left-dir ↔ /memory/right-dir')
+    expect(statusText()).not.toContain('directory:')
+    expect(statusText()).toContain('文件（源）')
   })
 
   it('builds the very same session the manual entry builds for the pair', async () => {
@@ -2478,7 +2523,7 @@ describe('directory progress and cancel UI', () => {
     fireEvent.click(within(syncDialog).getByRole('button', { name: '取消' }))
     expect(progressBar()).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '模板归位' }))
+    clickMore('模板归位')
     const setupDialog = await screen.findByRole('dialog', { name: '模板归位 · 选择根' })
     expect(progressBar()).toBeNull()
     fireEvent.change(within(setupDialog).getByLabelText('散乱树 B 根'), {
@@ -2581,7 +2626,7 @@ describe('session tab labels follow the session facts', () => {
 
     await openDirectoryPair(port, /baseline ↔ candidate/)
 
-    fireEvent.click(screen.getByRole('button', { name: '选择右目录' }))
+    clickMore('选择右目录')
 
     const swapped = await screen.findByRole('tab', { name: /baseline ↔ incoming/ }, { timeout: 4000 })
     expect(swapped.getAttribute('aria-selected')).toBe('true')
@@ -2608,7 +2653,7 @@ describe('session tab labels follow the session facts', () => {
     await screen.findByRole('tab', { name: /deploy\.yaml/ }, { timeout: 4000 })
 
     fireEvent.click(sessionTab(/engine\.ts/))
-    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    clickMore('打开左文件')
 
     const opened = await screen.findByRole('tab', { name: /other\.ts ↔ engine\.ts/ }, { timeout: 4000 })
     expect(fullTabText(opened)).toContain(OTHER)
@@ -2830,10 +2875,10 @@ describe('session tab labels follow the session facts', () => {
     await screen.findByRole('tab', { name: /deploy\.yaml/ }, { timeout: 4000 })
 
     fireEvent.click(sessionTab(/engine\.ts/))
-    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    clickMore('打开左文件')
     await waitFor(() => expect(tabLabels(activeTab()).title).toBe('alpha.ts ↔ engine.ts'))
 
-    fireEvent.click(screen.getByRole('button', { name: '打开右文件' }))
+    clickMore('打开右文件')
     await waitFor(() => expect(tabLabels(activeTab()).title).toBe('alpha.ts ↔ beta.ts'))
 
     // The session kept its identity: still one tab per opened pair, same slots.

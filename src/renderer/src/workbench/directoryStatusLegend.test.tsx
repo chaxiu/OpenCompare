@@ -34,7 +34,7 @@ afterEach(cleanup)
 const LEGEND_STATUSES = ['same', 'added', 'removed', 'modified'] as const
 type Dictionary = typeof en | typeof zh
 
-/** Both four-cell legends of the directory shell, toolbar first. */
+/** The single four-cell legend of the directory shell. */
 function directoryLegends(dictionary: Dictionary): HTMLElement[] {
   const labels = LEGEND_STATUSES.map((status) => dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]])
   return Array.from(document.querySelectorAll<HTMLElement>('span')).filter((span) => {
@@ -77,8 +77,8 @@ async function openDirectoryPair(
   fireEvent.click(within(panel).getByRole('button', { name: dictionary['shell.compare.submit'] }))
 }
 
-/** Opens a right-only directory pair and waits for the two legends to mount. */
-async function openRightOnlySession(dictionary: Dictionary): Promise<HTMLElement[]> {
+/** Opens a right-only directory pair and waits for the toolbar legend to mount. */
+async function openRightOnlySession(dictionary: Dictionary): Promise<HTMLElement> {
   await screen.findAllByRole('tree', {}, { timeout: 30_000 })
   let legends: HTMLElement[] = []
   await expect
@@ -86,15 +86,15 @@ async function openRightOnlySession(dictionary: Dictionary): Promise<HTMLElement
       legends = directoryLegends(dictionary)
       return legends.length
     })
-    .toBe(2)
-  return legends
+    .toBe(1)
+  return legends[0]
 }
 
 describe.each([
   ['zh', zh, /新增|删除/],
   ['en', en, /Added|Removed/]
-] as const)('directory status bar legend (%s)', (language, dictionary, textDiffWords) => {
-  it('uses the directory vocabulary and mirrors the toolbar counts', async () => {
+] as const)('directory status legend (%s)', (language, dictionary, textDiffWords) => {
+  it('renders the directory vocabulary once in the filter row and never in the status bar', async () => {
     const port = createWebPlatformPort()
     await port.writeTextFile('/memory/legend-left/same.txt', 'same\n')
     await port.writeTextFile('/memory/legend-right/same.txt', 'same\n')
@@ -102,37 +102,42 @@ describe.each([
 
     renderWithI18n(<Workbench platform={port} />, language)
     await openDirectoryPair('/memory/legend-left', '/memory/legend-right', dictionary)
-    const legends = await openRightOnlySession(dictionary)
+    const legend = await openRightOnlySession(dictionary)
 
     const statusBar = document.querySelector<HTMLElement>('footer[data-shell-level="status"]')
     expect(statusBar).not.toBeNull()
-    const statusLegend = legends.find((legend) => statusBar?.contains(legend) === true)
-    const toolbarLegend = legends.find((legend) => statusBar?.contains(legend) === false)
-    expect(statusLegend).toBeDefined()
-    expect(toolbarLegend).toBeDefined()
+    const filterRow = document.querySelector<HTMLElement>(
+      '[data-shell-level="view-toolbar"] [data-shell-entry="filter"]'
+    )
+    expect(filterRow).not.toBeNull()
 
-    const counts = legendCounts(toolbarLegend as HTMLElement, dictionary)
+    // Exactly one legend exists, it sits in the directory filter row, and the
+    // status bar no longer repeats it.
+    expect(document.querySelectorAll('[data-shell-legend]')).toHaveLength(1)
+    expect(legend.getAttribute('data-shell-legend')).not.toBeNull()
+    expect(filterRow?.parentElement?.contains(legend)).toBe(true)
+    expect(statusBar?.querySelector('[data-shell-legend]')).toBeNull()
+    expect(statusBar?.contains(legend)).toBe(false)
+
+    const counts = legendCounts(legend, dictionary)
     expect(counts).toEqual({ same: 1, added: 1, removed: 0, modified: 0 })
-    expect(legendCounts(statusLegend as HTMLElement, dictionary)).toEqual(counts)
-    expect(statusLegend?.textContent).not.toMatch(textDiffWords)
-    expect(toolbarLegend?.textContent).not.toMatch(textDiffWords)
+    expect(legend.textContent).not.toMatch(textDiffWords)
 
-    // The status bar wraps its groups instead of hiding them behind a scroll
-    // channel, and every legend cell keeps its dot, count and label in view.
+    // Every legend cell keeps its dot, count and label in view.
+    for (const status of LEGEND_STATUSES) {
+      const cell = Array.from(legend.children).find((child) =>
+        (child.textContent ?? '').includes(dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]])
+      )
+      expect(cell).toBeDefined()
+      expect(legend.contains(cell as Element)).toBe(true)
+      expect(cell?.querySelector('.tabular')?.textContent).toMatch(/^\d+$/)
+    }
+
+    // The status bar keeps its single-row layout and its metric readouts.
     const footer = statusBar as HTMLElement
     const footerClasses = (footer.getAttribute('class') ?? '').split(/\s+/)
     expect(footerClasses).toContain('flex-wrap')
     expect(footerClasses.some((token) => token.startsWith('overflow-x'))).toBe(false)
-    for (const status of LEGEND_STATUSES) {
-      const cell = Array.from((statusLegend as HTMLElement).children).find((child) =>
-        (child.textContent ?? '').includes(dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]])
-      )
-      expect(cell).toBeDefined()
-      expect(footer.contains(cell as Element)).toBe(true)
-      expect(cell?.querySelector('.tabular')?.textContent).toMatch(/^\d+$/)
-    }
-
-    // Source / Target file counts and the Differences value stay visible.
     for (const key of [
       'shell.stat.sourceFiles',
       'shell.stat.targetFiles',

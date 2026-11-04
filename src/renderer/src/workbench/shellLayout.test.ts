@@ -119,42 +119,51 @@ describe('shell level table', () => {
     }
   })
 
-  it('keeps the ready chrome at or under the pre-change 112px baseline', () => {
-    expect(levelHeightPx('app')).toBe(44)
-    expect(levelHeightPx('sessions')).toBe(36)
-    expect(levelHeightPx('status')).toBe(32)
-    expect(chromeHeightPx('ready')).toBe(112)
+  it('sums the four ready chrome levels to exactly 120px', () => {
+    expect(levelHeightPx('app')).toBe(32)
+    expect(levelHeightPx('sessions')).toBe(28)
+    expect(levelHeightPx('view-toolbar')).toBe(36)
+    expect(levelHeightPx('panels')).toBe(24)
+    expect(levelHeightPx('status')).toBe(24)
+    expect(
+      levelHeightPx('app') +
+        levelHeightPx('sessions') +
+        levelHeightPx('view-toolbar') +
+        levelHeightPx('panels')
+    ).toBe(120)
+    expect(chromeHeightPx('ready')).toBe(84)
+    expect(CHROME_BASELINE_PX).toBe(84)
     expect(chromeHeightPx('ready')).toBeLessThanOrEqual(CHROME_BASELINE_PX)
-    expect(chromeHeightPx('empty')).toBe(76)
+    expect(chromeHeightPx('empty')).toBe(56)
     for (const tier of TIERS) {
       expect(TIER_WIDTHS[tier]).toBeGreaterThan(0)
       // Tier independent: the same numbers for every window width.
-      expect(chromeHeightPx('ready')).toBe(112)
-      expect(mainContentHeightPx('ready')).toBe(768 - 112)
+      expect(chromeHeightPx('ready')).toBe(84)
+      expect(mainContentHeightPx('ready')).toBe(768 - 84)
     }
   })
 
-  it('adds only the 1px border budget once the status bar wraps', () => {
-    // 112px stays the single-row baseline; wrapping only adds the border px.
-    expect(chromeHeightPx('ready', 2)).toBe(113)
+  it('adds only the status-row delta once the status bar wraps', () => {
+    // 84px stays the single-row baseline; wrapping adds the status row delta.
+    expect(chromeHeightPx('ready', 2)).toBe(93)
     expect(chromeHeightPx('ready', 2)).toBe(
-      112 + (statusBarHeightPx(2) - statusBarHeightPx(1))
+      84 + (statusBarHeightPx(2) - statusBarHeightPx(1))
     )
-    expect(chromeHeightPx('empty', 2)).toBe(77)
-    expect(mainContentHeightPx('ready', 2)).toBe(768 - 113)
-    expect(mainContentHeightPx('ready', 2)).toBe(mainContentHeightPx('ready') - 1)
+    expect(chromeHeightPx('empty', 2)).toBe(65)
+    expect(mainContentHeightPx('ready', 2)).toBe(768 - 93)
+    expect(mainContentHeightPx('ready', 2)).toBe(mainContentHeightPx('ready') - 9)
 
     const single = contentRowBudget('ready', 'directory', 24)
-    const wrapped = contentRowBudget('ready', 'directory', 24, false, 2)
-    expect(wrapped.chrome).toBe(113)
-    expect(wrapped.area).toBe(single.area - 1)
+    const wrapped = contentRowBudget('ready', 'directory', 24, 2)
+    expect(wrapped.chrome).toBe(93)
+    expect(wrapped.area).toBe(single.area - 9)
   })
 
   it('does not lose a visible row against the pre-change bands', () => {
     expect(toolbarBandHeightPx(0)).toBe(0)
-    expect(toolbarBandHeightPx(1)).toBe(32)
-    expect(toolbarBandHeightPx(2)).toBe(66)
-    expect(toolbarBandHeightPx(3)).toBe(100)
+    expect(toolbarBandHeightPx(1)).toBe(36)
+    expect(toolbarBandHeightPx(2)).toBe(72)
+    expect(toolbarBandHeightPx(3)).toBe(108)
 
     // Pre-change: p-2 root + 24px rows with gap-2 (104 / 40), plus the mode row
     // for code (72) and a 32px back row + gap-2 for a drilldown (40 more).
@@ -174,7 +183,7 @@ describe('shell level table', () => {
         ['structured', 24]
       ] as const) {
         for (const drilldown of [false, true]) {
-          const after = contentRowBudget('ready', view, rowPx, drilldown)
+          const after = contentRowBudget('ready', view, rowPx)
           expect(after.rows).toBeGreaterThanOrEqual(baselineRows(view, rowPx, drilldown))
           expect(after.area).toBeGreaterThan(0)
         }
@@ -215,7 +224,7 @@ describe('shell entry manifest', () => {
     }
     // Copy is only ever dropped for these entries, and only at these tiers;
     // everything else keeps its copy so no entry can silently disappear.
-    const alwaysIcon = ['settings', 'prev-diff', 'next-diff']
+    const alwaysIcon = ['settings', 'override', 'save', 'prev-diff', 'next-diff']
     const compactIcon = ['new-compare', 'open-file', 'open-folder', 'drilldown-back']
     for (const tier of TIERS) {
       for (const id of SHELL_ENTRY_IDS) {
@@ -278,10 +287,13 @@ describe('toolbar width budgets', () => {
   })
 
   it('fits every view toolbar at 1024 / 1440 / 1920', () => {
+    // The directory row is the 1024px acceptance row: it must fit on its own.
+    expect(measureToolbar('compact', 'view-toolbar', 'directory').fits).toBe(true)
     for (const tier of TIERS) {
       for (const view of VIEWS) {
         const budget = measureToolbar(tier, 'view-toolbar', view)
-        expect(budget.fits).toBe(true)
+        expect(budget.required).toBe(Math.max(...budget.rows.map((row) => row.required)))
+        expect(budget.rows.filter((row) => !row.fits)).toEqual([])
         for (const row of budget.rows) {
           expect(row.required).toBeLessThanOrEqual(row.available)
         }
@@ -291,13 +303,9 @@ describe('toolbar width budgets', () => {
 
   it('reports one budget row per rendered toolbar row', () => {
     const directory = measureToolbar('compact', 'view-toolbar', 'directory')
-    expect(directory.rows.map((row) => row.row)).toEqual([
-      'directory-status',
-      'directory-sync',
-      'directory-snapshots'
-    ])
+    expect(directory.rows.map((row) => row.row)).toEqual(['directory-toolbar'])
     const code = measureToolbar('compact', 'view-toolbar', 'code-merge')
-    expect(code.rows.map((row) => row.row)).toEqual(['code-mode', 'code-merge'])
+    expect(code.rows.map((row) => row.row)).toEqual(['code-merge'])
     // The widest row of the level is what the level budget reports.
     expect(directory.required).toBe(
       Math.max(...directory.rows.map((row) => row.required))
@@ -339,41 +347,36 @@ describe('toolbar width budgets', () => {
     expect(compact.rows.length).toBe(wide.rows.length)
   })
 
-  it('registers the three code-diff switches and the pair actions inside the existing row', () => {
+  it('registers the three code-diff switches inside the single code row', () => {
     const row = TOOLBAR_ROWS.find((item) => item.id === 'code-diff')
+    // The pair actions (reload / swap / reset / open sides / byte badge) moved
+    // into the row's "more" menu, so only the inline controls remain here.
     expect(row?.controls.map((item) => item.id)).toEqual([
+      'mode-switch',
       'block-counter',
       'code-switch-newline',
       'code-switch-encoding',
       'code-switch-whitespace',
       'code-diff-count',
-      'code-diff-bytes',
-      'code-reload',
-      'code-swap',
-      'reset',
-      'open-left',
-      'open-right'
+      'more'
     ])
+    expect(row?.entries).toEqual(['drilldown-back', 'prev-diff', 'next-diff', 'override', 'save'])
     for (const tier of TIERS) {
       expect(measureToolbar(tier, 'view-toolbar', 'code-diff').fits).toBe(true)
       for (const control of row?.controls ?? []) {
         expect(control.width[controlPresentation(control.id, tier)]).toBeGreaterThan(0)
       }
       const compact = tier === 'compact' ? 'icon-only' : 'label'
+      expect(controlPresentation('mode-switch', tier)).toBe('label')
       expect(controlPresentation('code-switch-newline', tier)).toBe(compact)
       expect(controlPresentation('code-switch-encoding', tier)).toBe(compact)
       expect(controlPresentation('code-switch-whitespace', tier)).toBe(compact)
-      expect(controlPresentation('code-diff-bytes', tier)).toBe(compact)
       expect(controlPresentation('code-diff-count', tier)).toBe('label')
-      // The two pair actions only spend their copy on the widest tier.
-      expect(controlPresentation('code-reload', tier)).toBe(
-        tier === 'wide' ? 'label' : 'icon-only'
-      )
-      expect(controlPresentation('code-swap', tier)).toBe(tier === 'wide' ? 'label' : 'icon-only')
+      expect(controlPresentation('more', tier)).toBe('label')
     }
   })
 
-  it('keeps the accepted app and code-diff entry sets with two code rows', () => {
+  it('keeps the accepted app and code-diff entry sets on one code row', () => {
     expect(SHELL_ENTRY_IDS.length).toBe(18)
     expect(entriesFor('app')).toEqual(['new-compare', 'open-file', 'open-folder', 'settings'])
     expect(entriesFor('view-toolbar', 'code-diff')).toEqual([
@@ -383,19 +386,20 @@ describe('toolbar width budgets', () => {
       'override',
       'save'
     ])
-    expect(viewToolbarRows('code-diff')).toBe(2)
+    expect(viewToolbarRows('code-diff')).toBe(1)
   })
 })
 
 describe('status bar width model', () => {
-  it('wraps the 1415px content at 960 / 1024 / 1280 instead of overflowing', () => {
-    for (const width of [960, 1024, 1280]) {
+  it('keeps the 520px content on one row at every reference width', () => {
+    expect(STATUS_BAR_CONTENT_PX).toBe(520)
+    for (const width of STATUS_BAR_WIDTHS) {
       const budget = measureStatusBar(width)
       expect(budget.required).toBe(STATUS_BAR_CONTENT_PX)
-      expect(budget.fits).toBe(false)
-      expect(budget.rows).toBeGreaterThanOrEqual(2)
+      expect(budget.fits).toBe(true)
+      expect(budget.rows).toBe(1)
       // Wrapping carries the content: no row ever leaves the viewport.
-      expect(budget.rows * budget.available).toBeGreaterThanOrEqual(budget.required)
+      expect(budget.available).toBeGreaterThanOrEqual(budget.required)
     }
   })
 
@@ -435,12 +439,13 @@ describe('status bar width model', () => {
     expect(tokens).toContain('flex-wrap')
     expect(tokens).toContain('gap-y-0')
     expect(tokens.some((token) => token.startsWith('overflow-x'))).toBe(false)
-    // The single-row baseline keeps the level's 32px height.
-    expect(levelHeightPx('status')).toBe(2 * 16)
+    // The single-row baseline keeps the level's 24px (`h-6`) height.
+    expect(levelHeightPx('status')).toBe(24)
+    expect(levelHeightPx('status')).toBe(HEIGHT_PX['h-6'])
   })
 
   it('derives the declared height from the wrapped row count', () => {
-    expect(statusBarHeightPx(1)).toBe(32)
+    expect(statusBarHeightPx(1)).toBe(24)
     expect(statusBarHeightPx(2)).toBe(2 * 16 + 1)
     expect(statusBarHeightPx(3)).toBe(3 * 16 + 1)
     for (let rows = 1; rows <= 3; rows += 1) {
@@ -451,35 +456,32 @@ describe('status bar width model', () => {
     expect(statusBarHeightPx(3) - 1).toBe(3 * 16)
   })
 
-  it('maps the five reference widths onto the row-count height classes', () => {
-    for (const width of [960, 1024, 1280]) {
-      const { rows } = measureStatusBar(width)
-      expect(rows).toBeGreaterThanOrEqual(2)
-      expect(statusBarHeightPx(rows)).toBe(rows * 16 + 1)
-    }
-    for (const width of [1440, 1920]) {
+  it('maps the five reference widths onto the single-row height class', () => {
+    for (const width of STATUS_BAR_WIDTHS) {
       const { rows } = measureStatusBar(width)
       expect(rows).toBe(1)
-      expect(statusBarHeightPx(rows)).toBe(32)
+      expect(statusBarHeightPx(rows)).toBe(24)
     }
   })
 
   it('keeps a single height utility per row count', () => {
-    for (const width of [960, 1024, 1280, 1440, 1920]) {
+    for (const width of STATUS_BAR_WIDTHS) {
       const { rows } = measureStatusBar(width)
       const tokens = statusBarClasses(rows).split(' ')
-      const heightTokens = tokens.filter((token) => token === 'h-8' || token === 'h-auto')
+      const heightTokens = tokens.filter(
+        (token) => token === 'h-6' || token === 'h-auto'
+      )
       expect(heightTokens).toHaveLength(1)
-      if (rows === 1) {
-        expect(tokens).toContain('h-8')
-        expect(tokens).not.toContain('h-auto')
-        expect(tokens).not.toContain('min-h-8')
-      } else {
-        expect(tokens).toContain('h-auto')
-        expect(tokens).toContain('min-h-8')
-        expect(tokens).not.toContain('h-8')
-      }
+      expect(rows).toBe(1)
+      expect(tokens).toContain('h-6')
+      expect(tokens).not.toContain('h-auto')
+      expect(tokens).not.toContain('min-h-6')
     }
+
+    const wrapped = statusBarClasses(2).split(' ')
+    expect(wrapped).toContain('h-auto')
+    expect(wrapped).toContain('min-h-6')
+    expect(wrapped).not.toContain('h-6')
   })
 })
 

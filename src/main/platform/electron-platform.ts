@@ -25,7 +25,7 @@ import { createReadStream, constants } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { app, dialog, ipcMain } from 'electron'
+import { app, clipboard, dialog, ipcMain } from 'electron'
 import type { FileFilter } from 'electron'
 import { OperationCancelledError, mapWithLimit, toReadableIoError } from '@core/io'
 import { probeTextBytes } from '@core/text/probe'
@@ -1084,4 +1084,8 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     return writeComparisonHistory(parsed)
   })
   ipcMain.handle(PLATFORM_CHANNELS.systemLocale, () => systemLocale())
+  ipcMain.handle(PLATFORM_CHANNELS.copyText, (_event, text: unknown) => {
+    clipboard.writeText(typeof text === 'string' ? text : String(text))
+    return true
+  })
 }

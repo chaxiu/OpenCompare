@@ -255,6 +255,34 @@ function View({ comparison }: { readonly comparison: DirectoryComparison }): JSX
   )
 }
 
+/** The active view's single toolbar overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+function closeMore(): void {
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+}
+
+/** One overflow item, matched by its visible label inside the accessible name. */
+function moreItem(label: string): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(label)
+  })
+}
+
 const TOOLBAR: readonly (readonly [MessageKey, MessageKey])[] = [
   ['directory.toolbar.pickLeft', 'directory.toolbar.pickLeftTitle'],
   ['directory.toolbar.pickRight', 'directory.toolbar.pickRightTitle'],
@@ -282,9 +310,16 @@ describe('directory copy from the locale table', () => {
         DIRECTORY_FILTERS.map((filter) => localeText(language, FILTER_LABEL_KEYS[filter]))
       )
       for (const [labelKey, titleKey] of TOOLBAR) {
-        expect(
-          screen.getByRole('button', { name: localeText(language, labelKey) }).getAttribute('title')
-        ).toBe(localeText(language, titleKey))
+        const label = localeText(language, labelKey)
+        const title = localeText(language, titleKey)
+        // The primary sync action stays inline; every other declared entry is a
+        // menu item whose description carries the same localized title.
+        if (labelKey === 'directory.toolbar.previewSync') {
+          expect(screen.getByRole('button', { name: label }).getAttribute('title')).toBe(title)
+          continue
+        }
+        expect(moreItem(label).textContent).toContain(title)
+        closeMore()
       }
       expect(screen.getByText(localeText(language, 'directory.panel.source'))).toBeDefined()
       expect(screen.getByText(localeText(language, 'directory.panel.target'))).toBeDefined()

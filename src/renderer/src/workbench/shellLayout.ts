@@ -87,7 +87,7 @@ export interface ShellLevelMetrics {
 
 export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
   app: {
-    height: 'h-11',
+    height: 'h-8',
     paddingX: 'px-3',
     paddingY: 'py-0',
     gap: 'gap-2',
@@ -95,7 +95,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     controlHeight: 'h-[var(--height-control-sm)]'
   },
   sessions: {
-    height: 'h-9',
+    height: 'h-7',
     paddingX: 'px-3',
     paddingY: 'py-0',
     gap: 'gap-2',
@@ -111,23 +111,23 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     controlHeight: 'h-[var(--height-control-sm)]'
   },
   'view-toolbar': {
-    height: 'h-7',
+    height: 'h-8',
     paddingX: 'px-2',
     paddingY: 'py-0.5',
     gap: 'gap-2',
-    stackGap: 'gap-1.5',
+    stackGap: 'gap-0',
     controlHeight: 'h-[var(--height-control-sm)]'
   },
   panels: {
-    height: 'h-8',
+    height: 'h-6',
     paddingX: 'px-2',
-    paddingY: 'py-2',
+    paddingY: 'py-0',
     gap: 'gap-2',
     stackGap: 'gap-2',
     controlHeight: 'h-[var(--height-control-sm)]'
   },
   status: {
-    height: 'h-8',
+    height: 'h-6',
     paddingX: 'px-3',
     paddingY: 'py-0',
     gap: 'gap-3',
@@ -136,9 +136,14 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
   }
 }
 
-/** Height of one level row, in px. */
+/**
+ * Rendered height of one level band, in px: the row height plus its vertical
+ * inset. `view-toolbar` is the one level with a non-zero inset (`h-8` +
+ * `py-0.5` = 36), which is also what `toolbarBandHeightPx` reports.
+ */
 export function levelHeightPx(level: ShellLevel): number {
-  return HEIGHT_PX[SHELL_LEVELS[level].height]
+  const metrics = SHELL_LEVELS[level]
+  return HEIGHT_PX[metrics.height] + SPACING_PX[metrics.paddingY] * 2
 }
 
 /** Utilities of the level's own band (insets plus the row stack gap). */
@@ -167,10 +172,11 @@ export function levelHeaderClasses(level: ShellLevel): string {
 export const STATUS_BAR_WIDTHS: readonly number[] = [960, 1024, 1280, 1440, 1920]
 
 /**
- * One-row content demand of the status bar, measured on the 1024px L3
- * evidence: session + platform + probe + legend + stats need 1415px.
+ * One-row content demand of the status bar. After dropping the session id,
+ * platform name, legend and tutorial copy, the bar only carries the scene's
+ * line / item measures plus the (deduped) encoding and newline facts.
  */
-export const STATUS_BAR_CONTENT_PX = 1415
+export const STATUS_BAR_CONTENT_PX = 520
 
 export interface StatusBarBudget {
   /** Width left inside the level's horizontal inset. */
@@ -207,24 +213,25 @@ const STATUS_BAR_BORDER_PX = 1
 /**
  * Declared border-box height of the status bar for `rows` wrapped rows.
  *
- * One row stays on the `h-8` step (32px, border included). From two rows on the
- * height becomes `rows * 16 + 1`: the 16px rows plus the 1px `border-t`, so the
- * content box always fits `rows * 16` and `scrollHeight <= clientHeight`.
+ * One row stays on the `h-6` step (24px, border included) — the shell's single
+ * row contract. From two rows on the height becomes `rows * 16 + 1`: the 16px
+ * rows plus the 1px `border-t`, so the content box always fits `rows * 16` and
+ * `scrollHeight <= clientHeight`.
  */
 export function statusBarHeightPx(rows: number): number {
   const safeRows = Math.max(1, Math.trunc(rows))
-  if (safeRows === 1) return HEIGHT_PX['h-8']
+  if (safeRows === 1) return HEIGHT_PX['h-6']
   return safeRows * STATUS_BAR_ROW_PX + STATUS_BAR_BORDER_PX
 }
 
 /**
  * Layout utilities of the status bar itself: a wrapping flex row with no
  * horizontal scroll channel. The row gap stays 0; the height is the only
- * status-layer height source — `h-8` on a single row, `h-auto min-h-8` once
+ * status-layer height source — `h-6` on a single row, `h-auto min-h-6` once
  * the content model wraps (declared height then follows the content).
  */
 export function statusBarClasses(rows = 1): string {
-  const height = rows >= 2 ? 'h-auto min-h-8' : 'h-8'
+  const height = rows >= 2 ? 'h-auto min-h-6' : 'h-6'
   return `flex flex-wrap items-center gap-y-0 ${SHELL_LEVELS.status.gap} ${height}`
 }
 
@@ -383,16 +390,16 @@ export const SHELL_ENTRIES: Record<ShellEntryId, ShellEntryPlacement> = {
     slot: 'code-edit',
     labelKey: 'files.code.overwriteRight',
     labelKeys: ['files.code.overwriteRight'],
-    presentation: ALL_LABELS,
-    width: { label: 168, 'icon-only': 168 }
+    presentation: ICON_ONLY,
+    width: { label: 26, 'icon-only': 26 }
   },
   save: {
     level: 'view-toolbar',
     slot: 'code-edit',
     labelKey: 'files.code.saveLeft',
     labelKeys: ['files.code.saveLeft'],
-    presentation: ALL_LABELS,
-    width: { label: 184, 'icon-only': 184 }
+    presentation: ICON_ONLY,
+    width: { label: 26, 'icon-only': 26 }
   },
   'merge-accept': {
     level: 'view-toolbar',
@@ -446,12 +453,6 @@ export interface ToolbarControlSpec {
 
 const CONTROL_LABELS: Readonly<Record<WidthTier, EntryPresentation>> = ALL_LABELS
 const CONTROL_COMPACT_ICONS: Readonly<Record<WidthTier, EntryPresentation>> = COMPACT_ICONS
-/** Copy only on the widest tier, for actions that must yield to the counters. */
-const CONTROL_WIDE_LABELS: Readonly<Record<WidthTier, EntryPresentation>> = {
-  compact: 'icon-only',
-  regular: 'icon-only',
-  wide: 'label'
-}
 
 /** Copy of one non-entry control at one tier. */
 export function controlPresentation(id: string, tier: WidthTier): EntryPresentation {
@@ -473,17 +474,15 @@ function collapsible(id: string, label: number, iconOnly: number): ToolbarContro
   return { id, presentation: CONTROL_COMPACT_ICONS, width: { label, 'icon-only': iconOnly } }
 }
 
-/** An icon-bearing control that only shows its copy on the widest tier. */
-function collapsibleWide(id: string, label: number, iconOnly: number): ToolbarControlSpec {
-  return { id, presentation: CONTROL_WIDE_LABELS, width: { label, 'icon-only': iconOnly } }
-}
-
 export interface ToolbarRowSpec {
   readonly id: string
   readonly level: ToolbarLevel
   /** Views this row belongs to; `app` rows are shared by every view. */
   readonly views: readonly ToolbarView[]
+  /** Entries rendered directly in the row. */
   readonly entries: readonly ShellEntryId[]
+  /** Entries collected into the row's overflow menu (still reachable). */
+  readonly overflow: readonly ShellEntryId[]
   readonly controls: readonly ToolbarControlSpec[]
   /** Fixed width of separators, gaps and other row chrome, in px. */
   readonly extra: number
@@ -494,98 +493,71 @@ const APP_ROW: ToolbarRowSpec = {
   level: 'app',
   views: ['directory'],
   entries: ['new-compare', 'open-file', 'open-folder', 'settings'],
+  overflow: [],
   controls: [control('brand', 130)],
   extra: 56
 }
 
+/**
+ * One rendered row per view. The directory row keeps the filter, its legend,
+ * the sync direction/mode pickers and the single solid primary action; the
+ * snapshot / report / path-privacy actions live in `overflow` (the "more"
+ * menu). Code rows fold the former mode row into the action row and collect
+ * secondary pair actions into the same overflow menu.
+ */
 export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
   APP_ROW,
   {
-    id: 'directory-status',
+    id: 'directory-toolbar',
     level: 'view-toolbar',
     views: ['directory'],
-    entries: ['filter'],
+    entries: ['filter', 'sync'],
+    overflow: ['template', 'snapshot-export', 'snapshot-import', 'report-export'],
     controls: [
       control('legend', 240),
-      control('pick-left', 80),
-      control('pick-right', 80),
-      control('busy', 16)
+      control('sync-direction', 112),
+      control('sync-mode', 90),
+      control('more', 60)
     ],
-    extra: 48
-  },
-  {
-    id: 'directory-sync',
-    level: 'view-toolbar',
-    views: ['directory'],
-    entries: ['sync', 'template'],
-    controls: [control('sync-direction', 112), control('sync-mode', 90)],
-    extra: 32
-  },
-  {
-    id: 'directory-snapshots',
-    level: 'view-toolbar',
-    views: ['directory'],
-    entries: ['snapshot-export', 'snapshot-import', 'report-export'],
-    controls: [control('hide-local-paths', 112), control('report-progress', 120)],
-    extra: 64
-  },
-  {
-    id: 'code-mode',
-    level: 'view-toolbar',
-    views: ['code-diff', 'code-merge'],
-    entries: ['drilldown-back'],
-    controls: [
-      control('mode-switch', 312),
-      control('mode-hint', 240),
-      control('source-title', 170)
-    ],
-    extra: 24
+    extra: 13
   },
   {
     id: 'code-diff',
     level: 'view-toolbar',
     views: ['code-diff'],
-    entries: ['prev-diff', 'next-diff', 'override', 'save'],
+    entries: ['drilldown-back', 'prev-diff', 'next-diff', 'override', 'save'],
+    overflow: [],
     controls: [
+      control('mode-switch', 240),
       control('block-counter', 96),
       collapsible('code-switch-newline', 132, 26),
       collapsible('code-switch-encoding', 132, 26),
       collapsible('code-switch-whitespace', 120, 26),
       control('code-diff-count', 60),
-      collapsible('code-diff-bytes', 88, 26),
-      collapsibleWide('code-reload', 92, 26),
-      collapsibleWide('code-swap', 96, 26),
-      control('reset', 60),
-      collapsible('open-left', 91, 26),
-      collapsible('open-right', 91, 26)
+      control('more', 60)
     ],
-    extra: 88
+    extra: 32
   },
   {
     id: 'code-merge',
     level: 'view-toolbar',
     views: ['code-merge'],
-    entries: ['prev-diff', 'next-diff', 'merge-accept', 'export'],
+    entries: ['drilldown-back', 'prev-diff', 'next-diff', 'merge-accept', 'export'],
+    overflow: [],
     controls: [
       control('pending-counter', 84),
       collapsible('merge-open-sides', 318, 78),
-      collapsible('merge-copy', 60, 26)
+      collapsible('merge-copy', 60, 26),
+      control('more', 60)
     ],
-    extra: 88
-  },
-  {
-    id: 'drilldown-lead',
-    level: 'view-toolbar',
-    views: ['csv', 'structured'],
-    entries: ['drilldown-back'],
-    controls: [control('source-title', 170)],
-    extra: 18
+    extra: 32
   },
   {
     id: 'csv',
     level: 'view-toolbar',
     views: ['csv'],
-    entries: [],
+    entries: ['drilldown-back'],
+    overflow: [],
     controls: [
       control('key-label', 33),
       // The key chips absorb the remaining row width; this is their minimum.
@@ -600,8 +572,10 @@ export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
     id: 'structured',
     level: 'view-toolbar',
     views: ['structured'],
-    entries: [],
+    entries: ['drilldown-back'],
+    overflow: [],
     controls: [
+      control('source-title', 170),
       control('format-switch', 98),
       control('sample-hint', 180),
       control('structured-status-filter', 280),
@@ -670,14 +644,14 @@ export function entriesFor(level: ShellLevel, view: ToolbarView = 'directory'): 
   if (level === 'app' || level === 'view-toolbar') {
     return TOOLBAR_ROWS.filter(
       (row) => row.level === level && (level === 'app' || row.views.includes(view))
-    ).flatMap((row) => row.entries)
+    ).flatMap((row) => [...row.entries, ...row.overflow])
   }
   // Levels without a toolbar row (sessions) declare their entries directly.
   return SHELL_ENTRY_IDS.filter((id) => SHELL_ENTRIES[id].level === level)
 }
 
-/** Ready-state chrome this shell must never exceed (44 + 36 + 32). */
-export const CHROME_BASELINE_PX = 112
+/** Ready-state chrome this shell must never exceed (32 + 28 + 24). */
+export const CHROME_BASELINE_PX = 84
 
 /** Reference viewport height used by the content/row-count budgets. */
 export const REFERENCE_VIEWPORT_HEIGHT_PX = 768
@@ -696,13 +670,13 @@ export function mainContentHeightPx(state: 'empty' | 'ready', statusRows = 1): n
   return REFERENCE_VIEWPORT_HEIGHT_PX - chromeHeightPx(state, statusRows)
 }
 
-/** Toolbar rows one view renders (the drilldown lead row only when drilled). */
-export function viewToolbarRows(view: ToolbarView, drilldown = false): number {
+/**
+ * Toolbar rows one view renders. Every view owns exactly one row now: the
+ * drilldown back action sits inside that row instead of growing a second band.
+ */
+export function viewToolbarRows(view: ToolbarView): number {
   return TOOLBAR_ROWS.filter(
-    (row) =>
-      row.level === 'view-toolbar' &&
-      row.views.includes(view) &&
-      (drilldown || row.id !== 'drilldown-lead')
+    (row) => row.level === 'view-toolbar' && row.views.includes(view)
   ).length
 }
 
@@ -710,11 +684,7 @@ export function viewToolbarRows(view: ToolbarView, drilldown = false): number {
 export function toolbarBandHeightPx(rows: number): number {
   if (rows <= 0) return 0
   const metrics = SHELL_LEVELS['view-toolbar']
-  return (
-    SPACING_PX[metrics.paddingY] * 2 +
-    levelHeightPx('view-toolbar') * rows +
-    SPACING_PX[metrics.stackGap] * (rows - 1)
-  )
+  return levelHeightPx('view-toolbar') * rows + SPACING_PX[metrics.stackGap] * (rows - 1)
 }
 
 /** Whole rows fitting into an area of `areaPx`. */
@@ -753,11 +723,10 @@ export function contentRowBudget(
   state: 'empty' | 'ready',
   view: ToolbarView,
   rowPx: number,
-  drilldown = false,
   statusRows = 1
 ): ContentRowBudget {
   const chrome = chromeHeightPx(state, statusRows)
-  const toolbar = toolbarBandHeightPx(viewToolbarRows(view, drilldown))
+  const toolbar = toolbarBandHeightPx(viewToolbarRows(view))
   const panelsInset = SPACING_PX[SHELL_LEVELS.panels.paddingY] * 2
   const panelHeader = levelHeightPx('panels')
   const area = Math.max(0, REFERENCE_VIEWPORT_HEIGHT_PX - chrome - toolbar - panelsInset - panelHeader)

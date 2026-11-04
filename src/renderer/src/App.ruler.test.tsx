@@ -114,8 +114,6 @@ const SUMMARY_LEFT = CODE_SCENE.diff.left.path
 const SUMMARY_RIGHT = CODE_SCENE.diff.right.path
 const LEFT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.left}/src/core/engine.ts`
 const RIGHT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.right}/src/core/engine.ts`
-const SAMPLE_DIRECTORY_ID = `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
-const DRILLDOWN_ID = `file:${SAMPLE_DIRECTORY_ID}::src/core/engine.ts`
 
 function sessionTabs(): HTMLElement[] {
   return within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
@@ -289,7 +287,7 @@ describe('directory drilldown ruler roundtrip', () => {
     fireEvent.scroll(sourceBody)
 
     fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
-    await screen.findByText(DRILLDOWN_ID, {}, { timeout: 4000 })
+    await screen.findByRole('button', { name: '返回上级目录视图' }, { timeout: 4000 })
 
     // Exactly one ruler with at least one marker, painted from the drilled diff.
     expect(rulerElements(container)).toHaveLength(1)
@@ -323,7 +321,7 @@ describe('directory drilldown ruler roundtrip', () => {
 
     // A second drilldown of the same pair paints the same intervals.
     fireEvent.doubleClick(within(screen.getAllByRole('tree')[0]).getAllByText('engine.ts')[0])
-    await screen.findByText(DRILLDOWN_ID, {}, { timeout: 4000 })
+    await screen.findByRole('button', { name: '返回上级目录视图' }, { timeout: 4000 })
     expect(markerRanges(container)).toEqual(firstRanges)
   })
 })

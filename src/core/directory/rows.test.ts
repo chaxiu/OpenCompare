@@ -343,12 +343,16 @@ describe('createDirectoryScrollMap', () => {
     }
 
     const map = createDirectoryScrollMap(FITTING_ROWS, VIEWPORT)
-    expect(map.rowPositionForOffset(4_800)).toBe(200)
-    expect(map.indexForOffset(4_800)).toBe(200)
+    // Derived from the single row-height source, never a stale pixel literal.
+    const position = 4_800 / DIRECTORY_ROW_HEIGHT
+    expect(map.rowPositionForOffset(4_800)).toBeCloseTo(position, 6)
+    expect(map.indexForOffset(4_800)).toBe(Math.floor(position))
     expect(map.rowTop(206, 4_800)).toBe(206 * DIRECTORY_ROW_HEIGHT)
     const range = map.visibleRange(4_800, 10)
-    expect(range.start).toBe(190)
-    expect(range.end).toBe(237)
+    expect(range.start).toBe(Math.floor(position) - 10)
+    expect(range.end).toBe(
+      Math.floor(position) + Math.ceil(VIEWPORT / DIRECTORY_ROW_HEIGHT) + 10
+    )
   })
 
   it('switches to the compressed map at the first row above the cap', () => {

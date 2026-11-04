@@ -16,10 +16,11 @@ import type { MergeAccept, MergeModel, MergeRange, MergeResolutions } from '@cor
 import type { CodeSceneFixture, TextSample } from '@shared/fixtures'
 import type { PlatformPort, TextFileFacts } from '@shared/platform/types'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
-import { Checkbox } from '@renderer/components/Checkbox'
 import { DiffBadge, DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_ROW_HEIGHT, DiffPane } from '@renderer/components/DiffPane'
 import { DiffRuler } from '@renderer/components/DiffRuler'
+import { DropdownMenu } from '@renderer/components/DropdownMenu'
+import type { DropdownItem } from '@renderer/components/DropdownMenu'
 import { Icon } from '@renderer/components/Icon'
 import { MergePane } from '@renderer/components/MergePane'
 import type { MergeLineView } from '@renderer/components/MergePane'
@@ -78,34 +79,6 @@ function offsetTop(range: MergeRange): number {
 /* Two-column line + inline character diff                             */
 /* ------------------------------------------------------------------ */
 
-/** One comparison switch of the diff toolbar, using the shared square toggle. */
-function CodeSwitch({
-  id,
-  checked,
-  label,
-  showLabel,
-  onToggle
-}: {
-  readonly id: 'ignore-newline' | 'ignore-encoding' | 'ignore-whitespace'
-  readonly checked: boolean
-  readonly label: string
-  /** The copy is dropped on the compact tier; the switch stays operable. */
-  readonly showLabel: boolean
-  readonly onToggle: () => void
-}): JSX.Element {
-  return (
-    <Checkbox
-      role="switch"
-      checked={checked}
-      onChange={onToggle}
-      label={label}
-      showLabel={showLabel}
-      data-code-switch={id}
-      className={showLabel ? undefined : 'w-7 justify-center'}
-    />
-  )
-}
-
 function CodeDiffView({
   pair,
   buffer,
@@ -147,15 +120,6 @@ function CodeDiffView({
   readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
-  const tier = useWidthTier()
-  const newlineLabelShown = controlPresentation('code-switch-newline', tier) === 'label'
-  const encodingLabelShown = controlPresentation('code-switch-encoding', tier) === 'label'
-  const whitespaceLabelShown = controlPresentation('code-switch-whitespace', tier) === 'label'
-  const bytesLabelShown = controlPresentation('code-diff-bytes', tier) === 'label'
-  const reloadLabelShown = controlPresentation('code-reload', tier) === 'label'
-  const swapLabelShown = controlPresentation('code-swap', tier) === 'label'
-  const openLeftLabelShown = controlPresentation('open-left', tier) === 'label'
-  const openRightLabelShown = controlPresentation('open-right', tier) === 'label'
   const initial = {
     leftPath: buffer?.leftPath ?? pair.left.path,
     rightPath: buffer?.rightPath ?? pair.right.path,
@@ -178,6 +142,8 @@ function CodeDiffView({
   const [rightFacts, setRightFacts] = useState<TextFileFacts | undefined>(probes?.right)
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const [active, setActive] = useState(0)
+  // Which panel header owns the active mark; independent of the diff block.
+  const [activeSide, setActiveSide] = useState<'left' | 'right'>('left')
   // Bumped on every explicit jump so re-selecting the current block re-scrolls.
   const [jumpToken, setJumpToken] = useState(0)
   // Reload / swap keep the viewport where it was, so the next block-scroll
@@ -443,195 +409,170 @@ function CodeDiffView({
     )
   }
 
+  /** The "more" menu carries every secondary pair action and comparison switch. */
+  function selectMore(id: string): void {
+    switch (id) {
+      case 'code-switch-newline':
+        toggleSwitch('ignoreNewline')
+        break
+      case 'code-switch-encoding':
+        toggleSwitch('ignoreEncoding')
+        break
+      case 'code-switch-whitespace':
+        toggleSwitch('ignoreWhitespace')
+        break
+      case 'code-reload':
+        void reload()
+        break
+      case 'code-swap':
+        swapSides()
+        break
+      case 'reset':
+        reset()
+        break
+      case 'open-left':
+        void open('left')
+        break
+      case 'open-right':
+        void open('right')
+        break
+      default:
+        break
+    }
+  }
+
+  const moreItems: readonly DropdownItem[] = [
+    {
+      id: 'code-switch-newline',
+      label: `${switches.ignoreNewline ? '[x] ' : ''}${t('files.code.ignoreNewline')}`
+    },
+    {
+      id: 'code-switch-encoding',
+      label: `${switches.ignoreEncoding ? '[x] ' : ''}${t('files.code.ignoreEncoding')}`
+    },
+    {
+      id: 'code-switch-whitespace',
+      label: `${switches.ignoreWhitespace ? '[x] ' : ''}${t('files.code.ignoreWhitespace')}`
+    },
+    ...(readSide ? [{ id: 'code-reload', label: t('files.code.reload') }] : []),
+    ...(onPairChange ? [{ id: 'code-swap', label: t('files.code.swap') }] : []),
+    { id: 'reset', label: t('files.code.reset') },
+    { id: 'open-left', label: t('files.action.openLeft') },
+    { id: 'open-right', label: t('files.action.openRight') }
+  ]
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          'flex shrink-0 items-center bg-surface-sunken',
           levelBandClasses('view-toolbar')
         )}
       >
-        {toolbarLeading ? (
-          <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
-            {toolbarLeading}
-          </div>
-        ) : null}
-        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
-        <IconButton
-          data-shell-entry="prev-diff"
-          label={t('files.code.prevDifference')}
-          icon={<Icon name={SHELL_ENTRY_ICONS['prev-diff']} />}
-          onClick={() => step(-1)}
-          disabled={blockCount === 0}
-        />
-        <IconButton
-          data-shell-entry="next-diff"
-          label={t('files.code.nextDifference')}
-          icon={<Icon name={SHELL_ENTRY_ICONS['next-diff']} />}
-          onClick={() => step(1)}
-          disabled={blockCount === 0}
-        />
-        <span className="flex items-center gap-2 text-2xs text-content-muted">
-          {t('files.code.blocks')}
-          <span className="tabular font-mono text-content-secondary">
-            {activeIndex + 1}/{blockCount}
-          </span>
-          {activeBlock ? <DiffBadge status={activeBlock.status} /> : null}
-        </span>
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <CodeSwitch
-          id="ignore-newline"
-          checked={switches.ignoreNewline}
-          label={t('files.code.ignoreNewline')}
-          showLabel={newlineLabelShown}
-          onToggle={() => toggleSwitch('ignoreNewline')}
-        />
-        <CodeSwitch
-          id="ignore-encoding"
-          checked={switches.ignoreEncoding}
-          label={t('files.code.ignoreEncoding')}
-          showLabel={encodingLabelShown}
-          onToggle={() => toggleSwitch('ignoreEncoding')}
-        />
-        <CodeSwitch
-          id="ignore-whitespace"
-          checked={switches.ignoreWhitespace}
-          label={t('files.code.ignoreWhitespace')}
-          showLabel={whitespaceLabelShown}
-          onToggle={() => toggleSwitch('ignoreWhitespace')}
-        />
-        <span className="flex shrink-0 items-center gap-2 text-2xs text-content-muted">
-          {t('files.code.differenceCount')}
-          <span data-code-diff-count className="tabular font-mono text-content-secondary">
-            {diff.differenceCount}
-          </span>
-        </span>
-        {diff.normalization.encoding.byteDifference ? (
-          <span
-            data-code-diff-bytes
-            aria-label={t('files.code.byteDifference')}
-            title={t('files.code.byteDifference')}
-            className="flex shrink-0 items-center gap-1 text-2xs text-danger"
-          >
-            <Icon name={UI_ICON_ACTIONS.warning} />
-            {bytesLabelShown ? t('files.code.byteDifference') : null}
-          </span>
-        ) : null}
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-shell-entry="override" className="flex shrink-0 items-center gap-2">
-          <ToolbarButton
-            size="sm"
-            icon={<Icon name={UI_ICON_ACTIONS.overwriteRight} />}
-            onClick={() => overwrite('to-right')}
-            disabled={activeBlock === null}
-          >
-            {t('files.code.overwriteRight')}
-          </ToolbarButton>
-          <ToolbarButton
-            size="sm"
-            icon={<Icon name={UI_ICON_ACTIONS.overwriteLeft} />}
-            onClick={() => overwrite('to-left')}
-            disabled={activeBlock === null}
-          >
-            {t('files.code.overwriteLeft')}
-          </ToolbarButton>
-        </span>
-        <ToolbarButton
-          size="sm"
-          variant="ghost"
-          icon={<Icon name={UI_ICON_ACTIONS.reset} />}
-          onClick={reset}
-        >
-          {t('files.code.reset')}
-        </ToolbarButton>
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-code-pair-actions className="flex shrink-0 items-center gap-2">
-          {readSide ? (
+        <div className={cx('flex min-w-0 flex-1 items-center', levelRowClasses('view-toolbar'))}>
+          {toolbarLeading}
+          <IconButton
+            data-shell-entry="prev-diff"
+            label={t('files.code.prevDifference')}
+            icon={<Icon name={SHELL_ENTRY_ICONS['prev-diff']} />}
+            onClick={() => step(-1)}
+            disabled={blockCount === 0}
+          />
+          <IconButton
+            data-shell-entry="next-diff"
+            label={t('files.code.nextDifference')}
+            icon={<Icon name={SHELL_ENTRY_ICONS['next-diff']} />}
+            onClick={() => step(1)}
+            disabled={blockCount === 0}
+          />
+          <span data-shell-entry="override" className="flex shrink-0 items-center gap-2">
             <ToolbarButton
               size="sm"
-              data-code-action="reload"
-              aria-label={t('files.code.reload')}
-              title={t('files.code.reload')}
-              icon={<Icon name={UI_ICON_ACTIONS.refresh} />}
-              onClick={() => void reload()}
-            >
-              {reloadLabelShown ? t('files.code.reload') : null}
-            </ToolbarButton>
-          ) : null}
-          {onPairChange ? (
+              aria-label={t('files.code.overwriteRight')}
+              title={t('files.code.overwriteRight')}
+              icon={<Icon name={UI_ICON_ACTIONS.overwriteRight} />}
+              onClick={() => overwrite('to-right')}
+              disabled={activeBlock === null}
+            />
             <ToolbarButton
               size="sm"
-              data-code-action="swap"
-              aria-label={t('files.code.swap')}
-              title={t('files.code.swap')}
-              icon={<Icon name={UI_ICON_ACTIONS.swap} />}
-              onClick={swapSides}
+              aria-label={t('files.code.overwriteLeft')}
+              title={t('files.code.overwriteLeft')}
+              icon={<Icon name={UI_ICON_ACTIONS.overwriteLeft} />}
+              onClick={() => overwrite('to-left')}
+              disabled={activeBlock === null}
+            />
+          </span>
+          <span data-shell-entry="save" className="flex shrink-0 items-center gap-2">
+            <ToolbarButton
+              size="sm"
+              aria-label={t('files.code.saveLeft')}
+              title={t('files.code.saveLeftTitle')}
+              icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
+              onClick={() => void save('left')}
+              disabled={!leftDirty}
+            />
+            <ToolbarButton
+              size="sm"
+              aria-label={t('files.code.saveRight')}
+              title={t('files.code.saveRightTitle')}
+              icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
+              onClick={() => void save('right')}
+              disabled={!rightDirty}
+            />
+          </span>
+          <span className="flex shrink-0 items-center gap-2 text-2xs text-content-muted">
+            {t('files.code.blocks')}
+            <span className="tabular font-mono text-content-secondary">
+              {activeIndex + 1}/{blockCount}
+            </span>
+            {activeBlock ? <DiffBadge status={activeBlock.status} /> : null}
+          </span>
+          <span className="flex shrink-0 items-center gap-2 text-2xs text-content-muted">
+            {t('files.code.differenceCount')}
+            <span data-code-diff-count className="tabular font-mono text-content-secondary">
+              {diff.differenceCount}
+            </span>
+          </span>
+          {diff.normalization.encoding.byteDifference ? (
+            <span
+              data-code-diff-bytes
+              aria-label={t('files.code.byteDifference')}
+              title={t('files.code.byteDifference')}
+              className="flex shrink-0 items-center gap-1 text-2xs text-danger"
             >
-              {swapLabelShown ? t('files.code.swap') : null}
-            </ToolbarButton>
+              <Icon name={UI_ICON_ACTIONS.warning} />
+            </span>
           ) : null}
-        </span>
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-shell-entry="save" className="flex shrink-0 items-center gap-2">
-          <ToolbarButton
+          {dirty ? (
+            <span role="status" className="min-w-0 truncate text-2xs text-diff-modified">
+              {leftDirty && rightDirty
+                ? t('files.code.unsavedBoth')
+                : leftDirty
+                  ? t('files.code.unsavedLeft')
+                  : t('files.code.unsavedRight')}
+            </span>
+          ) : null}
+          {notice ? (
+            <span
+              role="status"
+              className={cx(
+                'min-w-0 truncate text-2xs',
+                notice.tone === 'error' ? 'text-danger' : 'text-diff-added'
+              )}
+            >
+              {notice.text}
+            </span>
+          ) : null}
+          <span aria-hidden className="mx-3 h-5 w-px bg-line-subtle" />
+          <DropdownMenu
+            entryId="more"
             size="sm"
-            icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
-            onClick={() => void save('left')}
-            disabled={!leftDirty}
-            title={t('files.code.saveLeftTitle')}
-          >
-            {t('files.code.saveLeft')}
-          </ToolbarButton>
-          <ToolbarButton
-            size="sm"
-            icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
-            onClick={() => void save('right')}
-            disabled={!rightDirty}
-            title={t('files.code.saveRightTitle')}
-          >
-            {t('files.code.saveRight')}
-          </ToolbarButton>
-        </span>
-        {dirty ? (
-          <span role="status" className="text-2xs text-diff-modified">
-            {leftDirty && rightDirty
-              ? t('files.code.unsavedBoth')
-              : leftDirty
-                ? t('files.code.unsavedLeft')
-                : t('files.code.unsavedRight')}
-          </span>
-        ) : null}
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <ToolbarButton
-          size="sm"
-          aria-label={t('files.action.openLeft')}
-          title={t('files.action.openLeft')}
-          icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
-          onClick={() => void open('left')}
-        >
-          {openLeftLabelShown ? t('files.action.openLeft') : null}
-        </ToolbarButton>
-        <ToolbarButton
-          size="sm"
-          aria-label={t('files.action.openRight')}
-          title={t('files.action.openRight')}
-          icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
-          onClick={() => void open('right')}
-        >
-          {openRightLabelShown ? t('files.action.openRight') : null}
-        </ToolbarButton>
-        {notice ? (
-          <span
-            role="status"
-            className={cx(
-              'text-2xs',
-              notice.tone === 'error' ? 'text-danger' : 'text-diff-added'
-            )}
-          >
-            {notice.text}
-          </span>
-        ) : null}
+            label={t('shell.toolbar.more')}
+            items={moreItems}
+            onSelect={selectMore}
+          />
         </div>
       </div>
 
@@ -644,7 +585,11 @@ function CodeDiffView({
             <Panel
               key="left"
               title={leftPath}
+              address={leftPath}
               subtitle={t('files.code.sideLeft')}
+              active={activeSide === 'left'}
+              onActivate={() => setActiveSide('left')}
+              onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
               meta={
                 leftDirty ? (
                   <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
@@ -662,7 +607,11 @@ function CodeDiffView({
             <Panel
               key="right"
               title={rightPath}
+              address={rightPath}
               subtitle={t('files.code.sideRight')}
+              active={activeSide === 'right'}
+              onActivate={() => setActiveSide('right')}
+              onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
               meta={
                 rightDirty ? (
                   <span className="text-2xs text-diff-modified">{t('files.code.modified')}</span>
@@ -739,11 +688,12 @@ function CodeMergeView({
   // The layout table owns the collapse rule; the row only asks it.
   const tier = useWidthTier()
   const openSideCopyShown = controlPresentation('merge-open-sides', tier) === 'label'
-  const copyCopyShown = controlPresentation('merge-copy', tier) === 'label'
   const baseScroll = useRef<HTMLDivElement>(null)
   const oursScroll = useRef<HTMLDivElement>(null)
   const theirsScroll = useRef<HTMLDivElement>(null)
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
+  // Which merge pane owns the active header mark.
+  const [activeSide, setActiveSide] = useState<MergeSideKey>('ours')
 
   const conflictCount = model.conflictIds.length
   const activeIndex = conflictCount === 0 ? -1 : Math.min(activeConflict, conflictCount - 1)
@@ -823,92 +773,85 @@ function CodeMergeView({
     }
   }
 
+  /** The "more" menu keeps secondary merge actions off the single row. */
+  function selectMore(id: string): void {
+    // Copy stays gated on a fully resolved merge, exactly like the old button.
+    if (id === 'merge-copy' && render.unresolved === 0) void copyText()
+  }
+
+  const moreItems: readonly DropdownItem[] = [
+    {
+      id: 'merge-copy',
+      label: t('files.action.copy'),
+      description:
+        render.unresolved > 0 ? t('files.merge.previewUnresolved') : undefined,
+      icon: <Icon name={UI_ICON_ACTIONS.copy} />
+    }
+  ]
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          'flex shrink-0 items-center bg-surface-sunken',
           levelBandClasses('view-toolbar')
         )}
       >
-        {toolbarLeading ? (
-          <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
-            {toolbarLeading}
-          </div>
-        ) : null}
-        <div className={cx('flex shrink-0 items-center', levelRowClasses('view-toolbar'))}>
-        <IconButton
-          data-shell-entry="prev-diff"
-          label={t('files.merge.prevConflict')}
-          icon={<Icon name={SHELL_ENTRY_ICONS['prev-diff']} />}
-          onClick={() => step(-1)}
-          disabled={conflictCount === 0}
-        />
-        <IconButton
-          data-shell-entry="next-diff"
-          label={t('files.merge.nextConflict')}
-          icon={<Icon name={SHELL_ENTRY_ICONS['next-diff']} />}
-          onClick={() => step(1)}
-          disabled={conflictCount === 0}
-        />
-        <span className="flex items-center gap-2 text-2xs text-content-muted">
-          {t('files.merge.pending')}
-          <span className="tabular font-mono text-content-secondary">
-            {render.unresolved}/{conflictCount}
-          </span>
-        </span>
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-shell-entry="merge-accept" className="flex shrink-0 items-center gap-2">
-          {ACCEPT_OPTIONS.map((option) => (
-            <ToolbarButton
-              key={option.value}
-              size="sm"
-              variant={activeId && resolutions[activeId] === option.value ? 'primary' : 'default'}
-              onClick={() => {
-                if (activeId) onResolve(activeId, option.value)
-              }}
-              disabled={activeId === null}
-            >
-              {t(option.key)}
-            </ToolbarButton>
-          ))}
-        </span>
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        {(Object.keys(MERGE_SIDE_KEYS) as MergeSideKey[]).map((which) => (
-          <ToolbarButton
-            key={which}
-            size="sm"
-            aria-label={t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })}
-            icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
-            onClick={() => void openSide(which)}
-          >
-            {openSideCopyShown
-              ? t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })
-              : null}
-          </ToolbarButton>
-        ))}
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          {notice ? (
-            <span
-              role="status"
-              className={cx(
-                'text-2xs',
-                notice.tone === 'error' ? 'text-danger' : 'text-diff-added'
-              )}
-            >
-              {notice.text}
+        <div className={cx('flex min-w-0 flex-1 items-center', levelRowClasses('view-toolbar'))}>
+          {toolbarLeading}
+          <IconButton
+            data-shell-entry="prev-diff"
+            label={t('files.merge.prevConflict')}
+            icon={<Icon name={SHELL_ENTRY_ICONS['prev-diff']} />}
+            onClick={() => step(-1)}
+            disabled={conflictCount === 0}
+          />
+          <IconButton
+            data-shell-entry="next-diff"
+            label={t('files.merge.nextConflict')}
+            icon={<Icon name={SHELL_ENTRY_ICONS['next-diff']} />}
+            onClick={() => step(1)}
+            disabled={conflictCount === 0}
+          />
+          <span className="flex shrink-0 items-center gap-2 text-2xs text-content-muted">
+            {t('files.merge.pending')}
+            <span className="tabular font-mono text-content-secondary">
+              {render.unresolved}/{conflictCount}
             </span>
-          ) : null}
-          <ToolbarButton
-            size="sm"
-            aria-label={t('files.action.copy')}
-            icon={<Icon name={UI_ICON_ACTIONS.copy} />}
-            onClick={() => void copyText()}
-            disabled={render.unresolved > 0}
-          >
-            {copyCopyShown ? t('files.action.copy') : null}
-          </ToolbarButton>
+          </span>
+          <span data-shell-entry="merge-accept" className="flex shrink-0 items-center gap-2">
+            {ACCEPT_OPTIONS.map((option) => (
+              <ToolbarButton
+                key={option.value}
+                size="sm"
+                variant={
+                  activeId && resolutions[activeId] === option.value ? 'primary' : 'default'
+                }
+                onClick={() => {
+                  if (activeId) onResolve(activeId, option.value)
+                }}
+                disabled={activeId === null}
+              >
+                {t(option.key)}
+              </ToolbarButton>
+            ))}
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {(Object.keys(MERGE_SIDE_KEYS) as MergeSideKey[]).map((which) => (
+              <ToolbarButton
+                key={which}
+                size="sm"
+                aria-label={t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })}
+                icon={<Icon name={SHELL_ENTRY_ICONS['open-folder']} />}
+                onClick={() => void openSide(which)}
+              >
+                {openSideCopyShown
+                  ? t('files.merge.openSide', { side: t(MERGE_SIDE_KEYS[which]) })
+                  : null}
+              </ToolbarButton>
+            ))}
+          </span>
           <ToolbarButton
             size="sm"
             data-shell-entry="export"
@@ -916,10 +859,29 @@ function CodeMergeView({
             icon={<Icon name={SHELL_ENTRY_ICONS.export} />}
             onClick={() => void saveText()}
             disabled={render.unresolved > 0}
+            className="ml-auto"
           >
             {t('files.merge.export')}
           </ToolbarButton>
-        </span>
+          {notice ? (
+            <span
+              role="status"
+              className={cx(
+                'min-w-0 truncate text-2xs',
+                notice.tone === 'error' ? 'text-danger' : 'text-diff-added'
+              )}
+            >
+              {notice.text}
+            </span>
+          ) : null}
+          <span aria-hidden className="mx-3 h-5 w-px bg-line-subtle" />
+          <DropdownMenu
+            entryId="more"
+            size="sm"
+            label={t('shell.toolbar.more')}
+            items={moreItems}
+            onSelect={selectMore}
+          />
         </div>
       </div>
 
@@ -929,17 +891,41 @@ function CodeMergeView({
       >
       <SplitPane
         panes={[
-          <Panel key="base" title={sides.base.path} subtitle={t(MERGE_SIDE_KEYS.base)}>
+          <Panel
+            key="base"
+            title={sides.base.path}
+            address={sides.base.path}
+            subtitle={t(MERGE_SIDE_KEYS.base)}
+            active={activeSide === 'base'}
+            onActivate={() => setActiveSide('base')}
+            onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
+          >
             <MergePane lines={baseLines.map((text) => ({ text }))} scrollRef={baseScroll} />
           </Panel>,
-          <Panel key="ours" title={sides.ours.path} subtitle={t(MERGE_SIDE_KEYS.ours)}>
+          <Panel
+            key="ours"
+            title={sides.ours.path}
+            address={sides.ours.path}
+            subtitle={t(MERGE_SIDE_KEYS.ours)}
+            active={activeSide === 'ours'}
+            onActivate={() => setActiveSide('ours')}
+            onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
+          >
             <MergePane
               lines={oursLines.map((text) => ({ text }))}
               activeRange={activeBlock?.oursRange}
               scrollRef={oursScroll}
             />
           </Panel>,
-          <Panel key="theirs" title={sides.theirs.path} subtitle={t(MERGE_SIDE_KEYS.theirs)}>
+          <Panel
+            key="theirs"
+            title={sides.theirs.path}
+            address={sides.theirs.path}
+            subtitle={t(MERGE_SIDE_KEYS.theirs)}
+            active={activeSide === 'theirs'}
+            onActivate={() => setActiveSide('theirs')}
+            onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
+          >
             <MergePane
               lines={theirsLines.map((text) => ({ text }))}
               activeRange={activeBlock?.theirsRange}
@@ -1179,7 +1165,9 @@ export function CodeView({
     <>
       {toolbarLeading}
       {adhoc ? (
-        <span className="text-2xs text-content-muted">{t('files.code.drilldown')}</span>
+        <span className="min-w-0 truncate text-2xs text-content-muted">
+          {t('files.code.drilldown')}
+        </span>
       ) : mergeOnly ? null : (
         <>
           <SegmentedControl

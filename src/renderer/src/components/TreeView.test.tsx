@@ -199,12 +199,19 @@ describe('TreeView beyond the browser height cap', () => {
     const big = render(
       <TreeHarness rows={lazyRows(1_516_096)} initialScrollTop={0} selectedPath={null} />
     )
+    expect(DIRECTORY_ROW_HEIGHT).toBe(28)
     const height = Number.parseFloat(treeElement().style.height)
     expect(height).toBe(DIRECTORY_MAX_TREE_HEIGHT)
     expect(height).toBeLessThan(2 ** 24)
+    // Row boxes and the translateY window both derive from the same 28px.
+    const bigRows = renderedRows()
+    expect(bigRows[0].parentElement?.style.height).toBe('28px')
+    expect(bigRows[1].parentElement?.style.transform).toBe('translateY(28px)')
     big.unmount()
 
-    for (const rowCount of [5_000, 699_050]) {
+    // 599,000 × 28 = 16,772,000 stays under the 2^24 layout cap, so the
+    // identity map is still pixel-exact.
+    for (const rowCount of [5_000, 599_000]) {
       const small = render(
         <TreeHarness rows={lazyRows(rowCount)} initialScrollTop={0} selectedPath={null} />
       )

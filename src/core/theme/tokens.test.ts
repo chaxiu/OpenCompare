@@ -196,6 +196,17 @@ describe('direction document matches the shipped tokens', () => {
     }
   })
 
+  it('keeps the control shape inventory at three radius steps and three heights', () => {
+    // Shapes stay within rectangle (radius xs/sm/md), round dot and thin bar;
+    // the only radius scale is the three-step token set.
+    const radii = [...new Set(parseRadiusPx(css))]
+    expect(radii).toHaveLength(3)
+    expect(radii.sort((a, b) => a - b)).toEqual([4, 6, 8])
+    const heights = [...new Set(parseControlHeightsPx(css))]
+    expect(heights).toHaveLength(3)
+    expect(css).not.toMatch(/border-radius:\s*[0-9]+px/)
+  })
+
   it('lists the type, radius and control-height values', () => {
     for (const [name, entry] of Object.entries(parseTypeScale(css))) {
       expect(direction, `--text-${name}`).toContain(

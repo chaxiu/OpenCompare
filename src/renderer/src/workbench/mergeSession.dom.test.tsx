@@ -24,7 +24,13 @@ const copy = (key: string): string => zh[key as MessageKey]
 const tabs = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>('[data-session-tab]'))
 const rows = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>('[data-history-entry]'))
 const rowPaths = (row: HTMLElement): string => row.querySelector('[data-history-paths]')?.getAttribute('title') ?? ''
-const panel = (path: string): HTMLElement => document.querySelector<HTMLElement>(`section header span[title="${path}"]`)!.closest('section')!
+const panel = (path: string): HTMLElement => {
+  const node = document.querySelector<HTMLElement>(
+    `section header [data-panel-address][title="${path}"]`
+  )
+  if (node === null) throw new Error(`missing panel: ${path}`)
+  return node.closest('section')!
+}
 const conflicts = (): number => Number(/冲突块\s*(\d+)/.exec(screen.getByRole('contentinfo').textContent ?? '')?.[1])
 const reopenName = (paths: string[]): string => copy('shell.history.reopenTitle').replace('{paths}', paths.join(' ↔ '))
 const readHistory = (port: PlatformPort) => port.readComparisonHistory()
@@ -33,7 +39,46 @@ const closeTab = (tab: HTMLElement): void => {
 }
 const reopenButton = (paths: string[]): HTMLElement => within(rows().find((row) => rowPaths(row) === paths.join(' ↔ '))!).getByRole('button', { name: reopenName(paths) })
 const mergeError = (code: string, path: string): string => copy(`shell.merge.error.${code}`).replace('{side}', copy('files.merge.side.base')).replace('{path}', path)
-const switchEl = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-code-switch="${id}"]`)!
+const SWITCH_LABELS: Record<string, string> = {
+  'ignore-newline': copy('files.code.ignoreNewline'),
+  'ignore-encoding': copy('files.code.ignoreEncoding'),
+  'ignore-whitespace': copy('files.code.ignoreWhitespace')
+}
+/** The active view's single toolbar overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+function closeMore(): void {
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+}
+function menuItem(label: string): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(label)
+  })
+}
+/** One comparison switch, now a menu item; the leading [x] is the checked state. */
+function switchItem(id: string): HTMLElement {
+  return menuItem(SWITCH_LABELS[id])
+}
+function switchChecked(id: string): string {
+  const state = (switchItem(id).textContent ?? '').trimStart().startsWith('[x]') ? 'true' : 'false'
+  closeMore()
+  return state
+}
+function toggleSwitch(id: string): void {
+  fireEvent.click(switchItem(id))
+}
 const historyKeys = (): string[] => Object.keys(localStorage).sort()
 const mount = (port: PlatformPort): void => {
   renderWithI18n(<Workbench platform={port} />, 'zh')
@@ -250,11 +295,11 @@ describe('merge history switch fidelity', () => {
       for (const path of second) await port.writeTextFile(path, 'one\ntwo\nthree\n')
       mount(port)
       await openPair(pairLeft, pairRight)
-      await waitFor(() => expect(switchEl('ignore-whitespace')).not.toBeNull())
-      fireEvent.click(switchEl('ignore-whitespace'))
-      fireEvent.click(switchEl('ignore-newline'))
-      expect(switchEl('ignore-whitespace').getAttribute('aria-checked')).toBe('true')
-      expect(switchEl('ignore-newline').getAttribute('aria-checked')).toBe('false')
+      await waitFor(() => expect(switchItem('ignore-whitespace')).toBeDefined())
+      toggleSwitch('ignore-whitespace')
+      toggleSwitch('ignore-newline')
+      expect(switchChecked('ignore-whitespace')).toBe('true')
+      expect(switchChecked('ignore-newline')).toBe('false')
       await closeAllTabs()
 
       const before = await readHistory(port)
@@ -358,10 +403,10 @@ describe('merge history switch fidelity', () => {
       // The stored combination (whitespace on, newline / encoding off) must not
       // leak into the shell after the failure.
       await openPair(pairLeft, pairRight)
-      await waitFor(() => expect(switchEl('ignore-whitespace')).not.toBeNull())
-      expect(switchEl('ignore-whitespace').getAttribute('aria-checked')).toBe('false')
-      expect(switchEl('ignore-newline').getAttribute('aria-checked')).toBe('true')
-      expect(switchEl('ignore-encoding').getAttribute('aria-checked')).toBe('true')
+      await waitFor(() => expect(switchItem('ignore-whitespace')).toBeDefined())
+      expect(switchChecked('ignore-whitespace')).toBe('false')
+      expect(switchChecked('ignore-newline')).toBe('true')
+      expect(switchChecked('ignore-encoding')).toBe('true')
       const output = calls.join('\n')
       for (const path of [...ordered, pairLeft, pairRight]) expect(output).not.toContain(path)
     } finally {

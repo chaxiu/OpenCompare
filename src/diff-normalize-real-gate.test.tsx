@@ -74,13 +74,34 @@ interface DomFacts {
 let fixtures: WrittenFixtures
 let run: EvidenceRun
 let dom: DomFacts
+const SWITCH_LABELS: Record<SwitchId, string> = {
+  'ignore-newline': zh['files.code.ignoreNewline'],
+  'ignore-encoding': zh['files.code.ignoreEncoding']
+}
+/** The single toolbar overflow trigger; every comparison switch lives inside. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+/** Opens the overflow menu and returns it, idempotently. */
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
 function switchOf(id: SwitchId): HTMLElement {
-  const element = document.querySelector<HTMLElement>(`[data-code-switch="${id}"]`)
-  if (element === null) throw new Error(`missing comparison switch: ${id}`)
-  return element
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(SWITCH_LABELS[id])
+  })
+}
+function switchState(id: SwitchId): string {
+  return (switchOf(id).textContent ?? '').trimStart().startsWith('[x]') ? 'true' : 'false'
 }
 function checkedState(): readonly [string | null, string | null] {
-  return [switchOf('ignore-newline').getAttribute('aria-checked'), switchOf('ignore-encoding').getAttribute('aria-checked')]
+  return [switchState('ignore-newline'), switchState('ignore-encoding')]
 }
 function countValue(): number {
   return Number(document.querySelector('[data-code-diff-count]')?.textContent ?? 'NaN')
@@ -166,11 +187,18 @@ async function measureDom(): Promise<DomFacts> {
     fireEvent.click(switchOf('ignore-encoding'))
     snap()
     const statusAfterClickCycle = statusValues()
+    // Menu items are native buttons: a Space / Enter press activates the same
+    // click handler. jsdom has no default button activation, so focus the item
+    // and dispatch the click the browser would synthesize.
     const spaceStart = performance.now()
-    fireEvent.keyDown(switchOf('ignore-newline'), { key: ' ' })
+    const spaceItem = switchOf('ignore-newline')
+    spaceItem.focus()
+    fireEvent.click(spaceItem)
     const switchSpaceMs = performance.now() - spaceStart
     snap()
-    fireEvent.keyDown(switchOf('ignore-newline'), { key: ' ' })
+    const spaceItemAgain = switchOf('ignore-newline')
+    spaceItemAgain.focus()
+    fireEvent.click(spaceItemAgain)
     snap()
     const statusAfterSpaceCycle = statusValues()
     const rows = paneRows()
@@ -319,12 +347,12 @@ describe('diff normalization on real external files', () => {
     expect(readings.countDefault).toBe(0)
     expect(readings.countClickOff).toBeGreaterThan(0)
     expect(readings.countClickReopened).toBe(0)
-    expect(readings.statusDefault).toEqual(['CRLF', 'UTF-8', 'LF', 'GBK'])
+    expect(readings.statusDefault).toEqual(['CRLF', 'LF', 'UTF-8', 'GBK'])
     expect(readings.statusAfterClickCycle).toEqual(readings.statusDefault)
     expect(readings.statusAfterSpaceCycle).toEqual(readings.statusDefault)
     expect(dom.tagName).toBe('BUTTON')
-    expect(dom.role).toBe('switch')
-    expect(dom.encodingRole).toBe('switch')
+    expect(dom.role).toBe('menuitem')
+    expect(dom.encodingRole).toBe('menuitem')
     expect(dom.encodingTagName).toBe('BUTTON')
     expect(dom.encodingFocusable).toBe(true)
     expect(dom.tabIndex).toBe(0)

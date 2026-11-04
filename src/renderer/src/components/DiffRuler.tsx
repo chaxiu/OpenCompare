@@ -176,53 +176,62 @@ export function DiffRuler({
           onJumpActive()
         }
       }}
-      className="focus-ring relative w-9 shrink-0 overflow-hidden rounded-sm border border-line-subtle bg-surface-sunken"
+      className="focus-ring relative flex shrink-0 pr-1.5"
     >
-      {markers.map(({ band, blockIndex }) => {
-        const active =
-          activeBlock !== null &&
-          band.startRow <= activeBlock.endRow &&
-          band.endRow >= activeBlock.startRow
-        // Paint every marker at least clickable, then pull it back inside the
-        // track; the `data-*` row range stays the projected one.
-        const height = Math.min(trackHeight, Math.max(RULER_MARKER_MIN_HEIGHT, band.height))
-        const top = Math.min(Math.max(0, band.top), Math.max(0, trackHeight - height))
-
-        return (
-          <div
-            key={`${band.status}-${band.startRow}`}
-            role="option"
-            aria-selected={active}
-            aria-label={t('files.code.ruler.marker', {
-              status: t(DIFF_LABEL_KEYS[band.status]),
-              start: band.startRow + 1,
-              end: band.endRow + 1
-            })}
-            data-diff-status={band.status}
-            data-start-row={band.startRow}
-            data-end-row={band.endRow}
-            onClick={(event) => {
-              // A marker picks its own block exactly; the track handler must not
-              // fire a second, ratio-based selection on top of it.
-              event.stopPropagation()
-              if (blockIndex >= 0) onSelectBlock(blockIndex)
-            }}
-            style={{ top, height }}
-            className={cx(
-              'absolute inset-x-1 cursor-pointer',
-              DIFF_DOT_CLASSES[band.status],
-              active ? 'z-10 outline outline-1 outline-accent' : ''
-            )}
-          />
-        )
-      })}
       <div
-        aria-hidden
-        data-window-top={Math.round(viewportWindow.top)}
-        data-window-height={Math.round(viewportWindow.height)}
-        style={{ top: viewportWindow.top, height: viewportWindow.height }}
-        className="pointer-events-none absolute inset-x-0 border-y border-accent/40 bg-surface-raised/20"
-      />
+        data-ruler-track="true"
+        style={{ width: 2 }}
+        className="relative w-0.5 shrink-0 overflow-hidden rounded-sm bg-line-subtle"
+      >
+        {markers.map(({ band, blockIndex }) => {
+          const active =
+            activeBlock !== null &&
+            band.startRow <= activeBlock.endRow &&
+            band.endRow >= activeBlock.startRow
+          // Paint every marker at least clickable, then pull it back inside the
+          // track; the `data-*` row range stays the projected one.
+          const height = Math.min(trackHeight, Math.max(RULER_MARKER_MIN_HEIGHT, band.height))
+          const top = Math.min(Math.max(0, band.top), Math.max(0, trackHeight - height))
+          const label = t('files.code.ruler.marker', {
+            status: t(DIFF_LABEL_KEYS[band.status]),
+            start: band.startRow + 1,
+            end: band.endRow + 1
+          })
+
+          return (
+            <div
+              key={`${band.status}-${band.startRow}`}
+              role="option"
+              aria-selected={active}
+              aria-label={label}
+              // Hovering a marker reveals the line range it covers.
+              title={label}
+              data-diff-status={band.status}
+              data-start-row={band.startRow}
+              data-end-row={band.endRow}
+              onClick={(event) => {
+                // A marker picks its own block exactly; the track handler must not
+                // fire a second, ratio-based selection on top of it.
+                event.stopPropagation()
+                if (blockIndex >= 0) onSelectBlock(blockIndex)
+              }}
+              style={{ top, height }}
+              className={cx(
+                'absolute inset-x-0 cursor-pointer',
+                DIFF_DOT_CLASSES[band.status],
+                active ? 'z-10 outline outline-1 outline-accent' : ''
+              )}
+            />
+          )
+        })}
+        <div
+          aria-hidden
+          data-window-top={Math.round(viewportWindow.top)}
+          data-window-height={Math.round(viewportWindow.height)}
+          style={{ top: viewportWindow.top, height: viewportWindow.height }}
+          className="pointer-events-none absolute inset-x-0 border-y border-accent/40 bg-content-muted/25"
+        />
+      </div>
     </div>
   )
 }

@@ -84,14 +84,41 @@ function selectedFileInto(label: string, file: File): void {
   fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } })
 }
 
+/** The active view's single toolbar overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+/** One overflow item, matched by its visible label inside the accessible name. */
+function moreItem(label: string): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(label)
+  })
+}
+
+/** One diff-semantic count from the visible view legend. */
+function legendCount(status: string): number {
+  return Number(document.querySelector(`[data-legend-status="${status}"] .tabular`)?.textContent)
+}
+
 describe('snapshot workbench integration', () => {
   it('loads the remote snapshot sample with a snapshot-labelled right pane and four statuses', async () => {
     await loadWorkbench()
 
     startSample('remote-snapshot')
 
-    expect(await screen.findByText('/snapshots/right/remote-prod')).toBeDefined()
-    expect(screen.getAllByText('remote-prod').length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('/snapshots/right/remote-prod')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('tab', { name: /baseline ↔ remote-prod/ })).toBeDefined()
     expect(screen.getAllByText('快照').length).toBeGreaterThan(0)
 
     const comparison = await compareSides(
@@ -103,17 +130,16 @@ describe('snapshot workbench integration', () => {
       expect(comparison.counts[status]).toBeGreaterThan(0)
     }
 
-    const statusBar = screen.getByRole('contentinfo').textContent ?? ''
-    // Directory statuses read through the directory vocabulary.
-    expect(statusBar).toContain(
-      `${comparison.counts.same}${zh['directory.filter.same']}${comparison.counts.added}${zh['directory.filter.rightOnly']}${comparison.counts.removed}${zh['directory.filter.leftOnly']}${comparison.counts.modified}${zh['common.diff.modified']}`
-    )
+    // The four status counts are read from the view legend, not the status bar.
+    for (const status of ['same', 'added', 'removed', 'modified'] as const) {
+      expect(legendCount(status)).toBe(comparison.counts[status])
+    }
   })
 
   it('filters a snapshot comparison by status', async () => {
     await loadWorkbench()
     startSample('remote-snapshot')
-    await screen.findByText('/snapshots/right/remote-prod')
+    await screen.findAllByText('/snapshots/right/remote-prod')
 
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
     expect(screen.queryByText('parser.ts')).toBeNull()
@@ -134,7 +160,7 @@ describe('snapshot workbench integration', () => {
   it('drills snapshot files into code, CSV and structured views pointing at the mount', async () => {
     await loadWorkbench()
     startSample('remote-snapshot')
-    await screen.findByText('/snapshots/right/remote-prod')
+    await screen.findAllByText('/snapshots/right/remote-prod')
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
 
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
@@ -189,7 +215,7 @@ describe('snapshot workbench integration', () => {
     startSample('directory')
     await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
 
-    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+    fireEvent.click(moreItem('导出左侧快照'))
 
     expect(
       await screen.findByText(/已导出到 \/memory\/baseline\.ocsnap\.json（15 个文件）/)
@@ -214,7 +240,7 @@ describe('snapshot workbench integration', () => {
     await screen.findByRole('tab', { name: /baseline ↔ candidate/ }, { timeout: 4000 })
     const before = screen.getByRole('contentinfo').textContent
 
-    fireEvent.click(screen.getByRole('button', { name: '导出左侧快照' }))
+    fireEvent.click(moreItem('导出左侧快照'))
 
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(screen.getByRole('contentinfo').textContent).toBe(before)
@@ -233,11 +259,12 @@ describe('snapshot workbench integration', () => {
       new File([exported.text], 'baseline.ocsnap.json', { type: 'application/json' })
     )
 
-    expect(await screen.findByText('/snapshots/right/baseline')).toBeDefined()
+    expect((await screen.findAllByText('/snapshots/right/baseline')).length).toBeGreaterThan(0)
     expect(await screen.findByText(/已挂载快照 baseline/)).toBeDefined()
-    expect(screen.getByRole('contentinfo').textContent).toContain(
-      `15${zh['directory.filter.same']}0${zh['directory.filter.rightOnly']}0${zh['directory.filter.leftOnly']}0${zh['common.diff.modified']}`
-    )
+    expect(legendCount('same')).toBe(15)
+    expect(legendCount('added')).toBe(0)
+    expect(legendCount('removed')).toBe(0)
+    expect(legendCount('modified')).toBe(0)
 
     fireEvent.click(screen.getByRole('tab', { name: '仅差异' }))
     expect(screen.getAllByText(/当前过滤下/).length).toBe(2)
@@ -246,7 +273,7 @@ describe('snapshot workbench integration', () => {
   it('rejects a non-snapshot file and keeps the current comparison', async () => {
     await loadWorkbench()
     startSample('remote-snapshot')
-    await screen.findByText('/snapshots/right/remote-prod')
+    await screen.findAllByText('/snapshots/right/remote-prod')
     const before = screen.getByRole('contentinfo').textContent ?? ''
 
     selectedFileInto(
@@ -256,8 +283,8 @@ describe('snapshot workbench integration', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('快照导入失败')
-    expect(screen.getByText('/samples/directory/baseline')).toBeDefined()
-    expect(screen.getByText('/snapshots/right/remote-prod')).toBeDefined()
+    expect(screen.getAllByText('/samples/directory/baseline').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('/snapshots/right/remote-prod').length).toBeGreaterThan(0)
     expect(screen.getByRole('contentinfo').textContent).toBe(before)
   })
 
@@ -274,15 +301,17 @@ describe('snapshot workbench integration', () => {
       '选择右侧快照文件',
       new File([serializeSnapshot(document)], 'meta-only.ocsnap.json', { type: 'application/json' })
     )
-    await screen.findByText('/snapshots/right/meta-only')
+    await screen.findAllByText('/snapshots/right/meta-only')
 
     fireEvent.doubleClick(screen.getAllByText('notes.ts')[0])
 
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toContain('未内联')
     })
-    // No empty drilldown session replaced the comparison.
-    expect(screen.getByRole('contentinfo').textContent).toContain('/snapshots/right/meta-only')
+    // No empty drilldown session replaced the comparison: the mount stays the
+    // active comparison and the address bar still shows the snapshot root.
+    expect(screen.getAllByText('/snapshots/right/meta-only').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('tab', { name: /notes\.ts/ })).toBeNull()
   })
 })
 
@@ -351,7 +380,7 @@ describe('snapshot failure copy', () => {
       'Choose right snapshot file',
       new File([serializeSnapshot(document)], 'meta-only.ocsnap.json')
     )
-    await screen.findByText('/snapshots/right/meta-only')
+    await screen.findAllByText('/snapshots/right/meta-only')
 
     fireEvent.doubleClick(screen.getAllByText('notes.ts')[0])
     await waitFor(() =>

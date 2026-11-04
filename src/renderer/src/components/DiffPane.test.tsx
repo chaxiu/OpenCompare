@@ -233,9 +233,9 @@ describe('DiffPane windowing', () => {
 
     const leftRows = renderedRows(left)
     const rightRows = renderedRows(right)
-    // Measured: 30 visible rows + 10 overscan rows above and below.
+    // Measured: 28 visible rows + 10 overscan rows above and below.
     expect(leftRows).toHaveLength(ROW_LIMIT)
-    expect(leftRows).toHaveLength(50)
+    expect(leftRows).toHaveLength(48)
     expect(Math.abs(leftRows.length - rightRows.length)).toBeLessThanOrEqual(2 * OVERSCAN)
     // The rendered range stays inside the visible band plus overscan.
     expect(renderedIndices(left)[0]).toBe(175_000 - OVERSCAN)
@@ -265,9 +265,9 @@ describe('DiffPane windowing', () => {
     const { container } = render(<TwoPanes rows={LARGE_ROWS} />)
     const [left, right] = paneElements(container)
 
-    expect(DIFF_ROW_HEIGHT).toBe(20)
-    expect(contentOf(left).style.height).toBe('7000000px')
-    expect(contentOf(left).dataset.diffContentHeight).toBe('7000000')
+    expect(DIFF_ROW_HEIGHT).toBe(22)
+    expect(contentOf(left).style.height).toBe('7700000px')
+    expect(contentOf(left).dataset.diffContentHeight).toBe('7700000')
     expect(contentOf(right).style.height).toBe(contentOf(left).style.height)
     expect(contentOf(right).dataset.diffContentHeight).toBe(
       contentOf(left).dataset.diffContentHeight
@@ -283,10 +283,17 @@ describe('DiffPane windowing', () => {
 
     expect(contentOf(left).dataset.diffWindowStart).toBe(String(middle))
     const middleRow = rowAt(left, middle)
-    // Same 20px row shell and sticky gutter as the full-render path.
-    expect(middleRow.className).toContain('flex h-5 border-l-2')
+    // Same 22px row shell and sticky gutter as the full-render path.
+    expect(middleRow.className).toContain('flex border-l-2')
+    expect(middleRow.style.height).toBe('22px')
+    expect(middleRow.style.lineHeight).toBe('22px')
     expect(middleRow.firstElementChild?.className).toContain('sticky left-0')
-    expect(middleRow.querySelectorAll('.bg-diff-modified\\/40')).toHaveLength(1)
+    // The inline wash is a <=15% soft background plus a 1px underline.
+    const inline = middleRow.querySelector<HTMLElement>('.bg-diff-modified\\/12')
+    expect(inline?.textContent).toBe('174989')
+    expect(inline?.className).toContain('underline')
+    expect(inline?.className).toContain('decoration-1')
+    expect(middleRow.querySelectorAll('.bg-diff-modified\\/40')).toHaveLength(0)
     expect(middleRow.textContent).toContain('174989')
     expect(middleRow.textContent).toContain('left 174989')
 
@@ -369,7 +376,8 @@ describe('DiffPane windowing', () => {
     expect(rowAt(right, 1).lastElementChild?.className).toContain('bg-diff-added-soft')
     expect(rowAt(left, 2).lastElementChild?.className).toContain('bg-diff-removed-soft')
     expect(rowAt(left, 3).lastElementChild?.className).toContain('bg-diff-modified-soft')
-    expect(rowAt(left, 3).querySelector('.bg-diff-modified\\/40')?.textContent).toBe('4')
+    expect(rowAt(left, 3).querySelector('.bg-diff-modified\\/12')?.textContent).toBe('4')
+    expect(rowAt(left, 3).querySelector('.bg-diff-modified\\/40')).toBeNull()
     expect(rowAt(left, 4).lastElementChild?.className).toContain('bg-diff-conflict-soft')
   })
 
@@ -404,10 +412,15 @@ describe('DiffPane small-file path', () => {
     const [left, right] = paneElements(container)
 
     const same = rowAt(left, 0)
-    expect(same.className).toContain('flex h-5 border-l-2')
+    expect(same.className).toContain('flex border-l-2')
+    expect(same.style.height).toBe('22px')
+    expect(same.style.lineHeight).toBe('22px')
     const gutter = same.firstElementChild as HTMLElement
     expect(gutter.className).toContain('sticky left-0')
     expect(gutter.className).toContain('bg-surface-raised')
+    // The line-number gutter shares the body's 12px font and 22px line height.
+    expect(gutter.className).toContain('text-xs')
+    expect(gutter.style.lineHeight).toBe('22px')
     expect(gutter.textContent).toBe('1')
 
     // An `added` row is a filler on the left: empty gutter on sunken surface.
@@ -422,9 +435,12 @@ describe('DiffPane small-file path', () => {
     expect(rowAt(left, 3).lastElementChild?.className).toContain('bg-diff-modified-soft')
     expect(rowAt(left, 4).lastElementChild?.className).toContain('bg-diff-conflict-soft')
 
-    // The changed fragment stays its own highlighted span.
-    const highlight = rowAt(left, 3).querySelector('.bg-diff-modified\\/40')
+    // The changed fragment stays its own soft-wash, underlined span.
+    const highlight = rowAt(left, 3).querySelector('.bg-diff-modified\\/12')
     expect(highlight?.textContent).toBe('red')
+    expect(highlight?.className).toContain('underline')
+    expect(highlight?.className).toContain('decoration-1')
+    expect(rowAt(left, 3).querySelector('.bg-diff-modified\\/40')).toBeNull()
 
     // Long lines keep the same no-wrap horizontal behaviour without a window.
     const longCell = rowAt(left, SMALL_ROW_COUNT - 1).lastElementChild as HTMLElement

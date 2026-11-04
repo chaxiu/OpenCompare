@@ -12,7 +12,7 @@ import type { DirectoryReportProgress } from '@core/directory/report'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import type { TemplateResolvedPlan } from '@core/directory/template'
 import { ToolbarButton } from '@renderer/components/Button'
-import { Checkbox } from '@renderer/components/Checkbox'
+import { DropdownMenu } from '@renderer/components/DropdownMenu'
 import { Icon } from '@renderer/components/Icon'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
@@ -148,6 +148,7 @@ export function DirectoryView({
   const [mode, setMode] = useState<SyncMode>('incremental')
   const leftInputRef = useRef<HTMLInputElement>(null)
   const rightInputRef = useRef<HTMLInputElement>(null)
+  const [activeSide, setActiveSide] = useState<'left' | 'right'>('left')
   const leftBodyRef = useRef<HTMLDivElement>(null)
   const rightBodyRef = useRef<HTMLDivElement>(null)
   /**
@@ -202,21 +203,114 @@ export function DirectoryView({
     return model
   }, [comparison, filter, collapsedPaths])
 
+  const moreItems = [
+    {
+      id: 'pick-left',
+      label: t('directory.toolbar.pickLeft'),
+      description: pickerAvailable ? t('directory.toolbar.pickLeftTitle') : undefined,
+      icon: <Icon name={UI_ICON_ACTIONS.pickFolder} />
+    },
+    {
+      id: 'pick-right',
+      label: t('directory.toolbar.pickRight'),
+      description: pickerAvailable ? t('directory.toolbar.pickRightTitle') : undefined,
+      icon: <Icon name={UI_ICON_ACTIONS.pickFolder} />
+    },
+    {
+      id: 'template',
+      label: t('directory.toolbar.template'),
+      description: t('directory.toolbar.templateTitle'),
+      icon: <Icon name={SHELL_ENTRY_ICONS.template} />
+    },
+    {
+      id: 'snapshot-export-left',
+      label: t('directory.toolbar.exportLeft'),
+      description: t('directory.toolbar.exportLeftTitle'),
+      icon: <Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />
+    },
+    {
+      id: 'snapshot-export-right',
+      label: t('directory.toolbar.exportRight'),
+      description: t('directory.toolbar.exportRightTitle'),
+      icon: <Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />
+    },
+    {
+      id: 'snapshot-import-left',
+      label: t('directory.toolbar.importLeft'),
+      description: t('directory.toolbar.importLeftTitle'),
+      icon: <Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />
+    },
+    {
+      id: 'snapshot-import-right',
+      label: t('directory.toolbar.importRight'),
+      description: t('directory.toolbar.importRightTitle'),
+      icon: <Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />
+    },
+    {
+      id: 'report-export',
+      label: t('directory.report.toolbar.export'),
+      description: t('directory.report.toolbar.exportTitle'),
+      icon: <Icon name={SHELL_ENTRY_ICONS['report-export']} />
+    },
+    {
+      id: 'hide-local-paths',
+      label: `${hideLocalPaths ? '[x] ' : ''}${t('directory.report.toolbar.hideLocalPaths')}`,
+      description: t('directory.report.toolbar.hideLocalPathsTitle')
+    }
+  ]
+
+  function handleMoreSelect(id: string): void {
+    switch (id) {
+      case 'pick-left':
+        if (busy || !pickerAvailable) return
+        onPick('left')
+        return
+      case 'pick-right':
+        if (busy || !pickerAvailable) return
+        onPick('right')
+        return
+      case 'template':
+        if (busy) return
+        onPreviewTemplate()
+        return
+      case 'snapshot-export-left':
+        if (busy) return
+        onExportSnapshot('left')
+        return
+      case 'snapshot-export-right':
+        if (busy) return
+        onExportSnapshot('right')
+        return
+      case 'snapshot-import-left':
+        if (busy) return
+        leftInputRef.current?.click()
+        return
+      case 'snapshot-import-right':
+        if (busy) return
+        rightInputRef.current?.click()
+        return
+      case 'report-export':
+        if (busy || reportExporting) return
+        onExportReport()
+        return
+      case 'hide-local-paths':
+        onHideLocalPathsChange(!hideLocalPaths)
+        return
+      default:
+        return
+    }
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          'flex shrink-0 items-center bg-surface-sunken',
           levelBandClasses('view-toolbar')
         )}
       >
-        <div
-          className={cx(
-            'flex shrink-0 items-center min-w-0 overflow-x-auto scrollbar-none',
-            levelRowClasses('view-toolbar')
-          )}
-        >
+        <div className={cx('flex w-full items-center min-w-0', levelRowClasses('view-toolbar'))}>
           <span data-shell-entry="filter" className="flex shrink-0 items-center">
             <SegmentedControl
               label={t('directory.filter.group')}
@@ -229,37 +323,6 @@ export function DirectoryView({
             composition={visibleCounts}
             labelKeys={DIRECTORY_STATUS_LABEL_KEYS}
           />
-          <span className="ml-auto flex shrink-0 items-center gap-2">
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={UI_ICON_ACTIONS.pickFolder} />}
-              onClick={() => onPick('left')}
-              disabled={busy || !pickerAvailable}
-              title={pickerAvailable ? t('directory.toolbar.pickLeftTitle') : undefined}
-            >
-              {t('directory.toolbar.pickLeft')}
-            </ToolbarButton>
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={UI_ICON_ACTIONS.pickFolder} />}
-              onClick={() => onPick('right')}
-              disabled={busy || !pickerAvailable}
-              title={pickerAvailable ? t('directory.toolbar.pickRightTitle') : undefined}
-            >
-              {t('directory.toolbar.pickRight')}
-            </ToolbarButton>
-            {busy ? (
-              <Icon name={UI_ICON_ACTIONS.loading} className="animate-spin text-content-muted" />
-            ) : null}
-          </span>
-        </div>
-
-        <div
-          className={cx(
-            'flex shrink-0 items-center min-w-0 overflow-x-auto scrollbar-none',
-            levelRowClasses('view-toolbar')
-          )}
-        >
           <SegmentedControl
             label={t('directory.sync.direction')}
             options={directionOptions}
@@ -274,6 +337,7 @@ export function DirectoryView({
           />
           <ToolbarButton
             size="sm"
+            variant="primary"
             data-shell-entry="sync"
             icon={<Icon name={SHELL_ENTRY_ICONS.sync} />}
             onClick={() => onPreviewSync(direction, mode)}
@@ -281,74 +345,6 @@ export function DirectoryView({
             title={t('directory.toolbar.previewSyncTitle')}
           >
             {t('directory.toolbar.previewSync')}
-          </ToolbarButton>
-          <ToolbarButton
-            size="sm"
-            data-shell-entry="template"
-            icon={<Icon name={SHELL_ENTRY_ICONS.template} />}
-            onClick={onPreviewTemplate}
-            disabled={busy}
-            title={t('directory.toolbar.templateTitle')}
-          >
-            {t('directory.toolbar.template')}
-          </ToolbarButton>
-        </div>
-
-        <div
-          className={cx(
-            'flex shrink-0 items-center min-w-0 overflow-x-auto scrollbar-none',
-            levelRowClasses('view-toolbar')
-          )}
-        >
-          <span data-shell-entry="snapshot-export" className="flex shrink-0 items-center gap-2">
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />}
-              onClick={() => onExportSnapshot('left')}
-              disabled={busy}
-              title={t('directory.toolbar.exportLeftTitle')}
-            >
-              {t('directory.toolbar.exportLeft')}
-            </ToolbarButton>
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />}
-              onClick={() => onExportSnapshot('right')}
-              disabled={busy}
-              title={t('directory.toolbar.exportRightTitle')}
-            >
-              {t('directory.toolbar.exportRight')}
-            </ToolbarButton>
-          </span>
-          <span data-shell-entry="snapshot-import" className="flex shrink-0 items-center gap-2">
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />}
-              onClick={() => leftInputRef.current?.click()}
-              disabled={busy}
-              title={t('directory.toolbar.importLeftTitle')}
-            >
-              {t('directory.toolbar.importLeft')}
-            </ToolbarButton>
-            <ToolbarButton
-              size="sm"
-              icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />}
-              onClick={() => rightInputRef.current?.click()}
-              disabled={busy}
-              title={t('directory.toolbar.importRightTitle')}
-            >
-              {t('directory.toolbar.importRight')}
-            </ToolbarButton>
-          </span>
-          <ToolbarButton
-            size="sm"
-            data-shell-entry="report-export"
-            icon={<Icon name={SHELL_ENTRY_ICONS['report-export']} />}
-            onClick={onExportReport}
-            disabled={busy || reportExporting}
-            title={t('directory.report.toolbar.exportTitle')}
-          >
-            {t('directory.report.toolbar.export')}
           </ToolbarButton>
           {reportProgress ? (
             <span
@@ -370,38 +366,41 @@ export function DirectoryView({
               </ToolbarButton>
             </span>
           ) : null}
-          <Checkbox
-            checked={hideLocalPaths}
-            onChange={onHideLocalPathsChange}
-            label={t('directory.report.toolbar.hideLocalPaths')}
-            title={t('directory.report.toolbar.hideLocalPathsTitle')}
-            showLabel
-            className="shrink-0"
-          />
-          <input
-            ref={leftInputRef}
-            type="file"
-            accept=".json,.ocsnap.json,application/json"
-            aria-label={t('directory.snapshot.pickLeftFile')}
-            className="sr-only"
-            onChange={(event) => {
-              selectedFile('left', event.target.files)
-              event.target.value = ''
-            }}
-          />
-          <input
-            ref={rightInputRef}
-            type="file"
-            accept=".json,.ocsnap.json,application/json"
-            aria-label={t('directory.snapshot.pickRightFile')}
-            className="sr-only"
-            onChange={(event) => {
-              selectedFile('right', event.target.files)
-              event.target.value = ''
-            }}
-          />
+          <span className="ml-auto flex shrink-0 items-center">
+            <span aria-hidden className="mx-3 h-5 w-px bg-line-subtle" />
+            <DropdownMenu
+              label={t('shell.toolbar.more')}
+              entryId="more"
+              size="sm"
+              items={moreItems}
+              onSelect={handleMoreSelect}
+            />
+          </span>
         </div>
       </div>
+
+      <input
+        ref={leftInputRef}
+        type="file"
+        accept=".json,.ocsnap.json,application/json"
+        aria-label={t('directory.snapshot.pickLeftFile')}
+        className="sr-only"
+        onChange={(event) => {
+          selectedFile('left', event.target.files)
+          event.target.value = ''
+        }}
+      />
+      <input
+        ref={rightInputRef}
+        type="file"
+        accept=".json,.ocsnap.json,application/json"
+        aria-label={t('directory.snapshot.pickRightFile')}
+        className="sr-only"
+        onChange={(event) => {
+          selectedFile('right', event.target.files)
+          event.target.value = ''
+        }}
+      />
 
       <div
         data-shell-level="panels"
@@ -417,6 +416,10 @@ export function DirectoryView({
             key="left"
             title={comparison.leftName}
             subtitle={comparison.leftRoot}
+            address={comparison.leftRoot}
+            active={activeSide === 'left'}
+            onActivate={() => setActiveSide('left')}
+            onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
             meta={
               <span className="text-2xs text-content-muted">
                 {t(leftIsSnapshot ? 'directory.panel.snapshot' : 'directory.panel.source')}
@@ -444,6 +447,10 @@ export function DirectoryView({
             key="right"
             title={comparison.rightName}
             subtitle={comparison.rightRoot}
+            address={comparison.rightRoot}
+            active={activeSide === 'right'}
+            onActivate={() => setActiveSide('right')}
+            onCopy={(text) => platform.copyText?.(text) ?? Promise.resolve(false)}
             meta={
               <span className="text-2xs text-content-muted">
                 {t(rightIsSnapshot ? 'directory.panel.snapshot' : 'directory.panel.target')}

@@ -288,7 +288,7 @@ describe('language switch', () => {
     expect(
       within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
     ).toHaveLength(4)
-    expect(screen.getByRole('contentinfo').textContent).toContain('会话')
+    expect(screen.getByRole('contentinfo').textContent).toContain('JSON 节点（左）')
     expect(settingsDialog('zh')).toBeDefined()
     expect(languageOptions(settingsDialog('zh'), 'zh').map((tab) => tab.textContent)).toEqual([
       'English',
@@ -304,7 +304,7 @@ describe('language switch', () => {
     fireEvent.click(languageOptions(settingsDialog('zh'), 'zh')[0])
     expect(screen.queryByRole('tablist', { name: 'Switch view' })).toBeNull()
     expect(screen.getByRole('tablist', { name: 'Sessions' })).toBeDefined()
-    expect(screen.getByRole('contentinfo').textContent).toContain('Session')
+    expect(screen.getByRole('contentinfo').textContent).toContain('JSON nodes (left)')
     expect(settingsDialog('en')).toBeDefined()
   })
 
@@ -494,10 +494,9 @@ describe('language switch', () => {
         ?.getAttribute('aria-selected')
     ).toBe('true')
     expect((screen.getAllByRole('tree')[0].parentElement as HTMLElement).scrollTop).toBe(96)
-    expect(screen.getByRole('contentinfo').textContent).toContain(
-      `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
-    )
-    expect(beforeStatus).toContain('会话')
+    expect(screen.getByRole('contentinfo').textContent).not.toContain('directory:')
+    expect(screen.getByRole('contentinfo').textContent).toContain('Source files')
+    expect(beforeStatus).toContain('文件（源）')
     expect(counting).toEqual(callsBefore)
     expect(onCompareRequest).toHaveBeenCalledTimes(1)
     expect(compareRequestsReady).toHaveBeenCalledTimes(1)

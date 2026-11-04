@@ -33,6 +33,7 @@ export const PLATFORM_CHANNELS = {
   readComparisonHistory: 'platform:read-comparison-history',
   writeComparisonHistory: 'platform:write-comparison-history',
   systemLocale: 'platform:system-locale',
+  copyText: 'platform:copy-text',
   /** main → renderer: one compare request collected from the launch source. */
   compareRequest: 'platform:compare-request',
   /** renderer → main: the subscriber is listening, deliver queued requests. */

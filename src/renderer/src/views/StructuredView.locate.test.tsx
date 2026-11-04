@@ -5,6 +5,7 @@ import { STRUCTURED_SCENE } from '@shared/fixtures'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { StructuredView } from './StructuredView'
+import { CHANGE_ROW_HEIGHT, SOURCE_ROW_HEIGHT } from './structuredStatus'
 
 afterEach(cleanup)
 
@@ -15,8 +16,6 @@ const platform = createWebPlatformPort()
  * the real panels, so both the row windows and the scroll ratios are real.
  */
 const VIEWPORT_HEIGHT = 600
-const SOURCE_ROW_HEIGHT = 20
-const CHANGE_ROW_HEIGHT = 24
 const SOURCE_OVERSCAN = 10
 const CHANGE_OVERSCAN = 10
 const SOURCE_LIMIT = Math.ceil(VIEWPORT_HEIGHT / SOURCE_ROW_HEIGHT) + 2 * SOURCE_OVERSCAN

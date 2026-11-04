@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ICON_NAMES, ICON_SIZES, strokeWidthFor } from '@renderer/assets/icons'
 import type { IconSize } from '@renderer/assets/icons'
-import { DIFF_LABEL_KEYS } from '@renderer/components/diffSemantics'
 import { translate } from '@renderer/i18n/context'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
-import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
-import type { DiffStatus } from '@shared/fixtures'
 import { Workbench } from './Workbench'
 import {
   SHELL_ENTRIES,
@@ -16,6 +12,7 @@ import {
   SHELL_LEVELS,
   SHELL_LEVEL_ORDER,
   TIER_WIDTHS,
+  TOOLBAR_ROWS,
   entriesFor,
   entryPresentation,
   levelBandClasses,
@@ -91,10 +88,14 @@ function renderedLevels(container: HTMLElement): readonly string[] {
   )
 }
 
+const ENTRY_IDS = new Set<string>(SHELL_ENTRY_IDS)
+
 function renderedEntries(container: HTMLElement): readonly ShellEntryId[] {
-  return Array.from(container.querySelectorAll('[data-shell-entry]')).map(
-    (element) => element.getAttribute('data-shell-entry') ?? ''
-  ) as ShellEntryId[]
+  // `more` triggers are toolbar hooks, not manifest entries: the manifest
+  // test reaches the overflow entries through the opened menu instead.
+  return Array.from(container.querySelectorAll('[data-shell-entry]'))
+    .map((element) => element.getAttribute('data-shell-entry') ?? '')
+    .filter((id): id is ShellEntryId => ENTRY_IDS.has(id))
 }
 
 function entryElement(container: HTMLElement, id: ShellEntryId): HTMLElement {
@@ -135,12 +136,19 @@ function showSession(name: RegExp): void {
   fireEvent.click(within(tabs).getByRole('tab', { name }))
 }
 
-/** What the level table declares for one ready view, minus absent extras. */
+/** Inline entries the level table declares for one ready view. */
+function inlineEntries(view: ToolbarView): readonly ShellEntryId[] {
+  return TOOLBAR_ROWS.filter(
+    (row) => row.level === 'view-toolbar' && row.views.includes(view)
+  ).flatMap((row) => row.entries)
+}
+
+/** What the level table declares inline for one ready view, minus absent extras. */
 function declaredEntries(view: ToolbarView, drilled: boolean): readonly ShellEntryId[] {
   return [
     ...entriesFor('app'),
     ...entriesFor('sessions'),
-    ...entriesFor('view-toolbar', view).filter((id) => drilled || id !== 'drilldown-back')
+    ...inlineEntries(view).filter((id) => drilled || id !== 'drilldown-back')
   ]
 }
 
@@ -215,7 +223,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     const toolbar = levelElement(container, 'view-toolbar')
     hasClasses(toolbar, levelBandClasses('view-toolbar'))
     const rows = Array.from(toolbar.children)
-    expect(rows.length).toBe(3)
+    expect(rows.length).toBe(1)
     for (const row of rows) hasClasses(row, levelRowClasses('view-toolbar'))
 
     const panels = levelElement(container, 'panels')
@@ -265,61 +273,67 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     }
   })
 
-  it('keeps a narrow toolbar row scrollable instead of clipped or wrapped', async () => {
+  it('keeps a narrow directory toolbar on one row with no scroll channel', async () => {
     setWindowWidth(960)
     const { container } = render(<Workbench platform={createWebPlatformPort()} />)
     await loadSamples()
 
-    const toolbar = levelElement(container, 'view-toolbar')
-    // The band keeps its table tokens: the scroll guard lives on the rows only.
+    // Exactly one view-toolbar band owns the single row.
+    const bands = container.querySelectorAll('[data-shell-level="view-toolbar"]')
+    expect(bands.length).toBe(1)
+    const toolbar = bands[0] as HTMLElement
     hasClasses(toolbar, levelBandClasses('view-toolbar'))
     expect(classList(toolbar)).not.toContain('overflow-x-auto')
-    expect(classList(toolbar)).not.toContain('min-w-0')
     expect(classList(toolbar).filter((token) => token.includes(':'))).toEqual([])
 
     const rows = Array.from(toolbar.children)
-    expect(rows.length).toBe(3)
-    for (const row of rows) {
-      hasClasses(row, levelRowClasses('view-toolbar'))
-      hasClasses(row, 'shrink-0 min-w-0 overflow-x-auto scrollbar-none')
-      expect(classList(row).some((token) => token.startsWith('flex-wrap'))).toBe(false)
-      expect(classList(row).filter((token) => token.includes(':'))).toEqual([])
-    }
+    expect(rows.length).toBe(1)
+    const [row] = rows
+    hasClasses(row, levelRowClasses('view-toolbar'))
+    // jsdom cannot measure scrollWidth, so the contract is asserted on tokens:
+    // the row is a plain flex row, never a horizontal scroller or wrapper.
+    expect(classList(row)).not.toContain('overflow-x-auto')
+    expect(classList(row)).not.toContain('scrollbar-none')
+    expect(classList(row).some((token) => token.startsWith('flex-wrap'))).toBe(false)
+    expect(classList(row).filter((token) => token.includes(':'))).toEqual([])
     expect(Array.from(toolbar.querySelectorAll('[class*="flex-wrap"]'))).toEqual([])
 
-    // `scrollbar-none` hides the global 10px scrollbar inside the 28px rows
-    // only, so no other element loses its scrollbar affordance.
-    const scrollers = Array.from(container.querySelectorAll('.scrollbar-none'))
-    expect(scrollers.length).toBe(3)
-    for (const scroller of scrollers) expect(toolbar.contains(scroller)).toBe(true)
-    const css = readFileSync('src/renderer/src/assets/main.css', 'utf8')
-    const start = css.indexOf('@utility scrollbar-none')
-    expect(start).toBeGreaterThan(-1)
-    const nextUtility = css.indexOf('@utility', start + 1)
-    const utility = css.slice(start, nextUtility === -1 ? css.length : nextUtility)
-    expect(utility).toContain('scrollbar-width: none')
-    expect(utility).toContain('&::-webkit-scrollbar')
-    expect(utility).toContain('display: none')
-
-    // At 960 the first row's filter, legend and actions stay reachable by name.
-    expect(container.querySelectorAll('[data-shell-entry="filter"]').length).toBe(1)
+    // Directory row shape: filter segmented → one solid primary action → more.
     const filterGroup = screen.getByRole('tablist', { name: zh('directory.filter.group') })
     expect(within(filterGroup).getAllByRole('tab').length).toBeGreaterThan(1)
-    const firstRowText = rows[0].textContent ?? ''
-    // The directory legend reuses the filter vocabulary, not the text-diff words.
+    const firstRowText = row.textContent ?? ''
     expect(firstRowText).toContain(zh('directory.filter.same'))
     expect(firstRowText).toContain(zh('directory.filter.rightOnly'))
-    for (const key of ['directory.toolbar.pickLeft', 'directory.toolbar.pickRight'] as const) {
-      const buttons = screen.getAllByRole('button', { name: zh(key) })
-      expect(buttons.length).toBe(1)
-      expect(isRendered(buttons[0])).toBe(true)
-    }
 
-    // The third row is not folded into a menu either: its snapshot export and
-    // the local-path switch are both still rendered.
-    const exportEntry = entryElement(container, 'snapshot-export')
-    expect(isRendered(exportEntry)).toBe(true)
-    expect(rows[2].textContent ?? '').toContain(zh('directory.report.toolbar.hideLocalPaths'))
+    const primary = Array.from(row.querySelectorAll('button')).filter((button) =>
+      classList(button).includes('bg-accent')
+    )
+    expect(primary.length).toBe(1)
+    expect(primary[0].getAttribute('data-shell-entry')).toBe('sync')
+
+    // Secondary directory actions stay reachable through the "more" menu.
+    fireEvent.click(screen.getByRole('button', { name: zh('shell.toolbar.more') }))
+    const menu = screen.getByRole('menu', { name: zh('shell.toolbar.more') })
+    const menuText = menu.textContent ?? ''
+    for (const key of [
+      'directory.toolbar.pickLeft',
+      'directory.toolbar.pickRight',
+      'directory.toolbar.template',
+      'directory.toolbar.exportLeft',
+      'directory.toolbar.importLeft',
+      'directory.report.toolbar.export',
+      'directory.report.toolbar.hideLocalPaths'
+    ] as const) {
+      expect(menuText).toContain(zh(key))
+    }
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    // The entries the table keeps inline are the only ones hooked as entries.
+    expect(container.querySelectorAll('[data-shell-entry="filter"]').length).toBe(1)
+    expect(container.querySelectorAll('[data-shell-entry="sync"]').length).toBe(1)
+    expect(container.querySelector('[data-shell-entry="template"]')).toBeNull()
+    expect(container.querySelector('[data-shell-entry="snapshot-export"]')).toBeNull()
   })
 
   it('renders every entry once with the presentation the table declares', async () => {
@@ -374,9 +388,18 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
         const mode = entryPresentation(id, tier)
         const copies = SHELL_ENTRIES[id].labelKeys.map((key) => zh(key))
         if (mode === 'icon-only') {
-          // An icon-only entry keeps its copy as the accessible name.
-          expect(element.tagName).toBe('BUTTON')
-          expect(copies).toContain(element.getAttribute('aria-label') ?? '')
+          // An icon-only entry keeps its copy as the accessible name: either on
+          // the entry button itself or on the grouped icon actions inside it.
+          if (element.tagName === 'BUTTON') {
+            expect(copies).toContain(element.getAttribute('aria-label') ?? '')
+          } else {
+            const names = Array.from(element.querySelectorAll('button')).map(
+              (button) => button.getAttribute('aria-label') ?? ''
+            )
+            expect(names.length).toBeGreaterThan(0)
+            for (const name of names) expect(name.trim().length).toBeGreaterThan(0)
+            expect(names.some((name) => copies.includes(name))).toBe(true)
+          }
         } else {
           // A labelled entry always shows some copy and keeps every control named.
           expect((element.textContent ?? '').trim().length).toBeGreaterThan(0)
@@ -427,11 +450,15 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
       expect(container.querySelector('[data-shell-entry="drilldown-back"]')).not.toBeNull()
     )
 
-    const toolbar = levelElement(container, 'view-toolbar')
+    const bands = container.querySelectorAll('[data-shell-level="view-toolbar"]')
+    expect(bands.length).toBe(1)
+    const toolbar = bands[0] as HTMLElement
     expect(toolbar.querySelectorAll('[data-shell-level="panels"]').length).toBe(0)
-    expect(Array.from(toolbar.children).length).toBe(2)
     const firstRow = toolbar.firstElementChild as HTMLElement
     hasClasses(firstRow, levelRowClasses('view-toolbar'))
+    expect(
+      within(firstRow).getByRole('button', { name: zh('shell.notice.returnAction') })
+    ).toBeDefined()
     expect(renderedEntries(toolbar)[0]).toBe('drilldown-back')
     expect(renderedLevels(container)).toEqual([
       'app',
@@ -442,40 +469,30 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     ])
   })
 
-  it('keeps the status bar entries and their order', async () => {
+  it('shows only the scene statistics, without session / platform / legend', async () => {
     const { container } = render(<Workbench platform={createWebPlatformPort()} />)
     await loadSamples()
 
     const status = levelElement(container, 'status')
     const { rows } = measureStatusBar(window.innerWidth)
     hasClasses(status, statusBarClasses(rows))
+    hasClasses(status, levelBandClasses('status'))
     const text = status.textContent ?? ''
-    expect(text).toContain(zh('shell.status.session'))
-    expect(text).toContain('web')
-    expect(text).toContain(zh('common.diff.same'))
-    expect(text.indexOf(zh('shell.status.session'))).toBeLessThan(
-      text.indexOf(zh('shell.status.platform'))
-    )
-    expect(text.indexOf(zh('shell.status.platform'))).toBeLessThan(
-      text.indexOf(zh('common.diff.same'))
-    )
-    // The four semantic legend cells come before the trailing statistics.
-    expect(text.indexOf(zh('common.diff.removed'))).toBeLessThan(
-      text.indexOf(zh('shell.stat.sourceFiles'))
-    )
+    // The removed i18n keys must never resurface in the status bar.
+    expect(text).not.toContain('会话')
+    expect(text).not.toContain('运行平台')
+    expect(status.querySelector('[data-shell-legend]')).toBeNull()
+    expect(status.querySelectorAll('[data-legend-status]')).toHaveLength(0)
+    // The scene metrics stay visible after dropping the old copy.
+    expect(text).toContain(zh('shell.stat.sourceFiles'))
+    expect(text).toContain(zh('shell.stat.targetFiles'))
+    expect(text).toContain(zh('shell.stat.differences'))
     // Every number in the status bar stays tabular.
     for (const value of Array.from(status.querySelectorAll('.tabular'))) {
       expect(isRendered(value)).toBe(true)
     }
   })
 })
-
-/** Legend cells of the status bar, in rendered order. */
-function statusLegendItems(container: HTMLElement): readonly HTMLElement[] {
-  const legend = levelElement(container, 'status').querySelector('[data-shell-legend]')
-  if (!(legend instanceof HTMLElement)) throw new Error('missing status bar legend')
-  return Array.from(legend.querySelectorAll<HTMLElement>('[data-legend-status]'))
-}
 
 /** One labelled status-bar entry, located by its leading label. */
 function statusEntry(container: HTMLElement, label: string): HTMLElement {
@@ -487,57 +504,27 @@ function statusEntry(container: HTMLElement, label: string): HTMLElement {
   return entry
 }
 
-describe.each([960, 1024, 1280, 1440, 1920])('wrapping status bar at %ipx', (width) => {
+describe.each([960, 1024, 1280, 1440, 1920])('status bar at %ipx', (width) => {
   beforeEach(() => {
     setWindowWidth(width)
   })
 
-  it('keeps every legend cell, its count and the statistics visible', async () => {
+  it('keeps one row of scene metrics and statistics without a legend', async () => {
     const { container } = render(<Workbench platform={createWebPlatformPort()} />)
     await loadSamples()
 
     const status = levelElement(container, 'status')
     const { rows } = measureStatusBar(width)
-    // The bar wraps its groups instead of hiding them behind a scroll channel,
-    // and the footer height class is the helper output for the measured rows.
+    expect(rows).toBe(1)
     hasClasses(status, statusBarClasses(rows))
     hasClasses(status, levelBandClasses('status'))
+    expect(classList(status)).toContain('h-6')
+    expect(classList(status)).not.toContain('h-auto')
     expect(classList(status).some((token) => token.startsWith('overflow-x'))).toBe(false)
-    const heightTokens = classList(status).filter(
-      (token) => token === 'h-8' || token === 'h-auto'
-    )
-    expect(heightTokens).toHaveLength(1)
-    if (rows === 1) {
-      expect(heightTokens).toEqual(['h-8'])
-      expect(classList(status)).not.toContain('h-auto')
-    } else {
-      expect(heightTokens).toEqual(['h-auto'])
-      expect(classList(status)).toContain('min-h-8')
-      expect(classList(status)).not.toContain('h-8')
-    }
-
-    // 4/4 semantic cells of the directory sample (its conflict count is zero).
-    const items = statusLegendItems(container)
-    expect(items.map((item) => item.getAttribute('data-legend-status'))).toEqual([
-      'same',
-      'added',
-      'removed',
-      'modified'
-    ])
-    for (const item of items) {
-      expect(status.contains(item)).toBe(true)
-      expect(isRendered(item)).toBe(true)
-      const status_ = item.getAttribute('data-legend-status') ?? ''
-      const dot = item.querySelector(`span[aria-hidden][class*="bg-diff-${status_}"]`)
-      expect(dot).not.toBeNull()
-      const count = item.querySelector('.tabular')
-      expect(count).not.toBeNull()
-      expect(count?.textContent).toMatch(/^\d+$/)
-      expect(isRendered(count as Element)).toBe(true)
-      // The label sits inside the same cell as dot and count, using the
-      // directory vocabulary of the active directory session.
-      expect(item.textContent).toContain(zh(DIRECTORY_STATUS_LABEL_KEYS[status_ as DiffStatus]))
-    }
+    // The removed four-state legend and the removed platform copy are gone.
+    expect(status.querySelector('[data-shell-legend]')).toBeNull()
+    expect(status.querySelectorAll('[data-legend-status]')).toHaveLength(0)
+    expect(status.textContent ?? '').not.toContain('运行平台')
 
     // Source / Target statistics stay visible with their values.
     for (const key of ['shell.stat.sourceFiles', 'shell.stat.targetFiles'] as const) {
@@ -551,27 +538,65 @@ describe.each([960, 1024, 1280, 1440, 1920])('wrapping status bar at %ipx', (wid
   })
 })
 
-describe('status bar conflict legend', () => {
+describe('status bar merge metrics', () => {
   beforeEach(() => {
     setWindowWidth(TIER_WIDTHS.compact)
   })
 
-  it('adds the conflict cell only when the composition reports conflicts', async () => {
+  it('reports the conflict count without a conflict legend', async () => {
     const { container } = render(<Workbench platform={createWebPlatformPort()} />)
     await loadSamples()
 
-    expect(statusLegendItems(container)).toHaveLength(4)
-    showSession(/3-Way Merge/)
-    await waitFor(() => expect(statusLegendItems(container)).toHaveLength(5))
     expect(
-      statusLegendItems(container).map((item) => item.getAttribute('data-legend-status'))
-    ).toEqual(['same', 'added', 'removed', 'modified', 'conflict'])
-    for (const item of statusLegendItems(container)) {
-      expect(isRendered(item)).toBe(true)
-      expect(item.textContent).toContain(
-        zh(DIFF_LABEL_KEYS[item.getAttribute('data-legend-status') as DiffStatus])
-      )
+      levelElement(container, 'status').querySelectorAll('[data-legend-status]')
+    ).toHaveLength(0)
+    showSession(/3-Way Merge/)
+    await waitFor(() => expect(statusEntry(container, zh('shell.stat.conflicts'))).toBeDefined())
+    const status = levelElement(container, 'status')
+    expect(status.querySelector('[data-shell-legend]')).toBeNull()
+    expect(status.querySelectorAll('[data-legend-status]')).toHaveLength(0)
+    const conflicts = statusEntry(container, zh('shell.stat.conflicts'))
+    expect(isRendered(conflicts)).toBe(true)
+    expect(conflicts.querySelector('.tabular')?.textContent).toMatch(/^\d+$/)
+  })
+})
+
+describe('status bar probe facts', () => {
+  beforeEach(() => {
+    setWindowWidth(TIER_WIDTHS.regular)
+  })
+
+  it('shows only the deduped newline / encoding facts of the active diff', async () => {
+    const { container } = render(<Workbench platform={createWebPlatformPort()} />)
+    await loadSamples()
+
+    showSession(/3-Way Merge/)
+    const modeTabs = screen.getByRole('tablist', { name: zh('files.code.modeLabel') })
+    fireEvent.click(within(modeTabs).getByRole('tab', { name: zh('files.code.mode.diff') }))
+    await waitFor(() => expect(renderedEntries(container)).toContain('override'))
+
+    const status = levelElement(container, 'status')
+    const text = status.textContent ?? ''
+    const newlineLabels = [
+      zh('shell.status.newline'),
+      zh('shell.status.leftNewline'),
+      zh('shell.status.rightNewline')
+    ]
+    const encodingLabels = [
+      zh('shell.status.encoding'),
+      zh('shell.status.leftEncoding'),
+      zh('shell.status.rightEncoding')
+    ]
+    for (const labels of [newlineLabels, encodingLabels]) {
+      const shown = labels.filter((label) => text.includes(label))
+      expect(shown.length).toBeGreaterThan(0)
+      // Equal sides collapse to the single fact; a real difference expands to
+      // exactly the left / right pair, never both shapes at once.
+      if (shown.includes(labels[0])) expect(shown).toEqual([labels[0]])
+      else expect(new Set(shown).size).toBe(shown.length)
     }
+    expect(text).not.toContain('会话')
+    expect(text).not.toContain('运行平台')
   })
 })
 
@@ -587,6 +612,22 @@ describe('workbench shell entry manifest', () => {
       // only unions; the per-view uniqueness is asserted above.
       for (const id of renderedEntries(container)) seen.add(id)
     }
+
+    // The overflow entries are not inline hooks: they live inside the "more"
+    // menu, so the menu has to be opened before they can be accounted for.
+    fireEvent.click(screen.getByRole('button', { name: zh('shell.toolbar.more') }))
+    const menu = screen.getByRole('menu', { name: zh('shell.toolbar.more') })
+    const menuItems = within(menu)
+      .getAllByRole('menuitem')
+      .map((item) => item.textContent ?? '')
+    const overflowEntries = ['template', 'snapshot-export', 'snapshot-import', 'report-export'] as const
+    for (const id of overflowEntries) {
+      expect(menuItems.some((text) => text.includes(zh(SHELL_ENTRIES[id].labelKey)))).toBe(true)
+      seen.add(id)
+    }
+    // Escape closes the menu without selecting anything.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
 
     collect()
     showSession(/3-Way Merge/)

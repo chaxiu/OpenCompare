@@ -33,7 +33,7 @@ import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
 import { SessionTabs } from '@renderer/components/SessionTabs'
 import { StateView } from '@renderer/components/StateView'
-import { CompositionLegend, StatusBar, StatusEntry } from '@renderer/components/StatusBar'
+import { StatusBar, StatusEntry } from '@renderer/components/StatusBar'
 import { cx, formatBytes } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { Translate } from '@renderer/i18n/context'
@@ -43,7 +43,6 @@ import type { CodeMergeState, CodeMode } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
-import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import { StructuredView } from '@renderer/views/StructuredView'
 import type { StructuredScroll } from '@renderer/views/StructuredView'
 import {
@@ -385,7 +384,7 @@ export function Workbench({
   const historyRef = useRef<readonly ComparisonHistoryEntry[]>([])
   /** Resolves when the mount read settles; later writes wait on it. */
   const historyReady = useRef<Promise<void> | null>(null)
-  const [csvAlign, setCsvAlign] = useState<CsvAlignState | null>(null)
+  const [, setCsvAlign] = useState<CsvAlignState | null>(null)
   const [directoryBusy, setDirectoryBusy] = useState(false)
   /**
    * The report export is its own task: it never touches `directoryBusy`, so the
@@ -674,17 +673,6 @@ export function Workbench({
   // at runtime, not read from the sample answer key. Merge state is keyed by
   // session, so a tab switch never shows another session's count.
   const activeMerge = active ? (codeMerge[active.id] ?? null) : null
-  const legend = useMemo<SampleComposition | null>(() => {
-    if (active?.scene === 'directory') return directoryCounts
-    if (active?.scene === 'csv' && csvAlign?.sessionId === active.id) {
-      return { ...csvAlign.counts, conflict: 0 }
-    }
-    const base = active?.composition ?? null
-    if (base && active?.scene === 'code' && activeMerge) {
-      return { ...base, conflict: activeMerge.unresolved }
-    }
-    return base
-  }, [active, directoryCounts, activeMerge, csvAlign])
 
   /**
    * Mode of the code view actually mounted: the shell keeps it per session, so
@@ -2065,7 +2053,6 @@ export function Workbench({
                 </ToolbarButton>
               </>
             }
-            hint={t('shell.empty.hint')}
             extra={
               history.length > 0 ? (
                 <HistoryHome
@@ -2155,24 +2142,12 @@ export function Workbench({
       ) : null}
 
       <StatusBar>
-        <StatusEntry label={t('shell.status.session')} value={active ? active.id : '—'} />
-        <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <StatusEntry label={t('shell.status.platform')} value={platform.kind} />
         {probeEntries.length > 0 ? (
           <>
-            <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
             {probeEntries.map((entry) => (
               <StatusEntry key={entry.key} label={t(entry.key)} value={entry.value} />
             ))}
-          </>
-        ) : null}
-        {legend ? (
-          <>
             <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-            <CompositionLegend
-              composition={legend}
-              labelKeys={active?.scene === 'directory' ? DIRECTORY_STATUS_LABEL_KEYS : undefined}
-            />
           </>
         ) : null}
         {active ? (

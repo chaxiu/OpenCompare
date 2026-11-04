@@ -89,6 +89,8 @@ const platform: PlatformPort = {
     ) as Promise<void>,
   systemLocale: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.systemLocale) as Promise<string>,
+  copyText: (text) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.copyText, text) as Promise<boolean>,
   onCompareRequest: (listener) => {
     const forward = (_event: IpcRendererEvent, payload: CompareRequestPayload): void => {
       listener(payload)

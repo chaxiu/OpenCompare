@@ -9,9 +9,11 @@ import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { createStructuredCompareClient } from '@renderer/structured/compareClient'
 import type { StructuredCompareClient } from '@renderer/structured/compareClient'
 import { StructuredView } from './StructuredView'
+import { CHANGE_ROW_HEIGHT, SOURCE_ROW_HEIGHT } from './structuredStatus'
 
 const platform = createWebPlatformPort()
-const ROW_HEIGHT = 20
+/** The source pane row height is an alias of the shared diff row height. */
+const ROW_HEIGHT = SOURCE_ROW_HEIGHT
 const VIEWPORT_HEIGHT = 600
 const MAX_SCROLL = 10_000_000
 const ITEM_COUNT = 7_600
@@ -164,7 +166,7 @@ describe('5 MB structured comparison', () => {
         // The two counts survive the windowing: the list is windowed too.
         expect(
           container.querySelectorAll('[data-change-row]').length
-        ).toBeLessThanOrEqual(Math.ceil(VIEWPORT_HEIGHT / 24) + 2 * 10)
+        ).toBeLessThanOrEqual(Math.ceil(VIEWPORT_HEIGHT / CHANGE_ROW_HEIGHT) + 2 * 10)
 
         expect(unhandled).toEqual([])
       } finally {

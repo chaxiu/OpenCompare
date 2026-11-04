@@ -492,7 +492,7 @@ export function StructuredView({
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 flex-col border-b border-line-subtle bg-surface-sunken',
+          'flex shrink-0 flex-col bg-surface-sunken',
           levelBandClasses('view-toolbar')
         )}
       >

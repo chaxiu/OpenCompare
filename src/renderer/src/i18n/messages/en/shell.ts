@@ -17,6 +17,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.toolbar.openFileTitle': 'Choose the left and right files in order',
   'shell.toolbar.openFolder': 'Open folder',
   'shell.toolbar.openFolderTitle': 'Choose the left and right folders in order',
+  'shell.toolbar.more': 'More',
   'shell.empty.title': 'Open real files or folders to start comparing',
   'shell.empty.description':
     'Type or paste two real paths in "New comparison" without any system dialog, pick both sides through the system pickers, or drop two real paths onto the window.',
@@ -106,8 +107,10 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.closeUnsaved.discard': 'Discard and close',
   'shell.closeUnsaved.body':
     'To keep your changes, choose "Continue editing" first and save the left / right file to disk from that session before closing it.',
-  'shell.status.session': 'Session',
-  'shell.status.platform': 'Platform',
+  'shell.panel.copyPath': 'Copy full path',
+  'shell.panel.copied': 'Path copied',
+  'shell.status.newline': 'Newline',
+  'shell.status.encoding': 'Encoding',
   'shell.status.leftNewline': 'Left newline',
   'shell.status.leftEncoding': 'Left encoding',
   'shell.status.rightNewline': 'Right newline',

@@ -70,6 +70,34 @@ function installPlatform(port: PlatformPort): void {
   window.openComparePlatform = port
 }
 
+/** The active view's single toolbar overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+function closeMore(): void {
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+}
+
+/** One overflow item, matched by its visible label inside the accessible name. */
+function moreItem(label: string): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(label)
+  })
+}
+
 function answers(values: readonly string[]): () => Promise<string | null> {
   const queue = [...values]
   return async () => queue.shift() ?? null
@@ -173,25 +201,24 @@ describe('runtime language switch', () => {
     )
     const sourceMeta = await screen.findByText(localeText('en', 'directory.panel.source'))
     expect(screen.getByText(localeText('en', 'directory.panel.target'))).toBeDefined()
-    const exportButton = (): HTMLElement =>
-      screen.getByRole('button', { name: localeText('en', 'directory.report.toolbar.export') })
-    expect(exportButton().getAttribute('title')).toBe(
-      localeText('en', 'directory.report.toolbar.exportTitle')
-    )
+    // The export action now lives in the overflow menu: its label and the
+    // localized description stay in the same dictionary as the rest of the view.
+    const expectExportItem = (language: 'en' | 'zh'): void => {
+      const item = moreItem(localeText(language, 'directory.report.toolbar.export'))
+      expect(item.textContent).toContain(
+        localeText(language, 'directory.report.toolbar.exportTitle')
+      )
+      closeMore()
+    }
+    expectExportItem('en')
     expect(document.body.textContent ?? '').not.toMatch(HAN)
 
     fireEvent.click(screen.getByTestId('switch-zh'))
     expect(sourceMeta.textContent).toBe(localeText('zh', 'directory.panel.source'))
-    expect(
-      screen
-        .getByRole('button', { name: localeText('zh', 'directory.report.toolbar.export') })
-        .getAttribute('title')
-    ).toBe(localeText('zh', 'directory.report.toolbar.exportTitle'))
+    expectExportItem('zh')
     fireEvent.click(screen.getByTestId('switch-en'))
     expect(sourceMeta.textContent).toBe(localeText('en', 'directory.panel.source'))
-    expect(exportButton().getAttribute('title')).toBe(
-      localeText('en', 'directory.report.toolbar.exportTitle')
-    )
+    expectExportItem('en')
     expect(document.body.textContent ?? '').not.toMatch(HAN)
   }, 30_000)
 })

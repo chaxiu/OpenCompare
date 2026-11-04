@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodeSceneFixture } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
@@ -134,6 +134,24 @@ function paneElements(container: HTMLElement): [HTMLDivElement, HTMLDivElement] 
   return [panes[0], panes[1]]
 }
 
+/** The code view's single overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+/** Runs one secondary action through the overflow menu. */
+function clickMore(label: string): void {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  fireEvent.click(
+    within(menu).getByRole('menuitem', { name: (name: string) => name.includes(label) })
+  )
+}
+
 /** Drives the web runtime's hidden file picker with a chosen local file. */
 function chooseFile(name: string, text: string): void {
   const input = document.querySelector<HTMLInputElement>('input[data-opencompare-picker="file"]')
@@ -154,7 +172,21 @@ describe('diff ruler persistence', () => {
     cleanup()
 
     const pair = render(<CodeView pair={LONG_PAIR} platform={createWebPlatformPort()} />)
-    expect(rulerOf(pair.container)).toBeDefined()
+    const pairRuler = rulerOf(pair.container)
+    expect(pairRuler).toBeDefined()
+
+    // The track stays 2px wide with its viewport rectangle and hover line range.
+    const track = pairRuler.querySelector<HTMLElement>('[data-ruler-track="true"]')
+    expect(track).not.toBeNull()
+    expect(track?.style.width).toBe('2px')
+    expect(track?.className).toContain('w-0.5')
+    expect(track?.querySelector('[data-window-top]')).not.toBeNull()
+    expect(track?.querySelector('[data-window-height]')).not.toBeNull()
+    expect(pairRuler.className).toContain('pr-1.5')
+
+    const marker = pair.container.querySelector<HTMLElement>('[data-diff-status]')
+    expect(marker).not.toBeNull()
+    expect(marker?.getAttribute('title')).toMatch(/^.+ · 第 \d+–\d+ 行$/)
   })
 
   it('is absent in merge mode and survives overwrite, reset and opening a file', async () => {
@@ -171,9 +203,9 @@ describe('diff ruler persistence', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '覆写到右' }))
     expect(rulerOf(container)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '重置' }))
+    clickMore('重置')
     expect(rulerOf(container)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '打开左文件' }))
+    clickMore('打开左文件')
     chooseFile('left.ts', FIXTURE.diff.right.text)
     await screen.findByText(/已打开 \/memory\/left\.ts/)
     expect(rulerOf(container)).toBeDefined()

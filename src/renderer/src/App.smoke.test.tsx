@@ -95,6 +95,27 @@ function selectScene(icon: string): void {
   fireEvent.click(within(node).getByRole('tab'))
 }
 
+/** The active view's single toolbar overflow trigger. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+function closeMore(): void {
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+}
+
 /** Starts the four built-in scenes through the settings sample entries. */
 async function loadDemoSamples(copy: Record<MessageKey, string>): Promise<void> {
   for (const id of ['directory', 'code', 'csv', 'structured']) {
@@ -169,7 +190,13 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
   expect(within(codeModes).getByRole('tab', { name: copy['files.code.mode.diff'] })).toBeDefined()
   expect(within(codeModes).getByRole('tab', { name: copy['files.code.mode.merge'] })).toBeDefined()
   expect(screen.getByRole('button', { name: copy['files.merge.export'] })).toBeDefined()
-  expect(screen.getByRole('button', { name: copy['files.action.copy'] })).toBeDefined()
+  // Copy is a secondary merge action and lives in the overflow menu now.
+  expect(
+    within(openMore()).getByRole('menuitem', {
+      name: (name: string) => name.includes(copy['files.action.copy'])
+    })
+  ).toBeDefined()
+  closeMore()
   assertNoCopy(main, foreign)
   if (language === 'en') assertNoHan(main)
 

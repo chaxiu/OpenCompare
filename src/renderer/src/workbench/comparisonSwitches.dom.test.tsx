@@ -24,10 +24,13 @@ const FACTS: Record<string, TextFileFacts> = {
   [OTHER_LEFT]: { path: OTHER_LEFT, encoding: 'UTF-16LE', newline: 'LF', bytes: 12, sha256: sha256Hex('utf16') },
   [OTHER_RIGHT]: { path: OTHER_RIGHT, encoding: 'UTF-8', newline: 'LF', bytes: 6, sha256: sha256Hex(TEXTS[OTHER_RIGHT]) }
 }
+/** Every probe label the status layer may render, deduped forms included. */
 const STATUS_KEYS = [
+  'shell.status.newline',
   'shell.status.leftNewline',
-  'shell.status.leftEncoding',
   'shell.status.rightNewline',
+  'shell.status.encoding',
+  'shell.status.leftEncoding',
   'shell.status.rightEncoding'
 ] as const
 
@@ -57,8 +60,62 @@ async function switchPort(): Promise<{
     }
   }
 }
-function switchOf(id: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-code-switch="${id}"]`)
+
+type SwitchId = 'ignore-newline' | 'ignore-encoding' | 'ignore-whitespace'
+
+const SWITCH_LABELS: Record<SwitchId, string> = {
+  'ignore-newline': zh['files.code.ignoreNewline'],
+  'ignore-encoding': zh['files.code.ignoreEncoding'],
+  'ignore-whitespace': zh['files.code.ignoreWhitespace']
+}
+
+/** The single toolbar overflow trigger; every comparison switch lives inside. */
+function moreTrigger(): HTMLElement {
+  const trigger = document.querySelector<HTMLElement>('[data-shell-entry="more"]')
+  if (trigger === null) throw new Error('missing more trigger')
+  return trigger
+}
+
+/** Opens the overflow menu and returns it, idempotently. */
+function openMore(): HTMLElement {
+  const trigger = moreTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  const menu = screen.queryByRole('menu')
+  if (menu === null) throw new Error('more menu did not open')
+  return menu
+}
+
+function closeMore(): void {
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+}
+
+function menuItem(label: string): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(label)
+  })
+}
+
+function switchOf(id: SwitchId): HTMLElement {
+  return menuItem(SWITCH_LABELS[id])
+}
+
+/** A menu item's checked state is the leading `[x] ` label prefix. */
+function checked(id: SwitchId): string {
+  const state = (switchOf(id).textContent ?? '').trimStart().startsWith('[x]') ? 'true' : 'false'
+  // Reading never leaves the menu hanging over the next interaction.
+  closeMore()
+  return state
+}
+
+/** Opens the menu, activates one switch and lets the menu close on select. */
+function toggle(id: SwitchId): void {
+  fireEvent.click(switchOf(id))
+}
+
+function menuAction(label: string): void {
+  fireEvent.click(menuItem(label))
 }
 
 function countText(): string {
@@ -79,7 +136,7 @@ function storageSnapshot(): string {
   )
 }
 
-/** The four original probe values of the status layer, in DOM order. */
+/** The probe values of the status layer, in DOM order (deduped forms included). */
 function statusValues(): string[] {
   const bar = document.querySelector<HTMLElement>('footer[data-shell-level="status"]')
   if (bar === null) throw new Error('missing status bar')
@@ -117,33 +174,34 @@ describe('workbench comparison switches', () => {
     renderWithI18n(<Workbench platform={port} />, 'zh')
     await openPair(LEFT, RIGHT, /left\.ts ↔ right\.ts/)
 
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('true')
-    expect(switchOf('ignore-encoding')?.getAttribute('aria-checked')).toBe('true')
+    expect(checked('ignore-newline')).toBe('true')
+    expect(checked('ignore-encoding')).toBe('true')
     expect(countText()).toBe('0')
-    expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8'])
+    // Newlines differ (left / right), encodings agree and collapse to one entry.
+    expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8'])
     expect(calls).toEqual([LEFT, RIGHT])
     const stored = storageSnapshot()
 
-    fireEvent.click(switchOf('ignore-newline')!)
-    fireEvent.click(switchOf('ignore-encoding')!)
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
+    toggle('ignore-newline')
+    toggle('ignore-encoding')
+    expect(checked('ignore-newline')).toBe('false')
     expect(Number(countText())).toBeGreaterThan(0)
     expect(calls).toEqual([LEFT, RIGHT])
-    expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8'])
+    expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8'])
     expect(storageSnapshot()).toBe(stored)
     const countBefore = countText()
 
     await openPair(OTHER_LEFT, OTHER_RIGHT, /other-left\.ts ↔ other-right\.ts/)
     // A new session opens at the current runtime value, not at the default.
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
-    expect(switchOf('ignore-encoding')?.getAttribute('aria-checked')).toBe('false')
+    expect(checked('ignore-newline')).toBe('false')
+    expect(checked('ignore-encoding')).toBe('false')
     expect(countText()).toBe('1')
     expect(document.querySelector('[data-code-diff-bytes]')).not.toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: /left\.ts ↔ right\.ts/ }))
     await waitFor(() => expect(countText()).toBe(countBefore))
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
-    expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8'])
+    expect(checked('ignore-newline')).toBe('false')
+    expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8'])
     expect(calls).toEqual([LEFT, RIGHT, OTHER_LEFT, OTHER_RIGHT])
     expect(storageSnapshot()).toBe(stored)
   })
@@ -152,15 +210,15 @@ describe('workbench comparison switches', () => {
     const first = await switchPort()
     const view = renderWithI18n(<Workbench platform={first.port} />, 'zh')
     await openPair(LEFT, RIGHT, /left\.ts ↔ right\.ts/)
-    fireEvent.click(switchOf('ignore-newline')!)
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
+    toggle('ignore-newline')
+    expect(checked('ignore-newline')).toBe('false')
     view.unmount()
 
     const second = await switchPort()
     renderWithI18n(<Workbench platform={second.port} />, 'zh')
     await openPair(LEFT, RIGHT, /left\.ts ↔ right\.ts/)
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('true')
-    expect(switchOf('ignore-encoding')?.getAttribute('aria-checked')).toBe('true')
+    expect(checked('ignore-newline')).toBe('true')
+    expect(checked('ignore-encoding')).toBe('true')
   })
 
   it('keeps raw status, switch state and the no-write invariant across reload and swap', async () => {
@@ -168,42 +226,42 @@ describe('workbench comparison switches', () => {
     renderWithI18n(<Workbench platform={port} />, 'zh')
     await openPair(LEFT, RIGHT, /left\.ts ↔ right\.ts/)
 
-    expect(switchOf('ignore-whitespace')?.getAttribute('aria-checked')).toBe('false')
-    expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8'])
+    expect(checked('ignore-whitespace')).toBe('false')
+    expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8'])
     expect(calls).toEqual([LEFT, RIGHT])
 
-    fireEvent.click(switchOf('ignore-whitespace')!)
-    expect(switchOf('ignore-whitespace')?.getAttribute('aria-checked')).toBe('true')
+    toggle('ignore-whitespace')
+    expect(checked('ignore-whitespace')).toBe('true')
     // The status layer keeps the disk facts: normalising never rewrites them.
-    expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8'])
+    expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8'])
     expect(calls).toEqual([LEFT, RIGHT])
 
-    fireEvent.click(switchOf('ignore-newline')!)
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
+    toggle('ignore-newline')
+    expect(checked('ignore-newline')).toBe('false')
     await openPair(OTHER_LEFT, OTHER_RIGHT, /other-left\.ts ↔ other-right\.ts/)
     fireEvent.click(screen.getByRole('tab', { name: /left\.ts ↔ right\.ts/ }))
     await waitFor(() =>
       expect(screen.getByRole('tab', { name: /left\.ts ↔ right\.ts/ }).getAttribute('aria-selected')).toBe('true')
     )
-    expect(switchOf('ignore-whitespace')?.getAttribute('aria-checked')).toBe('true')
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
+    expect(checked('ignore-whitespace')).toBe('true')
+    expect(checked('ignore-newline')).toBe('false')
 
     const beforeReload = calls.length
     const writesBefore = writes.mock.calls.length
-    fireEvent.click(document.querySelector('[data-code-action="reload"]')!)
+    menuAction(zh['files.code.reload'])
     await waitFor(() => expect(calls.length).toBeGreaterThan(beforeReload))
     expect(calls.slice(beforeReload)).toEqual([LEFT, RIGHT])
     expect(writes.mock.calls.length).toBe(writesBefore)
     expect(screen.getAllByRole('tab')).toHaveLength(2)
-    expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8'])
+    expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8'])
 
     const beforeSwap = calls.length
-    fireEvent.click(document.querySelector('[data-code-action="swap"]')!)
-    await waitFor(() => expect(statusValues()).toEqual(['LF', 'UTF-8', 'CRLF', 'UTF-8']))
-    expect(switchOf('ignore-whitespace')?.getAttribute('aria-checked')).toBe('true')
-    expect(switchOf('ignore-newline')?.getAttribute('aria-checked')).toBe('false')
-    fireEvent.click(document.querySelector('[data-code-action="swap"]')!)
-    await waitFor(() => expect(statusValues()).toEqual(['CRLF', 'UTF-8', 'LF', 'UTF-8']))
+    menuAction(zh['files.code.swap'])
+    await waitFor(() => expect(statusValues()).toEqual(['LF', 'CRLF', 'UTF-8']))
+    expect(checked('ignore-whitespace')).toBe('true')
+    expect(checked('ignore-newline')).toBe('false')
+    menuAction(zh['files.code.swap'])
+    await waitFor(() => expect(statusValues()).toEqual(['CRLF', 'LF', 'UTF-8']))
     expect(calls.length).toBe(beforeSwap)
     expect(writes.mock.calls.length).toBe(writesBefore)
   })

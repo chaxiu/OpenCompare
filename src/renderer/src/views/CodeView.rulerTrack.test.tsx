@@ -320,6 +320,34 @@ function RulerHarness({
 /* ------------------------------------------------------------------ */
 
 describe('diff ruler marker floor at 350k rows', () => {
+  it('paints the 2px track, the viewport rectangle and line-numbered marker titles', () => {
+    const { ruler } = renderDiff()
+
+    // The visible track is the 2px rail, not the full hit area.
+    const track = ruler.querySelector<HTMLElement>('[data-ruler-track="true"]')
+    expect(track).not.toBeNull()
+    expect(track?.className).toContain('w-0.5')
+    expect(track?.style.width).toBe('2px')
+    // Root keeps 6px between the rail and the vertical scrollbar.
+    expect(ruler.className).toContain('pr-1.5')
+
+    // The current viewport rectangle rides on the same track.
+    const windowRect = track?.querySelector<HTMLElement>('[data-window-top]')
+    expect(windowRect).not.toBeNull()
+    expect(windowRect?.dataset.windowTop).toBeDefined()
+    expect(windowRect?.dataset.windowHeight).toBeDefined()
+    expect(Number.isFinite(Number(windowRect?.dataset.windowHeight))).toBe(true)
+
+    // Every marker exposes its line range on hover.
+    const markers = Array.from(ruler.querySelectorAll<HTMLElement>('[data-diff-status]'))
+    expect(markers.length).toBeGreaterThan(0)
+    for (const marker of markers) {
+      const title = marker.getAttribute('title') ?? ''
+      expect(title).toContain(String(Number(marker.dataset.startRow) + 1))
+      expect(title).toContain(String(Number(marker.dataset.endRow) + 1))
+    }
+  })
+
   it('paints every marker at the clickable floor without leaving the track', () => {
     const { ruler } = renderDiff()
     const bands = buildRulerBands(model.rows, {
@@ -400,7 +428,7 @@ describe('windowed panes after a track hit', () => {
     expect(rightRow?.textContent).toContain(`right ${expected.startRow + 1}`)
   })
 
-  it('keeps both panes windowed with the exact rows × 20 content height', () => {
+  it('keeps both panes windowed with the exact rows × 22 content height', () => {
     const { ruler, panes } = renderDiff()
     const contentHeight = ROW_COUNT * DIFF_ROW_HEIGHT
 

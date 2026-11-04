@@ -458,6 +458,20 @@ export function createWebPlatformPort(): PlatformPort {
     writeComparisonHistory: async (entries) => writeStoredHistory(entries),
     // The browser exposes no OS UI locale beyond the navigator's preference.
     systemLocale: async () => (typeof navigator === 'undefined' ? '' : navigator.language),
+    // Best-effort clipboard write. A browser without the async clipboard API
+    // (or a denied permission) reports `false`; the caller still shows its
+    // one-shot accessible feedback and never throws.
+    copyText: async (text) => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text)
+          return true
+        }
+      } catch {
+        // Permission denied / unavailable: the UI degrades to feedback only.
+      }
+      return false
+    },
     // The browser runtime has no launch source (`argv` / URL scheme), so the
     // stream is an inert stub with the very same signature as the desktop one.
     onCompareRequest: () => () => undefined,
