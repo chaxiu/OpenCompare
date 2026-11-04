@@ -7,12 +7,11 @@ used.
 
 ## Captured commit
 
-- commit: `eb33ad18c17fb0126dfb2cc76cc3958fdcc14bc4`
+- commit: `147224bf93193f91c6ded973b859381cc7dd974c`
 - both images were rebuilt on a clean working tree at exactly that commit
-  (the tracked tree was clean — `git status --porcelain` showed only the
-  untracked `.munk/changes/` change pack — and `HEAD` equalled this commit
-  before the build), running `pnpm build` and then the capture script below in
-  that order, so the recorded commit is the build the images actually came from.
+  (`git status --porcelain` was empty and `HEAD` equalled this commit before
+  the build), running `pnpm build` and then the capture script below in that
+  order, so the recorded commit is the build the images actually came from.
 
 ## Images
 
@@ -24,17 +23,17 @@ used.
 ## Rebuild evidence
 
 The rebuild on the clean tree above printed
-`wrote docs/assets/opencompare-workbench.png (240092 bytes)` and
-`wrote docs/assets/opencompare-file-diff.png (296806 bytes)`. Both rebuilt files
+`wrote docs/assets/opencompare-workbench.png (241888 bytes)` and
+`wrote docs/assets/opencompare-file-diff.png (298362 bytes)`. Both rebuilt files
 differ from the previously committed images (`git diff` reports binary changes
 for both), so the rebuilt PNGs replaced the old ones — the rebuild followed the
-directory toolbar band pinned to 36px single-row / 72px wrapped-row and the
-dropdown menu that flips above or clamps inside the viewport.
+unknown-extension content-family change (classification and the supported-file
+copy rendered in the shell).
 
 | Image | Previous sha256 | Rebuilt sha256 (committed) |
 | --- | --- | --- |
-| `docs/assets/opencompare-workbench.png` | `94fec62e80d6aa504a951f5fdb419ea9da63a7a17540139c378f4480c0f126d0` | `5e7607c19a77819f19229fc9864a3f2a1497c6476528482fdc63fac3bbdc6566` |
-| `docs/assets/opencompare-file-diff.png` | `3b1151c83a3bfe3fdf09590d2598b0eec186e5ee91f86bd90b22f1817d067cc7` | `863a4df80d518515c22a8f96496fd1753bb10d94d3a5506369a948dccb14d195` |
+| `docs/assets/opencompare-workbench.png` | `5e7607c19a77819f19229fc9864a3f2a1497c6476528482fdc63fac3bbdc6566` | `ee23c1fd0baec6dc6e8799ea12c77205598e51924843759651f00f93b3459136` |
+| `docs/assets/opencompare-file-diff.png` | `863a4df80d518515c22a8f96496fd1753bb10d94d3a5506369a948dccb14d195` | `e47f710d2500a6dd79a22df485239068945300ac8f586f1a247d2b6ce04c31a5` |
 
 `src/main/release-artifacts-and-brand.test.ts` guards this record: the captured
 commit must resolve, be an ancestor of `HEAD`, and leave `src/renderer` with a
