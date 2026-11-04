@@ -36,7 +36,12 @@ toggle behaviour and comparison results are unchanged.
 | Fact | Baseline fact | Recomputed | Equal |
 | --- | --- | --- | --- |
 | bytes | 5367 | 5367 | yes |
-| sha256 | `8cfacec99138c21ef24b5eead14d4171ec4f4d657e815f1b8ba888bfc830a69b` | `8cfacec99138c21ef24b5eead14d4171ec4f4d657e815f1b8ba888bfc830a69b` | yes |
+| sha256 | `8fc99d02f65f815f4a5858839a8c77f2ec01c86221d65be5ac268c9135887792` | `8fc99d02f65f815f4a5858839a8c77f2ec01c86221d65be5ac268c9135887792` | yes |
+
+**Provenance.** The pre-token fact `8cfacec99138c21ef24b5eead14d4171ec4f4d657e815f1b8ba888bfc830a69b`
+was captured at commit `11170a5` with app version `0.2.20`; the recomputed hash above is the same
+generator with app version `0.2.21`. The two differ only in the `APP_VERSION` string and are both
+`5367` bytes (`baseline-facts.json` → `directoryHtml.preToken` / `directoryHtml.refreshed`).
 
 Export HTML moved into the directory "more" menu; the generated file is byte-identical.
 The hidden-local-paths switch is a menu item and keeps the same persisted state.
