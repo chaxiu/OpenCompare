@@ -9,6 +9,7 @@ import type { PlatformPort } from '@shared/platform/types'
 import { interpolate } from '@renderer/i18n/interpolate'
 import { zh } from '@renderer/i18n/messages'
 import type { Translate } from '@renderer/i18n/context'
+import { probeTextBytes } from '@core/text/probe'
 import { historyCandidate } from './historyHomeModel'
 import { buildMergeSession, mergeSessionErrorMessage, mergeSessionId, mergeSessionText, MergeSessionError } from './mergeSession'
 import { ipcPort, releaseScratchRoots, scratchRoot } from '../../../test/sharedHarness'
@@ -26,6 +27,20 @@ function realFilePort(read: (path: string) => Promise<string> = (path) => readFi
     if (channel !== PLATFORM_CHANNELS.readTextFile) throw new Error(`unexpected channel ${channel}`)
     return read(String(args[0]))
   })
+}
+
+/** A real-file port for unknown extensions: probe once per side, no plain read. */
+function realProbePort(): PlatformPort {
+  const port = {
+    readTextFile: async (path: string) => {
+      throw new Error(`unexpected plain read ${path}`)
+    },
+    probeTextFile: async (path: string) => ({
+      path,
+      ...probeTextBytes(await readFile(path))
+    })
+  }
+  return port as unknown as PlatformPort
 }
 
 async function writeTrio(root: string, names = ['base.txt', 'ours.txt', 'theirs.txt']) {
@@ -58,6 +73,41 @@ describe('buildMergeSession', () => {
     expect({ code: (failure as MergeSessionError).code, side: (failure as MergeSessionError).side }).toEqual({ code: 'READ_FAILED', side: 'theirs' })
     expect(mergeSessionErrorMessage(failure, t)).toContain('theirs')
     expect(mergeSessionErrorMessage(failure, t)).not.toContain(root)
+  })
+})
+
+describe('buildMergeSession with unknown extensions', () => {
+  it('opens three unknown-extension text files as one merge view', async () => {
+    const paths = await writeTrio(await scratchRoot(), ['base.vue', 'ours.vue', 'theirs.vue'])
+    const session = await buildMergeSession(realProbePort(), paths.base, paths.ours, paths.theirs)
+    expect(session.scene).toBe('code')
+    expect(session.merge).toEqual({
+      base: { path: paths.base, text: BASE_TEXT },
+      ours: { path: paths.ours, text: OURS_TEXT },
+      theirs: { path: paths.theirs, text: THEIRS_TEXT }
+    })
+  })
+
+  it('rejects a binary unknown-extension side with its side and file name', async () => {
+    const root = await scratchRoot()
+    const paths = await writeTrio(root, ['base.vue', 'ours.vue', 'theirs.vue'])
+    await writeFile(
+      paths.ours,
+      Uint8Array.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52
+      ])
+    )
+    const failure = await buildMergeSession(realProbePort(), paths.base, paths.ours, paths.theirs).catch(
+      (cause: unknown) => cause
+    )
+    expect(failure).toBeInstanceOf(MergeSessionError)
+    expect({ code: (failure as MergeSessionError).code, side: (failure as MergeSessionError).side }).toEqual({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      side: 'ours'
+    })
+    const message = mergeSessionErrorMessage(failure, t)
+    expect(message).toContain('ours.vue')
+    expect(message).not.toContain(root)
   })
 })
 

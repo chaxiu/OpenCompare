@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
 import type { FormEvent, JSX, KeyboardEvent } from 'react'
 import { SHELL_ENTRY_ICONS } from '@renderer/assets/icons'
-import { isSupportedComparisonFile } from '@shared/fileExtensions'
 import { parseManualPaths, resolveCompareRequest } from '@shared/compareRequest'
 import type {
   CompareErrorCode,
@@ -182,15 +181,6 @@ async function describeResolveIssue(
           rightKind: t(kindKey(rightKind === 'directory' ? 'directory' : 'file'))
         }
       }
-    }
-  }
-
-  if (code === 'UNSUPPORTED_FILE_TYPE') {
-    const side: Side = isSupportedComparisonFile(paths.left) ? 'right' : 'left'
-    return {
-      kind: 'compare',
-      code,
-      params: { side: t(sideKey(side)), path: paths[side] }
     }
   }
 

@@ -6,7 +6,6 @@
  * is folded exactly like a comparison path and the file system is only reached
  * through {@link PathProbe}.
  */
-import { isSupportedComparisonFile } from './fileExtensions'
 import { normalizePathValue } from './compareRequest'
 import type { PathContext, PathProbe } from './compareRequest'
 import type { PathProbeKind } from './platform/types'
@@ -89,7 +88,9 @@ async function probeSide(path: string, probe: PathProbe): Promise<ProbeOutcome> 
  * Resolves three raw paths into validated {@link MergePaths}: normalises each
  * side, probes each exactly once, then applies the frozen precedence
  * base → ours → theirs and, inside one side, ACCESS_DENIED → NOT_FOUND →
- * NOT_A_FILE → UNSUPPORTED_FILE_TYPE. Duplicate paths are legal merge inputs.
+ * NOT_A_FILE. File families are decided by `buildMergeSession` from extension
+ * + content, so validation never reads file bytes. Duplicate paths are legal
+ * merge inputs.
  */
 export async function resolveMergeRequest(
   paths: Partial<Record<MergeSide, string>>,
@@ -109,7 +110,6 @@ export async function resolveMergeRequest(
     if (outcome === undefined || !outcome.ok) return failure('ACCESS_DENIED', side, path)
     if (outcome.kind === 'missing') return failure('NOT_FOUND', side, path)
     if (outcome.kind === 'directory') return failure('NOT_A_FILE', side, path)
-    if (!isSupportedComparisonFile(path)) return failure('UNSUPPORTED_FILE_TYPE', side, path)
   }
 
   return { ok: true, paths: normalized.paths }

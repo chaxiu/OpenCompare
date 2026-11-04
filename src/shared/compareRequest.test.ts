@@ -351,17 +351,14 @@ describe('resolveCompareRequest', () => {
     expect(result.error.message).toContain('/tmp/folder')
   })
 
-  it('rejects unsupported file families and lists the supported ones', async () => {
-    const { probe } = staticProbe({ '/tmp/a.bin': 'file', '/tmp/b.exe': 'file' })
+  it('lets an unknown extension through to the open path without reading bytes', async () => {
+    const { probe, calls } = staticProbe({ '/tmp/a.bin': 'file', '/tmp/b.exe': 'file' })
 
     const result = await resolveCompareRequest({ left: '/tmp/a.bin', right: '/tmp/b.exe' }, { probe })
 
-    expect(result.ok).toBe(false)
-    if (result.ok) throw new Error('expected failure')
-    expect(result.error.code).toBe('UNSUPPORTED_FILE_TYPE')
-    expect(result.error.message).toContain('代码/文本')
-    expect(result.error.message).toContain('CSV/TSV')
-    expect(result.error.message).toContain('JSON/YAML')
+    expect(result.ok).toBe(true)
+    // Validation only stats each side: the family is decided when the file opens.
+    expect(calls).toEqual(['/tmp/a.bin', '/tmp/b.exe'])
   })
 
   it('matches extensions case-insensitively', async () => {

@@ -36,7 +36,7 @@ export const shell = {
   'shell.notice.dropMixed': '拖入的两项一个是文件、一个是文件夹，无法建立对比；请拖入两个同类路径。',
   'shell.notice.symlinkDirectory': '「{name}」是符号链接且指向目录，按不跟随口径不下钻内容。',
   'shell.notice.unsupportedDrilldown':
-    '暂不支持把 {name} 下钻到文件对比（仅代码 / 文本 · CSV / TSV · JSON / YAML）。',
+    '「{name}」无法按文本打开：扩展名无法识别时按内容判断，二进制文件不支持。',
   'shell.notice.exported.one': '已导出到 {path}（{count} 个文件）。',
   'shell.notice.exported.other': '已导出到 {path}（{count} 个文件）。',
   'shell.notice.exportedWithSkipped.one':
@@ -110,8 +110,6 @@ export const shell = {
   'shell.session.sample.structured.subtitle': '键序打乱 + 深层键值增删改与类型变化',
   'shell.session.missing.left': '{path}（左不存在）',
   'shell.session.missing.right': '{path}（右不存在）',
-  'shell.file.error.unsupported':
-    '暂不支持对比 {name}（仅支持代码 / 文本 · CSV / TSV · JSON / YAML）。',
   'shell.file.error.mixed':
     '两侧文件类型不一致（{left} 是 {leftKind}，{right} 是 {rightKind}），请选择同类文件。',
   'shell.snapshot.error.invalid-json': '快照导入失败：所选文件不是合法 JSON。',
@@ -165,14 +163,14 @@ export const shell = {
   'shell.compare.error.TYPE_MISMATCH':
     '左右两侧类型不一致：左侧是{leftKind}（{left}），右侧是{rightKind}（{right}）。',
   'shell.compare.error.UNSUPPORTED_FILE_TYPE':
-    '不支持的文件类型：{side}「{path}」。支持代码/文本、CSV/TSV、JSON/YAML 文件。',
+    '不支持的文件类型：{side}「{path}」。扩展名无法识别时按内容判断，二进制文件不支持。',
   'shell.compare.error.ACCESS_DENIED': '无法访问{side}路径：{path}（权限不足或不可读）。',
   'shell.merge.error.EMPTY_PATH': '{side}路径为空，请输入有效路径。',
   'shell.merge.error.NOT_FOUND': '{side} 路径不存在：{path}',
   'shell.merge.error.ACCESS_DENIED': '无法访问 {side} 路径：{path}（权限不足或不可读）。',
   'shell.merge.error.NOT_A_FILE': '{side} 路径不是文件：{path}（三向合并需要三个文件）。',
   'shell.merge.error.UNSUPPORTED_FILE_TYPE':
-    '不支持的文件类型：{side}「{path}」。支持代码/文本、CSV/TSV、JSON/YAML 文件。',
+    '不支持的文件类型：{side}「{path}」。扩展名无法识别时按内容判断，二进制文件不支持。',
   'shell.merge.error.READ_FAILED': '读取 {side} 文件失败，请检查该文件是否仍存在且可读。',
   'shell.history.title': '最近对比',
   'shell.history.kind.directory': '目录',

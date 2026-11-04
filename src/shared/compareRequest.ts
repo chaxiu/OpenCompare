@@ -6,7 +6,6 @@
  * receives `homeDir` / `baseDir` explicitly, so parsing is deterministic in
  * tests and the real file system is only reached through {@link PathProbe}.
  */
-import { isSupportedComparisonFile } from './fileExtensions'
 import type { PathProbeKind } from './platform/types'
 
 export interface ComparePaths {
@@ -459,14 +458,11 @@ function typeMismatchMessage(
   return `左右两侧类型不一致：左侧是${describeKind(leftKind)}（${left}），右侧是${describeKind(rightKind)}（${right}）。`
 }
 
-function unsupportedFileMessage(side: Side, path: string): string {
-  return `不支持的文件类型：${SIDE_LABEL[side]}「${path}」。支持代码/文本、CSV/TSV、JSON/YAML 文件。`
-}
-
 /**
  * Resolves raw paths into a validated {@link CompareRequest}: normalises both
  * sides, probes each exactly once, then applies the frozen error precedence
- * NOT_FOUND → TYPE_MISMATCH → UNSUPPORTED_FILE_TYPE, left side first.
+ * NOT_FOUND → TYPE_MISMATCH, left side first. File families are decided by the
+ * open path from extension + content, so validation never reads file bytes.
  */
 export async function resolveCompareRequest(
   paths: ComparePaths,
@@ -500,15 +496,6 @@ export async function resolveCompareRequest(
       'TYPE_MISMATCH',
       typeMismatchMessage(display(left), display(right), leftKind, rightKind)
     )
-  }
-
-  if (leftKind === 'file') {
-    if (!isSupportedComparisonFile(left)) {
-      return failure('UNSUPPORTED_FILE_TYPE', unsupportedFileMessage('left', display(left)))
-    }
-    if (!isSupportedComparisonFile(right)) {
-      return failure('UNSUPPORTED_FILE_TYPE', unsupportedFileMessage('right', display(right)))
-    }
   }
 
   return { ok: true, request: { left, right, kind: leftKind } }

@@ -8,7 +8,6 @@ import { detectNewline } from '@core/text/probe'
 import { SNAPSHOT_SCHEMA } from '@shared/snapshot'
 import type { SnapshotDocument } from '@shared/snapshot'
 import type { PlatformPort, TextFileProbe } from '@shared/platform/types'
-import type { DrilldownTarget } from './renderer/src/workbench/fileKinds'
 import { openDrilldownSession, openFilePairSession } from './renderer/src/workbench/directoryCompare'
 import type { WorkbenchSession } from './renderer/src/workbench/session'
 import { directorySides, snapshotSide } from './renderer/src/workbench/snapshotOps'
@@ -49,7 +48,6 @@ const platform: PlatformPort = {
   }
 }
 
-const TARGET: DrilldownTarget = { kind: 'code', label: 'code' }
 let root = ''
 function fileNode(relativePath: string, leftPath?: string, rightPath?: string): DirectoryDiffNode {
   const name = relativePath.slice(relativePath.lastIndexOf('/') + 1)
@@ -79,6 +77,10 @@ beforeAll(async () => {
 afterAll(async () => {
   if (root.length > 0) await rm(root, { recursive: true, force: true })
 })
+const PNG_HEADER = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52
+])
+
 describe('real file-pair open probe facts', () => {
   it('matches platform.probeTextFile for all four encodings with one probe per side', async () => {
     const paths: string[] = []
@@ -98,6 +100,49 @@ describe('real file-pair open probe facts', () => {
     expect(probeCalls).toHaveLength(paths.length)
     expect(readCalls).toEqual([])
   })
+
+  it('opens an unknown extension text pair from the single probe per side', async () => {
+    const left = join(root, 'unknown-left.vue')
+    const right = join(root, 'unknown-right.vue')
+    await writeFile(left, 'alpha\nbeta\n')
+    await writeFile(right, 'alpha\nbeta\n')
+
+    probeCalls.length = 0
+    readCalls.length = 0
+    const session = await openFilePairSession(platform, left, right)
+    expect(session.adhoc?.scene).toBe('code')
+    expectSide(session, 'left', await base.probeTextFile(left))
+    expectSide(session, 'right', await base.probeTextFile(right))
+    expect([...probeCalls].sort()).toEqual([left, right].sort())
+    expect(readCalls).toEqual([])
+  })
+
+  it('opens a GBK unknown-extension pair with the decoded body and facts', async () => {
+    const gbk = Uint8Array.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a])
+    const left = join(root, 'gbk-left.vue')
+    const right = join(root, 'gbk-right.vue')
+    await writeFile(left, gbk)
+    await writeFile(right, gbk)
+
+    const session = await openFilePairSession(platform, left, right)
+    expect(session.adhoc?.pair.left.text).toBe('中文\n')
+    expect(session.probes?.left?.encoding).toBe('GBK')
+  })
+
+  it('rejects an unknown extension binary pair with the failing side', async () => {
+    const left = join(root, 'unknown-bin-left.vue')
+    const right = join(root, 'unknown-bin-right.vue')
+    await writeFile(left, 'alpha\n')
+    await writeFile(right, PNG_HEADER)
+
+    probeCalls.length = 0
+    const failure = openFilePairSession(platform, left, right)
+    await expect(failure).rejects.toMatchObject({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      params: { side: 'right', name: 'unknown-bin-right.vue' }
+    })
+    expect([...probeCalls].sort()).toEqual([left, right].sort())
+  })
 })
 describe('drilldown probe facts', () => {
   it('probes each real side independently and never probes a missing side', async () => {
@@ -111,7 +156,6 @@ describe('drilldown probe facts', () => {
       platform,
       'directory:a ↔ b',
       fileNode('src/engine.ts', left, right),
-      TARGET,
       sides
     )
     expect(session.probes?.left?.newline).toBe('CRLF')
@@ -124,7 +168,6 @@ describe('drilldown probe facts', () => {
       platform,
       'directory:a ↔ b',
       fileNode('src/new.ts', undefined, right),
-      TARGET,
       sides
     )
     expect(added.probes?.left).toBeUndefined()
@@ -132,6 +175,50 @@ describe('drilldown probe facts', () => {
     expect(added.adhoc?.pair.left.text).toBe('')
     expect(added.adhoc?.pair.left.path).toContain('opencompare-missing-left')
     expect(probeCalls).toEqual([right])
+  })
+
+  it('opens an unknown extension text pair with exactly one probe per side', async () => {
+    const left = join(root, 'drill-unknown-left.vue')
+    const right = join(root, 'drill-unknown-right.vue')
+    await writeFile(left, 'alpha\nbeta\n')
+    await writeFile(right, 'alpha\nbeta\n')
+    const sides = directorySides(root, root)
+
+    probeCalls.length = 0
+    readCalls.length = 0
+    const session = await openDrilldownSession(
+      platform,
+      'directory:a ↔ b',
+      fileNode('src/widget.vue', left, right),
+      sides
+    )
+    expect(session.adhoc?.scene).toBe('code')
+    expect(session.adhoc?.pair.left.text).toBe('alpha\nbeta\n')
+    expectSide(session, 'left', await base.probeTextFile(left))
+    expectSide(session, 'right', await base.probeTextFile(right))
+    expect([...probeCalls].sort()).toEqual([left, right].sort())
+    expect(readCalls).toEqual([])
+  })
+
+  it('rejects an unknown extension binary drilldown after one probe per side', async () => {
+    const left = join(root, 'drill-binary-left.vue')
+    const right = join(root, 'drill-binary-right.vue')
+    await writeFile(left, PNG_HEADER)
+    await writeFile(right, PNG_HEADER)
+    const sides = directorySides(root, root)
+
+    probeCalls.length = 0
+    const failure = openDrilldownSession(
+      platform,
+      'directory:a ↔ b',
+      fileNode('src/image.vue', left, right),
+      sides
+    )
+    await expect(failure).rejects.toMatchObject({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      params: { side: 'left', name: 'image.vue' }
+    })
+    expect(probeCalls).toEqual([left])
   })
 
   it('probes a snapshot-inlined body as memory UTF-8 and never touches its virtual path', async () => {
@@ -156,7 +243,6 @@ describe('drilldown probe facts', () => {
       platform,
       'directory:a ↔ b',
       fileNode('src/inline.ts', undefined, mountedPath),
-      TARGET,
       { ...sides }
     )
     expect(session.adhoc?.pair.right.text).toBe(inline)

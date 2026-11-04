@@ -45,7 +45,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.notice.symlinkDirectory':
     '"{name}" is a symbolic link to a folder and is not followed, so its contents are not opened.',
   'shell.notice.unsupportedDrilldown':
-    'Cannot open {name} in a file comparison yet (only code / text · CSV / TSV · JSON / YAML).',
+    'Cannot open "{name}" as text: when the extension is unknown the content is checked, and binary files are not supported.',
   'shell.notice.exported.one': 'Exported to {path} ({count} file).',
   'shell.notice.exported.other': 'Exported to {path} ({count} files).',
   'shell.notice.exportedWithSkipped.one':
@@ -129,8 +129,6 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'Shuffled keys with deep additions, removals, edits and type changes',
   'shell.session.missing.left': '{path} (missing on the left)',
   'shell.session.missing.right': '{path} (missing on the right)',
-  'shell.file.error.unsupported':
-    'Cannot compare {name} yet (only code / text · CSV / TSV · JSON / YAML are supported).',
   'shell.file.error.mixed':
     'The two files have different types ({left} is {leftKind}, {right} is {rightKind}). Choose files of the same type.',
   'shell.snapshot.error.invalid-json':
@@ -191,7 +189,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.compare.error.TYPE_MISMATCH':
     'The two sides differ in type: the left side is {leftKind} ({left}) and the right side is {rightKind} ({right}).',
   'shell.compare.error.UNSUPPORTED_FILE_TYPE':
-    'Unsupported file type: {side} "{path}". Supported files are code/text, CSV/TSV and JSON/YAML.',
+    'Unsupported file type: {side} "{path}". When the extension is unknown the content is checked; binary files are not supported.',
   'shell.compare.error.ACCESS_DENIED':
     'Cannot access the {side} path: {path} (permission denied or unreadable).',
   'shell.merge.error.EMPTY_PATH': 'The {side} path is empty. Enter a valid path.',
@@ -201,7 +199,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.merge.error.NOT_A_FILE':
     'The {side} path is not a file: {path} (a 3-way merge needs three files).',
   'shell.merge.error.UNSUPPORTED_FILE_TYPE':
-    'Unsupported file type: {side} "{path}". Supported files are code/text, CSV/TSV and JSON/YAML.',
+    'Unsupported file type: {side} "{path}". When the extension is unknown the content is checked; binary files are not supported.',
   'shell.merge.error.READ_FAILED':
     'Could not read the {side} file. Check that it still exists and is readable.',
   'shell.history.title': 'Recent comparisons',

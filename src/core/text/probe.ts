@@ -307,6 +307,18 @@ export function probeTextBytes(
 }
 
 /**
+ * The single text / binary verdict over one probe result. Text means the
+ * encoding was recognised and the decoded body has no `U+0000`.
+ *
+ * That is equivalent to "no NUL byte outside the UTF-16 layout": UTF-16 NULs
+ * live in the high byte and never decode to `U+0000`, while any other NUL
+ * decodes to `U+0000` under UTF-8 / GBK (0x00 is not a GBK lead or trail byte).
+ */
+export function isTextProbe(probe: Pick<TextBytesProbe, 'text' | 'encoding'>): boolean {
+  return probe.encoding !== 'Unknown' && !probe.text.includes('\u0000')
+}
+
+/**
  * Probes in-memory text exactly as its UTF-8 encoding would be probed. Sample
  * bodies and snapshot-inlined files have no original bytes, so they take this
  * one path instead of a second detection rule set.

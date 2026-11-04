@@ -145,7 +145,7 @@ describe('openFilePairSession', () => {
     expect(session.adhoc?.format).toBe('json')
   })
 
-  it('rejects a mixed family and an unsupported type without reading either side', async () => {
+  it('rejects a mixed known family without reading either side', async () => {
     const readTextFile = vi.fn(async () => '')
     const platform = { readTextFile } as unknown as PlatformPort
 
@@ -153,12 +153,85 @@ describe('openFilePairSession', () => {
     await expect(mixed).rejects.toBeInstanceOf(FilePairError)
     await expect(mixed).rejects.toMatchObject({ code: 'mixed-family' })
 
-    const unsupported = openFilePairSession(platform, '/a/x.bin', '/b/x.bin')
-    await expect(unsupported).rejects.toBeInstanceOf(FilePairError)
-    await expect(unsupported).rejects.toMatchObject({ code: 'unsupported-type' })
-
     // A rejected pair never reaches the platform and never builds a session.
     expect(readTextFile).not.toHaveBeenCalled()
+  })
+
+  it('opens an unknown-extension text pair as code from one probe per side', async () => {
+    const probe = vi.fn(async (path: string) => ({
+      path,
+      ...probeTextBytes(new TextEncoder().encode('alpha\nbeta\n'))
+    }))
+    const platform = { probeTextFile: probe } as unknown as PlatformPort
+
+    const session = await openFilePairSession(platform, '/a/widget.vue', '/b/widget.vue')
+    expect(session.scene).toBe('code')
+    expect(session.adhoc?.pair.left.text).toBe('alpha\nbeta\n')
+    expect(session.probes?.left?.encoding).toBe('UTF-8')
+    expect(probe.mock.calls.map(([path]) => path)).toEqual(['/a/widget.vue', '/b/widget.vue'])
+  })
+
+  it('opens a GBK unknown-extension pair with the decoded body and facts', async () => {
+    const gbk = Uint8Array.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a])
+    const platform = {
+      probeTextFile: async (path: string) => ({ path, ...probeTextBytes(gbk) })
+    } as unknown as PlatformPort
+
+    const session = await openFilePairSession(platform, '/a/note.vue', '/b/note.vue')
+    expect(session.adhoc?.pair.left.text).toBe('中文\n')
+    expect(session.probes?.left?.encoding).toBe('GBK')
+  })
+
+  it('rejects unknown-extension binary content with the failing side', async () => {
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52
+    ])
+    const text = new TextEncoder().encode('alpha\n')
+    const platform = {
+      probeTextFile: async (path: string) => ({
+        path,
+        ...probeTextBytes(path.startsWith('/a/') ? text : png)
+      })
+    } as unknown as PlatformPort
+
+    const rightBinary = openFilePairSession(platform, '/a/widget.vue', '/b/widget.vue')
+    await expect(rightBinary).rejects.toMatchObject({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      params: { side: 'right', name: 'widget.vue' }
+    })
+
+    const leftBinary = openFilePairSession(platform, '/b/widget.vue', '/a/widget.vue')
+    await expect(leftBinary).rejects.toMatchObject({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      params: { side: 'left', name: 'widget.vue' }
+    })
+  })
+
+  it('keeps mixed-family rejection for unknown text against structured extensions', async () => {
+    const platform = stubPlatform({ '/a/widget.vue': 'a\n', '/b/x.json': '{"a":1}\n' })
+    const mixed = openFilePairSession(platform, '/a/widget.vue', '/b/x.json')
+    await expect(mixed).rejects.toMatchObject({ code: 'mixed-family' })
+  })
+
+  it('opens an unknown-extension text beside a known text extension', async () => {
+    const session = await openFilePairSession(
+      stubPlatform({ '/a/widget.vue': 'a\n', '/b/engine.ts': 'a\n' }),
+      '/a/widget.vue',
+      '/b/engine.ts'
+    )
+    expect(session.scene).toBe('code')
+  })
+
+  it('keeps extension-less names on the extension path without probing content', async () => {
+    const probe = vi.fn(async (path: string) => ({ path, ...probeTextBytes(new TextEncoder().encode('x\n')) }))
+    const platform = {
+      probeTextFile: probe,
+      readTextFile: async (path: string) => (path.startsWith('/a/') ? 'a\n' : 'b\n')
+    } as unknown as PlatformPort
+    const session = await openFilePairSession(platform, '/a/Makefile', '/b/Makefile')
+    expect(session.scene).toBe('code')
+    // `extensionFamily('Makefile') === 'code'`; a code pair still probes each side once for facts.
+    expect(probe).toHaveBeenCalledTimes(2)
   })
 })
 

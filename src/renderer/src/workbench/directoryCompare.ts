@@ -13,18 +13,20 @@ import type {
   DirectoryDiffNode
 } from '@core/directory/compare'
 import type { DrilldownTarget, FileKind } from './fileKinds'
-import { baseName, classifyFile } from './fileKinds'
+import { extensionFamily } from '@shared/fileExtensions'
+import { baseName, classifyFamily, classifyFile, contentFamily } from './fileKinds'
 import { missingSidePath } from './sessionDisplay'
 import type { AdhocFilePair, FilePair, FilePairProbes, WorkbenchSession } from './session'
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
-import { readSideFile, readSideFileProbe } from './snapshotOps'
+import { readSideFile, readSideFileProbe, type SideFileFacts } from './snapshotOps'
 
 /** Known file-pair failures the shell localizes from a stable code. */
-export type FilePairErrorCode = 'unsupported-type' | 'mixed-family'
+export type FilePairErrorCode = 'UNSUPPORTED_FILE_TYPE' | 'mixed-family'
 
 export interface FilePairErrorParams {
   readonly name?: string
+  readonly side?: 'left' | 'right'
   readonly left?: string
   readonly right?: string
   readonly leftKind?: FileKind
@@ -359,27 +361,52 @@ export async function openDrilldownSession(
   platform: PlatformPort,
   parentId: string,
   node: DirectoryDiffNode,
-  target: DrilldownTarget,
   sides: ComparisonSides
 ): Promise<WorkbenchSession> {
-  const probe = target.kind === 'code'
-  const read = async (
-    path: string | undefined
-  ): Promise<{ readonly text: string; readonly facts?: TextFileFacts } | null> => {
-    if (path === undefined) return null
-    if (probe) return readSideFileProbe(platform, sides, path)
-    return { text: await readSideFile(platform, sides, path) }
+  const build = async (
+    target: DrilldownTarget,
+    prefetched?: { readonly side: 'left' | 'right'; readonly file: SideFileFacts }
+  ): Promise<WorkbenchSession> => {
+    const probe = target.kind === 'code'
+    const read = async (
+      side: 'left' | 'right',
+      path: string | undefined
+    ): Promise<{ readonly text: string; readonly facts?: TextFileFacts } | null> => {
+      if (path === undefined) return null
+      if (prefetched?.side === side) return prefetched.file
+      if (probe) return readSideFileProbe(platform, sides, path)
+      return { text: await readSideFile(platform, sides, path) }
+    }
+
+    const [left, right] = await Promise.all([read('left', node.leftPath), read('right', node.rightPath)])
+    return createDrilldownSession(
+      parentId,
+      node,
+      target,
+      left?.text ?? '',
+      right?.text ?? '',
+      probe ? { left: left?.facts, right: right?.facts } : undefined
+    )
   }
 
-  const [left, right] = await Promise.all([read(node.leftPath), read(node.rightPath)])
-  return createDrilldownSession(
-    parentId,
-    node,
-    target,
-    left?.text ?? '',
-    right?.text ?? '',
-    probe ? { left: left?.facts, right: right?.facts } : undefined
-  )
+  const byExtension = extensionFamily(node.name)
+  if (byExtension !== null) return build(classifyFamily(byExtension))
+
+  // Unknown extension: one side decides text / binary. The probe read is reused
+  // as that side's body and facts, so the side is read exactly once.
+  const decisionPath = node.leftPath ?? node.rightPath
+  if (decisionPath === undefined) return build(classifyFamily('code'))
+  const decisionSide = node.leftPath !== undefined ? 'left' : 'right'
+  const first = await readSideFileProbe(platform, sides, decisionPath)
+  const family = contentFamily(node.name, { text: first.text, encoding: first.facts.encoding })
+  if (family === null) {
+    throw new FilePairError(
+      'UNSUPPORTED_FILE_TYPE',
+      { side: decisionSide, name: node.name },
+      `Unsupported file type: ${node.name}.`
+    )
+  }
+  return build(classifyFamily(family), { side: decisionSide, file: first })
 }
 
 /**
@@ -401,27 +428,19 @@ export function resolveDirectoryReturn(
   return fallback ? { id: fallback.id, fallback: true } : null
 }
 
-/**
- * Classifies one side of an opened pair, rejecting an unsupported extension with
- * the workbench's usual readable notice.
- */
-function requireComparableFile(path: string): { readonly target: DrilldownTarget } {
-  const name = baseName(path)
-  const target = classifyFile(name)
-  if (target === null) {
-    throw new FilePairError(
-      'unsupported-type',
-      { name },
-      `Unsupported file type: ${name}.`
-    )
-  }
-  return { target }
-}
-
 /** One opened side: its body plus the original facts for a code pair. */
 interface OpenedSide {
   readonly text: string
   readonly facts?: TextFileFacts
+}
+
+/** One side's family plus the probe that decided it (unknown extensions only). */
+interface ResolvedSide {
+  readonly side: 'left' | 'right'
+  readonly path: string
+  readonly name: string
+  readonly family: FileKind | null
+  readonly probe?: OpenedSide
 }
 
 /**
@@ -440,6 +459,28 @@ async function readOpenedSide(
 }
 
 /**
+ * Resolves one side's family: a known extension needs no read at all, while an
+ * unknown extension is probed once and that same probe becomes its body/facts.
+ */
+async function resolveOpenedSide(
+  platform: PlatformPort,
+  side: 'left' | 'right',
+  path: string
+): Promise<ResolvedSide> {
+  const name = baseName(path)
+  const known = extensionFamily(path)
+  if (known !== null) return { side, path, name, family: known }
+  const probe = await readOpenedSide(platform, path, true)
+  return {
+    side,
+    path,
+    name,
+    family: contentFamily(name, { text: probe.text, encoding: probe.facts?.encoding ?? 'Unknown' }),
+    probe
+  }
+}
+
+/**
  * Opens two real absolute paths as one file-level session: the same model a
  * drilldown produces (code text / delimited table / structured document).
  * Rejects with a readable message when a side is unsupported or the two sides
@@ -450,35 +491,47 @@ export async function openFilePairSession(
   leftPath: string,
   rightPath: string
 ): Promise<WorkbenchSession> {
-  const left = requireComparableFile(leftPath)
-  const right = requireComparableFile(rightPath)
+  // Known extensions read zero bytes here; unknown extensions read once per side
+  // and reuse that probe as the body, so no side is ever read twice.
+  const resolved = await Promise.all([
+    resolveOpenedSide(platform, 'left', leftPath),
+    resolveOpenedSide(platform, 'right', rightPath)
+  ])
+
+  // Binary wins over mixed-family, left side first: a deterministic attribution.
+  for (const side of resolved) {
+    if (side.family === null) {
+      throw new FilePairError(
+        'UNSUPPORTED_FILE_TYPE',
+        { side: side.side, name: side.name },
+        `Unsupported file type: ${side.name}.`
+      )
+    }
+  }
+
+  const [left, right] = resolved as [ResolvedSide & { family: FileKind }, ResolvedSide & { family: FileKind }]
   // One session renders one file family, so a mixed pair (e.g. JSON ↔ YAML) is
   // rejected instead of silently picking a side's format.
-  if (left.target.label !== right.target.label) {
+  if (left.family !== right.family) {
     throw new FilePairError(
       'mixed-family',
-      {
-        left: baseName(leftPath),
-        right: baseName(rightPath),
-        leftKind: left.target.label,
-        rightKind: right.target.label
-      },
-      `Mixed file types: ${baseName(leftPath)} is ${left.target.label}, ${baseName(rightPath)} is ${right.target.label}.`
+      { left: left.name, right: right.name, leftKind: left.family, rightKind: right.family },
+      `Mixed file types: ${left.name} is ${left.family}, ${right.name} is ${right.family}.`
     )
   }
 
-  const probe = left.target.kind === 'code'
-  const [leftSide, rightSide] = await Promise.all([
-    readOpenedSide(platform, leftPath, probe),
-    readOpenedSide(platform, rightPath, probe)
-  ])
-  const leftName = baseName(leftPath)
-  const rightName = baseName(rightPath)
+  const target = classifyFamily(left.family)
+  const probe = target.kind === 'code'
+  const read = async (side: ResolvedSide): Promise<OpenedSide> => {
+    if (side.probe !== undefined) return side.probe
+    return readOpenedSide(platform, side.path, probe)
+  }
+  const [leftSide, rightSide] = await Promise.all([read(left), read(right)])
 
   return createFilePairSession(
     `file:${leftPath} ↔ ${rightPath}`,
-    leftName === rightName ? leftName : `${leftName} ↔ ${rightName}`,
-    left.target,
+    left.name === right.name ? left.name : `${left.name} ↔ ${right.name}`,
+    target,
     { path: leftPath, text: leftSide.text },
     { path: rightPath, text: rightSide.text },
     probe ? { left: leftSide.facts, right: rightSide.facts } : undefined

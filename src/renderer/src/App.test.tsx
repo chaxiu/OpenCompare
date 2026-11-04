@@ -348,19 +348,17 @@ describe('workbench shell', () => {
     expect(screen.getByText(/YAML 原文/)).toBeDefined()
   })
 
-  it('explains why a non-text file cannot be drilled into', async () => {
+  it('opens a sample unknown-extension text file instead of refusing it', async () => {
     await renderApp()
 
     await loadDemoSamples()
     await screen.findByRole('tab', { name: /3-Way Merge/ }, { timeout: 4000 })
 
+    // The sample's "logo.png" body is a hex dump, so content decides: text opens.
     fireEvent.doubleClick(screen.getAllByText('logo.png')[0])
 
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('暂不支持')
-    // the directory session stays put instead of silently doing nothing
-    expect(statusText()).toContain('文件（源）')
-    expect(screen.queryByText(SAMPLE_DIRECTORY_ID)).toBeNull()
+    expect(await screen.findByRole('tab', { name: /logo\.png/ }, { timeout: 4000 })).toBeDefined()
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
   })
 
   it('degrades the native directory picker on the web runtime', async () => {
@@ -1025,17 +1023,21 @@ describe('real file workbench', () => {
     expect(screen.getAllByRole('tab', { name: /engine\.ts/ })).toHaveLength(1)
   })
 
-  it('reports an unsupported extension without opening a session', async () => {
-    mountWorkbench(
-      scriptedPort({
-        files: [`${DIRECTORY_SAMPLE_PATHS.left}/assets/logo.png`, `${DIRECTORY_SAMPLE_PATHS.right}/assets/logo.png`],
-      })
-    )
+  it('reports an unsupported binary unknown extension without opening a session', async () => {
+    const base = createWebPlatformPort()
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    ])
+    await base.writeFileBytes('/memory/a/logo.png', png)
+    await base.writeFileBytes('/memory/b/logo.png', png)
+    mountWorkbench(scriptedPort({ files: ['/memory/a/logo.png', '/memory/b/logo.png'] }, base))
 
     fireEvent.click(screen.getByRole('button', { name: '打开文件' }))
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('暂不支持对比 logo.png')
+    expect(alert.textContent).toContain('不支持的文件类型')
+    expect(alert.textContent).toContain('logo.png')
+    expect(alert.textContent).toContain('二进制文件不支持')
     expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
   })
 })
@@ -1082,6 +1084,42 @@ describe('directory drilldown roundtrip', () => {
     expect(within(paneTree(1)).queryAllByText('deploy.yaml')).toHaveLength(0)
     expect(within(paneTree(0)).getAllByText('engine.ts')[0].closest('[role="treeitem"]')?.getAttribute('aria-selected')).toBe('true')
     expect((paneTree(0).parentElement as HTMLElement).scrollTop).toBe(96)
+  })
+
+  it('opens an unknown-extension text file from the tree as code', async () => {
+    const base = createWebPlatformPort()
+    await writeFiles(base, [
+      ['/memory/left/widget.vue', 'alpha\n'],
+      ['/memory/right/widget.vue', 'beta\n'],
+    ])
+    mountWorkbench(scriptedPort({ directories: ['/memory/left', '/memory/right'] }, base))
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(within(paneTree(0)).getAllByText('widget.vue')[0])
+
+    expect(await screen.findByRole('tab', { name: /widget\.vue/ }, { timeout: 4000 })).toBeDefined()
+    expect(screen.queryByText(/无法按文本打开/)).toBeNull()
+    expect(statusText()).toContain('UTF-8')
+  })
+
+  it('reports an unknown-extension binary drilldown without opening a blank tab', async () => {
+    const base = createWebPlatformPort()
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    ])
+    await base.writeFileBytes('/memory/left/logo.vue', png)
+    await base.writeFileBytes('/memory/right/logo.vue', png)
+    mountWorkbench(scriptedPort({ directories: ['/memory/left', '/memory/right'] }, base))
+    fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+    await screen.findByRole('tab', { name: /left ↔ right/ }, { timeout: 4000 })
+
+    fireEvent.doubleClick(within(paneTree(0)).getAllByText('logo.vue')[0])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('无法按文本打开')
+    expect(alert.textContent).toContain('logo.vue')
+    expect(within(sessionTabs()).queryAllByRole('tab', { name: /logo\.vue/ })).toHaveLength(0)
   })
 
   it('repeats drilldown and return without drifting', async () => {
@@ -1677,23 +1715,43 @@ describe('new compare dialog', () => {
     expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
   })
 
-  it('lists the supported families for an unsupported extension', async () => {
+  it('opens two unknown-extension text files from the manual path dialog', async () => {
     const base = createWebPlatformPort()
     await writeFiles(base, [
-      ['/memory/a.bin', 'a'],
-      ['/memory/b.bin', 'b'],
+      ['/memory/a.vue', 'alpha\nbeta\n'],
+      ['/memory/b.vue', 'alpha\ngamma\n'],
     ])
     mountWorkbench(base)
 
     openCompareDialog()
-    fillComparePaths('/memory/a.bin', '/memory/b.bin')
+    fillComparePaths('/memory/a.vue', '/memory/b.vue')
+    submitCompare()
+
+    const tab = await screen.findByRole('tab', { name: /a\.vue/ }, { timeout: 4000 })
+    expect(tab.getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText(/本地文件 · 双栏字符级 Diff/)).toBeDefined()
+    expect(statusText()).toContain('UTF-8')
+    expect(screen.queryByText(/不支持的文件类型/)).toBeNull()
+  })
+
+  it('reports an unknown-extension binary from the dialog with the failing side', async () => {
+    const base = createWebPlatformPort()
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    ])
+    await writeFiles(base, [['/memory/a.vue', 'alpha\n']])
+    await base.writeFileBytes('/memory/b.vue', png)
+    mountWorkbench(base)
+
+    openCompareDialog()
+    fillComparePaths('/memory/a.vue', '/memory/b.vue')
     submitCompare()
 
     const alert = await within(dialog()).findByRole('alert')
-    expect(alert.textContent).toContain('不支持')
-    expect(alert.textContent).toContain('代码/文本')
-    expect(alert.textContent).toContain('CSV/TSV')
-    expect(alert.textContent).toContain('JSON/YAML')
+    expect(alert.textContent).toContain('不支持的文件类型')
+    expect(alert.textContent).toContain('右侧')
+    expect(alert.textContent).toContain('b.vue')
+    expect(alert.textContent).toContain('二进制文件不支持')
     expect(screen.queryByRole('tablist', { name: '会话' })).toBeNull()
   })
 

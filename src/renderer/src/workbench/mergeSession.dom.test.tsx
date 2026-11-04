@@ -132,7 +132,6 @@ describe('merge dialog entry', () => {
   it('keeps pair and merge modes apart and never adds a tab for an invalid side', async () => {
     const memory = await trioPort()
     await memory.writeTextFile('/memory/merge/dir/inner.txt', 'x\n')
-    await memory.writeTextFile('/memory/merge/base.bin', 'x\n')
     const denied = '/memory/merge/denied.txt'
     const port: PlatformPort = { ...memory, statPath: async (path) => { if (path === denied) throw new Error('EACCES'); return memory.statPath(path) } }
     renderWithI18n(<Workbench platform={port} />, 'zh')
@@ -152,7 +151,6 @@ describe('merge dialog entry', () => {
       ['', 'EMPTY_PATH', ''],
       ['/memory/merge/missing.txt', 'NOT_FOUND', '/memory/merge/missing.txt'],
       ['/memory/merge/dir', 'NOT_A_FILE', '/memory/merge/dir'],
-      ['/memory/merge/base.bin', 'UNSUPPORTED_FILE_TYPE', '/memory/merge/base.bin'],
       [denied, 'ACCESS_DENIED', denied]
     ]
     for (const [value, code, path] of cases) {
