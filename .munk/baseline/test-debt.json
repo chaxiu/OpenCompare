@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 49566
+    "repoTestLines": 49681
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1698
+    "repoTestCases": 1705
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 49338,
-      "to": 49566,
-      "reason": "add narrow-window directory-toolbar and light-legend contrast coverage for this item: the per-locale pure width model and fixed legend-label -> sync-copy -> wrap ladder over 960/1024/1280/1440/1920 x zh/en, the wrapped band height and no-overflow row-class contract, the collapse-only-hides-copy chip aria/title contract, the five-chip 4.5:1 light-theme contrast assertion read from main.css, and the 1920 viewport fixtures the default jsdom width forced",
-      "addedCases": 9
+      "from": 49566,
+      "to": 49681,
+      "reason": "add directory view-toolbar 36/72 band and drop-down menu placement coverage for this item: the pinned 32px row / 4px wrapped-line gap / 2px band inset arithmetic behind toolbarBandHeightPx, the split gap-x-2 gap-y-1 row-class contract, the segmented-control 32px frame contract, and the pure below / above / clamped menu placement model including the nine-entry 800px viewport case",
+      "addedCases": 7
     }
   ]
 }

@@ -318,7 +318,7 @@ export function DirectoryView({
         )}
       >
         <div className={directoryToolbarRowClasses()}>
-          <span data-shell-entry="filter" className="flex shrink-0 items-center">
+          <span data-shell-entry="filter" className="flex min-h-8 shrink-0 items-center">
             <SegmentedControl
               label={t('directory.filter.group')}
               options={filterOptions}
@@ -346,6 +346,7 @@ export function DirectoryView({
           <ToolbarButton
             size="sm"
             variant="primary"
+            className="min-h-8"
             data-shell-entry="sync"
             icon={<Icon name={SHELL_ENTRY_ICONS.sync} />}
             onClick={() => onPreviewSync(direction, mode)}
@@ -358,7 +359,7 @@ export function DirectoryView({
           {reportProgress ? (
             <span
               role="status"
-              className="flex shrink-0 items-center gap-2 text-2xs text-content-secondary"
+              className="flex min-h-8 shrink-0 items-center gap-2 text-2xs text-content-secondary"
             >
               <span className="tabular">
                 {t('directory.report.progress', {
@@ -375,7 +376,7 @@ export function DirectoryView({
               </ToolbarButton>
             </span>
           ) : null}
-          <span className="ml-auto flex shrink-0 items-center">
+          <span className="ml-auto flex min-h-8 shrink-0 items-center">
             <span aria-hidden className="mx-3 h-5 w-px bg-line-subtle" />
             <DropdownMenu
               label={t('shell.toolbar.more')}

@@ -644,9 +644,22 @@ export function measureDirectoryToolbar(
   }
 }
 
-/** Utilities of the directory row container: wraps instead of overflowing. */
+/** Rendered height of one directory toolbar flex line, in px. */
+export const TOOLBAR_ROW_HEIGHT_PX = 32
+
+/** Vertical gap between two wrapped directory toolbar flex lines, in px. */
+export const TOOLBAR_ROW_GAP_PX = 4
+
+/** Vertical inset of the view-toolbar band, in px (one side). */
+export const TOOLBAR_BAND_PADDING_Y_PX = 2
+
+/**
+ * Utilities of the directory row container: wraps instead of overflowing.
+ * The horizontal gap stays 8px; the vertical (wrapped-line) gap is 4px so two
+ * 32px lines plus the band's 2+2 inset land on exactly 72px.
+ */
 export function directoryToolbarRowClasses(): string {
-  return `flex w-full min-w-0 items-center flex-wrap ${SHELL_LEVELS['view-toolbar'].gap} min-h-8`
+  return 'flex w-full min-w-0 items-center flex-wrap gap-x-2 gap-y-1 min-h-8'
 }
 
 export interface ToolbarRowSpec {
@@ -859,11 +872,18 @@ export function viewToolbarRows(view: ToolbarView): number {
   ).length
 }
 
-/** Rendered height of a view-toolbar band holding `rows` rows. */
+/**
+ * Rendered height of a view-toolbar band holding `rows` wrapped lines:
+ * `rows * 32 + (rows - 1) * 4 + 2 * 2` → 36px single, 72px wrapped.
+ */
 export function toolbarBandHeightPx(rows: number): number {
-  if (rows <= 0) return 0
-  const metrics = SHELL_LEVELS['view-toolbar']
-  return levelHeightPx('view-toolbar') * rows + SPACING_PX[metrics.stackGap] * (rows - 1)
+  const safeRows = Math.max(0, Math.trunc(rows))
+  if (safeRows === 0) return 0
+  return (
+    safeRows * TOOLBAR_ROW_HEIGHT_PX +
+    (safeRows - 1) * TOOLBAR_ROW_GAP_PX +
+    TOOLBAR_BAND_PADDING_Y_PX * 2
+  )
 }
 
 /** Whole rows fitting into an area of `areaPx`. */

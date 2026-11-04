@@ -62,7 +62,7 @@ export function CompositionLegend({
 }): JSX.Element {
   const { t } = useI18n()
   return (
-    <span data-shell-legend className="flex shrink-0 items-center gap-3">
+    <span data-shell-legend className="flex min-h-8 shrink-0 items-center gap-3">
       {DIFF_STATUSES.filter((status) => status !== 'conflict' || composition.conflict > 0).map(
         (status) => {
           const label = t(labelKeys[status])

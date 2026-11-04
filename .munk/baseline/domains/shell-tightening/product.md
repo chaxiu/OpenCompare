@@ -4,10 +4,11 @@
 
 ## 范围
 
-- **壳层高度收敛**：`SHELL_LEVELS` 为唯一布局事实源，app 32（`h-8`）→ sessions 28（`h-7`）→ view-toolbar 36（`h-8` + `py-0.5` 单行，`stackGap` 为 `gap-0`）→ panels 头 24（`h-6`）→ status 24（`h-6`）；`events` 瞬时带（notice / 进度）保持 28 且不计入 120px 预算。1280×792 就绪态顶部控件带实测 32 / 28 / 36 / 24 合计 120px。
+- **壳层高度收敛**：`SHELL_LEVELS` 为唯一布局事实源，app 32（`h-8`）→ sessions 28（`h-7`）→ view-toolbar 单行 36（`2 + 32 + 2`）/ 两行 72（`2 + 32 + 4 + 32 + 2`）→ panels 头 24（`h-6`）→ status 24（`h-6`）；`events` 瞬时带（notice / 进度）保持 28 且不计入 120px 预算。1280×792 就绪态顶部控件带实测 32 / 28 / 36 / 24 合计 120px。
 - **目录工具行合成一行**：一行内顺序固定为「过滤 segmented → 1 个实心主操作 → 12px 组间距 + 1px 竖分隔 → 更多触发器」；快照导入 / 导出（六个方向）、导出 HTML（`report-export`）、隐藏本机路径（`hide-local-paths`）与模板（`template`）不作为行内直接条目，全部从「更多」菜单或设置打开。每屏行内实心主按钮 ≤1。
 - **弹性与溢出**：行内不再横向滚动裁切；1024 / 1280 放不下的动作进入「更多」。所有声明条目仍可发现、可点击、结果不变；菜单支持 `Escape` 与点击外部关闭。
-- **窄窗工具行模型**：目录工具行由 `shellLayout.ts` 的纯模型按「窗口宽度 + 当前语言」给出单行 / 两行与折叠档，`DirectoryView` 只消费结果、不写宽度常量。折叠阶梯固定为「图例状态词 → 同步主按钮文案 → 行容器换行」；折叠只隐藏文本，按钮、tab、菜单与可访问名全部保留。行容器 `flex-wrap` + `min-h-8`（无固定高、无 `overflow-*`），band 高度按行数取 36 / 72；代码视图工具行不受影响，恒 1 行。
+- **「更多」菜单落位**：菜单落位由零 DOM 纯函数 `placeDropdownMenu`（`components/menuPlacement.ts`）按实测触发器 / 菜单矩形决定 `top` / `left` / `maxHeight`：下方放得下→下方；下方不足且上方放得下→向上翻转；两侧都不足→视口边距内夹取并给视口高度上限。验收视口（en@960 / en@1024，innerHeight 800）下 9 条完整可见、无内部滚动条，菜单不靠滚动藏条目。
+- **窄窗工具行模型**：目录工具行由 `shellLayout.ts` 的纯模型按「窗口宽度 + 当前语言」给出单行 / 两行与折叠档，`DirectoryView` 只消费结果、不写宽度常量。折叠阶梯固定为「图例状态词 → 同步主按钮文案 → 行容器换行」；折叠只隐藏文本，按钮、tab、菜单与可访问名全部保留。行容器 `flex-wrap` + `gap-x-2 gap-y-1` + `min-h-8`（无固定高、无 `overflow-*`），每个直接子项至少 32 高，故每一 flex 行恰为 32、两行恒为 72；控件外框 ≤32（`SegmentedControl` 用 `px-1 py-0`，tab 仍 `h-[30px]` + 上下 1px border）。band 高度由 `toolbarBandHeightPx(rows)` 派生 36 / 72；代码视图工具行不受影响，恒 1 行。
 - **面板头地址条**：`Panel.tsx` 头部为单行 24px 可点击地址条——路径超宽省略显示、`title` 给完整路径、点击复制完整路径并给一次可访问反馈（`role="status"` / `aria-live`），全程不做文件系统写操作。复制能力经 `PlatformPort`（含 web 实现）注入，renderer 不直接 import Electron，能力不可用时降级为同样反馈且不抛错。
 - **活动面板指示**：活动面板容器无品牌色边框 / 描边，活动态由面板头背景变化 + 左侧 2px 品牌条表达；非活动面板没有该竖条。
 - **状态栏与首屏文案**：状态栏单行 ≤24，只保留当前场景的行数 / 条目度量与左右编码、换行（相同只写一次，不同才展开）；删 `shell.status.platform`、四态图例与底部教程 / 样本引导句（`shell.empty.hint` 不再渲染）。状态栏细节模型见域 `status-bar-layout`。
@@ -17,9 +18,18 @@
 
 ## 验收
 
-- **ac-shell-band-120**：1280×792 就绪态 `data-shell-level` 的 app / sessions / view-toolbar / panels 头实测高度依次为 32 / 28 / 36 / 24，四项合计 120px 且 ≤120。
+- **ac-shell-band-120**：1280×792 就绪态 `data-shell-level` 的 app / sessions / view-toolbar / panels 头实测高度依次为 **32 / 28 / 36 / 24**，四项合计恰为 120px 且 ≤120（既有断言只加强，不放宽）。
 - **ac-shell-levels-table**：`SHELL_LEVELS` 中 app / sessions / view-toolbar / panels 的高度解析值恰为 32 / 28 / 36 / 24，`levelHeightPx` 与组件渲染值同源，不存在第二份高度表。
-- **ac-toolbar-band-single-row**：单行时 `toolbarBandHeightPx(1) === 36`（含纵向内边距）；目录行在固定阶梯用尽后换行为 2 行，此时 `toolbarBandHeightPx(2) === 72` 且等于 `levelHeightPx('view-toolbar') * rows`；代码视图工具行恒 1 行。
+- **ac-band-single-36**：1280×792、zh、目录就绪态下 `[data-shell-level="view-toolbar"]` 的 `getBoundingClientRect().height === 36`；该 band 与其唯一行容器的 `scrollHeight === clientHeight`。
+- **ac-band-wrapped-72**：en、innerHeight 800 下，960 与 1024 两档发生换行的 band 高度都 `=== 72`，两次实测值完全相等；band 与行容器 `scrollHeight === clientHeight`。
+- **ac-band-zero-clip**：单行（1280）与两行（en@960、en@1024）下，行内任一控件的 `getBoundingClientRect().bottom <= band.bottom`；不存在纵向裁切，页脚 / 下沿无遮挡。
+- **ac-zh-single-row**：zh 在 960 / 1024 / 1280 三档均为单行，band 高度 `=== 36`，`measureDirectoryToolbar` 的 `rows === 1`。
+- **ac-control-height-32**：目录行内控件渲染高度 `<= 32`；`SegmentedControl` 外框恰为 32（`px-1 py-0`，tab 仍 `h-[30px]`，上下 border 各 1px），水平投影宽度不变；band / 行高不靠 `overflow-hidden`、负 margin 或裁切得到。
+- **ac-band-arithmetic**：高度算术精确命中——单行 `2 + 32 + 2 = 36`，两行 `2 + 32 + 4 + 32 + 2 = 72`；行容器横向 gap 仍为 8，纵向 gap 为 4。
+- **ac-band-height-pure**：`toolbarBandHeightPx(1) === 36`、`toolbarBandHeightPx(2) === 72`，由纯函数 / 常量表达并被单测钉死；行高 32 与控件最大高度 32 也由测试钉住；行高不随落入哪几个控件或语言漂移。
+- **ac-more-menu-in-viewport**：en@960 与 en@1024（innerHeight 800）打开「更多」菜单后，9 个 `menuitem` 的 `top >= 0` 且 `bottom <= 800`；菜单与各条目完整可见，菜单 `scrollHeight === clientHeight`（不出现内部滚动条藏条目）。
+- **ac-more-menu-last-action**：上述两档下每个条目可点击；末条「隐藏本机路径」点击后真实切换 `hideLocalPaths`（选中标记与状态回传均变化）；`Escape` 与点击菜单外部仍关闭菜单。
+- **ac-menu-placement**：菜单落位由可单测的纯函数决定：下方放得下→下方；下方不足且上方放得下→向上翻转；两侧都不足→在视口边距内夹取（clamped）并给不超过视口的高度上限；验收视口下不得触发内部滚动。
 - **ac-statusbar-single-row**：状态栏高度 ≤24，且 `measureStatusBar` 在 1024 / 1280 / 1440 / 1920 四档都只有 1 行。
 - **ac-toolbar-row-shape**：目录工具行顺序为「过滤 segmented → 1 个实心主操作 → 12px 间距 + 1px 竖分隔 → 更多触发器」，该行实心主按钮数恰为 1。
 - **ac-overflow-secondary**：`snapshot-import` / `snapshot-export`（六个方向动作）/ `report-export` / `hide-local-paths` 不作为工具行直接条目，全部可从「更多」菜单或设置打开。
@@ -45,9 +55,12 @@
 - **ac-shape-hue-budget**：1280×792 下控件形状 ≤3 种、界面色相 ≤4（蓝 / 绿 / 红 / 琥珀，中性灰不计），由 token / 形状清单断言。
 - **ac-before-after-shots**：`docs/visual/v1/before/` 四张保持原样；`docs/visual/v1/after/` 新增 directory / file × dark / light 四张 2560×1584 PNG（>100000 字节、已跟踪），`measurements.md` 同时登记 before / after 两表与顶部控件带实测值。
 - **ac-readme-provenance**：两张 README PNG 重拍为 2560×1584，`docs/screenshots.md` 更新 captured commit / 字节 / sha256，`release-artifacts-and-brand` 的「captured commit 到 HEAD 的 `src/renderer` 零 diff」门禁仍绿。
+- **ac-readme-screenshots**：用最终合入构建按 1280×792 逻辑视口 / DPR2 重出两张 README PNG；`docs/screenshots.md` 更新 captured commit、字节数与两枚 sha256；captured commit 是 HEAD 祖先且 `src/renderer` 自该 commit 零 diff；`README.md` / `README.zh-CN.md` 的 `Latest public release: v0.2.19` 指针不动。
 - **ac-functional-parity**：四态计数 6/4/4/5、三组忽略开关默认 false/true/true、目录 HTML 导出 5367 字节与 sha256 `8cfacec9…a69b` 与 `docs/visual/v1/baseline-facts.json` 逐项相等，由测试实读该文件并复算。
 - **ac-demo-entry-zero**：首屏与工作流工具栏的内置样本入口数 = 0，样本只能从设置里的调试入口进入。
-- **ac-gates-green**：`pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm build:web` / `pnpm test` / `node scripts/test-debt-gate.mjs` 全绿，且 test-debt 声明本项新增断言。
+- **ac-no-assertion-weakening**：既有 `ac-shell-band-120` 与 `ac-collapse-hides-text-only` 的断言只允许新增 / 加强；不得为过门删除、跳过或放宽既有断言；与既有断言冲突时先说明再改。
+- **ac-zero-change-redlines**：四态计数 48/2/2/27、状态栏差异 31、文件 77/77 不变；light 四态前景对比度维持 4.78 / 4.66 / 4.60 / 4.62（均 ≥4.5），dark 6.41 / 6.47 / 5.16 / 6.51 不回退；目录工具行横向 `scrollWidth === clientWidth`，无 `overflow-x` 兜底与横向裁切；对比语义、四态口径、导出、快照、发布通道零改动；不新增依赖、不动图标库、不改 `package.json#version` 与 `CHANGELOG.md`。
+- **ac-gates-green**：`pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm build:web` / `pnpm test` / `node scripts/test-debt-gate.mjs` 全绿；test-debt 以 growth 声明本项新增用例（`from` = 当前 ceiling、`to` = 新 ceiling，floors 只升不降），不删用例、不放宽既有断言。
 
 ## 非目标
 
@@ -64,10 +77,12 @@
 ## 实现约束
 
 - **单一布局事实源**：所有壳层高度、条目清单、宽度预算继续写在 `src/renderer/src/workbench/shellLayout.ts`（`SHELL_LEVELS` / `TOOLBAR_ROWS` / `entriesFor` / `measureToolbar` / `toolbarBandHeightPx` / `viewToolbarRows`），组件与测试都读同一份数据；禁止在 JSX 里另写行高或宽度常量。
-- **高度落脚**：app `h-8`(32)、sessions `h-7`(28)、view-toolbar `h-8` + `py-0.5`（单行合计 36，`stackGap` 为 `gap-0`）、panels `h-6`(24)、status `h-6`(24)；`CHROME_BASELINE_PX` 按新值重算为 84，不得放宽成「小于等于旧值」。瞬时 `events` 带保持现状。
+- **高度落脚**：app `h-8`(32)、sessions `h-7`(28)、view-toolbar 单行 36 / 两行 72（行高 32、纵向 gap 4、band `py-0.5` 2+2；`levelHeightPx('view-toolbar')` 仍为 36）、panels `h-6`(24)、status `h-6`(24)；`CHROME_BASELINE_PX` 按新值重算为 84，不得放宽成「小于等于旧值」。瞬时 `events` 带保持现状。
 - **溢出收纳**：`TOOLBAR_ROWS` 的 `overflow` 是「更多」菜单唯一来源；行内条目与 `overflow` 条目的并集仍等于该视图声明的入口集合，`entriesFor` 与 DOM 集合一致；菜单复用既有 `DropdownMenu`，不新建弹出层。
-- **窄窗模型单源**：控件宽度表 `DIRECTORY_TOOLBAR_WIDTHS`（zh / en 各一套，图例按最多 4 位计数预留）、折叠阶梯 `measureDirectoryToolbar(width, locale)`、行容器 class `directoryToolbarRowClasses()` 全部在 `shellLayout.ts`，`DirectoryView.tsx` 只读结果；`TOOLBAR_ROWS` 的目录行控件宽度取 `DIRECTORY_TOOLBAR_WIDTHS.zh`，不得另写一份数字。JSX 不写宽度常量、不用 Tailwind 响应式前缀分档，`shellLayout.ts` 保持零 DOM / 零 Electron。
+- **窄窗模型单源**：控件宽度表 `DIRECTORY_TOOLBAR_WIDTHS`（zh / en 各一套，图例按最多 4 位计数预留）、折叠阶梯 `measureDirectoryToolbar(width, locale)`、行容器 class `directoryToolbarRowClasses()`、行高常量 `TOOLBAR_ROW_HEIGHT_PX = 32` / `TOOLBAR_ROW_GAP_PX = 4` / `TOOLBAR_BAND_PADDING_Y_PX = 2` 全部在 `shellLayout.ts`；`toolbarBandHeightPx(rows)` 显式写 `rows*32 + (rows-1)*4 + 2*2`，`DirectoryView.tsx` 只读结果；`TOOLBAR_ROWS` 的目录行控件宽度取 `DIRECTORY_TOOLBAR_WIDTHS.zh`，不得另写一份数字。JSX 不写宽度 / 高度常量、不用 Tailwind 响应式前缀分档，`shellLayout.ts` 保持零 DOM / 零 Electron。
 - **折叠只隐藏文本**：`CompositionLegend` 的 `showLabels`（默认 `true`，其他调用点不受影响）控制是否渲染状态词，chip 用 `title` + `aria-label`（复用 `DIRECTORY_STATUS_LABEL_KEYS`）；同步主按钮折叠时 icon-only 并带 `aria-label = t('directory.toolbar.previewSync')`；不新增文案 key。
+- **行高与控件高度**：`directoryToolbarRowClasses()` 用 `gap-x-2 gap-y-1`（横 8 / 纵 4）且每个直接子项 `min-h-8`，保证每一 flex 行恰 32、两行恒 72、不随语言或控件组合漂移；`SegmentedControl` 只收纵向内边距（`p-1` → `px-1 py-0`，tab 仍 `h-[30px]` + 1px border = 32），水平投影宽度不变；不得用 `overflow-hidden`、负 margin 或裁切换取高度，也不得让行 class 含 `:`。
+- **菜单落位纯函数**：`components/menuPlacement.ts` 的 `placeDropdownMenu` 零 DOM，按触发器 / 菜单矩形返回 `below` / `above` / `clamped` 的 `top` / `left` / `width` / `maxHeight`（含 `MENU_GAP_PX` / `MENU_VIEWPORT_MARGIN_PX`）；`DropdownMenu` 用 fixed 定位消费该结果，`Escape` 与外部点击关闭逻辑不变。
 - **控件复用**：主操作、次要动作、更多触发器复用既有 `components/Button.tsx`、`DropdownMenu.tsx`、`SegmentedControl.tsx`；开关仍是单一 `components/Checkbox.tsx`，不得新增第二套开关控件；控件高度只走 `--height-control-sm/md`，间距只用 4/8/12/16/24，圆角只用 4/6/8（`--radius-lg` 已删除）。
 - **视图常量单源**：树行高只改 `src/core/directory/rows.ts` 的 `DIRECTORY_ROW_HEIGHT` 并让 `TreeView` / 滚动映射 / 行预算全部读它；代码行高只改 `components/DiffPane.tsx` 的 `DIFF_ROW_HEIGHT`，`DiffRuler` 与 `CodeView` 继续从这里取值，禁止复制常量。
 - **地址条复制**：剪贴板能力在 `src/shared/platform/types.ts` 增端口方法 + `src/preload`、`src/main` IPC 白名单 + web 实现，renderer 侧只经 `PlatformPort` 调用；不得在 renderer import Electron，也不得在测试里依赖真实剪贴板。
@@ -78,8 +93,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_c4097ed1a9ec9d00`（修窄窗工具栏溢出与浅色图例对比度，`kind: fix`）
+- WI：`wi_intake_d6e152cc0c481f5d`（目录工具栏定高 36/72 与「更多」菜单不出屏，`kind: fix`）
 - 日期：2026-11-05
-- 结果：code_gates passed（29 gates，attempt 002；`pnpm test` 140 files / 2237 passed + 1 skipped / 2238）。
-- 覆盖摘要：`shellLayout.ts` 新增 `DIRECTORY_TOOLBAR_WIDTHS`（zh / en 实测宽度 + 图例 4 位计数预留）、`measureDirectoryToolbar`（阶梯 none → legend → sync → wrap，贪心分行）与 `directoryToolbarRowClasses()`（`flex-wrap` + `min-h-8`，无 `overflow-*` / 无 `:` token）；`DirectoryView` 改读 `useWindowWidth` + 语言并把 `showLabels` / 同步按钮 `aria-label` 接到模型；`TOOLBAR_ROWS` 目录行控件宽度改由 zh 表供给；实测 zh@960/1024 折叠到 legend / sync，en@960 换 2 行（band 72），1024 / 1280 / 1440 / 1920 zh 仍单行 36px 且 zh@1280 保留状态词。同批把亮色五个 `--color-diff-*` 前景加深到对 chip 底 ≥ 4.5:1（该半边归域 `theme`）。1280 zh 画面像素确有变化，已按截图纪律重拍：`pnpm screenshots` 产 244495 / 297855 字节两张 PNG，`docs/screenshots.md` 记录 captured commit `ade5a1f` 与新 sha256。
-- 注：本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无用例可 copy、无 tech / ux 手合。**被推翻的假设**：① 「视图工具条带恒 1 行」不再成立——目录行允许换行，band 高度改按行数派生；② `controlPresentation('legend', 'compact')` 由 `label` 改为 `icon-only`，DOM 里对 `view-toolbar` 的 `flex-wrap` 禁令反转为「必须 `flex-wrap` 且无横向滚动」；③ `TOOLBAR_ROWS` 的目录行宽度不再手写数字，改引 `DIRECTORY_TOOLBAR_WIDTHS`。后续若改图例文案长度或计数位数，只改宽度表，别在 JSX 分档。
+- 结果：code_gates passed（29 gates，attempt 001；`pnpm test` 141 files / 2244 passed + 1 skipped / 2245）。
+- 覆盖摘要：`shellLayout.ts` 新增 `TOOLBAR_ROW_HEIGHT_PX = 32`、`TOOLBAR_ROW_GAP_PX = 4`、`TOOLBAR_BAND_PADDING_Y_PX = 2`，`toolbarBandHeightPx` 改为 `rows*32 + (rows-1)*4 + 2*2`（36 / 72）；`directoryToolbarRowClasses()` 由 `gap-2` 拆成 `gap-x-2 gap-y-1`；`DirectoryView` 各直接子项与 `CompositionLegend` 补 `min-h-8`，`SegmentedControl` 收为 `px-1 py-0`（外框 32 / tab 仍 30）；新增零 DOM `components/menuPlacement.ts`（below / above / clamped + 边距夹取 + 视口高度上限）并由 `DropdownMenu` 以 fixed 定位消费，en@960 / 1024（innerHeight 800）下 9 条菜单完整落入视口、无内部滚动。1280 zh 画面像素变化，已按截图纪律重拍：captured commit `eb33ad1`，`pnpm screenshots` 产 240092 / 296806 字节两张 PNG，`docs/screenshots.md` 记录新 sha256。
+- 注：本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无用例可 copy、无 tech / ux 手合。**被推翻的假设**：① 旧 `toolbarBandHeightPx(2) === levelHeightPx('view-toolbar') * rows` 不再成立——两行是 `2+32+4+32+2 = 72` 而非 72 巧合依赖 `36*2`，高度必须按行高 / 行间距 / padding 三项算术表达；② 行高漂移（92 / 80）的根因是 `SegmentedControl` 的 `p-1` 撑高与第二行是否含 segmented，故控件与直接子项都要显式 32 高；③ 菜单越界不能靠 `overflow` 兜底，必须由纯函数翻转 / 夹取。后续若改菜单条目数或控件高度，先改 `shellLayout.ts` 常量与 `menuPlacement` 输入，别在 JSX 补数字。

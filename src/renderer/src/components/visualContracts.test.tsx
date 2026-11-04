@@ -123,3 +123,12 @@ describe('tab contract', () => {
     })
   }
 })
+
+describe('segmented control height contract', () => {
+  it('keeps only horizontal padding so the frame is 30 + 2 = 32', () => {
+    const text = source('components/SegmentedControl.tsx')
+    expect(text).toContain('px-1 py-0')
+    expect(text).not.toMatch(/\bp-1\b/)
+    expect(text).toContain('border-line-subtle')
+  })
+})
