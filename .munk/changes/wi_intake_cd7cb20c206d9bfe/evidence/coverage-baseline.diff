@@ -1,0 +1,34 @@
+# baseline before -> after (measured 2026-11-04T17:02:59Z)
+measurement command: pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory="/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-refresh-11DuJj/reports"
+fresh summary abs path at measure time: /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-refresh-11DuJj/reports/coverage-summary.json
+fresh summary copy in pack: /Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_intake_cd7cb20c206d9bfe/.munk/changes/wi_intake_cd7cb20c206d9bfe/evidence/coverage-refresh-summary.json
+
+measuredAt before: commit fc584af0efea2fa75903ebb2d66bee99c0c20c9b / date 2026-11-03T16:38:42.000Z
+measuredAt after : commit 11170a5d300b5318c320913eaf6fea54ac510173 / date 2026-11-04T17:02:59.000Z
+
+totals (fresh v8 run, identical to previous values):
+  lines      pct 98.12 covered 2090 total 2130
+  branches   pct 90.27 covered 1346 total 1491
+  functions  pct 99.5  covered 402  total 404
+  statements pct 96.39 covered 2351 total 2439
+
+floors: lines 98 / branches 90 / functions 99 / moduleBranchesMin 75 / ignoreDirectivesMax 0 / floorLedger [] (unchanged, no downgrade)
+
+modules: 22 entries, all four metrics per module byte-identical to the fresh summary (only key order / skipped field differ in the raw v8 output)
+
+--- git diff .munk/baseline/coverage.json ---
+diff --git a/.munk/baseline/coverage.json b/.munk/baseline/coverage.json
+index 6cfc149..a063db5 100644
+--- a/.munk/baseline/coverage.json
++++ b/.munk/baseline/coverage.json
+@@ -1,8 +1,8 @@
+ {
+   "version": 1,
+   "measuredAt": {
+-    "commit": "fc584af0efea2fa75903ebb2d66bee99c0c20c9b",
+-    "date": "2026-11-03T16:38:42.000Z"
++    "commit": "11170a5d300b5318c320913eaf6fea54ac510173",
++    "date": "2026-11-04T17:02:59.000Z"
+   },
+   "provider": "v8",
+   "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=text --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reportsDirectory=.munk/changes/wi_intake_7e1cad0afa235fc2/evidence/coverage-coding",

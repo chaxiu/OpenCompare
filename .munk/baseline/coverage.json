@@ -1,8 +1,8 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "fc584af0efea2fa75903ebb2d66bee99c0c20c9b",
-    "date": "2026-11-03T16:38:42.000Z"
+    "commit": "11170a5d300b5318c320913eaf6fea54ac510173",
+    "date": "2026-11-04T17:02:59.000Z"
   },
   "provider": "v8",
   "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=text --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reportsDirectory=.munk/changes/wi_intake_7e1cad0afa235fc2/evidence/coverage-coding",
