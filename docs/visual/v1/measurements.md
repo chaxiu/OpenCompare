@@ -19,17 +19,17 @@ creates real temporary directory trees / a real `src/session.ts` pair under `/tm
 them through the app's launch intake, sets `document.documentElement.dataset.theme`, and
 captures the window content through the DevTools protocol.
 
-## `after/` — captured on commit `3b8cfe31af47208a048f3b7918d1b5df31ff5c54`
+## `after/` — captured on commit `37d481b21bd3b22395e0b2c555b297b3dd89a6d8`
 
 Capture path: `pnpm build` then `node scripts/capture-visual-baseline.mjs --out=after`.
 `before/` is untouched.
 
 | File | Logical viewport | Pixel size | Bytes | Session |
 | --- | --- | --- | --- | --- |
-| `docs/visual/v1/after/directory-dark.png` | 1280×792 | 2560×1584 | 236587 | Real directory pair, dark theme |
-| `docs/visual/v1/after/directory-light.png` | 1280×792 | 2560×1584 | 239477 | Real directory pair, light theme |
-| `docs/visual/v1/after/file-dark.png` | 1280×792 | 2560×1584 | 296666 | Real file pair, dark theme |
-| `docs/visual/v1/after/file-light.png` | 1280×792 | 2560×1584 | 295538 | Real file pair, light theme |
+| `docs/visual/v1/after/directory-dark.png` | 1280×792 | 2560×1584 | 235248 | Real directory pair, dark theme |
+| `docs/visual/v1/after/directory-light.png` | 1280×792 | 2560×1584 | 239140 | Real directory pair, light theme |
+| `docs/visual/v1/after/file-dark.png` | 1280×792 | 2560×1584 | 297243 | Real file pair, dark theme |
+| `docs/visual/v1/after/file-light.png` | 1280×792 | 2560×1584 | 296190 | Real file pair, light theme |
 
 ## Top control band (measured in the built window)
 

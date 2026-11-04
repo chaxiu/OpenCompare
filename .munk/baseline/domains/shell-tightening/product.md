@@ -54,6 +54,18 @@
 - **ac-inline-subtle**：单词级差异为柔底色 + 1px 下划线，深浅两套主题均无高饱和实色块。
 - **ac-shape-hue-budget**：1280×792 下控件形状 ≤3 种、界面色相 ≤4（蓝 / 绿 / 红 / 琥珀，中性灰不计），由 token / 形状清单断言。
 - **ac-before-after-shots**：`docs/visual/v1/before/` 四张保持原样；`docs/visual/v1/after/` 新增 directory / file × dark / light 四张 2560×1584 PNG（>100000 字节、已跟踪），`measurements.md` 同时登记 before / after 两表与顶部控件带实测值。
+- **ac-after-shots-refreshed**：四张 `docs/visual/v1/after/{directory-dark,directory-light,file-dark,file-light}.png` 由当前渲染层所在树先 `pnpm build`、再 `node scripts/capture-visual-baseline.mjs --out=after` 重新生成并覆盖；mtime / 内容来自本次构建而非旧 commit（旧图停在渲染层改动前的 44px 顶部带形态，不得复用）。
+- **ac-after-shot-pixels**：四张 after PNG 均为 2560×1584（1280×792 逻辑 × DPR2），目录视图 × 文件视图 × 深 / 浅两套主题齐全。
+- **ac-after-bytes-match**：`measurements.md` after 表 Bytes 列四个数值与四张 PNG 的 `wc -c` 实测逐张相等；若不等于旧值（236587 / 239477 / 296666 / 295538）须有实测命令输出佐证，不得沿用旧值。
+- **ac-after-binding-commit**：`measurements.md` 的 `## after/` 绑定 commit 等于截图时分支 HEAD 的完整 40 位 sha（本次 `37d481b`），且全文不再出现旧绑定 `3b8cfe3`。
+- **ac-top-band-measured**：Top control band 表的 `app` / `sessions` / `view-toolbar` / `panels` header / `status` 五级数值取自真实构建窗口 `getBoundingClientRect()`（截图脚本 `MEASURE_EXPRESSION` 打印的 metrics），Ready-state band total 等于 `app + sessions + view-toolbar + panelHeader` 且 ≤120；禁止按 `SHELL_LEVELS` 常量手算或照抄旧文档。
+- **ac-view-toolbar-36**：1280×792 就绪态 `view-toolbar` 实测 36px；若窄档实测到 72px 则按实测记录并注明档位，不得凭常量臆写。
+- **ac-unchanged-values-preserved**：旧表中与本次实测相同的行逐字保留（数值与描述不变），只有实测变化的数字被修改。
+- **ac-real-inputs**：截图输入为真实 `/tmp` 临时目录对与真实 `src/session.ts` 文件对照，经应用真实启动入口打开，不使用 `src/shared/fixtures/**` 摆拍。
+- **ac-before-untouched**：`docs/visual/v1/before/` 四张 PNG 的字节数与 sha256 与改动前完全一致，未被重拍或改写。
+- **ac-whitelist-diff**：相对本项起点（`37d481b`）的 `git diff --stat` 只含 `docs/visual/v1/after/` 四张 PNG、`docs/visual/v1/measurements.md` 与本项 change pack / 交付账本；不含 `src/**`、`scripts/**`、`package.json`、`README*`、`docs/release-notes/**`、`CHANGELOG*`、release workflow、`docs/assets/**`。
+- **ac-new-defect-reported**：截图暴露的新视觉缺陷不做任何修复改动，只在交付说明中列明现象、截图文件与建议，交回产品负责人。
+- **ac-delivery-receipt**：交付回执逐项点名截图所用 commit sha、四张 PNG 字节数、`code_gates` 证据路径，数值均为可复核实测。
 - **ac-readme-provenance**：两张 README PNG 重拍为 2560×1584，`docs/screenshots.md` 更新 captured commit / 字节 / sha256，`release-artifacts-and-brand` 的「captured commit 到 HEAD 的 `src/renderer` 零 diff」门禁仍绿。
 - **ac-readme-screenshots**：用最终合入构建按 1280×792 逻辑视口 / DPR2 重出两张 README PNG；`docs/screenshots.md` 更新 captured commit、字节数与两枚 sha256；captured commit 是 HEAD 祖先且 `src/renderer` 自该 commit 零 diff；`README.md` / `README.zh-CN.md` 的 `Latest public release: v0.2.19` 指针不动。
 - **ac-functional-parity**：四态计数 6/4/4/5、三组忽略开关默认 false/true/true、目录 HTML 导出 5367 字节与 sha256 `8cfacec9…a69b` 与 `docs/visual/v1/baseline-facts.json` 逐项相等，由测试实读该文件并复算。
@@ -93,8 +105,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_intake_d6e152cc0c481f5d`（目录工具栏定高 36/72 与「更多」菜单不出屏，`kind: fix`）
+- WI：`wi_intake_2ad3d38cc7b3f12e`（刷新 v1「改后」视觉证据并重钉 after 绑定，`kind: fix`）
 - 日期：2026-11-05
-- 结果：code_gates passed（29 gates，attempt 001；`pnpm test` 141 files / 2244 passed + 1 skipped / 2245）。
-- 覆盖摘要：`shellLayout.ts` 新增 `TOOLBAR_ROW_HEIGHT_PX = 32`、`TOOLBAR_ROW_GAP_PX = 4`、`TOOLBAR_BAND_PADDING_Y_PX = 2`，`toolbarBandHeightPx` 改为 `rows*32 + (rows-1)*4 + 2*2`（36 / 72）；`directoryToolbarRowClasses()` 由 `gap-2` 拆成 `gap-x-2 gap-y-1`；`DirectoryView` 各直接子项与 `CompositionLegend` 补 `min-h-8`，`SegmentedControl` 收为 `px-1 py-0`（外框 32 / tab 仍 30）；新增零 DOM `components/menuPlacement.ts`（below / above / clamped + 边距夹取 + 视口高度上限）并由 `DropdownMenu` 以 fixed 定位消费，en@960 / 1024（innerHeight 800）下 9 条菜单完整落入视口、无内部滚动。1280 zh 画面像素变化，已按截图纪律重拍：captured commit `eb33ad1`，`pnpm screenshots` 产 240092 / 296806 字节两张 PNG，`docs/screenshots.md` 记录新 sha256。
-- 注：本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无用例可 copy、无 tech / ux 手合。**被推翻的假设**：① 旧 `toolbarBandHeightPx(2) === levelHeightPx('view-toolbar') * rows` 不再成立——两行是 `2+32+4+32+2 = 72` 而非 72 巧合依赖 `36*2`，高度必须按行高 / 行间距 / padding 三项算术表达；② 行高漂移（92 / 80）的根因是 `SegmentedControl` 的 `p-1` 撑高与第二行是否含 segmented，故控件与直接子项都要显式 32 高；③ 菜单越界不能靠 `overflow` 兜底，必须由纯函数翻转 / 夹取。后续若改菜单条目数或控件高度，先改 `shellLayout.ts` 常量与 `menuPlacement` 输入，别在 JSX 补数字。
+- 结果：code_gates passed（29 gates，attempt 001，`.munk/runs/run_intake_2ad3d38cc7b3f12e/code-gates/attempts/001`）。
+- 覆盖摘要：在 `37d481b`（= `origin/main`）树上 `pnpm build` + `node scripts/capture-visual-baseline.mjs --out=after` 重出四张 after PNG 并覆盖，`measurements.md` 的 `## after/` 绑定 commit 由 `3b8cfe3` 改为 `37d481b21bd3b22395e0b2c555b297b3dd89a6d8`（全文已无 `3b8cfe3`），Bytes 列改为实测 235248 / 239140 / 297243 / 296190。顶部控件带五级实测（`app` 32 / `sessions` 28 / `view-toolbar` 36 / `panels` header 24 / `status` 24，Ready-state total 120）与旧表逐字相同，按「只改变化值」原则未动；`before/` 四张字节与 sha256 零变化。四张图均 2560×1584。
+- 注：本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无用例可 copy、无 tech / ux 手合。**被推翻的假设 / 后续注意**：① 「渲染层改动后 after 证据自动仍有效」不成立——`11cbdaa`（工具栏溢出 / light 对比度）与 `0ce2879`（band 36/72 + 「更多」菜单）改了 `src/renderer` 16 文件，旧截图顶部带仍是 44px 形态；**凡合入改渲染层的 WI，若验收依赖 after 图，必须同批重拍并重钉绑定 commit**。② 顶部带数值本次未变（36/72 档位在 1280 就绪态仍命中单行 36），故 `measurements.md` 该表不得为了「显得刷新过」而改写。③ 四张 PNG 字节全部变化（236587→235248、239477→239140、296666→297243、295538→296190），像素级证据只能按字节 / 生成 commit 判断是否过期，不能按尺寸判断。④ 本项只出证据：`src/**`、`scripts/**`、`package.json`、README、release notes 一律未改，新视觉缺陷只报不修。
