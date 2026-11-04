@@ -5,15 +5,15 @@
     "date": "2026-11-05"
   },
   "ceilings": {
-    "appTestLines": 2959,
+    "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 49681
+    "repoTestLines": 50019
   },
   "floors": {
-    "appTestCases": 94,
+    "appTestCases": 97,
     "syncRealGateCases": 32,
-    "repoTestCases": 1705
+    "repoTestCases": 1734
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -30,11 +30,18 @@
   },
   "growth": [
     {
+      "metric": "appTestLines",
+      "from": 2959,
+      "to": 2988,
+      "reason": "unknown-extension content fallback coverage in App.test.tsx: manual dialog opens a .vue text pair with UTF-8 status, binary .vue reports the failing side with the new copy, tree double-click opens a .vue text file and a binary drilldown shows the readable notice without a blank tab, plus the sample hex-dump .png now opens as text",
+      "addedCases": 3
+    },
+    {
       "metric": "repoTestLines",
-      "from": 49566,
-      "to": 49681,
-      "reason": "add directory view-toolbar 36/72 band and drop-down menu placement coverage for this item: the pinned 32px row / 4px wrapped-line gap / 2px band inset arithmetic behind toolbarBandHeightPx, the split gap-x-2 gap-y-1 row-class contract, the segmented-control 32px frame contract, and the pure below / above / clamped menu placement model including the nine-entry 800px viewport case",
-      "addedCases": 7
+      "from": 49681,
+      "to": 50019,
+      "reason": "unknown-extension content fallback coverage: new fileExtensions family tests, isTextProbe encoding/binary matrix, zero-read request validation, single-read pair/drilldown/merge opens on real disk, GBK decoding, binary side attribution, and mixed-family retention",
+      "addedCases": 29
     }
   ]
 }

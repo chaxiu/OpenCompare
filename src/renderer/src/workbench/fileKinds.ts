@@ -1,25 +1,22 @@
 /**
  * Maps a directory-tree file onto the file view that should open it.
  *
- * Both PRD-accepted families route to views that already exist: code/text →
- * the two-column code view, CSV/TSV → the table view, JSON/YAML → the
- * structured view. Anything else is not a supported drilldown target.
- *
- * The extension whitelists live in `@shared/fileExtensions` so request
- * validation and this classifier cannot drift apart.
+ * The extension whitelists and the "extension + content → family" decision live
+ * in `@shared/fileExtensions`; this module only maps a family onto its view
+ * target, so the classifier and the open path cannot drift apart.
  */
+import type { TextBytesProbe } from '@core/text/probe'
+import { isTextProbe } from '@core/text/probe'
 import {
-  CSV_FILE_EXTENSIONS,
-  JSON_FILE_EXTENSIONS,
-  TEXT_FILE_EXTENSIONS,
-  TSV_FILE_EXTENSIONS,
-  YAML_FILE_EXTENSIONS
+  extensionFamily,
+  resolveFileFamily,
+  type FileFamily
 } from '@shared/fileExtensions'
 
 export type DrilldownKind = 'code' | 'csv' | 'structured'
 
 /** Stable file-family identity; the display name comes from the dictionary. */
-export type FileKind = 'code' | 'csv' | 'tsv' | 'json' | 'yaml'
+export type FileKind = FileFamily
 
 export interface DrilldownTarget {
   readonly kind: DrilldownKind
@@ -29,12 +26,6 @@ export interface DrilldownTarget {
   readonly format?: 'json' | 'yaml'
 }
 
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf('.')
-  if (dot <= 0) return ''
-  return name.slice(dot + 1).toLowerCase()
-}
-
 /** Trailing separator tolerant base name of a POSIX or Windows path. */
 export function baseName(path: string): string {
   const normalized = path.replace(/[\\/]+$/, '')
@@ -42,20 +33,35 @@ export function baseName(path: string): string {
   return separator === -1 ? normalized : normalized.slice(separator + 1)
 }
 
+/** Family → view target. Mapping only, no extension logic. */
+export function classifyFamily(family: FileFamily): DrilldownTarget {
+  switch (family) {
+    case 'csv':
+      return { kind: 'csv', label: 'csv', delimiter: ',' }
+    case 'tsv':
+      return { kind: 'csv', label: 'tsv', delimiter: '\t' }
+    case 'json':
+      return { kind: 'structured', label: 'json', format: 'json' }
+    case 'yaml':
+      return { kind: 'structured', label: 'yaml', format: 'yaml' }
+    case 'code':
+      return { kind: 'code', label: 'code' }
+  }
+}
+
+/** Extension-only classification; `null` means the content decides. */
 export function classifyFile(name: string): DrilldownTarget | null {
-  const extension = extensionOf(name)
+  const family = extensionFamily(name)
+  return family === null ? null : classifyFamily(family)
+}
 
-  if (CSV_FILE_EXTENSIONS.has(extension)) return { kind: 'csv', label: 'csv', delimiter: ',' }
-  if (TSV_FILE_EXTENSIONS.has(extension)) return { kind: 'csv', label: 'tsv', delimiter: '\t' }
-  if (JSON_FILE_EXTENSIONS.has(extension)) {
-    return { kind: 'structured', label: 'json', format: 'json' }
-  }
-  if (YAML_FILE_EXTENSIONS.has(extension)) {
-    return { kind: 'structured', label: 'yaml', format: 'yaml' }
-  }
-  if (extension === '' || TEXT_FILE_EXTENSIONS.has(extension)) {
-    return { kind: 'code', label: 'code' }
-  }
-
-  return null
+/**
+ * The open path's only content decision: one probe result → family; `null`
+ * means binary and therefore unsupported.
+ */
+export function contentFamily(
+  name: string,
+  probe: Pick<TextBytesProbe, 'text' | 'encoding'>
+): FileKind | null {
+  return resolveFileFamily(name, isTextProbe(probe) ? 'text' : 'binary')
 }

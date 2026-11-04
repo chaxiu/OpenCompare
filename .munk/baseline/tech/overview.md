@@ -11,6 +11,7 @@ Thin technical baseline (SSOT). 域语义与 AC 见 `.munk/baseline/domains/**`�
 - `src/core/`：纯算法与领域模型，零 Electron / DOM，可被 vitest 直接单测。
 - **渲染侧图标单一来源**：`src/renderer/src/assets/icons/` 存 32 个 vendored Lucide SVG（`?raw` 导入）+ 纯数据表 `index.ts`（`ICON_PATHS` / `ICON_NAMES` / `ICON_SIZES` / `LUCIDE_VERSION` / `strokeWidthFor` / `SHELL_ENTRY_ICONS` / `UI_ICON_ACTIONS`，零 DOM 零 Electron，node 侧 vitest 直读）；`components/Icon.tsx` 是渲染侧唯一 `<svg>` 出口（几何 + 三档 16/20/24 与光学描边由它决定）。`lucide-react` 已从 `dependencies` 与锁文件移除，ESLint renderer 段拦 `lucide-react` 及其它图标集；新增图标须「拷 SVG + 进表 + 被映射引用」三步同批。域语义见 `.munk/baseline/domains/icon-system/product.md`。
 - `src/shared/`：跨进程类型、`PlatformPort`、fixtures、perf 契约。
+- **文件家族单一判定**：`src/shared/fileExtensions.ts` 的 `extensionFamily(name)`（仅扩展名，未知 → `null`）与 `resolveFileFamily(name, content)` 是唯一「扩展名 + 内容 → 家族」入口（`SUPPORTED_FILE_EXTENSIONS` / `isSupportedComparisonFile` 已删除）；`src/core/text/probe.ts` 的 `isTextProbe` 是唯一二进制结论（编码已知且解码文本无 `U+0000`）；`renderer/src/workbench/fileKinds.ts` 只做家族 → 视图映射（`classifyFamily` / `classifyFile` / `contentFamily`）。请求校验（`resolveCompareRequest` / `resolveMergeRequest`）零读取、不按扩展名拒绝；判定只在打开链路（`openFilePairSession` / `openDrilldownSession` / `buildMergeSession`）的每侧一次 probe 里发生，未知扩展名文本进 `code`，二进制抛 `UNSUPPORTED_FILE_TYPE`。取舍见 `tech/decisions/adr-0003-content-family-at-open.md`。
 
 ## 会话与视图生命周期（渲染侧）
 

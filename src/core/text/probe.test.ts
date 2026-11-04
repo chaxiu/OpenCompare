@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { sha256Bytes } from '../directory/hash'
-import { decodeText, detectEncoding, detectNewline, probeTextBytes } from './probe'
+import { decodeText, detectEncoding, detectNewline, isTextProbe, probeTextBytes } from './probe'
 import type { TextDecoderFactory } from './probe'
 
 const encoder = new TextEncoder()
@@ -189,5 +189,37 @@ describe('probeTextBytes', () => {
       bytes: GBK_CJK_LINE.length,
       sha256: sha256Bytes(GBK_CJK_LINE)
     })
+  })
+})
+
+describe('isTextProbe', () => {
+  it('accepts every recognised encoding with a NUL-free body', () => {
+    for (const bytes of [
+      utf8('hello\n'),
+      concat(bytesOf('EF BB BF'), utf8('hello\n')),
+      concat(bytesOf('FF FE'), utf16('hello\n', 'le')),
+      concat(bytesOf('FE FF'), utf16('hello\n', 'be')),
+      GBK_CJK_LINE
+    ]) {
+      expect(isTextProbe(probeTextBytes(bytes))).toBe(true)
+    }
+  })
+
+  it('rejects a PNG header whose IHDR length field carries NUL bytes', () => {
+    const png = bytesOf('89 50 4E 47 0D 0A 1A 0A 00 00 00 0D 49 48 44 52')
+    expect(isTextProbe(probeTextBytes(png))).toBe(false)
+  })
+
+  it('rejects a body that decodes as GBK yet keeps a non-layout NUL', () => {
+    // 0x00 is not a GBK lead or trail byte, so this decodes but still carries
+    // a U+0000: the GBK shape alone must not make it text.
+    const shaped = concat(GBK_CJK_LINE, Uint8Array.from([0x00]), GBK_CJK_LINE)
+    expect(probeTextBytes(shaped).encoding).toBe('GBK')
+    expect(probeTextBytes(shaped).text).toContain('\u0000')
+    expect(isTextProbe(probeTextBytes(shaped))).toBe(false)
+  })
+
+  it('rejects an unknown encoding', () => {
+    expect(isTextProbe({ text: 'plain', encoding: 'Unknown' })).toBe(false)
   })
 })

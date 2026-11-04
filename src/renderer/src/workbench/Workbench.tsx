@@ -71,7 +71,6 @@ import type {
   TemplatePreviewFailure,
   TemplateRoots
 } from './directoryOps'
-import { classifyFile } from './fileKinds'
 import type { PickedTextFile } from './fileIO'
 import {
   buildDirectoryReportForComparisonAsync,
@@ -307,8 +306,12 @@ function sidesAreRealDirectories(sides: ComparisonSides): boolean {
  */
 function filePairErrorMessage(cause: unknown, t: Translate): string {
   if (cause instanceof FilePairError) {
-    if (cause.code === 'unsupported-type') {
-      return t('shell.file.error.unsupported', { name: cause.params.name ?? '' })
+    if (cause.code === 'UNSUPPORTED_FILE_TYPE') {
+      const side = cause.params.side
+      return t('shell.compare.error.UNSUPPORTED_FILE_TYPE', {
+        side: side === undefined ? '' : t(side === 'left' ? 'common.side.left' : 'common.side.right'),
+        path: cause.params.name ?? ''
+      })
     }
     return t('shell.file.error.mixed', {
       left: cause.params.left ?? '',
@@ -332,6 +335,16 @@ function snapshotImportNotice(cause: unknown): Notice {
 function snapshotContentNotice(cause: unknown, displayPath: string): Notice {
   const copy = snapshotContentCopy(cause, displayPath)
   return copy === null ? detailNotice(errorText(cause)) : copyNotice(copy.key, copy.params)
+}
+
+/** Localizes a drilldown open failure: unsupported content, else a snapshot miss. */
+function openFileFailureNotice(cause: unknown, displayPath: string): Notice {
+  if (cause instanceof FilePairError && cause.code === 'UNSUPPORTED_FILE_TYPE') {
+    return copyNotice('shell.notice.unsupportedDrilldown', {
+      name: cause.params.name ?? displayPath
+    })
+  }
+  return snapshotContentNotice(cause, displayPath)
 }
 
 /** Localizes the built-in sample library failure; unknown details pass through. */
@@ -1294,18 +1307,12 @@ export function Workbench({
     const current = activeSides
     if (!source || source.scene !== 'directory' || current === null) return
 
-    const target = classifyFile(node.name)
-    if (target === null) {
-      report(copyNotice('shell.notice.unsupportedDrilldown', { name: node.name }))
-      return
-    }
-
     setDirectoryBusy(true)
     setNotice(null)
     try {
-      upsertSession(await openDrilldownSession(platform, source.id, node, target, current))
+      upsertSession(await openDrilldownSession(platform, source.id, node, current))
     } catch (cause) {
-      report(snapshotContentNotice(cause, node.relativePath))
+      report(openFileFailureNotice(cause, node.relativePath))
     } finally {
       setDirectoryBusy(false)
     }

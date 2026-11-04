@@ -50,15 +50,19 @@ describe('resolveMergeRequest', () => {
     expect(await resolveMergeRequest({ base: B, ours: B, theirs: T }, { probe })).toEqual({ ok: true, paths: { base: B, ours: B, theirs: T } })
   })
 
-  it('applies ACCESS_DENIED → NOT_FOUND → NOT_A_FILE → UNSUPPORTED_FILE_TYPE inside one side', async () => {
-    const unsupported = '/tmp/opencompare/base.bin'
+  it('applies ACCESS_DENIED → NOT_FOUND → NOT_A_FILE inside one side', async () => {
     const cases: readonly (readonly [Readonly<Record<string, PathProbeKind>>, readonly string[], string, string])[] = [
       [{ [B]: 'file' }, [B], 'ACCESS_DENIED', B],
       [{}, [], 'NOT_FOUND', B],
-      [{ [B]: 'directory' }, [], 'NOT_A_FILE', B],
-      [{ [unsupported]: 'file' }, [], 'UNSUPPORTED_FILE_TYPE', unsupported]
+      [{ [B]: 'directory' }, [], 'NOT_A_FILE', B]
     ]
     for (const [kinds, denied, code, path] of cases) expect(await failureOf({ base: path, ours: O, theirs: T }, probeOf(kinds, denied).probe)).toEqual({ code, side: 'base', path })
+  })
+
+  it('lets three unknown extensions through to the merge open path', async () => {
+    const vue = { base: '/tmp/opencompare/base.vue', ours: '/tmp/opencompare/ours.vue', theirs: '/tmp/opencompare/theirs.vue' }
+    const { probe } = probeOf({ [vue.base]: 'file', [vue.ours]: 'file', [vue.theirs]: 'file' })
+    expect(await resolveMergeRequest(vue, { probe })).toEqual({ ok: true, paths: vue })
   })
 
   it('resolves failures side by side: base, then ours, then theirs', async () => {

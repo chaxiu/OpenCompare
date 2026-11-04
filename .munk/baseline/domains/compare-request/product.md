@@ -14,11 +14,11 @@
 - **路径规范化单点复用（2026-11-01）**：`normalizePathValue(raw, context)` 由内部函数改为导出，作为「去空白 / 剥引号 / 展开 `~` / 按 `baseDir` 解析 / 词法折叠」的唯一实现；目录模板归位的两个根输入（散乱树 B 根、输出根）直接复用它，renderer 不得复制第二份。函数签名与既有行为（含返回 `null` 表示空输入）不变，仍不做 `realpath` / 符号链接解析。
 - **Windows 门禁**：`.munk/code-gates.json` 增加聚焦 gate `test-compare-request`（`pnpm test src/shared/compareRequest.test.ts`），并新增独立 CI job 在 `windows-latest` 上跑同一测试文件，真实可执行、无 `continue-on-error`、失败即红——Windows 专属规则不依赖本机实机验收。
 - **稳定错误码**：重复边（同一入口给出两次 left 或 right）、缺边、空串、未知 scheme/host 均产出稳定错误码与中文提示。
-- **校验与类型探测**：解析结果 + `PlatformPort` 探测（`statPath` 真实路径校验 / file·directory 类型探测）合并为最终 `CompareRequest`；定义不存在、单边不存在、file↔directory 类型不一致、扩展名不受支持、权限拒绝的错误码与可读中文提示。
+- **校验与类型探测**：解析结果 + `PlatformPort` 探测（`statPath` 真实路径校验 / file·directory 类型探测）合并为最终 `CompareRequest`；定义不存在、单边不存在、file↔directory 类型不一致、权限拒绝的错误码与可读中文提示。文件家族不在校验阶段判定（零读取，未知扩展名一律放行到打开链路，见 `file-family` 域）。
 - **`PlatformPort` 扩展**：新增一次路径探测调用（返回 `file` / `directory` / `missing` 语义），Electron 实现走 `fs.stat`，Web 实现基于内存虚拟文件系统给出同构结果；preload 只加白名单 channel。
 - **路径上下文的平台来源**：`~` 展开与相对路径解析所需的 `homeDir` / `baseDir` 由 `PlatformPort` 显式提供只读查询 `homeDirectory()` / `workingDirectory()`，Electron 实现分别用 `app.getPath('home')` 与 `process.cwd()`，Web 实现都返回内存沙箱根 `/memory`；preload 只新增白名单 channel（`platform:home-directory` / `platform:working-directory`），不暴露 Node，两套实现单测同构。
-- **扩展名白名单单一来源**：支持的文件扩展名集合在 shared 定义一次，renderer 既有 `fileKinds.ts` 判定复用它，避免两套白名单漂移（不改变既有分类结果）。
-- **自动化单测**：覆盖空格 / 中文 / Unicode / 引号 / `~` / 相对路径 / 缺边 / 重复参数 / 类型不匹配 / 不支持文件类型 / 权限错误；错误码与提示可直接被 UI 与主进程消费。
+- **文件家族判定单一来源**：扩展名集合与「扩展名 + 内容 → 家族」只在 `src/shared/fileExtensions.ts` 定义一次（`extensionFamily` / `resolveFileFamily`），renderer `fileKinds.ts` 只做家族 → 视图映射；校验阶段不读文件、不按扩展名拒绝。
+- **自动化单测**：覆盖空格 / 中文 / Unicode / 引号 / `~` / 相对路径 / 缺边 / 重复参数 / 类型不匹配 / 未知扩展名放行（校验零读取）/ 权限错误；错误码与提示可直接被 UI 与主进程消费。
 
 ## 验收
 
@@ -41,9 +41,9 @@
 - **ac-request-probe-directory**：两侧探测均为 `directory` 时产出 `kind: 'directory'`；探测调用次数为每侧一次。
 - **ac-side-not-found**：左侧存在、右侧不存在时返回 `NOT_FOUND`，提示含「右侧」与原始右侧路径；仅左/仅右不存在时为对称结果，均不产出 request。
 - **ac-type-mismatch**：一侧 file、另一侧 directory 时返回 `TYPE_MISMATCH`，提示同时含两侧名称，不产出 request。
-- **ac-unsupported-file-type**：两侧均为 file 且扩展名不受支持（如 `a.bin` / `b.exe`）时返回 `UNSUPPORTED_FILE_TYPE`，提示列出支持的家族（代码/文本 · CSV/TSV · JSON/YAML）；扩展名匹配不区分大小写。
+- **ac-unknown-extension-not-rejected**：两侧均为 file 且扩展名未知（如 `a.vue` / `b.vue`、`a.bin`）时校验返回 `ok: true`、`kind: 'file'`，`PathProbe` 只发生 `statPath`（零文件读取）；二进制拒绝与 `UNSUPPORTED_FILE_TYPE` 只由打开链路（`file-family` 域）给出，`CompareErrorCode` 仍保留该码供打开链路与对话框文案复用。
 - **ac-access-denied**：探测抛出权限错误（EACCES/EPERM）时返回 `ACCESS_DENIED` 且带可读提示，不把底层异常直接抛给调用方。
-- **ac-error-precedence**：多重错误同时存在时按固定顺序返回首个：`EMPTY_PATH` → `DUPLICATE_SIDE`/`MISSING_SIDE` → `UNKNOWN_SCHEME`/`UNKNOWN_ACTION` → `NOT_FOUND` → `TYPE_MISMATCH` → `UNSUPPORTED_FILE_TYPE`；左侧问题先于右侧。
+- **ac-error-precedence**：多重错误同时存在时按固定顺序返回首个：`EMPTY_PATH` → `DUPLICATE_SIDE`/`MISSING_SIDE` → `UNKNOWN_SCHEME`/`UNKNOWN_ACTION` → `NOT_FOUND` → `TYPE_MISMATCH`；左侧问题先于右侧。
 - **ac-error-shape-stable**：所有失败结果统一为 `{ ok: false, error: { code, message } }`，`code` 属于固定联合类型（上列字符串字面量），`message` 非空且为中文可读文本；解析函数对任何畸形输入都返回结果而非抛出异常。
 - **ac-platform-web-parity**：Web `PlatformPort` 实现对新探测能力返回与 Electron 实现相同的 `file`/`directory`/`missing` 语义：内存中存在的文件 → `file`、目录 → `directory`、不存在路径 → `missing`；同一组路径用例在两个实现的单测中结果一致。
 - **ac-platform-home-workdir**：`PlatformPort.homeDirectory()` 与 `workingDirectory()` 在两套实现中都返回绝对路径字符串：Electron 分别等于 `app.getPath('home')` 与 `process.cwd()`（单测断言），Web 均返回内存沙箱根 `/memory`；两套实现均有单测，preload 只桥接白名单 channel，renderer 不读环境变量猜测基准目录。
@@ -68,20 +68,20 @@
 - 不做主进程单实例锁、argv 收集、`opencompare` 协议注册、`open-url` / `second-instance` 接管、请求队列与窗口聚焦（已由 `launch` 域交付；本域只提供被它调用的 `parseCompareArgv` / `parseCompareUrl` / `resolveCompareRequest`，不承载 Electron 绑定与投递时序）。
 - 不做「保存左/右文件」原位写回，不改任何会话构建逻辑与 `WorkbenchSession` / `ComparisonSides` 语义。
 - 不新增运行时依赖，不做路径沙箱/安全策略（如允许根目录白名单）。
-- 不校验 file↔file 的文件家族是否一致（JSON vs YAML 等混合对仍由既有 `openFilePairSession` 拒绝），不改既有对比算法与目录扫描。
+- 不校验 file↔file 的文件家族是否一致（JSON vs YAML 等混合对仍由既有 `openFilePairSession` 拒绝），也不按扩展名拒绝（未知扩展名放行到打开链路按内容判定），不改既有对比算法与目录扫描。
 - 不做真实文件系统的端到端验收（由 product-qa 批次门覆盖），不接触打包、图标、发版脚本。
 - 不支持未列出的路径形式：drive-relative `C:foo`（按相对路径拼 `baseDir`）、`\\?\` / `\\.\` 长路径前缀、`~user`、`~` 后接 `\` 的 Windows 家目录展开。
 - 不新增第二套路径解析、URI 解码或 `normalizePath` 变体；四条入口（CLI argv、second-instance 接管、手输路径、`opencompare://`）继续复用同一套 `parseCompareUrl` / `parseCompareArgv` / `parseManualPaths` / `resolveCompareRequest`，不改 `launch.ts` / `NewCompareDialog.tsx` 的解析链路。
-- 不改 UI 布局、文案、交互与错误码 / 错误优先级；除按 `platform` 回显分隔符外不改错误消息内容。
+- 不改 UI 布局与交互；错误码联合类型保留 `UNSUPPORTED_FILE_TYPE`（改由打开链路产出），除按 `platform` 回显分隔符外不改错误消息内容。
 - 不做实机点选验收（Windows 规则的验收 = 自动测试 + 聚焦 gate + `windows-latest` CI job），不动打包、版本号、tag 与 Release 资产。
 
 ## 实现约束
 
 - 契约放在 `src/shared/`（与 `src/shared/platform/` 同级），保持零 Electron/DOM；`CompareRequest`、错误码联合类型与解析/校验入口是后续 UI 与主进程唯一依赖。
-- 导出的稳定符号：`CompareRequest`、`CompareErrorCode`、`CompareResult`、`parseCompareUrl`、`parseCompareArgv`、`parseManualPaths`、`resolveCompareRequest`、`toDisplayPath`；`CompareErrorCode` 至少含 `MISSING_SIDE`、`DUPLICATE_SIDE`、`EMPTY_PATH`、`UNKNOWN_SCHEME`、`UNKNOWN_ACTION`、`NOT_FOUND`、`TYPE_MISMATCH`、`UNSUPPORTED_FILE_TYPE`、`ACCESS_DENIED`。
+- 导出的稳定符号：`CompareRequest`、`CompareErrorCode`、`CompareResult`、`parseCompareUrl`、`parseCompareArgv`、`parseManualPaths`、`resolveCompareRequest`、`toDisplayPath`；`CompareErrorCode` 至少含 `MISSING_SIDE`、`DUPLICATE_SIDE`、`EMPTY_PATH`、`UNKNOWN_SCHEME`、`UNKNOWN_ACTION`、`NOT_FOUND`、`TYPE_MISMATCH`、`UNSUPPORTED_FILE_TYPE`、`ACCESS_DENIED`（`resolveCompareRequest` 不再产出 `UNSUPPORTED_FILE_TYPE`，该码保留给打开链路 / 对话框文案）。
 - 解析函数必须显式接收 `homeDir` / `baseDir` 等上下文参数，不读 `process.env`、`os.homedir()` 或 `window`，保证单测确定性；主进程/渲染层各自负责传入真实值。
 - `PlatformPort` 只新增一个探针方法（`statPath(path)`），返回 `'file' | 'directory' | 'missing'`，不把 Node 的 `Stats` 对象泄漏到 shared/renderer。
-- 支持的文件扩展名集合在 shared 定义一次（`src/shared/fileExtensions.ts`）；renderer 既有 `fileKinds.ts` 的判定改为复用它，避免两套白名单漂移（不改变既有分类结果）。
+- 扩展名集合与「扩展名 + 内容 → 家族」在 shared 定义一次（`src/shared/fileExtensions.ts` 的 `extensionFamily` / `resolveFileFamily`）；renderer `fileKinds.ts` 只做家族 → 视图映射，校验阶段不读文件、不按扩展名拒绝。
 - 绝对性判定在 `\` → `/` 归一之后进行；实现拆成 `toPosixSeparators` / `isAbsolutePath` / `splitPathRoot`（切成不可变根 `/`、`C:/`、`//server/share` 与可折叠余段）/ `foldPath` 四个纯函数，`..` 折叠只在根之下的余段内进行，因此天然不越过盘根与共享根。
 - 回显平台由调用方显式传入（`PathContext` / `ResolveContext` 可选 `platform`），缺省保持 `/`；Win 规则不依赖实机，全部由单测断言解析结果（不得以下游 `NOT_FOUND` 文案代替）。
 - 不新增依赖；测试用 vitest，放在既有测试布局（`src/shared/*.test.ts`、`src/renderer/src/platform/web-platform.test.ts`、`src/main/platform/electron-platform.test.ts`）。

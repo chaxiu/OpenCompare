@@ -78,7 +78,7 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 - **ac-narrow-960-controls-accessible**：960 宽渲染真实目录视图后 `filter` 入口命中 1 个、行内主操作可点击，其余声明动作在打开的「更多」菜单内可点击、未被 disabled 卸载。
 - **ac-no-view-switcher-dom**：空态与有会话两态下 `tablist`「视图切换 / Switch view」均为 `null`，`app` 级内 `[role="tablist"]` 数量为 0。
 - **ac-open-file-pair-scene-by-kind**：`openFilePairSession` 对两个 `.ts` 产 `code`、两个 `.csv` 产 `csv` 且两侧 `adhoc.tables` 就位、两个 `.json` 产 `structured` 且 `adhoc.format === 'json'`。
-- **ac-open-file-pair-rejects**：`.json ↔ .yaml` 抛 `mixed-family`，未知扩展名（如 `.bin`）抛 `unsupported-type`，两次拒绝都不产生 / 不替换会话。
+- **ac-open-file-pair-rejects**：`.json ↔ .yaml` 抛 `mixed-family`；未知扩展名的二进制内容（如含 NUL 的 PNG 字节）抛 `UNSUPPORTED_FILE_TYPE` 并带侧别 / 文件名；未知扩展名文本按 `code` 打开；两类拒绝都不产生 / 不替换会话。
 - **ac-tab-shows-scene-type**：同屏 4 个会话时每个 `[data-session-tab]` 内唯一 `svg[data-icon]` 依次为 `folder-tree` / `file-code-corner` / `table-2` / `braces`，切换活动态不变。
 - **ac-session-tab-drives-view**：点击 code / csv / structured / directory 会话 tab 分别出现对应模式的 `tablist`，取代原「视图切换」驱动的走查。
 - **ac-no-topbar-samples**：空态与 ready 态顶栏都不存在 `samples` / `samples-menu` 入口，也查不到「加载演示样本」类按钮或菜单触发器。

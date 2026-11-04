@@ -5,17 +5,17 @@
 ## 范围
 
 - **弹窗模式切换**：`NewCompareDialog` 在既有双路模式与三向模式间切换；默认双路（左 / 右输入 + 两个选择器 + 提交 / Enter / Esc 行为不变），三向模式只出现 base / ours / theirs 三个带标签输入与同一提交按钮，不出现逐侧选择器；两模式输入值各自保留，来回切换不丢已输入路径。三向不提供逐侧文件选择器、三文件拖拽、启动参数或 `opencompare://` 入口。
-- **纯函数归一化与校验（`src/shared/mergeRequest.ts`）**：三条路径各自复用 `compareRequest.ts` 导出的 `normalizePathValue` / `toDisplayPath`（去引号、`~` 展开、相对路径按 `baseDir` 解析、段折叠、统一 `/`），不写第二份归一化；逐侧一次 `statPath` 探测，稳定错误码 `EMPTY_PATH` / `NOT_FOUND` / `ACCESS_DENIED` / `NOT_A_FILE` / `UNSUPPORTED_FILE_TYPE`，优先级按 base→ours→theirs，同侧内 `ACCESS_DENIED`→`NOT_FOUND`→`NOT_A_FILE`→`UNSUPPORTED_FILE_TYPE`；三向允许两条路径相同（不套双路 `DUPLICATE_SIDE`）；返回值只携带稳定 `code` + 出错侧 + 规范化路径，零 Electron / DOM / Node 依赖。
-- **建立真实会话**：校验通过后按三条真实绝对路径读入正文，建立 `scene: 'code'` / `columns: 3` 会话，携带三个真实 `{ path, text }`（`WorkbenchSession.merge`），不加载任何内置样本；三栏标题为各侧真实路径、副标题为 base / ours / theirs 角色；冲突块与剩余计数由既有 `buildMergeModel` / `countUnresolved` 在真实正文上计算；该会话固定 `merge` 模式，不渲染 diff/merge 分段控件。
+- **纯函数归一化与校验（`src/shared/mergeRequest.ts`）**：三条路径各自复用 `compareRequest.ts` 导出的 `normalizePathValue` / `toDisplayPath`（去引号、`~` 展开、相对路径按 `baseDir` 解析、段折叠、统一 `/`），不写第二份归一化；逐侧一次 `statPath` 探测，稳定错误码 `EMPTY_PATH` / `NOT_FOUND` / `ACCESS_DENIED` / `NOT_A_FILE`，优先级按 base→ours→theirs，同侧内 `ACCESS_DENIED`→`NOT_FOUND`→`NOT_A_FILE`；校验阶段零文件读取、不按扩展名拒绝（家族由 `buildMergeSession` 按扩展名 + 内容判定，见 `file-family` 域）；三向允许两条路径相同（不套双路 `DUPLICATE_SIDE`）；返回值只携带稳定 `code` + 出错侧 + 规范化路径，零 Electron / DOM / Node 依赖。
+- **建立真实会话**：校验通过后按三条真实绝对路径读入正文，建立 `scene: 'code'` / `columns: 3` 会话，携带三个真实 `{ path, text }`（`WorkbenchSession.merge`），不加载任何内置样本；已知扩展名走 `readTextFile`，未知扩展名每侧一次 `probeTextFile`（判定、正文、facts 同一份字节），内容判定为二进制时抛 `UNSUPPORTED_FILE_TYPE` 并带侧别与文件名；三栏标题为各侧真实路径、副标题为 base / ours / theirs 角色；冲突块与剩余计数由既有 `buildMergeModel` / `countUnresolved` 在真实正文上计算；该会话固定 `merge` 模式，不渲染 diff/merge 分段控件。
 - **会话身份与文案派生**：会话 id 由三条有序路径派生 `merge:${base} ↔ ${ours} ↔ ${theirs}`（顺序敏感），同 trio 再次建立 / 重开复用同一 tab；标题由三个真实文件名派生（三名全同收敛为单个文件名），副标题由三条完整绝对路径派生，均从会话合并输入读取而非冻结常量；状态栏冲突计数只走既有 `onMergeStateChange` 通道。
-- **失败不建 tab**：空路径、缺失、不可读、目录、扩展名不支持、校验通过后读取失败，都只在弹窗 / 既有提示内就地展示一条 `role="alert"` 本地化文案，弹窗保持打开、tab 数与会话列表不变；不展示原始异常句，可含该侧路径。
+- **失败不建 tab**：空路径、缺失、不可读、目录、未知扩展名内容判定为二进制、校验通过后读取失败，都只在弹窗 / 既有提示内就地展示一条 `role="alert"` 本地化文案，弹窗保持打开、tab 数与会话列表不变；不展示原始异常句，可含该侧路径。
 - **历史写入与重开**：建立成功写一条 `kind: 'merge'` 历史，`paths` 固定 `[base, ours, theirs]`，三项开关取当前 shell 开关；同 trio 重复建立复用同一条目与 `id`，只刷新 `createdAt` 并置顶。空态最近历史中 merge 条目按既有行样式显示（类型文案 + 三条路径 + 时间 + 重开 / 移除）。重开时重新读取三个文件、按磁盘最新内容重建冲突块、复用原 tab id，成功后 `createdAt` 刷新且 `id` 不变；失败（删除 / 不可读 / 类型变化）不建 tab、不改当前会话与其它条目，只出一条既有本地化失败提示。merge 会话本身不消费三项对比开关，但条目按建立时 shell 开关逐项记录；重开成功后条目开关保持原值、shell 三项开关恢复为条目值，失败不改写 shell 开关。
 
 ## 验收
 
 - **ac-merge-dialog-mode**：弹窗默认双路且仍有左 / 右两个输入；切到三向恰有 base / ours / theirs 三个带标签输入、无「打开文件 / 打开文件夹」动作；切回双路后原输入逐字保留。
 - **ac-merge-normalize-pure**：含引号 / `~` / 相对路径的三条输入返回统一 `/` 的绝对路径；三个真实受支持文件返回 `ok: true` 且路径逐项等于归一化结果，每侧 `statPath` 只调用一次。
-- **ac-merge-error-codes**：空路径 / 不存在 / 不可读 / 目录 / 扩展名不支持分别返回稳定 `code` 与出错侧，优先级为 base→ours→theirs、同侧 ACCESS_DENIED→NOT_FOUND→NOT_A_FILE→UNSUPPORTED_FILE_TYPE。
+- **ac-merge-error-codes**：空路径 / 不存在 / 不可读 / 目录分别返回稳定 `code` 与出错侧，优先级为 base→ours→theirs、同侧 ACCESS_DENIED→NOT_FOUND→NOT_A_FILE；未知扩展名不在校验阶段拒绝，改由 `buildMergeSession` 的内容判定给出 `UNSUPPORTED_FILE_TYPE`（侧别 + 文件名，不建 tab）。
 - **ac-merge-invalid-no-tab**：每种失败提交后只出现一条 `role="alert"` 本地化提示、弹窗仍打开、`data-session-tab` 数量与提交前相等。
 - **ac-merge-real-panes**：三个真实临时文件（至少 1 个双侧冲突块）建立后恰新增 1 个 tab，三栏文本逐字等于磁盘内容，冲突块总数等于 `buildMergeModel` 对同三份文本的结果且 > 0。
 - **ac-merge-conflict-statusbar**：状态栏「冲突块」等于 `onMergeStateChange` 上报的 unresolved 值；接受一个冲突块减 1，接受全部为 0。

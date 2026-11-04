@@ -5,22 +5,24 @@
  * and never touches the merge algorithm: `CodeView` / `@core/text/merge` rebuild
  * the conflict model from the bodies carried here.
  */
-import type { PlatformPort } from '@shared/platform/types'
+import type { PlatformPort, TextFileProbe } from '@shared/platform/types'
 import type { MergeSide } from '@shared/mergeRequest'
 import type { Translate } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
-import { baseName } from './fileKinds'
+import { extensionFamily } from '@shared/fileExtensions'
+import { baseName, contentFamily } from './fileKinds'
 import type { MergeFileSides, WorkbenchSession } from './session'
 
 /** Known merge-session failures the shell localizes from a stable code. */
-export type MergeSessionErrorCode = 'READ_FAILED'
+export type MergeSessionErrorCode = 'READ_FAILED' | 'UNSUPPORTED_FILE_TYPE'
 
 /** A merge build rejection carrying the stable code and the failing side. */
 export class MergeSessionError extends Error {
   constructor(
     readonly code: MergeSessionErrorCode,
     readonly side: MergeSide,
-    message: string
+    message: string,
+    readonly path = ''
   ) {
     super(message)
     this.name = 'MergeSessionError'
@@ -34,7 +36,8 @@ const MERGE_SIDE_KEYS: Record<MergeSide, MessageKey> = {
 }
 
 const MERGE_ERROR_KEYS: Record<MergeSessionErrorCode, MessageKey> = {
-  READ_FAILED: 'shell.merge.error.READ_FAILED'
+  READ_FAILED: 'shell.merge.error.READ_FAILED',
+  UNSUPPORTED_FILE_TYPE: 'shell.merge.error.UNSUPPORTED_FILE_TYPE'
 }
 
 /**
@@ -83,11 +86,31 @@ export async function buildMergeSession(
   const source: Record<MergeSide, string> = { base, ours, theirs }
   const texts = await Promise.all(
     sides.map(async (side) => {
+      const path = source[side]
+      // A known extension keeps the existing plain read; an unknown extension is
+      // probed once and that same probe supplies the merge body.
+      if (extensionFamily(path) !== null) {
+        try {
+          return await platform.readTextFile(path)
+        } catch {
+          throw new MergeSessionError('READ_FAILED', side, `Failed to read the ${side} merge input.`)
+        }
+      }
+      let probe: TextFileProbe
       try {
-        return await platform.readTextFile(source[side])
+        probe = await platform.probeTextFile(path)
       } catch {
         throw new MergeSessionError('READ_FAILED', side, `Failed to read the ${side} merge input.`)
       }
+      if (contentFamily(path, probe) === null) {
+        throw new MergeSessionError(
+          'UNSUPPORTED_FILE_TYPE',
+          side,
+          `Unsupported file type: ${baseName(path)}.`,
+          path
+        )
+      }
+      return probe.text
     })
   )
 
@@ -114,5 +137,8 @@ export function mergeSessionErrorMessage(cause: unknown, t: Translate): string {
   const side = cause instanceof MergeSessionError ? cause.side : null
   const key =
     cause instanceof MergeSessionError ? MERGE_ERROR_KEYS[cause.code] : MERGE_ERROR_KEYS.READ_FAILED
-  return t(key, { side: side === null ? '' : t(MERGE_SIDE_KEYS[side]) })
+  return t(key, {
+    side: side === null ? '' : t(MERGE_SIDE_KEYS[side]),
+    path: cause instanceof MergeSessionError ? baseName(cause.path) : ''
+  })
 }
