@@ -24,7 +24,8 @@ import {
 } from '@core/directory/rows'
 import type { DirectoryRowModel } from '@core/directory/rows'
 import type { DirectoryReportProgress } from '@core/directory/report'
-import { zh } from '@renderer/i18n/messages'
+import { en, zh } from '@renderer/i18n/messages'
+import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DirectoryView } from './DirectoryView'
 import { DIRECTORY_STATUS_LABEL_KEYS, FILTER_LABEL_KEYS } from './directoryCopy'
@@ -41,7 +42,17 @@ vi.mock('@core/directory/filter', async (importOriginal) => {
 
 installJsdomViewport()
 
-afterEach(cleanup)
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+
+/** Pins the window width before a render, exactly like a real resize would. */
+function setWindowWidth(width: number): void {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+}
+
+afterEach(() => {
+  cleanup()
+  if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
+})
 
 /** Synthetic 5,000-row comparison shaped like the real window's first rows. */
 function syntheticComparison(fileCount: number): DirectoryComparison {
@@ -903,4 +914,61 @@ describe('DirectoryView workflow toolbar', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
   })
+})
+
+describe('DirectoryView narrow toolbar', () => {
+  it.each(['zh', 'en'] as const)(
+    'hides copy only and keeps every entry reachable at 960 (%s)',
+    (language) => {
+      setWindowWidth(960)
+      const dictionary = language === 'zh' ? zh : en
+      const { container } = renderWithI18n(
+        <Harness comparison={syntheticComparison(12)} initial={INITIAL_STATE} />,
+        language
+      )
+
+      const band = toolbarBand(container)
+      expect(band.children).toHaveLength(1)
+      const row = toolbarRow(container)
+
+      // Filter 5 tabs, direction 2 tabs, mode 2 tabs — none folded into a menu.
+      expect(row.querySelectorAll('[role="tablist"]')).toHaveLength(3)
+      expect(row.querySelectorAll('[role="tab"]')).toHaveLength(9)
+      expect(
+        within(row).getByRole('tablist', { name: dictionary['directory.filter.group'] })
+      ).toBeDefined()
+      expect(
+        within(row).getByRole('tablist', { name: dictionary['directory.sync.direction'] })
+      ).toBeDefined()
+      expect(
+        within(row).getByRole('tablist', { name: dictionary['directory.sync.mode'] })
+      ).toBeDefined()
+
+      // Legend chips keep the count but carry the status word as accessible copy.
+      const chips = row.querySelectorAll('[data-legend-status]')
+      expect(chips.length).toBeGreaterThan(0)
+      for (const chip of Array.from(chips)) {
+        const status = chip.getAttribute('data-legend-status') as keyof typeof DIRECTORY_STATUS_LABEL_KEYS
+        const label = dictionary[DIRECTORY_STATUS_LABEL_KEYS[status]]
+        expect(chip.textContent ?? '').not.toContain(label)
+        expect(chip.getAttribute('title')).toBe(label)
+        expect(chip.getAttribute('aria-label') ?? '').toContain(label)
+      }
+
+      // The solid primary action keeps its entry and its accessible name.
+      const sync = row.querySelector('[data-shell-entry="sync"]')
+      if (!(sync instanceof HTMLElement)) throw new Error('missing sync action')
+      expect(sync.textContent ?? '').toBe('')
+      expect(sync.getAttribute('aria-label')).toBe(dictionary['directory.toolbar.previewSync'])
+      expect(
+        screen.getByRole('button', { name: dictionary['directory.toolbar.previewSync'] })
+      ).toBe(sync)
+
+      // The overflow trigger stays inline; the menu set is unchanged.
+      expect(row.querySelector('[data-shell-entry="more"]')).not.toBeNull()
+      expect(
+        screen.getByRole('button', { name: dictionary['shell.toolbar.more'] })
+      ).toBeDefined()
+    }
+  )
 })

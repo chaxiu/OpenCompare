@@ -77,11 +77,24 @@ describe('WCAG contrast of the shipped tokens', () => {
         // `same` has no soft fill of its own; it sits on the sunken surface.
         const background =
           state === 'same' ? token(theme, 'surface-sunken') : token(theme, `diff-${state}-soft`)
+        // Light-theme chips are 11–13px text, so the pair must clear AA (4.5:1).
+        const minimum = theme === 'light' ? 4.5 : 3
         expect(
           contrastRatio(foreground, background),
           `${theme} diff-${state} / ${state === 'same' ? 'surface-sunken' : `diff-${state}-soft`}`
-        ).toBeGreaterThanOrEqual(3)
+        ).toBeGreaterThanOrEqual(minimum)
       }
+    }
+  })
+
+  it('keeps all five light-theme legend chips at AA small-text contrast', () => {
+    for (const state of [...FOUR_STATES, 'conflict'] as const) {
+      const background =
+        state === 'same' ? token('light', 'surface-sunken') : token('light', `diff-${state}-soft`)
+      expect(
+        contrastRatio(token('light', `diff-${state}`), background),
+        `light diff-${state} / ${state === 'same' ? 'surface-sunken' : `diff-${state}-soft`}`
+      ).toBeGreaterThanOrEqual(4.5)
     }
   })
 

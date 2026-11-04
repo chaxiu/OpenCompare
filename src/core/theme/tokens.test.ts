@@ -165,11 +165,11 @@ describe('diff semantics', () => {
     }
   })
 
-  it('pins the four light state colours at their desaturated values', () => {
-    expect(token('light', 'diff-same')).toBe('#818890')
-    expect(token('light', 'diff-added')).toBe('#419b4e')
-    expect(token('light', 'diff-removed')).toBe('#e55d57')
-    expect(token('light', 'diff-modified')).toBe('#ad832d')
+  it('pins the four light state colours at their WCAG-hardened values', () => {
+    expect(token('light', 'diff-same')).toBe('#63696f')
+    expect(token('light', 'diff-added')).toBe('#32773c')
+    expect(token('light', 'diff-removed')).toBe('#b04843')
+    expect(token('light', 'diff-modified')).toBe('#856523')
   })
 
   it('renders chip tints as 12% of the semantic hue over the base surface', () => {

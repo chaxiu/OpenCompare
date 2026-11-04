@@ -11,8 +11,11 @@ import { Workbench } from './Workbench'
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
 const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
 
 beforeAll(() => {
+  // Keep the directory legend's status words visible: this suite reads them.
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 })
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
     get: () => 1200
@@ -24,6 +27,7 @@ beforeAll(() => {
 })
 
 afterAll(() => {
+  if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
   if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
   else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
   if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)

@@ -132,17 +132,17 @@
   --color-danger-strong: #d24a44;
   --color-danger-soft: #fdecee;
 
-  /* Diff semantics — same hues, HSV saturation 10–15% below the dark values */
-  --color-diff-same: #818890;
-  --color-diff-added: #419b4e;
-  --color-diff-removed: #e55d57;
-  --color-diff-modified: #ad832d;
-  --color-diff-conflict: #b08324;
+  /* Diff semantics — same hues as dark, darkened to keep 4.5:1 on the chips */
+  --color-diff-same: #63696f;
+  --color-diff-added: #32773c;
+  --color-diff-removed: #b04843;
+  --color-diff-modified: #856523;
+  --color-diff-conflict: #88651c;
   /* Chips/badges: 12% of the semantic hue over `--color-surface-base` */
-  --color-diff-added-soft: #e8f3ea;
-  --color-diff-removed-soft: #fceceb;
-  --color-diff-modified-soft: #f5f0e6;
-  --color-diff-conflict-soft: #f6f0e5;
+  --color-diff-added-soft: #e6efe8;
+  --color-diff-removed-soft: #f6e9e8;
+  --color-diff-modified-soft: #f0ede5;
+  --color-diff-conflict-soft: #f1ede4;
 }
 
 @layer base {

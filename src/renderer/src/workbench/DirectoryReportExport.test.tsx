@@ -54,6 +54,17 @@ const buildAsync = vi.mocked(buildDirectoryReportForComparisonAsync)
 
 installJsdomViewport()
 
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+
+beforeAll(() => {
+  // Keep the directory legend's status words visible: this suite reads them.
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 })
+})
+
+afterAll(() => {
+  if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
+})
+
 afterEach(() => {
   cleanup()
   buildAsync.mockClear()
