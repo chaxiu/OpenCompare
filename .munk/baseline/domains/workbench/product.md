@@ -5,7 +5,7 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 ## 范围
 
 - **视觉基线**：token 唯一来源 `src/renderer/src/assets/main.css`（Tailwind v4 `@theme`），承载表面 / 文字 / 边框 / 主色 / 危险 + 差异语义色（same·added·removed·modified·conflict）、字号字重、间距、圆角、焦点环、动效；基础组件（工具栏按钮与下拉、会话标签、面板、可拖拽分割窗格、空 / 载 / 错态、状态栏、树与列表行、等宽代码块）只引用 token。
-- **壳层层级与三档宽度（单一尺寸表）**：`workbench/shellLayout.ts` 固定 `app`(h-11 px-3) → `sessions`(h-9 px-3) → `events`(h-7 px-3，仅 notice / 扫描进度) → `view-toolbar`(h-7 px-2 py-0.5，含下钻返回条) → `panels`(标题 h-8 px-2 + 内容 py-2) → `status`(h-8 px-3)，同级只出现一次，高度 / 内边距 / 间距 / 控件高度只取自该表；1024 / 1440 / 1920 由 `resolveWidthTier` 单表派生（`useWidthTier` 只在 resize 重算），单行不换行（唯一例外：`status` 层按内容宽度换行，四态图例与统计永不裁切，见域 `status-bar-layout`）；compact 档只隐藏文本 / 次要副标题 / 图例文字（保留 `aria-label` / `title`），不移除入口、不改溢出菜单。
+- **壳层层级与三档宽度（单一尺寸表）**：`workbench/shellLayout.ts` 固定 `app`(h-8 px-3 = 32) → `sessions`(h-7 px-3 = 28) → `events`(h-7 px-3，仅 notice / 扫描进度) → `view-toolbar`(h-8 px-2 py-0.5，单行合计 36，含下钻返回条) → `panels`(标题 h-6 px-2 = 24 + 内容 py-2) → `status`(h-6 px-3 = 24)，同级只出现一次，高度 / 内边距 / 间距 / 控件高度只取自该表；1024 / 1440 / 1920 由 `resolveWidthTier` 单表派生（`useWidthTier` 只在 resize 重算），所有级别单行不换行（状态栏在受支持宽度恒单行，`rows >= 2` 仅为安全网，见域 `status-bar-layout`）；compact 档只隐藏文本 / 次要副标题（保留 `aria-label` / `title`），不移除入口、不改「更多」菜单。壳层高度 / 工具行 / 地址条 / 视图度量契约见域 `shell-tightening`。
 - **入口清单与稳定钩子**：入口集中声明为 `SHELL_ENTRIES`，18 条 `open-file` / `open-folder` / `new-compare` / `settings` / `filter` / `sync` / `template` / `snapshot-import` / `snapshot-export` / `report-export` / `drilldown-back` / `prev-diff` / `next-diff` / `override` / `save` / `merge-accept` / `export` / `tab-select` 与 DOM 集合完全相等；`measureToolbar(tier, level, view)` 以 `required ≤ available` 复核每行；各级带 `data-shell-level`、入口带 `data-shell-entry`。
 - **主屏与会话模型**：顶栏（品牌图标 + `OpenCompare` 标题、四个常驻动作 `new-compare` / `open-file` / `open-folder` / `settings`，无样本入口 / 品牌副标题 / scene 分段控件）+ 中央可拖拽双栏 / 三栏工作区 + 底部状态栏；一个样本或一对路径 = 一个会话，支持并存切换，无会话为空态，空 / 载 / 错三态可见。会话带 `dirty`（经 `onDirtyChange` 上报、`Workbench` 镜像）与可编辑工作副本 `CodeFileBuffer`，切 tab 卸载后仍可原样重建；tab 图标取 `SCENE_ICONS`。
 - **会话标签文案与截断**：标题 / 副标题在渲染期由 `describeSession` / `renderSessionText` 按会话事实派生（目录取目录名与根路径；文件对取两侧路径，同名取文件名、异名 `左 ↔ 右`；样本按 session id 走字典），可见文本由纯模块 `workbench/sessionTabText.ts` 按 `TAB_TIER_BUDGETS` 三档预算裁尾（`…` + 连续尾部、成对均分、副标题先丢 ` · <格式>`），完整文本留在 `aria-label` / `title`。
@@ -14,8 +14,8 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 - **顶层入口**：顶栏常驻「新建对比」（仅 `directoryBusy` 期间 disabled）与「打开文件」「打开文件夹」，空态 action 区恰为这三个真实 CTA；对话框（`role="dialog"`）含左右路径输入、两个选择器动作与「建立对比」，唯一校验入口是 `parseManualPaths` + `resolveCompareRequest`（`homeDir` / `baseDir` 由平台提供、probe 走 `statPath`），通过后只按 `kind` 路由到既有 `openFilePair` / `runSidesCompare` 并按 `upsertSession` 复用同路径对；路径类失败只在弹窗内以一行 `role="alert"` 展示，目录对比在扫描前即清掉弹窗。
 - **拖入与启动注入**：恰 2 个同类真实路径直接建会话，1 个作为左侧基准 + info 提示，>2 或文件目录混合明确提示且不建会话；挂载时经 `PlatformPort.onCompareRequest` 订阅一次后调 `compareRequestsReady()`，payload 复用既有会话入口，端口缺该能力等价「无注入」。
 - **目录对比进度与取消**：每次目录对比生成 `operationId` + `AbortController`，壳层常驻 `role="status"` 进度条（「目录对比进度」）按相位分段——扫描「正在扫描目录 + 已扫描 N 个文件」、校验「正在校验内容 + 已校验 M 个文件 + 累计 N 个文件」，两相位都展示累计「已处理 X」与「取消」；取消先 `abort()` 再 `platform.cancelOperation(id)`，取消后走 info notice 且会话 / 标签 / 状态栏 / 视图不变；跳过项以 info notice「已跳过：左 X / 右 Y」呈现。
-- **工具区窄档兜底**：目录视图三行工具行的横向溢出兜底只落在行容器（`min-w-0 overflow-x-auto scrollbar-none`），band 仍只吃 `levelBandClasses('view-toolbar')`；`main.css` 的 `@utility` 区新增 `scrollbar-none` 且只用于这三行。
-- **状态栏派生计数**：目录会话四态计数由 `visibleDirectoryCounts(root, filter)` 按过滤档从根节点聚合（`conflict` 恒 0）；代码双栏 Diff 在「平台」后追加「左换行 → 左编码 → 右换行 → 右编码」，由纯模块 `workbench/probeStatus.ts` 按会话固化探测事实（`TextFileFacts`：path / encoding / newline / bytes / sha256，不存正文）产出，缺失侧 `—`，三向合并不渲染。
+- **单行工具区与「更多」收纳**：目录 / 代码工具行各只渲染 1 行，不再横向滚动裁切；每行声明 `TOOLBAR_ROWS` 的 `entries`（直接渲染）与 `overflow`（「更多」菜单），两者并集等于该视图的入口集合，主操作每屏 ≤1 个实心按钮。目录行顺序为「过滤 segmented → 主操作 → 12px + 1px 竖分隔 → 更多」，模板 / 快照导入导出 / 导出 HTML / 隐藏本机路径进「更多」或设置；菜单复用 `DropdownMenu`，支持 `Escape` 与点击外部关闭。细节见域 `shell-tightening`。
+- **状态栏派生计数**：目录会话四态计数由 `visibleDirectoryCounts(root, filter)` 按过滤档从根节点聚合（`conflict` 恒 0），但状态栏本身不再渲染四态图例；代码双栏 Diff 只渲染「左换行 → 左编码 → 右换行 → 右编码」中实际存在的事实，左右相同只写一次，由纯模块 `workbench/probeStatus.ts` 按会话固化探测事实（`TextFileFacts`：path / encoding / newline / bytes / sha256，不存正文）产出，缺失侧 `—`，三向合并不渲染；不渲染平台名与教程句。
 - **示例与调试 + 样本底座**：样本入口只在设置 →「示例与调试」（5 个 `data-sample-entry`：directory / code / csv / structured / remote-snapshot，复用 `load({ scene })` 与 `runSidesCompare(remoteSnapshotSides())`；调试失败项 `data-sample-failure` 由 `showDebugSamples` 门控），已有会话按会话 id 合并、失败保留；样本库在 `src/shared/fixtures/`（零 Electron / DOM 依赖）：嵌套 + 散乱目录树、代码 Diff 与多冲突块 3-way、1200+ 行乱序主键 CSV、乱序深层 JSON/YAML。
 - **文案渲染期解析**：顶栏 / 三态 / 标签入参 / 通知 / 关闭确认 / 进度条 / 状态栏与图例 / 选择器与保存 `title` 全部经 `useI18n().t(key, params)` 取值，组件内无可见中文字面量；标题 / 副标题 / 统计标签由 `sessionDisplay.ts` 产出词典键 + 用户数据片段（统计用稳定角色 key），zh 值逐字沿用原界面，切语言不重挂载 / 不重扫 / 不新增会话。
 
@@ -66,7 +66,7 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 - **ac-no-wrap**：三档下 `app` 与 `view-toolbar` 子树内无 `flex-wrap` 容器；1024 宽时 `events` / `sessions` / `panels` 级也不引入换行容器。
 - **ac-fit-1024**：1024 / 1440 / 1920 三档对每个工具区，纯函数预算 `required ≤ available`（available = 窗口宽 − 该级左右内边距）均为真，并由渲染出的入口顺序与呈现模式复核。
 - **ac-entry-manifest-complete**：布局模块声明的入口 id 集合与 18 条既有入口完全相等（多一条或少一条即红，不含 `samples` / `samples-menu`）；ready 态 DOM 中每个 id 恰出现一次且可见。
-- **ac-statusbar-unchanged**：状态栏既有条目集合与顺序不变（会话 id → 平台 → 兼容图例 → 会话 stats），文字为 `text-2xs` + `tabular`；代码双栏 Diff 在「平台」后、「兼容图例」前追加四条目，不改变既有条目相对顺序。
+- **ac-statusbar-scene-facts**：状态栏只渲染当前场景的行数 / 条目度量与编码、换行事实（左右相同只写一次），不渲染会话 id、平台名、四态图例或教程引导；文字为 `text-2xs` + `tabular`，单行高度 ≤24。
 - **ac-drilldown-unchanged**：下钻返回条仍在 `view-toolbar` 级首位、同档高度，点击回到父目录会话，文案键不变，往返后过滤 / 折叠 / 选中 / 双栏滚动保持。
 - **ac-pure-module-pure**：截断规则以 `workbench/sessionTabText.ts` 导出，Node 可直接 import，模块链零 React / DOM / Electron，同一输入两次输出全等且幂等。
 - **ac-budget-table-single-source**：每档最大 tab 宽度与标题 / 副标题列预算来自单一表（组件与测试共读），满足 `tabMaxWidthPx ≥ chromeWidthPx + (titleCols + subtitleCols) × columnPx`、三档单调增、compact 副标题预算为 0。
@@ -74,8 +74,8 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 - **ac-tier-renders-pure-output**：固定 `window.innerWidth` 为 1024 / 1440 / 1920 各渲染一次含超长路径的会话，每个 tab 的标题与副标题逐字等于纯函数对应档输出。
 - **ac-full-text-not-lost**：被截断的 tab 仍可通过 `title` 或 `aria-label` 取得未截断的完整标题（及副标题），截断不导致语义丢失。
 - **ac-band-has-no-scroll**：`view-toolbar` band 的 class 仍为 `levelBandClasses('view-toolbar')` 全量 token，不含 `overflow-x-auto` / `min-w-0` / `flex-wrap`。
-- **ac-three-rows-scrollable**：`view-toolbar` 内行容器恰 3 个，各含 `min-w-0` / `overflow-x-auto` / `scrollbar-none`，并保留 `shrink-0` / `h-7` / `gap-2`。
-- **ac-narrow-960-controls-accessible**：960 宽渲染真实目录视图后 `filter` 入口命中 1 个、组合图例文本仍在文档中、左右目录选择按钮各 1 个且未被 disabled 卸载。
+- **ac-view-toolbar-single-row**：每个视图的 `view-toolbar` 行容器恰 1 个（`viewToolbarRows(view) === 1`），行容器无 `overflow-x-auto`，行高 36px。
+- **ac-narrow-960-controls-accessible**：960 宽渲染真实目录视图后 `filter` 入口命中 1 个、行内主操作可点击，其余声明动作在打开的「更多」菜单内可点击、未被 disabled 卸载。
 - **ac-no-view-switcher-dom**：空态与有会话两态下 `tablist`「视图切换 / Switch view」均为 `null`，`app` 级内 `[role="tablist"]` 数量为 0。
 - **ac-open-file-pair-scene-by-kind**：`openFilePairSession` 对两个 `.ts` 产 `code`、两个 `.csv` 产 `csv` 且两侧 `adhoc.tables` 就位、两个 `.json` 产 `structured` 且 `adhoc.format === 'json'`。
 - **ac-open-file-pair-rejects**：`.json ↔ .yaml` 抛 `mixed-family`，未知扩展名（如 `.bin`）抛 `unsupported-type`，两次拒绝都不产生 / 不替换会话。
@@ -122,9 +122,9 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 
 ## 最近交付证明
 
-- WI：`wi_ws_424fd8747601b2c8`（代码文件对打开链路接入探测事实 + 状态栏左右原始值，`kind: feature`，`needSelfTest=false`）
-- 日期：2026-11-02
-- 结果：code_gates passed（22 gates，attempt 001；`pnpm test` 119 files / 1869 passed + 1 skipped / 1870）。
-- 覆盖摘要：`session.ts` 新增 `FilePairProbes`（不含正文）；`openFilePairSession` 对代码对改走 `platform.probeTextFile` 一次取文本 + 事实，四条入口共用；新增 `openDrilldownSession` 与 `probeTextString`（快照侧内存 UTF-8，不进 `probeTextFile`），样本构建期算一次；新增纯模块 `workbench/probeStatus.ts` 产出固定四序四条目（缺失 `—`、非双栏 Diff 为空），`CodeView` 模式由壳层按会话持有（`codeModes`）。
-- 注：探测通道取代 `readTextFile` 后旧打桩断言须同批改到 `probeTextFile`；快照侧永不按虚拟路径探测。
+- WI：`wi_ws_5315d151d872f78c`（主界面布局收紧与视图修正，`kind: feature`）
+- 日期：2026-11-05
+- 结果：code_gates passed（29 gates，attempt 001；`pnpm test` 140 files / 2225 passed + 1 skipped / 2226）。
+- 覆盖摘要：壳层层级压到 32 / 28 / 36 / 24 / 24 且只保留 1 行工具行（`CHROME_BASELINE_PX` 84）；目录行主操作收敛为 1 个实心按钮，模板 / 快照六向 / 导出 HTML / 隐藏本机路径进「更多」；`Panel` 头改可复制地址条并经 `PlatformPort` 注入剪贴板；状态栏删平台名 / 四态图例 / 教程句，只留场景度量与去重后的编码换行；会话模型、入口语义与四态口径未变。
+- 注：`CompositionLegend` 仍在组件库中供其他场景使用，但不再进入 `Workbench` 状态栏；状态栏单行模型与壳层总预算分别见域 `status-bar-layout` / `shell-tightening`。
 

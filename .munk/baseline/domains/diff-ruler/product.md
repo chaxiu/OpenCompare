@@ -80,12 +80,12 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 ## 非目标
 
 - 不改 `src/core/text/ruler.ts` 的既有导出语义；不改 `diffLineTexts`、`DiffRow`/`DiffBlock`/`DiffStatus` 类型、`INLINE_CHAR_LIMIT`、字符级 segment、`merge`、`overwriteBlock`。
-- 不改 `DiffPane.tsx` 渲染路径与 props（行渲染、filler 行、`inlineSegments`、`DIFF_ROW_HEIGHT`）；不改 `SplitPane.tsx` 拖拽/键盘/比例逻辑；三栏 merge 不加指示条；目录树/CSV/结构化视图不改。
+- 不改 `DiffPane.tsx` 渲染路径与 props 契约（行渲染、filler 行、`inlineSegments` 结构）；行高（当前 `DIFF_ROW_HEIGHT = 22`）与单词级差异配色由域 `shell-tightening` 定义，本域只消费；不改 `SplitPane.tsx` 拖拽/键盘/比例逻辑；三栏 merge 不加指示条；目录树/CSV/结构化视图不改。
 - 不做文本缩略图/minimap、行号列表、逐行文本或语法高亮绘制。
 - 不新增 vitest 配置、依赖、不改 `code-gates.json`、不跑 `perf:gate`/`self_test`、不做真实 358k 对照对实机观察（product-qa 承接）。
 - 不碰版本号、`CHANGELOG`、`README*`、`docs/**`、发布脚本与发布单点文件。
 - 不做视口窗拖动/手势优先级、不新增全局快捷键、不新增 IPC/平台通道。
-- 轨道级命中不改窗口化口径：`WINDOW_THRESHOLD`(1000)、`ROW_OVERSCAN`(10)、`DIFF_ROW_HEIGHT`(20)、行级 `DiffRowView` 与 `data-diff-*` 锚点语义不动，不在窗口分支另起行样式；也不改 `RULER_BAND_HEIGHT`(4) 与 `buildRulerBands` 的投影算法/输出契约，`@core` 不新增像素常量。
+- 轨道级命中不改窗口化口径：`WINDOW_THRESHOLD`(1000)、`ROW_OVERSCAN`(10)、`DIFF_ROW_HEIGHT`(22)、行级 `DiffRowView` 与 `data-diff-*` 锚点语义不动，不在窗口分支另起行样式；也不改 `RULER_BAND_HEIGHT`(4) 与 `buildRulerBands` 的投影算法/输出契约，`@core` 不新增像素常量。
 - 不新增 click 之外的指针交互（hover/拖动/右键/双击/滚轮跳块），不改键盘映射与工具条按钮行为；不跑 `perf:gate`、不起浏览器/真机/CDP 场（L3 复验属 Product Ops）。
 
 ## 实现约束
