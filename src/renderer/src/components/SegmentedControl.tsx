@@ -27,7 +27,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-md border border-line-subtle bg-surface-sunken p-1"
+      className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-md border border-line-subtle bg-surface-sunken px-1 py-0"
     >
       {options.map((option) => {
         const active = option.value === value

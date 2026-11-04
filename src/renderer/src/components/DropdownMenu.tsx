@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import type { JSX, ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { CSSProperties, JSX, ReactNode } from 'react'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { ToolbarButton } from './Button'
 import { Icon } from './Icon'
 import type { ButtonSize, ButtonVariant } from './Button'
+import { MENU_WIDTH_PX, placeDropdownMenu } from './menuPlacement'
+import type { MenuPlacement } from './menuPlacement'
 import { cx } from './utils'
 
 export interface DropdownItem {
@@ -42,7 +44,37 @@ export function DropdownMenu({
   entryId
 }: DropdownMenuProps): JSX.Element {
   const [open, setOpen] = useState(false)
+  const [placement, setPlacement] = useState<MenuPlacement | null>(null)
   const container = useRef<HTMLDivElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open) return undefined
+
+    function update(): void {
+      const triggerRect = container.current?.getBoundingClientRect()
+      const menuRect = menu.current?.getBoundingClientRect()
+      if (!triggerRect) return
+      setPlacement(
+        placeDropdownMenu({
+          trigger: triggerRect,
+          menu: {
+            width: menuRect?.width || MENU_WIDTH_PX,
+            height: menuRect?.height || 0
+          },
+          viewport: { width: window.innerWidth, height: window.innerHeight }
+        })
+      )
+    }
+
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return undefined
@@ -61,6 +93,17 @@ export function DropdownMenu({
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [open])
+
+  const menuStyle: CSSProperties = placement
+    ? {
+        position: 'fixed',
+        top: placement.top,
+        left: placement.left,
+        width: placement.width,
+        maxHeight: placement.maxHeight,
+        overflowY: 'auto'
+      }
+    : { position: 'fixed', top: 0, left: 0, width: MENU_WIDTH_PX, visibility: 'hidden' }
 
   return (
     <div ref={container} className="relative shrink-0">
@@ -86,9 +129,11 @@ export function DropdownMenu({
 
       {open ? (
         <div
+          ref={menu}
           role="menu"
           aria-label={menuLabel ?? label}
-          className="absolute right-0 z-30 mt-1 w-72 rounded-md border border-line-strong bg-surface-overlay p-1 shadow-overlay"
+          style={menuStyle}
+          className="z-30 rounded-md border border-line-strong bg-surface-overlay p-1 shadow-overlay"
         >
           {items.map((item) => (
             <button

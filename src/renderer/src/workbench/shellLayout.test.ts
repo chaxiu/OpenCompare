@@ -15,6 +15,9 @@ import {
   STATUS_BAR_CONTENT_PX,
   STATUS_BAR_WIDTHS,
   TIER_WIDTHS,
+  TOOLBAR_BAND_PADDING_Y_PX,
+  TOOLBAR_ROW_GAP_PX,
+  TOOLBAR_ROW_HEIGHT_PX,
   TOOLBAR_ROWS,
   chromeHeightPx,
   directoryToolbarRowClasses,
@@ -447,9 +450,32 @@ describe('directory toolbar layout model', () => {
     expect(tokens).toContain('flex')
     expect(tokens).toContain('flex-wrap')
     expect(tokens).toContain('min-h-8')
+    expect(tokens).toContain('gap-x-2')
+    expect(tokens).toContain('gap-y-1')
+    expect(tokens).not.toContain('gap-2')
     expect(tokens).not.toContain('h-8')
     expect(tokens.some((token) => token.startsWith('overflow'))).toBe(false)
     expect(tokens.some((token) => token.includes(':'))).toBe(false)
+  })
+
+  it('pins the 32 / 4 / 2 arithmetic behind the 36 / 72 band', () => {
+    expect(TOOLBAR_ROW_HEIGHT_PX).toBe(32)
+    expect(TOOLBAR_ROW_GAP_PX).toBe(4)
+    expect(TOOLBAR_BAND_PADDING_Y_PX).toBe(2)
+    expect(SHELL_LEVELS['view-toolbar'].height).toBe('h-8')
+    expect(HEIGHT_PX[SHELL_LEVELS['view-toolbar'].height]).toBe(TOOLBAR_ROW_HEIGHT_PX)
+    expect(toolbarBandHeightPx(1)).toBe(2 + 32 + 2)
+    expect(toolbarBandHeightPx(2)).toBe(2 + 32 + 4 + 32 + 2)
+    for (const rows of [1, 2, 3, 4]) {
+      expect(toolbarBandHeightPx(rows)).toBe(
+        rows * TOOLBAR_ROW_HEIGHT_PX +
+          (rows - 1) * TOOLBAR_ROW_GAP_PX +
+          TOOLBAR_BAND_PADDING_Y_PX * 2
+      )
+    }
+    expect(levelHeightPx('view-toolbar')).toBe(
+      TOOLBAR_ROW_HEIGHT_PX + TOOLBAR_BAND_PADDING_Y_PX * 2
+    )
   })
 
   it('reserves four legend digits so count changes never move the ladder', () => {
