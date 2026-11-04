@@ -139,6 +139,20 @@
   ],
   "steps": [
     {
+      "id": "spike-process-tree-soak",
+      "job": "gates",
+      "name": "Spike process-tree soak (same image)",
+      "tokens": [
+        "pnpm test:soak -- --rounds=50"
+      ],
+      "absent": [
+        "|| true",
+        "continue-on-error"
+      ],
+      "patterns": [],
+      "absentPatterns": []
+    },
+    {
       "id": "pre-create-release",
       "job": "gates",
       "name": "Pre-create the tag's release",
@@ -481,6 +495,16 @@
     }
   ],
   "stepOrder": [
+    {
+      "id": "gates-soak-position",
+      "names": [
+        "Spike process-tree soak (same image)",
+        "Coverage gate (src/core floors)",
+        "Pre-create the tag's release"
+      ],
+      "mustBeLast": false,
+      "job": "gates"
+    },
     {
       "id": "finalize-order",
       "names": [

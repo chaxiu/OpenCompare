@@ -1,6 +1,6 @@
 # Domain: release-verify
 
-发布验收驱动域：把「这个 Release 到底能不能装、能不能跑、取消后有没有噪声」收敛为仓内唯一可复核实现 `scripts/verify-release.mjs` 与只读 workflow `.github/workflows/post-release-verify.yml`，验证对象既可以是 publish 前的 draft，也可以是已公开 Release。本域只管验收驱动本身（CLI 契约、检查注册表、draft / published 传输、fail-closed 汇总、A/B 分层与证据形状）；打包 / 签名 / 公证 / 发版通道归 `domains/release`，`finalize` 的验证先于公开的顺序契约归 `domains/release-publish-gate`，门禁矩阵形状归 `domains/quality-gates`。
+发布验收驱动域：把「这个 Release 到底能不能装、能不能跑、取消后有没有噪声」收敛为仓内唯一可复核实现 `scripts/verify-release.mjs` 与只读 workflow `.github/workflows/post-release-verify.yml`，验证对象既可以是 publish 前的 draft，也可以是已公开 Release。本域只管验收驱动本身（CLI 契约、检查注册表、draft / published 传输、fail-closed 汇总、A/B 分层与证据形状）；打包 / 签名 / 公证 / 发版通道归 `domains/release`，`finalize` 的验证先于公开的顺序契约归 `domains/release-publish-gate`，门禁矩阵形状归 `domains/quality-gates`，spike 启动描述 / 进程树收尾 / soak / 推 tag 前同镜像预演契约归 `domains/spike-teardown`。
 
 ## 范围
 
@@ -57,25 +57,11 @@
 - **ac-full-code-gates / ac-injection-red**：按 `.munk/code-gates.json` 顺序全量 gate 退出码 0；把 `judgeReleaseGate` 临时改为无条件 pass 后 gate 用例必须变红（记录注入点 / 命令 / 退出码 / 失败用例），还原后复跑为绿。
 - **ac-delivery-numbers / ac-behavior-preserved**：`pnpm test src/verify-release-gate.test.ts` 全绿 0 skipped，A 层 15 项 registry、平台过滤、CLI 拒绝、零 heap / 零本机夹具、平台 fail 腿、missing / unexpected / skip / count / env / evidence / step 字段 fail-closed、三平台聚合、B 层三轮与 16 MiB 线、纯函数判定、AST 契约、workflow 契约、code-gates 清单契约各 ≥1 条断言；行数 / `toContain` / `readFileSync` / 执行用例数改前改后实测数字写入 delivery，不降门、不删断言、不搬断言规避。
 - **ac-synthetic-version**：本文件内不出现当前发布版本字面量，judge 入参一律合成版本（`9.9.9` / `v1.2.3`），纯函数判定逻辑不变。
-- **ac-spike-linux-launch-descriptor**：给定平台与端口，启动描述逐字段可断言——Linux 为 `command="xvfb-run"`、`args` 以 `-a` 开头且含 `--no-sandbox` / `--disable-dev-shm-usage` / `--remote-debugging-port=<port>`，入口仍是仓库根 `.`；darwin 为 Electron 二进制 + `.` + 端口参数，不含 `--no-sandbox` / `xvfb-run`；两者共用同一构造函数；缺二进制或端口越界抛错。
-- **ac-spike-workflow-parity**：spike 的 Linux 与 macOS 步骤同一命令形状（同一脚本、同一组参数），Linux 不由外层 `xvfb-run` 包裹（xvfb 归属唯一）且步骤前显式安装 xvfb。
-- **ac-spike-fail-fast-on-exit**：page target 出现前子进程退出时，spike 在 ≤5s 内以退出码 1 结束（不空转到 120s），`spike.json` 的 `reason="process-exited"`，`exitCode` 为真实值，`stdout` / `stderr` 字段存在。
-- **ac-spike-bounded-target-wait**：子进程存活但无 page target 时，在固定预算（≤60s，常量 `SPIKE_TARGET_TIMEOUT_MS`）内失败，`reason="no-page-target"`，`portProbe` ≥1 条，探针间隔为常量（`SPIKE_TARGET_POLL_INTERVAL_MS`，>0 且 ≤1s），并记录会话总时长。
-- **ac-spike-reason-app-shell**：target 已出现但 app shell 表达式在预算内未就绪时，`reason="app-shell-timeout"`，与 `no-page-target`、`process-exited` 三者互不混同（`SPIKE_FAILURE_REASONS` 取值集合固定且封闭）。
-- **ac-spike-diagnostics-artifact**：失败时 `--out` 下同时落 `spike.json`（`conclusion` / `reason` / `exitCode` / `signal` / `stdout` / `stderr` / `portProbe` / `startedAt` / `finishedAt`）与 `spike-launch.log`（Electron 输出、xvfb 输出、端口 / 目标探针）；成功时 `spike.json` 含 `conclusion="window-booted"` 与 `url`；两条路径原子落盘，不因异常丢文件。
-- **ac-gate-registration**：新增门禁 `spike-launch-gate`（测试文件 `src/spike-launch-gate.test.ts`）写入 `.munk/code-gates.json`（`version` 仍为 1、命令为单 argv、不含 `&&` / `||` / `|` / `;`），`pnpm test src/spike-launch-gate.test.ts` 全绿且不启动真实窗口、不联网（时钟 / 探针 / 子进程 / world 全部注入）。
 - **ac-full-gates-green**：`pnpm install`、`lint`、`typecheck`、`build`、`build:web`、`test` 与全部门禁自绿；`.munk/baseline/test-debt.json` 按 ratchet 更新（`growth.from` 等于上一版 committed ceiling、增幅 ≤400，floors 只升不降）。
 - **ac-readonly-workflow**：`post-release-verify.yml` 仍只由 `workflow_dispatch` 触发、零 `secrets.`、无写 Release / tag / 资产的命令，`spike` 仍是 `verify` 前置门禁；`mode` 与 `release.yml` 读出的状态一致，验证对象随 draft / published 切换而判定不变。
 - **ac-no-release-mutation**：不改 `package.json#version`（保持 0.2.18）、不新建 tag、不改 v0.2.17 已公开 Release 与资产、不重写历史 run；`release.yml` 的发版语义不变。
 - **ac-lessons-record**：`docs/lessons.md` 第 12 节记录根因（run artifact / Electron 无输出 / 120s 超时 / aggregate `total=0`）、修复口径（启动描述单一来源 + 诊断字段契约），门禁以 markers 断言该节存在。
-- **ac-linux-group-kill**：Linux spike 子进程以 `detached: true` 建立进程组；stop 先对 `-pid` 整组 SIGTERM，超预算则整组 SIGKILL 并在有界 `killWaitMs` 内 resolve；`ESRCH` / `EPERM` 容忍；用真实父子孙链验证 stop 返回后父、孙 `kill(pid, 0)` 均失败，零幸存者。
-- **ac-stdio-released**：stop 返回后子进程 `stdout` / `stderr` 均为 destroyed，`exit` 与两条流的 `data` 监听数为 0，无未 unref 管道句柄。
-- **ac-success-path-reaped / ac-failure-path-reaped**：成功与三类失败共用同一收尾实现；成功证据字段（`conclusion` / `reason=null` / `url` / `portProbe`）不丢，失败诊断契约不回归，两条路径零孤儿。
-- **ac-cli-deterministic-exit**：独立 Node 驱动进程跑成功路径、不施加外部 kill，固定预算（≤15 s，不延长 `SPIKE_*`）内退出码 0，`spike.json` 与 `spike-launch.log` 完整落盘。
-- **ac-evidence-flushed-before-exit**：`exitAfterFlush` 只在模块入口（库函数零调用），先等 stdout / stderr drain，`SPIKE_EXIT_FLUSH_TIMEOUT_MS` 兜底；退出后 `spike.json` 可 parse、`spike-launch.log` 含启动行与 ≥1 条 `/json/list` 探针。
-- **ac-macos-parity**：macOS 不加 `detached`、启动描述与输出语义不变；`buildSpikeLaunchDescriptor` 与既有 macOS 记录字段零改动。
-- **ac-gate-registered / ac-no-relax**：新增 `spike-process-tree-gate` 进入 `.munk/code-gates.json` 与 `pnpm test`（不启 Electron / xvfb、不联网、硬超时）；`expected=15`、`judgeReleaseGate`、`validateSummary` 与三个 `SPIKE_*` 预算均不放宽；workflow 触发面 / 权限 / job 超时不变。
-- **ac-repro-before-fix / ac-lessons-updated / ac-real-run-closed**：改动前在真实 run 证据上复核并用假进程树复现旧缺陷，`docs/lessons.md` 记录根因与收尾契约（门禁 markers 断言）；`post-release-verify` 真实 run 双 OS spike 正常结束、三条 verify 腿真跑、aggregate `total>0`，run 链接回填。
+- **ac-real-run-closed**：`post-release-verify` 真实 run 双 OS spike 正常结束、三条 verify 腿真跑、aggregate `total>0`，run 链接回填；spike 启动 / 收尾 / soak 契约归 `domains/spike-teardown`。
 - **ac-manifest-before-upload / ac-manifest-covers-upload-set / ac-manifest-key-post-upload-name**：清单两步与 `Upload installers to the tag's release` 同 job 且严格在前；清单键 = 上传后资产名，只由 `uploadAssetName`（空格→点）产出，文件集合与上传 glob 同源（`UPLOAD_ASSET_GLOBS` / `matchesUploadAssetGlob`，v0.2.18 形状 12 项），命中未入清单 / 清单键无文件 / 字节数不等即构建期 fail；`release.yml` 无第二份改写。
 - **ac-manifest-artifact-only / ac-no-asset-set-change / ac-expected-15-unchanged**：清单只经 `upload-artifact@v4` 归档（名含 tag 与 target、`if-no-files-found: error`），不进 `gh release upload`、不新增公开 checksum，上传 glob 与资产后缀清单零 diff；draft 逐资产 digest（剥 `sha256:`）== 构建期 sha256 折进 `identity-asset-bytes-sha256`，仍 15 项顺序不变、无 skip、阈值不放宽，published 手工复验无清单时 `buildSha256.status='not-provided'`。
 - **ac-fail-closed-digest-mismatch / -missing-manifest-entry / -orphan-manifest-entry / -empty-digest / -duplicate-key-conflict / ac-draft-manifest-required**：不等 / 发布有清单缺 / 清单有发布无 / digest 空 / 合并同名不同 sha / draft 拿不到清单（缺 artifact、下载失败、空目录、坏 JSON）一律 `fail` + 非零退出，problems 与 step log 同时点名资产名 + 期望 + 实测，不降级 skip / warn / 跳过。

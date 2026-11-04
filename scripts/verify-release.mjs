@@ -1648,13 +1648,25 @@ export function spawnCapturedChild({
     output.push(text)
   })
   let exitInfo = null
-  child.once('exit', (code, signal) => {
-    exitInfo = { code, signal }
+  let settleExit = () => {}
+  // Resolves on the parent's own `exit` / `close`, never on a child-written
+  // marker: the marker only proves the child started exiting.
+  const exitSeen = new Promise((resolve) => {
+    settleExit = resolve
   })
+  const recordExit = (code, signal) => {
+    if (exitInfo !== null) return
+    exitInfo = { code, signal }
+    settleExit(exitInfo)
+  }
+  child.once('exit', recordExit)
+  // `close` always follows `exit`; it is kept as a fallback so a missed exit
+  // event cannot leave the wait unbounded. `code` / `signal` are identical.
+  child.once('close', recordExit)
   child.once('error', (spawnError) => {
-    exitInfo = { code: -1, signal: null }
     stderrChunks.push(`spawn error: ${spawnError.message}\n`)
     output.push(`spawn error: ${spawnError.message}\n`)
+    recordExit(-1, null)
   })
   return {
     child,
@@ -1662,6 +1674,28 @@ export function spawnCapturedChild({
     alive: () => exitInfo === null && child.exitCode === null && child.signalCode === null,
     exitCode: () => exitInfo?.code ?? child.exitCode ?? null,
     signal: () => exitInfo?.signal ?? child.signalCode ?? null,
+    /**
+     * Bounded wait for the real parent-side exit event. Resolves with the
+     * observed `{ code, signal }`; a child that has already exited resolves
+     * immediately. The timeout returns the current state (still `null` when the
+     * event never arrived) instead of hanging the caller.
+     */
+    waitForExit: ({ timeoutMs = SPIKE_PROCESS_EXIT_BUDGET_MS } = {}) =>
+      new Promise((resolve) => {
+        if (exitInfo !== null) {
+          resolve(exitInfo)
+          return
+        }
+        const timer = setTimeout(() => {
+          resolve(exitInfo)
+        }, timeoutMs)
+        // A pending diagnostic wait must never pin the CLI event loop.
+        timer.unref?.()
+        exitSeen.then((info) => {
+          clearTimeout(timer)
+          resolve(info)
+        })
+      }),
     stdout: () => stdoutChunks.join(''),
     stderr: () => stderrChunks.join(''),
     stop: () => stopChild(child, { processGroup })
@@ -1842,6 +1876,11 @@ export function createWorld({ env = process.env } = {}) {
         })
         if (wait.target === null || wait.target === undefined) {
           const reason = wait.reason ?? 'no-page-target'
+          // The target wait can observe a child-side exit marker before the
+          // parent has consumed its own `exit` event. Await the real event
+          // (bounded) so `process-exited` diagnostics carry the true exit code
+          // instead of the null written by an early SIGTERM.
+          if (reason === 'process-exited') await proc.waitForExit()
           throw failure(
             reason,
             reason === 'process-exited'
@@ -1852,10 +1891,13 @@ export function createWorld({ env = process.env } = {}) {
         }
         cdp = await CdpClient.connectToTarget(wait.target)
       } catch (error) {
-        const wrapped =
-          error?.diagnostics === undefined
-            ? failure(childAlive() ? 'no-page-target' : 'process-exited', String(error?.message ?? error), wait)
-            : error
+        if (error?.diagnostics !== undefined) {
+          await proc.stop()
+          throw error
+        }
+        const reason = childAlive() ? 'no-page-target' : 'process-exited'
+        if (reason === 'process-exited') await proc.waitForExit()
+        const wrapped = failure(reason, String(error?.message ?? error), wait)
         await proc.stop()
         throw wrapped
       }
