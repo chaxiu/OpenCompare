@@ -36,7 +36,10 @@ if (typeof WebSocket === 'undefined') {
 }
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const outputDir = join(root, 'docs/visual/v1/before')
+// `--out=after` writes the post-change set without touching `before/`.
+const outArg = process.argv.find((arg) => arg.startsWith('--out='))
+const outputName = outArg === undefined ? 'before' : outArg.slice('--out='.length)
+const outputDir = join(root, 'docs/visual/v1', outputName)
 const BUILD_ENTRIES = [
   'out/main/index.js',
   'out/preload/index.js',
@@ -280,6 +283,49 @@ class Devtools {
   }
 }
 
+/**
+ * Real DOM measurements of the shell band and view metrics, evaluated inside
+ * the captured window so `measurements.md` never copies a design draft.
+ */
+const MEASURE_EXPRESSION = `(() => {
+  const px = (value) => Math.round(value * 100) / 100
+  const height = (selector) => {
+    const element = document.querySelector(selector)
+    return element === null ? null : px(element.getBoundingClientRect().height)
+  }
+  const width = (selector) => {
+    const element = document.querySelector(selector)
+    return element === null ? null : px(element.getBoundingClientRect().width)
+  }
+  const font = (selector) => {
+    const element = document.querySelector(selector)
+    return element === null ? null : getComputedStyle(element).fontSize
+  }
+  const row = document.querySelector('[data-diff-row]')
+  const rowSpan = row === null ? null : row.querySelector('span')
+  const ruler = document.querySelector('[data-diff-ruler="true"]')
+  const track = document.querySelector('[data-ruler-track="true"]')
+  return {
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    app: height('[data-shell-level="app"]'),
+    sessions: height('[data-shell-level="sessions"]'),
+    viewToolbar: height('[data-shell-level="view-toolbar"]'),
+    panels: height('[data-shell-level="panels"]'),
+    panelHeader: height('[data-panel-header]'),
+    status: height('[data-shell-level="status"]'),
+    treeRow: height('[role="treeitem"]'),
+    diffRow: row === null ? null : px(row.getBoundingClientRect().height),
+    codeFont: rowSpan === null ? null : getComputedStyle(rowSpan).fontSize,
+    gutterFont: row === null ? null : font('[data-diff-row] span'),
+    rulerTrack: track === null ? null : px(track.getBoundingClientRect().width),
+    rulerGap:
+      ruler === null
+        ? null
+        : px(parseFloat(getComputedStyle(ruler).paddingRight || '0')),
+    scrollbar: height('[data-shell-level="panels"] [data-diff-ruler="true"]')
+  }
+})()`
+
 function runApp(paths, port, home) {
   return spawn(
     electronBinary,
@@ -315,9 +361,10 @@ async function capture({ paths, port, home, ready, output, theme }) {
       )
       // One more paint after the theme switch and the session settle.
       await new Promise((resolve) => setTimeout(resolve, 700))
+      const metrics = await devtools.evaluate(MEASURE_EXPRESSION)
       const png = await devtools.screenshot()
       writeFileSync(join(outputDir, output), png)
-      return png.length
+      return { bytes: png.length, metrics }
     } finally {
       devtools.close()
     }
@@ -381,8 +428,11 @@ async function main() {
 
   try {
     for (const shot of shots) {
-      const bytes = await capture({ ...shot, home })
-      console.log(`wrote docs/visual/v1/before/${shot.output} (${bytes} bytes)`)
+      const result = await capture({ ...shot, home })
+      console.log(
+        `wrote docs/visual/v1/${outputName}/${shot.output} (${result.bytes} bytes)`
+      )
+      console.log(`measured ${shot.output} ${JSON.stringify(result.metrics)}`)
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true })

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import type { RealDirectoryFixture } from '../../test-support/directoryFixture'
@@ -28,6 +28,7 @@ import { zh } from '@renderer/i18n/messages'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DirectoryView } from './DirectoryView'
 import { DIRECTORY_STATUS_LABEL_KEYS, FILTER_LABEL_KEYS } from './directoryCopy'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
 
 vi.mock('@core/directory/filter', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@core/directory/filter')>()
@@ -38,30 +39,7 @@ vi.mock('@core/directory/filter', async (importOriginal) => {
   }
 })
 
-/**
- * jsdom reports zero-sized elements, which would give the virtualiser no
- * viewport at all. A fixed 1200×640 client box stands in for the real panel.
- */
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(cleanup)
 
@@ -315,6 +293,38 @@ function expandLabel(name: string): string {
   return zh['directory.tree.expand'].replace('{name}', name)
 }
 
+/** The single-row toolbar band and its one row container. */
+function toolbarBand(scope: ParentNode = document): HTMLElement {
+  const bands = scope.querySelectorAll<HTMLElement>('[data-shell-level="view-toolbar"]')
+  if (bands.length !== 1) throw new Error(`expected 1 view-toolbar band, found ${bands.length}`)
+  return bands[0]
+}
+
+function toolbarRow(scope: ParentNode = document): HTMLElement {
+  const child = toolbarBand(scope).firstElementChild
+  if (!(child instanceof HTMLElement)) throw new Error('view-toolbar has no row container')
+  return child
+}
+
+/** Solid primary actions: the only buttons painting the accent background. */
+function primaryButtons(scope: ParentNode): HTMLElement[] {
+  return Array.from(scope.querySelectorAll<HTMLElement>('button.bg-accent'))
+}
+
+/** Opens the toolbar's overflow menu and returns it. */
+function openMore(): HTMLElement {
+  const trigger = screen.getByRole('button', { name: zh['shell.toolbar.more'] })
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+  return screen.getByRole('menu', { name: zh['shell.toolbar.more'] })
+}
+
+/** One overflow action, matched by its visible label (descriptions included in the name). */
+function moreItem(label: string): HTMLElement {
+  return within(openMore()).getByRole('menuitem', {
+    name: (name: string) => name.includes(label)
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /* Suite                                                               */
 /* ------------------------------------------------------------------ */
@@ -562,12 +572,14 @@ describe('DirectoryView windowed tree', () => {
     )
     const selectedRow = model.at(206)
     if (!selectedRow) throw new Error('fixture is missing row 206')
+    // Keep row 206 inside the render window at the current 28px row height.
+    const restoreScroll = 200 * DIRECTORY_ROW_HEIGHT
     const initial: SavedState = {
       filter: 'differences',
       collapsed,
       selectedPath: selectedRow.node.relativePath,
-      left: 4800,
-      right: 4800
+      left: restoreScroll,
+      right: restoreScroll
     }
     let saved: SavedState = initial
 
@@ -578,8 +590,8 @@ describe('DirectoryView windowed tree', () => {
     )
 
     const [left, right] = trees()
-    expect(Math.abs(scrollerOf(left).scrollTop - 4800)).toBeLessThanOrEqual(1)
-    expect(Math.abs(scrollerOf(right).scrollTop - 4800)).toBeLessThanOrEqual(1)
+    expect(Math.abs(scrollerOf(left).scrollTop - restoreScroll)).toBeLessThanOrEqual(1)
+    expect(Math.abs(scrollerOf(right).scrollTop - restoreScroll)).toBeLessThanOrEqual(1)
     const selected = screen
       .getAllByRole('treeitem')
       .filter((row) => row.getAttribute('aria-selected') === 'true')
@@ -597,8 +609,8 @@ describe('DirectoryView windowed tree', () => {
     render(<Harness comparison={fixture.comparison} initial={saved} />)
 
     const [restoredLeft, restoredRight] = trees()
-    expect(Math.abs(scrollerOf(restoredLeft).scrollTop - 4800)).toBeLessThanOrEqual(1)
-    expect(Math.abs(scrollerOf(restoredRight).scrollTop - 4800)).toBeLessThanOrEqual(1)
+    expect(Math.abs(scrollerOf(restoredLeft).scrollTop - restoreScroll)).toBeLessThanOrEqual(1)
+    expect(Math.abs(scrollerOf(restoredRight).scrollTop - restoreScroll)).toBeLessThanOrEqual(1)
     expect(
       screen
         .getByRole('tab', { name: zh[FILTER_LABEL_KEYS.differences] })
@@ -670,7 +682,10 @@ describe('DirectoryView windowed tree', () => {
 })
 
 describe('DirectoryView report toolbar', () => {
-  it('keeps the report export button in every filter state and calls back once', () => {
+  const EXPORT = zh['directory.report.toolbar.export']
+  const HIDE = zh['directory.report.toolbar.hideLocalPaths']
+
+  it('keeps the report export entry reachable in every filter state and calls back once', () => {
     const onExportReport = vi.fn()
     render(
       <Harness
@@ -680,19 +695,18 @@ describe('DirectoryView report toolbar', () => {
       />
     )
 
-    const label = zh['directory.report.toolbar.export']
     for (const filter of DIRECTORY_FILTERS) {
       fireEvent.click(screen.getByRole('tab', { name: zh[FILTER_LABEL_KEYS[filter]] }))
-      const button = screen.getByRole('button', { name: label }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-      expect(button.title).toBe(zh['directory.report.toolbar.exportTitle'])
+      const item = moreItem(EXPORT) as HTMLButtonElement
+      expect(item.disabled).toBe(false)
+      expect(item.textContent).toContain(zh['directory.report.toolbar.exportTitle'])
     }
 
-    fireEvent.click(screen.getByRole('button', { name: label }))
+    fireEvent.click(moreItem(EXPORT))
     expect(onExportReport).toHaveBeenCalledTimes(1)
   })
 
-  it('disables the report export button while busy and never calls back', () => {
+  it('gates the report export entry while busy and never calls back', () => {
     const onExportReport = vi.fn()
     render(
       <Harness
@@ -703,12 +717,15 @@ describe('DirectoryView report toolbar', () => {
       />
     )
 
-    const button = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    fireEvent.click(button)
+    // The overflow stays discoverable; only its action is gated by `busy`.
+    const item = moreItem(EXPORT) as HTMLButtonElement
+    expect(item.textContent).toContain(EXPORT)
+    fireEvent.click(item)
     expect(onExportReport).not.toHaveBeenCalled()
+    expect(
+      (screen.getByRole('button', { name: zh['directory.toolbar.previewSync'] }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
   })
 
   it('defaults the hide-local-paths switch to checked and reports both directions', () => {
@@ -721,37 +738,32 @@ describe('DirectoryView report toolbar', () => {
       />
     )
 
-    const checkbox = screen.getByRole('checkbox', {
-      name: zh['directory.report.toolbar.hideLocalPaths']
-    }) as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
-    expect(checkbox.closest('label')?.getAttribute('title')).toBe(
-      zh['directory.report.toolbar.hideLocalPathsTitle']
-    )
+    const checkedLabel = moreItem(HIDE)
+    expect(checkedLabel.textContent?.trimStart().startsWith('[x]')).toBe(true)
+    expect(checkedLabel.textContent).toContain(zh['directory.report.toolbar.hideLocalPathsTitle'])
 
-    fireEvent.click(checkbox)
+    fireEvent.click(checkedLabel)
     expect(onHideLocalPathsChange).toHaveBeenLastCalledWith(false)
-    expect(checkbox.checked).toBe(false)
+    expect(moreItem(HIDE).textContent?.trimStart().startsWith('[x]')).toBe(false)
 
-    fireEvent.click(checkbox)
+    fireEvent.click(moreItem(HIDE))
     expect(onHideLocalPathsChange).toHaveBeenLastCalledWith(true)
-    expect(checkbox.checked).toBe(true)
+    expect(moreItem(HIDE).textContent?.trimStart().startsWith('[x]')).toBe(true)
 
-    const button = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    expect(button.disabled).toBe(false)
+    expect((moreItem(EXPORT) as HTMLButtonElement).disabled).toBe(false)
     expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('shows the throttled progress row and an always-clickable cancel entry', () => {
     const onCancelReportExport = vi.fn()
+    const onExportReport = vi.fn()
     render(
       <Harness
         comparison={syntheticComparison(12)}
         initial={INITIAL_STATE}
         reportExporting
         reportProgress={{ processedRows: 4_000, totalRows: 26_000 }}
+        onExportReport={onExportReport}
         onCancelReportExport={onCancelReportExport}
       />
     )
@@ -768,42 +780,75 @@ describe('DirectoryView report toolbar', () => {
     fireEvent.click(cancel)
     expect(onCancelReportExport).toHaveBeenCalledTimes(1)
 
-    const exportButton = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    expect(exportButton.disabled).toBe(true)
-    expect(exportButton.title).toBe(zh['directory.report.toolbar.exportTitle'])
+    const exportItem = moreItem(EXPORT)
+    expect(exportItem.textContent).toContain(zh['directory.report.toolbar.exportTitle'])
+    fireEvent.click(exportItem)
+    expect(onExportReport).not.toHaveBeenCalled()
   })
 
-  it('disables only the export button while the export is in flight', () => {
+  it('keeps the other actions usable while only the report export is gated', () => {
+    const onExportReport = vi.fn()
     render(
       <Harness
         comparison={syntheticComparison(12)}
         initial={INITIAL_STATE}
         reportExporting
         reportProgress={{ processedRows: 0, totalRows: 26_000 }}
+        onExportReport={onExportReport}
       />
     )
 
+    expect(
+      (screen.getByRole('button', { name: zh['directory.toolbar.previewSync'] }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false)
+
     for (const key of [
-      'directory.toolbar.previewSync',
       'directory.toolbar.template',
       'directory.toolbar.exportLeft',
       'directory.toolbar.importLeft'
     ] as const) {
-      expect((screen.getByRole('button', { name: zh[key] }) as HTMLButtonElement).disabled, key).toBe(
-        false
-      )
+      expect((moreItem(zh[key]) as HTMLButtonElement).disabled, key).toBe(false)
     }
 
-    expect(screen.getByRole('checkbox', {
-      name: zh['directory.report.toolbar.hideLocalPaths']
-    }).hasAttribute('disabled')).toBe(false)
+    expect(moreItem(HIDE).textContent?.trimStart().startsWith('[x]')).toBe(true)
+    fireEvent.click(moreItem(EXPORT))
+    expect(onExportReport).not.toHaveBeenCalled()
+  })
+})
+
+describe('DirectoryView panel address bar', () => {
+  it('copies the full path with one accessible confirmation and marks only the active panel', async () => {
+    render(<Harness comparison={syntheticComparison(12)} initial={INITIAL_STATE} />)
+
+    const headers = (): HTMLElement[] =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-panel-header]'))
+    expect(headers()).toHaveLength(2)
+    expect(headers()[0].getAttribute('data-panel-active')).toBe('true')
+    expect(headers()[1].hasAttribute('data-panel-active')).toBe(false)
+    expect(headers()[0].querySelector('[data-panel-active-bar]')?.className).toContain('w-0.5')
+    expect(headers()[1].querySelector('[data-panel-active-bar]')).toBeNull()
+
+    const address = within(headers()[0]).getByRole('button', {
+      name: zh['shell.panel.copyPath']
+    })
+    expect(address.getAttribute('title')).toBe('/left')
+    fireEvent.click(address)
+    const copied = await within(headers()[0]).findByRole('status')
+    expect(copied.textContent).toBe(zh['shell.panel.copied'])
+    await waitFor(() => expect(within(headers()[0]).getAllByRole('status')).toHaveLength(1))
+
+    // Moving the active mark swaps the header background and the brand bar.
+    fireEvent.pointerDown(headers()[1])
+    expect(headers()[1].getAttribute('data-panel-active')).toBe('true')
+    expect(headers()[1].querySelector('[data-panel-active-bar]')?.className).toContain('w-0.5')
+    expect(headers()[0].hasAttribute('data-panel-active')).toBe(false)
+    expect(headers()[0].querySelector('[data-panel-active-bar]')).toBeNull()
   })
 })
 
 describe('DirectoryView workflow toolbar', () => {
-  it('keeps the real entries and drops both demo shortcuts', () => {
+  it('keeps one single-row band, one solid primary action and every overflow entry in the menu', () => {
     const { container } = render(
       <Harness comparison={syntheticComparison(12)} initial={INITIAL_STATE} />
     )
@@ -811,17 +856,51 @@ describe('DirectoryView workflow toolbar', () => {
     expect(screen.queryByRole('button', { name: '加载演示目录' })).toBeNull()
     expect(screen.queryByRole('button', { name: '演示：远端快照' })).toBeNull()
 
+    const band = toolbarBand(container)
+    expect(band.children).toHaveLength(1)
+    const row = toolbarRow(container)
+
+    // Row order: filter segmented → legend → sync direction/mode → one primary → more.
+    expect(row.querySelector('[data-shell-entry="filter"]')).not.toBeNull()
+    expect(row.querySelector('[data-shell-legend]')).not.toBeNull()
+    const primaries = primaryButtons(row)
+    expect(primaries).toHaveLength(1)
+    expect(primaries[0].getAttribute('data-shell-entry')).toBe('sync')
+    expect(row.querySelector('[data-shell-entry="more"]')).not.toBeNull()
+    expect(row.querySelector('span.mx-3.h-5.w-px')).not.toBeNull()
+
+    // Secondary actions are no longer inline toolbar entries.
     for (const entry of [
-      'filter',
-      'sync',
       'template',
       'snapshot-import',
       'snapshot-export',
-      'report-export'
+      'report-export',
+      'hide-local-paths'
     ]) {
-      expect(container.querySelectorAll(`[data-shell-entry="${entry}"]`).length, entry).toBe(1)
+      expect(row.querySelector(`[data-shell-entry="${entry}"]`), entry).toBeNull()
     }
-    const toolbar = container.querySelector('[data-shell-level="view-toolbar"]')
-    expect(toolbar?.children.length).toBe(3)
+
+    const menu = openMore()
+    for (const key of [
+      'directory.toolbar.pickLeft',
+      'directory.toolbar.pickRight',
+      'directory.toolbar.template',
+      'directory.toolbar.exportLeft',
+      'directory.toolbar.exportRight',
+      'directory.toolbar.importLeft',
+      'directory.toolbar.importRight',
+      'directory.report.toolbar.export',
+      'directory.report.toolbar.hideLocalPaths'
+    ] as const) {
+      expect(
+        within(menu).getByRole('menuitem', {
+          name: (name: string) => name.includes(zh[key])
+        }),
+        key
+      ).toBeDefined()
+    }
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 })

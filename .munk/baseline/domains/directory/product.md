@@ -84,7 +84,7 @@
 - **ac-bounded-dom-50k**：1200×640 下每栏树行 ≤80、双栏 DOM ≤5000；5,000 行与 5 万+ 行渲染量相同（±2 / ≤10%），反复滚动不增长，展开 ≥2 万子项目录后仍有界。
 - **ac-scroll-far-rows**：滚到接近底部时渲染索引严格递增无重复并覆盖首末可见行，各字段与行模型一致；逐档切换过滤为对应前缀窗口，空档不渲染行并显示既有空态文案。
 - **ac-drilldown-restore**：过滤 + 折叠 + 选中 + 非零滚动后卸载再同状态重挂载，`scrollTop` 复原（±1）、选中在渲染窗口内、折叠子项不渲染；超大行数下同样成立。
-- **ac-height-capped**：`rows.length * 24 > 16_777_215` 时容器内联高度 ≤16,777,215px，行数较小时高度恰为行数 ×24。
+- **ac-height-capped**：`rows.length * DIRECTORY_ROW_HEIGHT > 16_777_215` 时容器内联高度 ≤16,777,215px，行数较小时高度恰为行数 × `DIRECTORY_ROW_HEIGHT`（当前 28）。
 - **ac-last-row-reachable**：1,516,096 行下滚到最大偏移可渲染末行且内容一致；0 / 1/4 / 1/2 / 3/4 / 末行与尾部目录所在索引均可命中，`offsetForIndex` 严格递增。
 - **ac-template-match**：匹配器以文件名 + SHA-256 把散乱树 B 映射到模板 A 槽位，产出 matched / missing / conflict / unused；索引匹配使 1,000+ 文件线性完成、不重复读内容。
 - **ac-four-outcomes-one-to-one**：每槽位恰好一条 matched / placed / missing / conflict 条目、`unused` 单列，分区计数等于数组长度、槽位总数等于 `templateFileCount`、`targetPath` 由 `joinRelativePath` 派生；条目带源 sha256 与 `modifiedMs`。
@@ -149,7 +149,7 @@
 - 判定各只有一份实现：`syncPreviewAction` / `canApplySyncPreview`、`resolveTemplatePlan`、`foldCase` 与 `templatePathIssue`；UI 与门禁同读，禁止内联第二份。
 - 模板归位只认注入 IO：`createTemplatePlan` 零 IO（覆盖检测靠注入清单），写入只走 `executeTemplatePlan`，复核只走 `verifyTemplateExtraction`；`setup` / `dry-run` / `result` 同在一个 `TemplateDialog`。
 - 平台缝按「新增能力 + 可选参数」演进：`PlatformPort` + `PLATFORM_CHANNELS` + preload 白名单 + Electron handler + Web 同签名实现；Web 无链接能力时同签名拒绝。
-- 行模型纯函数提供 `length` / `at(index)` / `visibleDirectoryCounts`，`DIRECTORY_ROW_HEIGHT = 24` 单源，`createDirectoryScrollMap` 处理 >2^24 px 上限；虚拟化锚定 `Panel` body。
+- 行模型纯函数提供 `length` / `at(index)` / `visibleDirectoryCounts`，`DIRECTORY_ROW_HEIGHT = 28` 单源（`TreeView` / 滚动映射 / 行预算共读），`createDirectoryScrollMap` 处理 >2^24 px 上限；虚拟化锚定 `Panel` body。
 - 目录树状态不依赖挂载生命周期：展开 / 选中为受控 props，滚动经 `onBodyScroll` 上报，壳层按会话 id 保存并在返回时回填，不引全局状态库。
 - 视觉：token 唯一来源 `main.css`，差异色走 `--color-diff-*`，组件不写死颜色 / 尺寸；目录四态词表经 `DIRECTORY_STATUS_LABEL_KEYS` 单源注入。
 - 进度与取消是可选尾参：跨相位累计单调、每批次最多一次、无定时器插值；批次挂起用 `abortable` 竞速且被放弃 promise 必须挂 `catch`。

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { JSX } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { DirectoryComparison, DirectoryDiffNode, FileDiffStatus } from '@core/directory/compare'
 import { DIRECTORY_FILTERS } from '@core/directory/filter'
 import { visibleDirectoryCounts } from '@core/directory/rows'
@@ -31,31 +31,14 @@ import {
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import { DirectoryView } from './DirectoryView'
 import { TemplateDialog } from './TemplateDialog'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
+import { closeMore, moreItem } from '../../../test/shellMenu'
 
 const HAN = /\p{Script=Han}/u
 const IPC_WRAPPER = 'Error invoking remote method'
 const webPlatform: PlatformPort = createWebPlatformPort()
 
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(cleanup)
 
@@ -282,9 +265,16 @@ describe('directory copy from the locale table', () => {
         DIRECTORY_FILTERS.map((filter) => localeText(language, FILTER_LABEL_KEYS[filter]))
       )
       for (const [labelKey, titleKey] of TOOLBAR) {
-        expect(
-          screen.getByRole('button', { name: localeText(language, labelKey) }).getAttribute('title')
-        ).toBe(localeText(language, titleKey))
+        const label = localeText(language, labelKey)
+        const title = localeText(language, titleKey)
+        // The primary sync action stays inline; every other declared entry is a
+        // menu item whose description carries the same localized title.
+        if (labelKey === 'directory.toolbar.previewSync') {
+          expect(screen.getByRole('button', { name: label }).getAttribute('title')).toBe(title)
+          continue
+        }
+        expect(moreItem(label).textContent).toContain(title)
+        closeMore()
       }
       expect(screen.getByText(localeText(language, 'directory.panel.source'))).toBeDefined()
       expect(screen.getByText(localeText(language, 'directory.panel.target'))).toBeDefined()

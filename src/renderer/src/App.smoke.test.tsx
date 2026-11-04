@@ -6,6 +6,7 @@ import { App } from './App'
 import { en, zh } from './i18n/messages'
 import type { MessageKey } from './i18n/messages'
 import { createWebPlatformPort } from './platform/web-platform'
+import { closeMore, openMore } from '../../test/shellMenu'
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
 const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
@@ -169,7 +170,13 @@ async function walkSurfaces(language: 'zh' | 'en'): Promise<void> {
   expect(within(codeModes).getByRole('tab', { name: copy['files.code.mode.diff'] })).toBeDefined()
   expect(within(codeModes).getByRole('tab', { name: copy['files.code.mode.merge'] })).toBeDefined()
   expect(screen.getByRole('button', { name: copy['files.merge.export'] })).toBeDefined()
-  expect(screen.getByRole('button', { name: copy['files.action.copy'] })).toBeDefined()
+  // Copy is a secondary merge action and lives in the overflow menu now.
+  expect(
+    within(openMore()).getByRole('menuitem', {
+      name: (name: string) => name.includes(copy['files.action.copy'])
+    })
+  ).toBeDefined()
+  closeMore()
   assertNoCopy(main, foreign)
   if (language === 'en') assertNoHan(main)
 

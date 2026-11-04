@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { JSX } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
 import { App } from './App'
@@ -11,32 +11,15 @@ import { LOCALE_ROWS, localeText } from './i18n/localeTable'
 import { en, messages, zh } from './i18n/messages'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
+import { installJsdomViewport } from '../../test/jsdomViewport'
+import { closeMore, moreItem } from '../../test/shellMenu'
 
 const HAN = /\p{Script=Han}/u
 const IO_DETAIL = 'EACCES: permission denied'
 const LEFT_IO = '/memory/io-left.txt'
 const RIGHT_IO = '/memory/io-right.txt'
 
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(() => {
   cleanup()
@@ -173,25 +156,24 @@ describe('runtime language switch', () => {
     )
     const sourceMeta = await screen.findByText(localeText('en', 'directory.panel.source'))
     expect(screen.getByText(localeText('en', 'directory.panel.target'))).toBeDefined()
-    const exportButton = (): HTMLElement =>
-      screen.getByRole('button', { name: localeText('en', 'directory.report.toolbar.export') })
-    expect(exportButton().getAttribute('title')).toBe(
-      localeText('en', 'directory.report.toolbar.exportTitle')
-    )
+    // The export action now lives in the overflow menu: its label and the
+    // localized description stay in the same dictionary as the rest of the view.
+    const expectExportItem = (language: 'en' | 'zh'): void => {
+      const item = moreItem(localeText(language, 'directory.report.toolbar.export'))
+      expect(item.textContent).toContain(
+        localeText(language, 'directory.report.toolbar.exportTitle')
+      )
+      closeMore()
+    }
+    expectExportItem('en')
     expect(document.body.textContent ?? '').not.toMatch(HAN)
 
     fireEvent.click(screen.getByTestId('switch-zh'))
     expect(sourceMeta.textContent).toBe(localeText('zh', 'directory.panel.source'))
-    expect(
-      screen
-        .getByRole('button', { name: localeText('zh', 'directory.report.toolbar.export') })
-        .getAttribute('title')
-    ).toBe(localeText('zh', 'directory.report.toolbar.exportTitle'))
+    expectExportItem('zh')
     fireEvent.click(screen.getByTestId('switch-en'))
     expect(sourceMeta.textContent).toBe(localeText('en', 'directory.panel.source'))
-    expect(exportButton().getAttribute('title')).toBe(
-      localeText('en', 'directory.report.toolbar.exportTitle')
-    )
+    expectExportItem('en')
     expect(document.body.textContent ?? '').not.toMatch(HAN)
   }, 30_000)
 })

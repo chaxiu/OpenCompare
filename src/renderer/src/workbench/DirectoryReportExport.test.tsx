@@ -33,6 +33,8 @@ import {
   buildDirectoryReportForComparisonAsync
 } from './directoryReport'
 import { Workbench } from './Workbench'
+import { installJsdomViewport } from '../../../test/jsdomViewport'
+import { closeMore, moreItem as menuItem } from '../../../test/shellMenu'
 
 /**
  * The workbench wiring is the subject here: the async builder is stubbed per
@@ -50,26 +52,7 @@ vi.mock('./directoryReport', async (importOriginal) => {
 
 const buildAsync = vi.mocked(buildDirectoryReportForComparisonAsync)
 
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 afterEach(() => {
   cleanup()
@@ -196,14 +179,16 @@ async function openDirectoryPair(
 }
 
 async function waitForDirectoryView(label: string): Promise<void> {
-  const button = await screen.findByRole(
-    'button',
-    { name: label },
+  await waitFor(
+    () => {
+      const sync = document.querySelector<HTMLButtonElement>('[data-shell-entry="sync"]')
+      expect(sync).not.toBeNull()
+      expect(sync?.disabled).toBe(false)
+    },
     { timeout: 180_000 }
   )
-  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false), {
-    timeout: 180_000
-  })
+  expect(menuItem(label)).toBeDefined()
+  closeMore()
 }
 
 /** The four visible numbers of the first `CompositionLegend` on screen. */
@@ -287,20 +272,36 @@ function queuePendingReport(): void {
   )
 }
 
-/** Toolbar actions gated by the directory comparison's own busy flag. */
-const DIRECTORY_BUSY_KEYS = [
-  'directory.toolbar.previewSync',
+const DIRECTORY_MENU_BUSY_KEYS = [
   'directory.toolbar.template',
   'directory.toolbar.exportLeft',
   'directory.toolbar.importLeft'
 ] as const
 
+function clickMenu(label: string): void {
+  fireEvent.click(menuItem(label))
+}
+
+/** A switch's checked state is the leading `[x] ` label prefix. */
+function menuChecked(label: string): boolean {
+  const on = (menuItem(label).textContent ?? '').trimStart().startsWith('[x]')
+  closeMore()
+  return on
+}
+
+function toggleMenu(label: string): void {
+  fireEvent.click(menuItem(label))
+}
+
 function expectDirectoryBusyButtonsEnabled(): void {
-  for (const key of DIRECTORY_BUSY_KEYS) {
-    expect((screen.getByRole('button', { name: zh[key] }) as HTMLButtonElement).disabled, key).toBe(
-      false
-    )
+  expect(
+    (screen.getByRole('button', { name: zh['directory.toolbar.previewSync'] }) as HTMLButtonElement)
+      .disabled
+  ).toBe(false)
+  for (const key of DIRECTORY_MENU_BUSY_KEYS) {
+    expect(menuItem(zh[key])).toBeDefined()
   }
+  closeMore()
 }
 
 describe('directory HTML report export', () => {
@@ -328,7 +329,7 @@ describe('directory HTML report export', () => {
     expect(viewCounts.same).toBeGreaterThanOrEqual(10_000)
     expect(viewCounts.modified).toBeGreaterThanOrEqual(10_000)
 
-    fireEvent.click(screen.getByRole('button', { name: zh['directory.report.toolbar.export'] }))
+    clickMenu(zh['directory.report.toolbar.export'])
 
     // The progress row is on screen before the save dialog is even considered.
     const expectedTotal = directoryReportSource(fixture.comparison).totalRows
@@ -336,13 +337,9 @@ describe('directory HTML report export', () => {
     expect(status.textContent).toMatch(new RegExp(`\\d+ / ${expectedTotal} 行`))
     const cancel = within(status).getByRole('button', { name: zh['directory.report.cancel'] })
     expect((cancel as HTMLButtonElement).disabled).toBe(false)
-    expect(
-      (
-        screen.getByRole('button', {
-          name: zh['directory.report.toolbar.export']
-        }) as HTMLButtonElement
-      ).disabled
-    ).toBe(true)
+    // The action stays listed while generating; its handler ignores repeats.
+    expect(menuItem(zh['directory.report.toolbar.export'])).toBeDefined()
+    closeMore()
     expect(saved).toHaveLength(0)
 
     await waitFor(() => expect(saved).toHaveLength(1))
@@ -387,7 +384,7 @@ describe('directory HTML report export', () => {
       screen.getByRole('tab', { name: zh['directory.filter.differences'] })
     )
     await waitFor(() => expect(legendNumbers(zh).same).toBe(0))
-    fireEvent.click(screen.getByRole('button', { name: zh['directory.report.toolbar.export'] }))
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(2))
     expect(reportCounts(reportDocument(saved[1].content))).toEqual(viewCounts)
   }, 240_000)
@@ -399,7 +396,7 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(EN_DIALOG, VIRTUAL_LEFT, VIRTUAL_RIGHT)
     await waitForDirectoryView(en['directory.report.toolbar.export'])
 
-    fireEvent.click(screen.getByRole('button', { name: en['directory.report.toolbar.export'] }))
+    clickMenu(en['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(1))
 
     const hidden = reportDocument(saved[0].content)
@@ -412,8 +409,8 @@ describe('directory HTML report export', () => {
     expect(saved[0].content).not.toContain('/Users')
     expect(saved[0].content).not.toContain(zh['directory.report.title'])
 
-    fireEvent.click(screen.getByRole('checkbox', { name: en['directory.report.toolbar.hideLocalPaths'] }))
-    fireEvent.click(screen.getByRole('button', { name: en['directory.report.toolbar.export'] }))
+    toggleMenu(en['directory.report.toolbar.hideLocalPaths'])
+    clickMenu(en['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(2))
 
     expect(saved[1].content).toContain(VIRTUAL_LEFT)
@@ -439,19 +436,15 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(ZH_DIALOG, '/memory/cancel-left', '/memory/cancel-right')
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
-    const button = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    fireEvent.click(button)
+    clickMenu(zh['directory.report.toolbar.export'])
 
     await waitFor(() => expect(calls).toBe(1))
-    await waitFor(() => expect(button.disabled).toBe(false))
     // Cancelling never retries and never reports a saved path.
     expect(calls).toBe(1)
     expect(screen.queryByRole('alert')).toBeNull()
     await expect(base.exists('/memory/cancel-left-vs-cancel-right.html')).resolves.toBe(false)
 
-    fireEvent.click(button)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(calls).toBe(2))
     // The very next attempt is a normal, successful save.
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(SAVED_PATH))
@@ -472,27 +465,18 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(ZH_DIALOG, '/memory/first-left', '/memory/first-right')
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
-    const checkbox = screen.getByRole('checkbox', {
-      name: zh['directory.report.toolbar.hideLocalPaths']
-    }) as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
-    fireEvent.click(checkbox)
-    expect(checkbox.checked).toBe(false)
+    expect(menuChecked(zh['directory.report.toolbar.hideLocalPaths'])).toBe(true)
+    toggleMenu(zh['directory.report.toolbar.hideLocalPaths'])
+    expect(menuChecked(zh['directory.report.toolbar.hideLocalPaths'])).toBe(false)
 
     await openDirectoryPair(ZH_DIALOG, '/memory/second-left', '/memory/second-right')
     await screen.findByRole('tab', { name: /second-left ↔ second-right/ })
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
-    expect(
-      (screen.getByRole('checkbox', { name: zh['directory.report.toolbar.hideLocalPaths'] }) as HTMLInputElement)
-        .checked
-    ).toBe(false)
+    expect(menuChecked(zh['directory.report.toolbar.hideLocalPaths'])).toBe(false)
 
     fireEvent.click(screen.getByRole('tab', { name: /first-left ↔ first-right/ }))
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
-    expect(
-      (screen.getByRole('checkbox', { name: zh['directory.report.toolbar.hideLocalPaths'] }) as HTMLInputElement)
-        .checked
-    ).toBe(false)
+    expect(menuChecked(zh['directory.report.toolbar.hideLocalPaths'])).toBe(false)
   })
 
   it('keeps the surface usable while generating and cancels without saving', async () => {
@@ -512,10 +496,7 @@ describe('directory HTML report export', () => {
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
     const before = (await base.listDirectory('/memory')).map((entry) => entry.name).sort()
-    const exportButton = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
 
     // The row exists synchronously, before any save dialog could be opened.
     const status = screen.getByRole('status')
@@ -526,19 +507,16 @@ describe('directory HTML report export', () => {
       name: zh['directory.report.cancel']
     }) as HTMLButtonElement
     expect(cancelButton.disabled).toBe(false)
-    expect(exportButton.disabled).toBe(true)
+    // The action stays listed while generating.
+    expect(menuItem(zh['directory.report.toolbar.export'])).toBeDefined()
 
-    // A second press cannot start a second generation.
-    fireEvent.click(exportButton)
+    // A second selection cannot start a second generation.
+    clickMenu(zh['directory.report.toolbar.export'])
     expect(buildAsync).toHaveBeenCalledTimes(1)
 
     // The rest of the directory surface is not busy-gated by the export.
-    const hideLocalPaths = screen.getByRole('checkbox', {
-      name: zh['directory.report.toolbar.hideLocalPaths']
-    }) as HTMLInputElement
-    expect(hideLocalPaths.disabled).toBe(false)
-    fireEvent.click(hideLocalPaths)
-    expect(hideLocalPaths.checked).toBe(false)
+    toggleMenu(zh['directory.report.toolbar.hideLocalPaths'])
+    expect(menuChecked(zh['directory.report.toolbar.hideLocalPaths'])).toBe(false)
 
     fireEvent.click(screen.getByRole('tab', { name: zh['directory.filter.differences'] }))
     await waitFor(() => expect(legendNumbers(zh).same).toBe(0))
@@ -548,7 +526,8 @@ describe('directory HTML report export', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(saved).toHaveLength(0)
     expect(buildAsync).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(exportButton.disabled).toBe(false))
+    expect(menuItem(zh['directory.report.toolbar.export'])).toBeDefined()
+    closeMore()
     expectDirectoryBusyButtonsEnabled()
     const notice = screen.getByRole('alert')
     expect(notice.textContent).toBe(zh['directory.report.cancelled'])
@@ -574,10 +553,7 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(ZH_DIALOG, '/memory/retry-left', '/memory/retry-right')
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
-    const exportButton = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     fireEvent.click(
       within(screen.getByRole('status')).getByRole('button', {
         name: zh['directory.report.cancel']
@@ -586,7 +562,7 @@ describe('directory HTML report export', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(saved).toHaveLength(0)
 
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(1))
     const content = saved[0].content
     expect(content.startsWith('<!DOCTYPE html>')).toBe(true)
@@ -614,24 +590,17 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(ZH_DIALOG, '/memory/saved-left', '/memory/saved-right')
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
-    const exportButton = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(1))
 
-    // While the save dialog is open the task is still single and the export
-    // button keeps its accessible name, only gaining `disabled`.
-    expect(exportButton.disabled).toBe(true)
-    expect(
-      screen.getByRole('button', { name: zh['directory.report.toolbar.export'] })
-    ).toBe(exportButton)
-    fireEvent.click(exportButton)
+    // While the save dialog is open the task is still single: selecting the
+    // same action again must not start a second generation.
+    expect(menuItem(zh['directory.report.toolbar.export'])).toBeDefined()
+    clickMenu(zh['directory.report.toolbar.export'])
     expect(buildAsync).toHaveBeenCalledTimes(1)
     expect(saved).toHaveLength(1)
 
     releaseSave()
-    await waitFor(() => expect(exportButton.disabled).toBe(false))
     const notice = await screen.findByRole('alert')
     expect(notice.className).toContain('text-diff-added')
     expect(notice.textContent).toContain(SAVED_PATH)
@@ -660,10 +629,7 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(ZH_DIALOG, '/memory/truncated-left', '/memory/truncated-right')
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
-    const exportButton = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(1))
     await waitFor(() => {
       const text = screen.getByRole('alert').textContent ?? ''
@@ -674,8 +640,7 @@ describe('directory HTML report export', () => {
 
     // An untruncated save never carries the truncation numbers.
     queueRealReport()
-    await waitFor(() => expect(exportButton.disabled).toBe(false))
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(saved).toHaveLength(2))
     await waitFor(() =>
       expect(screen.getByRole('alert').textContent).toContain('/memory/complete.html')
@@ -702,10 +667,7 @@ describe('directory HTML report export', () => {
     await openDirectoryPair(ZH_DIALOG, '/memory/readonly-left', '/memory/readonly-right')
     await waitForDirectoryView(zh['directory.report.toolbar.export'])
 
-    const exportButton = screen.getByRole('button', {
-      name: zh['directory.report.toolbar.export']
-    }) as HTMLButtonElement
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(attempts).toHaveLength(1))
 
     const notice = await screen.findByRole('alert')
@@ -713,10 +675,9 @@ describe('directory HTML report export', () => {
     expect(notice.textContent).toBe(message)
     expect(notice.textContent).not.toContain(zh['directory.report.saved'].replace('{path}', ''))
 
-    await waitFor(() => expect(exportButton.disabled).toBe(false))
     await expect(base.exists('/memory/readonly-left-vs-readonly-right.html')).resolves.toBe(false)
 
-    fireEvent.click(exportButton)
+    clickMenu(zh['directory.report.toolbar.export'])
     await waitFor(() => expect(attempts).toHaveLength(2))
     expect(screen.getByRole('alert').textContent).toBe(message)
     expectDirectoryBusyButtonsEnabled()

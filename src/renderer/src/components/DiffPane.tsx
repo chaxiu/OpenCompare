@@ -6,7 +6,7 @@ import type { DiffStatus } from '@shared/fixtures'
 import { cx } from './utils'
 
 /** Fixed row height (px) both diff panes share, so scroll maps 1:1 by row. */
-export const DIFF_ROW_HEIGHT = 20
+export const DIFF_ROW_HEIGHT = 22
 
 /** Extra rows above and below the viewport so fast scrolling never shows gaps. */
 export const ROW_OVERSCAN = 10
@@ -15,7 +15,24 @@ export const ROW_OVERSCAN = 10
 export const WINDOW_THRESHOLD = 1_000
 
 const GUTTER_CLASS =
-  'tabular sticky left-0 z-10 w-11 shrink-0 border-r border-line-subtle pr-2 text-right text-2xs leading-5 select-none'
+  'tabular sticky left-0 z-10 w-11 shrink-0 border-r border-line-subtle pr-2 text-right text-xs select-none'
+
+/**
+ * Inline word-level highlights: a <=15% soft wash plus a 1px underline, never
+ * a saturated solid fill, so the segment stays readable over the row tone in
+ * both themes while keeping the semantic status hue.
+ */
+const INLINE_CHANGED_CLASSES: Record<DiffStatus, string> = {
+  same: 'rounded-xs bg-diff-modified/12 text-diff-modified underline decoration-diff-modified decoration-1 underline-offset-2',
+  added:
+    'rounded-xs bg-diff-added/12 text-diff-added underline decoration-diff-added decoration-1 underline-offset-2',
+  removed:
+    'rounded-xs bg-diff-removed/12 text-diff-removed underline decoration-diff-removed decoration-1 underline-offset-2',
+  modified:
+    'rounded-xs bg-diff-modified/12 text-diff-modified underline decoration-diff-modified decoration-1 underline-offset-2',
+  conflict:
+    'rounded-xs bg-diff-conflict/12 text-diff-conflict underline decoration-diff-conflict decoration-1 underline-offset-2'
+}
 
 const ROW_TONE: Record<DiffStatus, string> = {
   same: '',
@@ -33,7 +50,7 @@ function inlineContent(row: DiffRow, side: 'left' | 'right'): ReactNode {
 
   return segments.map((segment, index) =>
     segment.changed ? (
-      <span key={index} className="rounded-xs bg-diff-modified/40 text-diff-modified">
+      <span key={index} className={INLINE_CHANGED_CLASSES[row.status]}>
         {segment.text}
       </span>
     ) : (
@@ -42,7 +59,7 @@ function inlineContent(row: DiffRow, side: 'left' | 'right'): ReactNode {
   )
 }
 
-/** One aligned 20px line: sticky line-number gutter plus the inline text cell. */
+/** One aligned {@link DIFF_ROW_HEIGHT}px line: sticky gutter plus inline text cell. */
 function DiffRowView({
   row,
   side,
@@ -60,10 +77,12 @@ function DiffRowView({
   return (
     <div
       data-diff-row={index}
-      className={cx('flex h-5 border-l-2', active ? 'border-accent' : 'border-transparent')}
+      style={{ height: DIFF_ROW_HEIGHT, lineHeight: `${DIFF_ROW_HEIGHT}px` }}
+      className={cx('flex border-l-2', active ? 'border-accent' : 'border-transparent')}
     >
       <span
         aria-hidden
+        style={{ lineHeight: `${DIFF_ROW_HEIGHT}px` }}
         className={cx(
           GUTTER_CLASS,
           filler ? 'bg-surface-sunken text-content-muted/50' : 'bg-surface-raised'
@@ -156,7 +175,7 @@ export function DiffPane({
   const windowStart = windowed ? (items[0]?.start ?? 0) : 0
   const windowEnd =
     items.length > 0 ? (items[items.length - 1]?.end ?? contentHeight) : contentHeight
-  // First row whose 20px band reaches into the viewport (overscan rows excluded).
+  // First row whose 22px band reaches into the viewport (overscan rows excluded).
   const firstVisible = items.find((item) => item.end > (virtualizer.scrollOffset ?? 0))?.index ?? 0
 
   return (

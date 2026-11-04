@@ -1,37 +1,19 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { PlatformPort, UserSettings } from '@shared/platform/types'
 import { App } from './App'
 import { renderWithI18n } from './i18n/testing'
 import { createWebPlatformPort } from './platform/web-platform'
 import { Workbench } from './workbench/Workbench'
+import { installJsdomViewport } from '../../test/jsdomViewport'
 
 const EMPTY_EN = 'Open real files or folders to start comparing'
 const EMPTY_ZH = '打开真实文件或文件夹开始对比'
 const LEFT_ENGINE = `${DIRECTORY_SAMPLE_PATHS.left}/src/core/engine.ts`
 
-const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
-const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
-
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get: () => 1200
-  })
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get: () => 640
-  })
-})
-
-afterAll(() => {
-  if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
-  if (originalHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalHeight)
-  else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
-})
+installJsdomViewport()
 
 beforeEach(() => {
   localStorage.clear()
@@ -288,7 +270,7 @@ describe('language switch', () => {
     expect(
       within(screen.getByRole('tablist', { name: '会话' })).getAllByRole('tab')
     ).toHaveLength(4)
-    expect(screen.getByRole('contentinfo').textContent).toContain('会话')
+    expect(screen.getByRole('contentinfo').textContent).toContain('JSON 节点（左）')
     expect(settingsDialog('zh')).toBeDefined()
     expect(languageOptions(settingsDialog('zh'), 'zh').map((tab) => tab.textContent)).toEqual([
       'English',
@@ -304,7 +286,7 @@ describe('language switch', () => {
     fireEvent.click(languageOptions(settingsDialog('zh'), 'zh')[0])
     expect(screen.queryByRole('tablist', { name: 'Switch view' })).toBeNull()
     expect(screen.getByRole('tablist', { name: 'Sessions' })).toBeDefined()
-    expect(screen.getByRole('contentinfo').textContent).toContain('Session')
+    expect(screen.getByRole('contentinfo').textContent).toContain('JSON nodes (left)')
     expect(settingsDialog('en')).toBeDefined()
   })
 
@@ -494,10 +476,9 @@ describe('language switch', () => {
         ?.getAttribute('aria-selected')
     ).toBe('true')
     expect((screen.getAllByRole('tree')[0].parentElement as HTMLElement).scrollTop).toBe(96)
-    expect(screen.getByRole('contentinfo').textContent).toContain(
-      `directory:${DIRECTORY_SAMPLE_PATHS.left} ↔ ${DIRECTORY_SAMPLE_PATHS.right}`
-    )
-    expect(beforeStatus).toContain('会话')
+    expect(screen.getByRole('contentinfo').textContent).not.toContain('directory:')
+    expect(screen.getByRole('contentinfo').textContent).toContain('Source files')
+    expect(beforeStatus).toContain('文件（源）')
     expect(counting).toEqual(callsBefore)
     expect(onCompareRequest).toHaveBeenCalledTimes(1)
     expect(compareRequestsReady).toHaveBeenCalledTimes(1)

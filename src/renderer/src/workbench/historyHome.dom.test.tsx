@@ -10,6 +10,7 @@ import { zh } from '@renderer/i18n/messages'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from './Workbench'
+import { closeMore, moreItem as menuItem } from '../../../test/shellMenu'
 
 const [DIR_LEFT, DIR_RIGHT] = ['/memory/history-dir-left', '/memory/history-dir-right']
 const [FILE_LEFT, FILE_RIGHT] = ['/memory/history/left.ts', '/memory/history/right.ts']
@@ -42,7 +43,23 @@ const mount = (port: PlatformPort): void => {
 const titled = (key: MessageKey, ...paths: string[]): string => zh[key].replace('{paths}', paths.join(' ↔ '))
 const reopenName = (l: string, r: string): string => titled('shell.history.reopenTitle', l, r)
 const removeName = (l: string, r: string): string => titled('shell.history.removeTitle', l, r)
-const switchEl = (name: string): HTMLElement => document.querySelector<HTMLElement>(`[data-code-switch="${name}"]`)!
+const SWITCH_LABELS: Record<string, string> = {
+  'ignore-newline': zh['files.code.ignoreNewline'],
+  'ignore-encoding': zh['files.code.ignoreEncoding'],
+  'ignore-whitespace': zh['files.code.ignoreWhitespace']
+}
+/** One comparison switch, now a menu item; the leading [x] is the checked state. */
+function switchItem(id: string): HTMLElement {
+  return menuItem(SWITCH_LABELS[id])
+}
+function switchChecked(id: string): string {
+  const state = (switchItem(id).textContent ?? '').trimStart().startsWith('[x]') ? 'true' : 'false'
+  closeMore()
+  return state
+}
+function toggleSwitch(id: string): void {
+  fireEvent.click(switchItem(id))
+}
 const captureConsole = (calls: string[]): (() => void) => {
   const spies = (['log', 'warn', 'error', 'info', 'debug'] as const).map((m) =>
     vi.spyOn(console, m).mockImplementation((...args) => { calls.push(args.map(String).join(' ')) })
@@ -182,10 +199,9 @@ describe('workbench history home', () => {
     const port = await openFresh(await memoryPort(), FILE_LEFT, FILE_RIGHT)
     const before = (await port.readComparisonHistory())[0]
     expect(before?.ignoreWhitespace).toBe(false)
-    await waitFor(() => expect(document.querySelector('[data-code-switch="ignore-whitespace"]')).not.toBeNull())
-    const sw = switchEl('ignore-whitespace')
-    fireEvent.click(sw)
-    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(switchItem('ignore-whitespace')).toBeDefined())
+    toggleSwitch('ignore-whitespace')
+    expect(switchChecked('ignore-whitespace')).toBe('true')
     await waitFor(async () => {
       const entries = await port.readComparisonHistory()
       expect(entries).toMatchObject([{ id: before?.id, createdAt: before?.createdAt, ignoreWhitespace: true, ignoreNewline: SWITCHES.ignoreNewline, ignoreEncoding: SWITCHES.ignoreEncoding }])
@@ -200,10 +216,9 @@ describe('workbench history home', () => {
     await openSample('directory')
     await waitFor(() => expect(tabs()).toHaveLength(1), { timeout: 30_000 })
     fireEvent.doubleClick(screen.getAllByText('engine.ts')[0])
-    await waitFor(() => expect(document.querySelector('[data-code-switch="ignore-newline"]')).not.toBeNull(), { timeout: 30_000 })
-    const sw = switchEl('ignore-newline')
-    fireEvent.click(sw)
-    expect(sw.getAttribute('aria-checked')).toBe('false')
+    await waitFor(() => expect(switchItem('ignore-newline')).toBeDefined(), { timeout: 30_000 })
+    toggleSwitch('ignore-newline')
+    expect(switchChecked('ignore-newline')).toBe('false')
     await expect(port.readComparisonHistory()).resolves.toEqual(seeded); expect(writes).toBe(0)
   }, 60_000)
   it('keeps absolute paths out of console output across establish, remove and failed reopen', async () => {
@@ -234,10 +249,10 @@ describe('workbench history home', () => {
     mount(port)
     await openPair(FILE_LEFT, FILE_RIGHT)
     await waitFor(async () => expect(await port.readComparisonHistory()).toHaveLength(1))
-    await waitFor(() => expect(document.querySelector('[data-code-switch="ignore-whitespace"]')).not.toBeNull())
+    await waitFor(() => expect(switchItem('ignore-whitespace')).toBeDefined())
     // A non-default switch combination is stored on the entry (whitespace defaults off).
-    fireEvent.click(switchEl('ignore-whitespace'))
-    expect(switchEl('ignore-whitespace').getAttribute('aria-checked')).toBe('true')
+    toggleSwitch('ignore-whitespace')
+    expect(switchChecked('ignore-whitespace')).toBe('true')
     await waitFor(async () => expect((await port.readComparisonHistory())[0]?.ignoreWhitespace).toBe(true))
     await closeOnlySession()
     cleanup()
@@ -245,15 +260,15 @@ describe('workbench history home', () => {
     await port.writeTextFile(FILE_RIGHT, 'alpha\nomega\n')
     mount(port)
     // A fresh render owns no session, so the shell switches start at their defaults.
-    expect(document.querySelector('[data-code-switch="ignore-whitespace"]')).toBeNull()
+    expect(tabs()).toHaveLength(0)
     fireEvent.click(await screen.findByRole('button', { name: reopenName(FILE_LEFT, FILE_RIGHT) }, { timeout: 30_000 }))
     await waitFor(() => expect(tabs()).toHaveLength(1), { timeout: 30_000 })
-    await waitFor(() => expect(switchEl('ignore-whitespace').getAttribute('aria-checked')).toBe('true'))
+    await waitFor(() => expect(switchChecked('ignore-whitespace')).toBe('true'))
     // The reopened panes show the new disk content, not the old line.
     const text = document.body.textContent ?? ''
     expect(text).toContain('omega')
     expect(text).not.toContain('beta')
-    expect(switchEl('ignore-newline').getAttribute('aria-checked')).toBe('true')
+    expect(switchChecked('ignore-newline')).toBe('true')
   }, 60_000)
   it('reopens a directory pair by rescanning the disk and keeping both real roots', async () => {
     const port = delayed(await memoryPort())

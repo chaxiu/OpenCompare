@@ -71,6 +71,7 @@ describe('preload bridge', () => {
         'readComparisonHistory',
         'writeComparisonHistory',
         'systemLocale',
+        'copyText',
         'onCompareRequest',
         'compareRequestsReady',
         'perf'

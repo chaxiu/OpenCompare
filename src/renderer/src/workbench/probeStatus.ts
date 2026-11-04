@@ -19,31 +19,34 @@ export interface ProbeStatusEntry {
 }
 
 /**
- * The four entries of a two-column code diff, in fixed order:
- * left newline → left encoding → right newline → right encoding.
- * A merge view has no left/right semantics, so it renders none.
+ * Status entries of a two-column code diff. Newline and encoding facts are
+ * deduped: when both sides agree the bar shows the fact once, and only a real
+ * difference expands into the left / right pair. A merge view has no
+ * left/right semantics, so it renders none.
  */
 export function codeProbeStatusEntries(
   probes: FilePairProbes | undefined,
   diffVisible: boolean
 ): readonly ProbeStatusEntry[] {
   if (!diffVisible) return []
-  return [
-    {
-      key: 'shell.status.leftNewline',
-      value: probes?.left?.newline ?? PROBE_MISSING_VALUE
-    },
-    {
-      key: 'shell.status.leftEncoding',
-      value: probes?.left?.encoding ?? PROBE_MISSING_VALUE
-    },
-    {
-      key: 'shell.status.rightNewline',
-      value: probes?.right?.newline ?? PROBE_MISSING_VALUE
-    },
-    {
-      key: 'shell.status.rightEncoding',
-      value: probes?.right?.encoding ?? PROBE_MISSING_VALUE
-    }
-  ]
+  const leftNewline = probes?.left?.newline ?? PROBE_MISSING_VALUE
+  const rightNewline = probes?.right?.newline ?? PROBE_MISSING_VALUE
+  const leftEncoding = probes?.left?.encoding ?? PROBE_MISSING_VALUE
+  const rightEncoding = probes?.right?.encoding ?? PROBE_MISSING_VALUE
+
+  const newline: ProbeStatusEntry[] =
+    leftNewline === rightNewline
+      ? [{ key: 'shell.status.newline', value: leftNewline }]
+      : [
+          { key: 'shell.status.leftNewline', value: leftNewline },
+          { key: 'shell.status.rightNewline', value: rightNewline }
+        ]
+  const encoding: ProbeStatusEntry[] =
+    leftEncoding === rightEncoding
+      ? [{ key: 'shell.status.encoding', value: leftEncoding }]
+      : [
+          { key: 'shell.status.leftEncoding', value: leftEncoding },
+          { key: 'shell.status.rightEncoding', value: rightEncoding }
+        ]
+  return [...newline, ...encoding]
 }

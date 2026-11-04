@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sha256Hex } from '@core/directory/hash'
 import { diffLineTexts } from '@core/text/diff'
@@ -8,6 +8,7 @@ import type { TextFileFacts } from '@shared/platform/types'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
+import { moreItem as menuItem, moreTrigger, openMore } from '../../../test/shellMenu'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair, FilePairProbes } from '@renderer/workbench/session'
 
@@ -49,13 +50,27 @@ function renderDiff(
     />
   )
 }
-function switchOf(id: string): HTMLElement {
-  const element = document.querySelector<HTMLElement>(`[data-code-switch="${id}"]`)
-  if (element === null) throw new Error(`missing switch: ${id}`)
-  return element
+const SWITCH_LABELS: Record<string, string> = {
+  'ignore-newline': '忽略换行',
+  'ignore-encoding': '忽略编码',
+  'ignore-whitespace': '忽略空白差异'
 }
-function checked(id: string): string | null {
-  return switchOf(id).getAttribute('aria-checked')
+const ACTION_LABELS: Record<'reload' | 'swap', string> = {
+  reload: '重新加载',
+  swap: '交换左右'
+}
+
+/** One comparison switch, now a menu item; the leading [x] is the checked state. */
+function switchOf(id: string): HTMLElement {
+  return menuItem(SWITCH_LABELS[id])
+}
+function checked(id: string): string {
+  const state = (switchOf(id).textContent ?? '').trimStart().startsWith('[x]') ? 'true' : 'false'
+  // Reading a value never leaves the menu hanging over the next interaction.
+  if (moreTrigger().getAttribute('aria-expanded') === 'true') {
+    fireEvent.keyDown(document, { key: 'Escape' })
+  }
+  return state
 }
 function countText(): string {
   return document.querySelector('[data-code-diff-count]')?.textContent ?? ''
@@ -102,17 +117,15 @@ function paneText(container: HTMLElement, side: 0 | 1): string {
 function markerCount(container: HTMLElement): number {
   return container.querySelectorAll('[data-diff-ruler="true"] [data-diff-status]').length
 }
-/** Panel header titles in DOM order (left, right). */
+/** Panel address-bar paths in DOM order (left, right). */
 function panelTitles(): string[] {
-  const headers = document.querySelectorAll<HTMLElement>(
-    '[data-shell-level="panels"] section header span[title]'
+  const addresses = document.querySelectorAll<HTMLElement>(
+    '[data-shell-level="panels"] [data-panel-address]'
   )
-  return Array.from(headers).map((element) => element.getAttribute('title') ?? '')
+  return Array.from(addresses).map((element) => element.getAttribute('title') ?? '')
 }
 function action(name: 'reload' | 'swap'): HTMLElement {
-  const element = document.querySelector<HTMLElement>(`[data-code-action="${name}"]`)
-  if (element === null) throw new Error(`missing pair action: ${name}`)
-  return element
+  return menuItem(ACTION_LABELS[name])
 }
 
 afterEach(() => {
@@ -127,8 +140,8 @@ describe('code diff comparison switches', () => {
     for (const id of ['ignore-newline', 'ignore-encoding']) {
       const element = switchOf(id)
       expect(element.tagName).toBe('BUTTON')
-      expect(element.getAttribute('role')).toBe('switch')
-      expect(element.getAttribute('aria-checked')).toBe('true')
+      expect(element.getAttribute('role')).toBe('menuitem')
+      expect(element.textContent?.trimStart().startsWith('[x]')).toBe(true)
       expect(element.hasAttribute('data-shell-entry')).toBe(false)
     }
     expect(document.querySelectorAll('[data-shell-level="view-toolbar"]')).toHaveLength(1)
@@ -213,26 +226,30 @@ describe('code diff comparison switches', () => {
         expect(countText()).toBe(String(expected.differenceCount))
         expect(nonSameRows()).toBeGreaterThan(0)
         if (left !== 'alpha\nbeta\n') {
-          expect(document.querySelector('[class*="bg-diff-modified/40"]')).not.toBeNull()
+          // Word-level marks are a soft wash plus a 1px underline, never a solid block.
+          const inline = document.querySelector('[class*="bg-diff-modified/12"]')
+          expect(inline).not.toBeNull()
+          expect(inline?.className).toContain('underline')
         }
         view.unmount()
       }
     }
   })
 
-  it('toggles once per click, Space and Enter through the same handler', () => {
+  it('toggles once per menu click and closes the menu on Escape', () => {
     renderDiff('alpha\n', 'beta\n')
-    const element = switchOf('ignore-newline')
-    element.focus()
-    expect(document.activeElement).toBe(element)
-
-    fireEvent.keyDown(element, { key: ' ' })
-    expect(checked('ignore-newline')).toBe('false')
-    fireEvent.keyDown(element, { key: 'Enter' })
     expect(checked('ignore-newline')).toBe('true')
-    fireEvent.click(element)
+
+    // Escape closes the menu without changing any switch.
+    fireEvent.click(moreTrigger())
+    expect(screen.queryByRole('menu')).not.toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(checked('ignore-newline')).toBe('true')
+
+    fireEvent.click(switchOf('ignore-newline'))
     expect(checked('ignore-newline')).toBe('false')
-    fireEvent.click(element)
+    fireEvent.click(switchOf('ignore-newline'))
     expect(checked('ignore-newline')).toBe('true')
   })
 
@@ -265,7 +282,7 @@ describe('code pair actions and whitespace switch', () => {
 
   it('defaults ignore-whitespace off and erases whitespace-only differences on', () => {
     const view = renderDiff(...WS)
-    expect([switchOf('ignore-whitespace').getAttribute('role'), checked('ignore-whitespace')]).toEqual(['switch', 'false'])
+    expect([switchOf('ignore-whitespace').getAttribute('role'), checked('ignore-whitespace')]).toEqual(['menuitem', 'false'])
     expect(Number(countText())).toBeGreaterThan(0)
     expect(nonSameRows()).toBeGreaterThan(0)
     fireEvent.click(switchOf('ignore-whitespace'))
@@ -352,7 +369,12 @@ describe('code pair actions and whitespace switch', () => {
   it('names the pair actions and whitespace switch in en', () => {
     const readSide = async (path: string): Promise<PickedTextFile> => ({ path, text: 'x\n' })
     renderWithI18n(<CodeView pair={{ left: { path: '/l.ts', text: 'a\n' }, right: { path: '/r.ts', text: 'b\n' } }} platform={platform} readSide={readSide} onPairChange={vi.fn()} />, 'en')
-    for (const name of ['Reload', 'Swap sides']) expect(screen.getByRole('button', { name })).toBeDefined()
-    expect(screen.getByRole('switch', { name: 'Ignore whitespace' })).toBeDefined()
+    const menu = openMore()
+    for (const name of ['Reload', 'Swap sides', 'Ignore whitespace']) {
+      expect(
+        within(menu).getByRole('menuitem', { name: (label: string) => label.includes(name) }),
+        name
+      ).toBeDefined()
+    }
   })
 })

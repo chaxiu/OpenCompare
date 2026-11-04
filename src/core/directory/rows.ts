@@ -20,13 +20,13 @@ import { FILE_DIFF_STATUSES } from './compare'
 import type { DirectoryFilter } from './filter'
 import { matchesFilter } from './filter'
 
-/** Single row height (Tailwind `h-6`) shared by the tree and its virtualiser. */
-export const DIRECTORY_ROW_HEIGHT = 24
+/** Single row height (Tailwind `h-7`) shared by the tree and its virtualiser. */
+export const DIRECTORY_ROW_HEIGHT = 28
 
 /**
  * Tallest content box the browser will lay out. Blink caps scrollable content
  * at 2^24 px (16,777,216) and silently clips whatever exceeds it, which is why
- * a 1.5M-row tree (`rows * 24` ≈ 3.6e7 px) could never be scrolled past row
+ * a 1.5M-row tree (`rows * 28` ≈ 4.2e7 px) could never be scrolled past row
  * ~699k. The tree therefore caps its container at one pixel below that limit
  * and maps rows onto the available offset instead of multiplying by row height.
  */
@@ -55,7 +55,7 @@ export interface DirectoryScrollMap {
 /**
  * Builds the row ↔ scroll-offset map for one pane.
  *
- * Below the browser cap this is the identity (`row * 24`), so every existing
+ * Below the browser cap this is the identity (`row * 28`), so every existing
  * pixel offset keeps its exact meaning. Above the cap the container height is
  * pinned to {@link DIRECTORY_MAX_TREE_HEIGHT} and each row occupies a slice of
  * the reachable offset instead: `offsetForIndex` stays strictly increasing,

@@ -339,6 +339,12 @@ export interface PlatformPort {
    */
   compareRequestsReady?(): Promise<void>
   /**
+   * Copies plain text (a panel address) to the host clipboard. Optional: a
+   * runtime without a clipboard rejects/omits it and the UI degrades to the
+   * same accessible feedback without throwing.
+   */
+  copyText?(text: string): Promise<boolean>
+  /**
    * Measurement-only seam. Present on the Electron bridge so a harness window
    * can fetch its config and report round boundaries; absent in the web runtime
    * and inert during a normal launch (the main process only answers it in
