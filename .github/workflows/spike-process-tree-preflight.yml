@@ -1,0 +1,40 @@
+name: Spike process-tree preflight
+
+# Read-only, pre-tag rehearsal on the release runner image: run the full
+# process-tree gate file, then repeat the failing-path `process-exited` case
+# 50 times. This proves the fix on the same ubuntu-latest image as
+# release.yml before any version tag is pushed. It never touches tags,
+# releases, artifacts or secrets.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Rehearsal tag label to record in the run name (no tag is created)'
+        required: false
+        default: 'v0.0.0-preflight'
+        type: string
+
+run-name: spike-process-tree preflight ${{ inputs.tag || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  process-tree-preflight:
+    name: Process-tree gate + soak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Spike process-tree gate
+        run: pnpm exec vitest run src/spike-process-tree-gate.test.ts
+      - name: Spike process-tree soak (50 rounds)
+        run: pnpm test:soak -- --rounds=50

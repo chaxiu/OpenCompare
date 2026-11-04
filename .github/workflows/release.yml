@@ -185,6 +185,12 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # Same-image pre-tag evidence: the failing-path `process-exited` case is
+      # repeated 50 times on this exact runner before the coverage build. Any
+      # red round fails the gates job, so a release tag can only be pushed
+      # after the soak is green on the release image.
+      - name: Spike process-tree soak (same image)
+        run: pnpm test:soak -- --rounds=50
       # Release-only coverage floor gate: `src/core/**` floors are pinned once
       # per release and compared against a summary produced by this job. The
       # gate is never part of the delivery matrix (.munk/code-gates.json).
