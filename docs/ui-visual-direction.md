@@ -71,10 +71,10 @@
 | `--color-diff-removed` | `#f85149` | 仅左 / 删除 |
 | `--color-diff-modified` | `#d29922` | 修改 |
 | `--color-diff-conflict` | `#d9a021` | 冲突（沿用修改色族） |
-| `--color-diff-added-soft` | `#10281a` | 新增底 |
-| `--color-diff-removed-soft` | `#2e171a` | 删除底 |
-| `--color-diff-modified-soft` | `#2c2210` | 修改底 |
-| `--color-diff-conflict-soft` | `#2c2210` | 冲突底 |
+| `--color-diff-added-soft` | `#112319` | 新增底 |
+| `--color-diff-removed-soft` | `#271619` | 删除底 |
+| `--color-diff-modified-soft` | `#231f14` | 修改底 |
+| `--color-diff-conflict-soft` | `#242014` | 冲突底 |
 
 亮色 token（同色相、语义色降饱和）：
 
@@ -103,10 +103,10 @@
 | `--color-diff-removed` | `#e55d57` | 仅左 / 删除 |
 | `--color-diff-modified` | `#ad832d` | 修改 |
 | `--color-diff-conflict` | `#b08324` | 冲突（沿用修改色族） |
-| `--color-diff-added-soft` | `#e7f4ea` | 新增底 |
-| `--color-diff-removed-soft` | `#fdecee` | 删除底 |
-| `--color-diff-modified-soft` | `#fbf0d9` | 修改底 |
-| `--color-diff-conflict-soft` | `#fbf0d9` | 冲突底 |
+| `--color-diff-added-soft` | `#e8f3ea` | 新增底 |
+| `--color-diff-removed-soft` | `#fceceb` | 删除底 |
+| `--color-diff-modified-soft` | `#f5f0e6` | 修改底 |
+| `--color-diff-conflict-soft` | `#f6f0e5` | 冲突底 |
 
 取整依据：亮色语义色保持暗色同名 token 的 HSV 色相（角差 ≤ 12°），饱和度下降 10–15%，
 明度取同时满足「对 `#ffffff` 与各自 soft 底 ≥ 3.0」「四态两两 ΔE ≥ 12」的最亮值，
@@ -118,9 +118,11 @@
   高度取 `--height-control-md`（32px）与 `--height-control-sm`（28px），文字 12px（`--text-xs`），
   圆角 6px（`--radius-sm`）；`danger` 只保留给破坏性确认，复用唯一红色 token。
 - **Toggle**：单一开关控件 28×16（宽 28 高 16），2px 描边，圆角 4px（`--radius-xs`）；
-  勾选态品牌色，未选态中性；用视觉隐藏的原生 checkbox 保留 `checkbox` / `switch` 语义与可访问名。
+  勾选态品牌色，未选态中性；`checkbox` 落点用视觉隐藏的原生 input 保留 `checked` 语义，
+  `switch` 落点保留 `<button role="switch" aria-checked>` 以维持既有键盘契约，两者共享同一外观。
 - **Chip / Badge**：高 20px、圆角 4px、11px 文字，结构为「8px 色点 + 文案 + 语义 soft 底色」，
-  不再使用彩色描边；五个 `DiffStatus` 与既有 i18n 文案键不变。
+  不再使用彩色描边；soft 底 = 语义色 12% 叠在 `--color-surface-base` 上（逐通道四舍五入，测试实读复算）。
+  五个 `DiffStatus` 与既有 i18n 文案键不变；圆形色点用 `rounded-full`（形状，不占圆角档位）。
 - **Tab**：`SessionTabs` 与 `SegmentedControl` 单项 30px，选中态用 2px 品牌色下划线表达，
   不再用整块高亮；`role="tab"` / `aria-selected` 语义不变。
 

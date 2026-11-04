@@ -226,10 +226,12 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
       hasClasses(header, levelHeaderClasses('panels'))
     }
 
-    // Every toolbar control keeps the control height of its own level. (The
-    // session tabs' height belongs to the frozen SessionTabs internals.)
+    // Every toolbar control keeps the control height of its own level. Tabs are
+    // out of scope: their 30px height is owned by the tab contract.
     for (const level of ['app', 'view-toolbar'] as const) {
-      const buttons = Array.from(levelElement(container, level).querySelectorAll('button'))
+      const buttons = Array.from(
+        levelElement(container, level).querySelectorAll('button:not([role="tab"])')
+      )
       expect(buttons.length).toBeGreaterThan(0)
       for (const button of buttons) hasClasses(button, SHELL_LEVELS[level].controlHeight)
     }

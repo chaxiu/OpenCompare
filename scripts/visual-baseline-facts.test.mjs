@@ -158,3 +158,17 @@ it('records and then re-verifies the pre-token baseline facts', async () => {
   expect(recorded.ignoreSwitches).toEqual(facts.ignoreSwitches)
   expect(recorded.directoryHtml).toEqual(facts.directoryHtml)
 })
+
+it('keeps the captured commit in history and before the token landing', () => {
+  const recorded = JSON.parse(readFileSync(FACTS_PATH, 'utf8'))
+  const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' })
+
+  git('cat-file', '-e', `${recorded.commit}^{commit}`)
+  const history = git('rev-list', 'HEAD').split('\n').filter(Boolean)
+  expect(history).toContain(recorded.commit)
+
+  const css = git('show', `${recorded.commit}:src/renderer/src/assets/main.css`)
+  expect(css).not.toContain('#0b0e12')
+  expect(css).not.toContain('--height-control')
+  expect(css).not.toMatch(/--text-(?:xs|sm|base|lg):/)
+})

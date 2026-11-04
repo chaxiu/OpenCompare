@@ -15,21 +15,21 @@
  */
 @theme {
   /* Layered neutral surfaces */
-  --color-surface-base: #0b0d12;
-  --color-surface-sunken: #080a0f;
-  --color-surface-raised: #12151d;
-  --color-surface-overlay: #171b25;
-  --color-surface-hover: #1e2331;
+  --color-surface-base: #0b0e12;
+  --color-surface-sunken: #080b0f;
+  --color-surface-raised: #11151b;
+  --color-surface-overlay: #171c24;
+  --color-surface-hover: #1c2230;
 
   /* Content */
-  --color-content-primary: #e7eaf2;
-  --color-content-secondary: #a3abbb;
-  --color-content-muted: #6b7583;
-  --color-content-inverse: #0b0d12;
+  --color-content-primary: #e6e9ef;
+  --color-content-secondary: #a8b0bd;
+  --color-content-muted: #6f7887;
+  --color-content-inverse: #0b0e12;
 
   /* Lines */
-  --color-line-subtle: #1e2431;
-  --color-line-strong: #303847;
+  --color-line-subtle: #232a35;
+  --color-line-strong: #333c4a;
 
   /* Single accent */
   --color-accent: #4c8dff;
@@ -37,21 +37,25 @@
   --color-accent-soft: #16233d;
   --color-focus: #6da4ff;
 
-  /* Danger */
-  --color-danger: #f2555a;
-  --color-danger-strong: #ff757a;
-  --color-danger-soft: #33191e;
+  /* Danger — one hue, one meaning: the same red as `diff-removed` */
+  --color-danger: #f85149;
+  --color-danger-strong: #ff6b64;
+  --color-danger-soft: #2e171a;
 
-  /* Diff semantics */
-  --color-diff-same: #6b7583;
+  /* Diff semantics — four hues only; conflict reuses the modified family */
+  --color-diff-same: #8b949e;
   --color-diff-added: #3fb950;
-  --color-diff-removed: #f2555a;
-  --color-diff-modified: #d8a13a;
-  --color-diff-conflict: #a371f7;
-  --color-diff-added-soft: #10281a;
-  --color-diff-removed-soft: #2e171a;
-  --color-diff-modified-soft: #2c2210;
-  --color-diff-conflict-soft: #241a37;
+  --color-diff-removed: #f85149;
+  --color-diff-modified: #d29922;
+  --color-diff-conflict: #d9a021;
+  /* Chips/badges: 12% of the semantic hue over `--color-surface-base` */
+  --color-diff-added-soft: #112319;
+  --color-diff-removed-soft: #271619;
+  --color-diff-modified-soft: #231f14;
+  --color-diff-conflict-soft: #242014;
+
+  /* Spacing — Tailwind's single base; 1/2/3/4/6 steps are 4/8/12/16/24px */
+  --spacing: 0.25rem;
 
   /* Typography — system stacks only, no network fonts */
   --font-sans:
@@ -59,14 +63,28 @@
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --font-mono:
     ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
-  --text-2xs: 0.6875rem;
-  --text-2xs--line-height: 1rem;
 
-  /* Radii */
-  --radius-xs: 0.1875rem;
-  --radius-sm: 0.3125rem;
-  --radius-md: 0.4375rem;
-  --radius-lg: 0.625rem;
+  /* Type scale — exactly 11 / 12 / 13 / 14 / 15px, each with its own line height */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 18px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 15px;
+  --text-lg--line-height: 24px;
+
+  /* Radii — exactly 4 / 6 / 8px */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+
+  /* Control heights — exactly 28 / 32 / 36px */
+  --height-control-sm: 28px;
+  --height-control-md: 32px;
+  --height-control-lg: 36px;
 
   /* Elevation */
   --shadow-panel: 0 10px 24px -18px rgb(0 0 0 / 0.9);
@@ -87,43 +105,44 @@
   color-scheme: light;
 
   /* Layered neutral surfaces */
-  --color-surface-base: #f6f7f9;
+  --color-surface-base: #ffffff;
   --color-surface-sunken: #eceef3;
-  --color-surface-raised: #ffffff;
-  --color-surface-overlay: #ffffff;
+  --color-surface-raised: #f6f8fa;
+  --color-surface-overlay: #eef1f5;
   --color-surface-hover: #e9edf3;
 
   /* Content */
-  --color-content-primary: #14181f;
-  --color-content-secondary: #4b5563;
-  --color-content-muted: #6b7280;
-  --color-content-inverse: #f6f7f9;
+  --color-content-primary: #1f2328;
+  --color-content-secondary: #5b6470;
+  --color-content-muted: #8b949e;
+  --color-content-inverse: #ffffff;
 
   /* Lines */
   --color-line-subtle: #e3e7ee;
   --color-line-strong: #c6cdd8;
 
-  /* Single accent */
+  /* Single accent — same hue as the dark #4c8dff, darkened for white text */
   --color-accent: #2563eb;
   --color-accent-strong: #1d4ed8;
   --color-accent-soft: #dbe7fd;
   --color-focus: #2563eb;
 
-  /* Danger */
-  --color-danger: #d1242f;
-  --color-danger-strong: #b31d28;
-  --color-danger-soft: #fde8ea;
+  /* Danger — same hue as `diff-removed` */
+  --color-danger: #e55d57;
+  --color-danger-strong: #d24a44;
+  --color-danger-soft: #fdecee;
 
-  /* Diff semantics */
-  --color-diff-same: #5c6675;
-  --color-diff-added: #1a7f37;
-  --color-diff-removed: #cf222e;
-  --color-diff-modified: #9a6700;
-  --color-diff-conflict: #8250df;
-  --color-diff-added-soft: #e7f4ea;
-  --color-diff-removed-soft: #fdecee;
-  --color-diff-modified-soft: #fbf0d9;
-  --color-diff-conflict-soft: #f2ebfd;
+  /* Diff semantics — same hues, HSV saturation 10–15% below the dark values */
+  --color-diff-same: #818890;
+  --color-diff-added: #419b4e;
+  --color-diff-removed: #e55d57;
+  --color-diff-modified: #ad832d;
+  --color-diff-conflict: #b08324;
+  /* Chips/badges: 12% of the semantic hue over `--color-surface-base` */
+  --color-diff-added-soft: #e8f3ea;
+  --color-diff-removed-soft: #fceceb;
+  --color-diff-modified-soft: #f5f0e6;
+  --color-diff-conflict-soft: #f6f0e5;
 }
 
 @layer base {
@@ -165,7 +184,7 @@
     background-color: var(--color-line-strong);
     background-clip: content-box;
     border: 2px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-xs);
   }
 }
 

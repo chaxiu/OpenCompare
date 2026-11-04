@@ -5,6 +5,9 @@ export type ButtonVariant = 'default' | 'primary' | 'ghost' | 'danger'
 export type ButtonSize = 'sm' | 'md'
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
+  // Three emphasis levels: solid primary, outlined default, ghost that only
+  // paints its background on hover. `danger` stays reserved for destructive
+  // confirmations and reuses the single red token.
   default:
     'border border-line-subtle bg-surface-raised text-content-primary hover:border-line-strong hover:bg-surface-hover',
   primary:
@@ -16,8 +19,8 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 }
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: 'h-6 gap-1 px-2 text-2xs',
-  md: 'h-7 gap-1.5 px-2.5 text-xs'
+  sm: 'h-[var(--height-control-sm)] gap-1 px-2 text-xs',
+  md: 'h-[var(--height-control-md)] gap-2 px-3 text-xs'
 }
 
 export interface ToolbarButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -80,7 +83,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cx(
-        'focus-ring transition-ui inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40',
+        'focus-ring transition-ui inline-flex h-[var(--height-control-sm)] w-[var(--height-control-sm)] shrink-0 items-center justify-center rounded-sm disabled:pointer-events-none disabled:opacity-40',
         ICON_VARIANT_CLASSES[variant],
         className
       )}

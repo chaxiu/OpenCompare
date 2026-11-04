@@ -95,7 +95,9 @@ describe('shell level table', () => {
     for (const level of SHELL_LEVEL_ORDER) {
       const metrics = SHELL_LEVELS[level]
       expect(Object.keys(HEIGHT_PX)).toContain(metrics.height)
-      expect(['h-6', 'h-7']).toContain(metrics.controlHeight)
+      expect(['h-[var(--height-control-sm)]', 'h-[var(--height-control-md)]']).toContain(
+        metrics.controlHeight
+      )
       expect(['px-2', 'px-3']).toContain(metrics.paddingX)
       expect(['py-0', 'py-0.5', 'py-2']).toContain(metrics.paddingY)
       expect(['gap-0', 'gap-1.5', 'gap-2', 'gap-3']).toContain(metrics.stackGap)

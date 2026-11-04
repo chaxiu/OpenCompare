@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import type { JSX, ReactNode } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { diffLineTexts, diffLineTextsWithFacts, overwriteBlock } from '@core/text/diff'
 import type { OverwriteDirection } from '@core/text/diff'
@@ -16,6 +16,7 @@ import type { MergeAccept, MergeModel, MergeRange, MergeResolutions } from '@cor
 import type { CodeSceneFixture, TextSample } from '@shared/fixtures'
 import type { PlatformPort, TextFileFacts } from '@shared/platform/types'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
+import { Checkbox } from '@renderer/components/Checkbox'
 import { DiffBadge, DiffDot } from '@renderer/components/DiffBadge'
 import { DIFF_ROW_HEIGHT, DiffPane } from '@renderer/components/DiffPane'
 import { DiffRuler } from '@renderer/components/DiffRuler'
@@ -77,7 +78,7 @@ function offsetTop(range: MergeRange): number {
 /* Two-column line + inline character diff                             */
 /* ------------------------------------------------------------------ */
 
-/** One native, keyboard-operable comparison switch of the diff toolbar. */
+/** One comparison switch of the diff toolbar, using the shared square toggle. */
 function CodeSwitch({
   id,
   checked,
@@ -92,50 +93,16 @@ function CodeSwitch({
   readonly showLabel: boolean
   readonly onToggle: () => void
 }): JSX.Element {
-  /**
-   * Space / Enter both activate a native button; preventing the default action
-   * keeps the synthetic click from toggling a second time.
-   */
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>): void {
-    if (event.key !== ' ' && event.key !== 'Enter') return
-    event.preventDefault()
-    onToggle()
-  }
-
   return (
-    <button
-      type="button"
+    <Checkbox
       role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      title={label}
+      checked={checked}
+      onChange={onToggle}
+      label={label}
+      showLabel={showLabel}
       data-code-switch={id}
-      onClick={onToggle}
-      onKeyDown={handleKeyDown}
-      className={cx(
-        'focus-ring transition-ui inline-flex h-6 shrink-0 items-center rounded-sm border text-2xs',
-        checked
-          ? 'border-accent/60 bg-accent-soft text-accent'
-          : 'border-line-subtle bg-surface-raised text-content-muted hover:border-line-strong',
-        showLabel ? 'gap-1.5 px-2' : 'w-6 justify-center'
-      )}
-    >
-      <span
-        aria-hidden
-        className={cx(
-          'relative inline-flex h-3 w-5 shrink-0 items-center rounded-full',
-          checked ? 'bg-accent' : 'bg-line-strong'
-        )}
-      >
-        <span
-          className={cx(
-            'absolute size-2 rounded-full bg-surface-base',
-            checked ? 'right-0.5' : 'left-0.5'
-          )}
-        />
-      </span>
-      {showLabel ? label : null}
-    </button>
+      className={showLabel ? undefined : 'w-7 justify-center'}
+    />
   )
 }
 
@@ -505,7 +472,7 @@ function CodeDiffView({
           onClick={() => step(1)}
           disabled={blockCount === 0}
         />
-        <span className="flex items-center gap-1.5 text-2xs text-content-muted">
+        <span className="flex items-center gap-2 text-2xs text-content-muted">
           {t('files.code.blocks')}
           <span className="tabular font-mono text-content-secondary">
             {activeIndex + 1}/{blockCount}
@@ -534,7 +501,7 @@ function CodeDiffView({
           showLabel={whitespaceLabelShown}
           onToggle={() => toggleSwitch('ignoreWhitespace')}
         />
-        <span className="flex shrink-0 items-center gap-1.5 text-2xs text-content-muted">
+        <span className="flex shrink-0 items-center gap-2 text-2xs text-content-muted">
           {t('files.code.differenceCount')}
           <span data-code-diff-count className="tabular font-mono text-content-secondary">
             {diff.differenceCount}
@@ -552,7 +519,7 @@ function CodeDiffView({
           </span>
         ) : null}
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-shell-entry="override" className="flex shrink-0 items-center gap-1.5">
+        <span data-shell-entry="override" className="flex shrink-0 items-center gap-2">
           <ToolbarButton
             size="sm"
             icon={<Icon name={UI_ICON_ACTIONS.overwriteRight} />}
@@ -579,7 +546,7 @@ function CodeDiffView({
           {t('files.code.reset')}
         </ToolbarButton>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-code-pair-actions className="flex shrink-0 items-center gap-1.5">
+        <span data-code-pair-actions className="flex shrink-0 items-center gap-2">
           {readSide ? (
             <ToolbarButton
               size="sm"
@@ -606,7 +573,7 @@ function CodeDiffView({
           ) : null}
         </span>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-shell-entry="save" className="flex shrink-0 items-center gap-1.5">
+        <span data-shell-entry="save" className="flex shrink-0 items-center gap-2">
           <ToolbarButton
             size="sm"
             icon={<Icon name={SHELL_ENTRY_ICONS.save} />}
@@ -885,14 +852,14 @@ function CodeMergeView({
           onClick={() => step(1)}
           disabled={conflictCount === 0}
         />
-        <span className="flex items-center gap-1.5 text-2xs text-content-muted">
+        <span className="flex items-center gap-2 text-2xs text-content-muted">
           {t('files.merge.pending')}
           <span className="tabular font-mono text-content-secondary">
             {render.unresolved}/{conflictCount}
           </span>
         </span>
         <span aria-hidden className="h-3 w-px shrink-0 bg-line-subtle" />
-        <span data-shell-entry="merge-accept" className="flex shrink-0 items-center gap-1.5">
+        <span data-shell-entry="merge-accept" className="flex shrink-0 items-center gap-2">
           {ACCEPT_OPTIONS.map((option) => (
             <ToolbarButton
               key={option.value}
@@ -1027,7 +994,7 @@ function CodeMergeView({
                             : t('files.merge.unresolved')}
                         </span>
                       </button>
-                      <div className="mt-1.5 flex flex-wrap gap-1">
+                      <div className="mt-2 flex flex-wrap gap-1">
                         {ACCEPT_OPTIONS.map((option) => (
                           <ToolbarButton
                             key={option.value}

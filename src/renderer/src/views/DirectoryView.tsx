@@ -12,6 +12,7 @@ import type { DirectoryReportProgress } from '@core/directory/report'
 import type { SyncDirection, SyncMode } from '@core/directory/sync'
 import type { TemplateResolvedPlan } from '@core/directory/template'
 import { ToolbarButton } from '@renderer/components/Button'
+import { Checkbox } from '@renderer/components/Checkbox'
 import { Icon } from '@renderer/components/Icon'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
@@ -228,7 +229,7 @@ export function DirectoryView({
             composition={visibleCounts}
             labelKeys={DIRECTORY_STATUS_LABEL_KEYS}
           />
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <span className="ml-auto flex shrink-0 items-center gap-2">
             <ToolbarButton
               size="sm"
               icon={<Icon name={UI_ICON_ACTIONS.pickFolder} />}
@@ -299,7 +300,7 @@ export function DirectoryView({
             levelRowClasses('view-toolbar')
           )}
         >
-          <span data-shell-entry="snapshot-export" className="flex shrink-0 items-center gap-1.5">
+          <span data-shell-entry="snapshot-export" className="flex shrink-0 items-center gap-2">
             <ToolbarButton
               size="sm"
               icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-export']} />}
@@ -319,7 +320,7 @@ export function DirectoryView({
               {t('directory.toolbar.exportRight')}
             </ToolbarButton>
           </span>
-          <span data-shell-entry="snapshot-import" className="flex shrink-0 items-center gap-1.5">
+          <span data-shell-entry="snapshot-import" className="flex shrink-0 items-center gap-2">
             <ToolbarButton
               size="sm"
               icon={<Icon name={SHELL_ENTRY_ICONS['snapshot-import']} />}
@@ -352,7 +353,7 @@ export function DirectoryView({
           {reportProgress ? (
             <span
               role="status"
-              className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
+              className="flex shrink-0 items-center gap-2 text-2xs text-content-secondary"
             >
               <span className="tabular">
                 {t('directory.report.progress', {
@@ -369,18 +370,14 @@ export function DirectoryView({
               </ToolbarButton>
             </span>
           ) : null}
-          <label
-            className="flex shrink-0 items-center gap-1.5 text-2xs text-content-secondary"
+          <Checkbox
+            checked={hideLocalPaths}
+            onChange={onHideLocalPathsChange}
+            label={t('directory.report.toolbar.hideLocalPaths')}
             title={t('directory.report.toolbar.hideLocalPathsTitle')}
-          >
-            <input
-              type="checkbox"
-              checked={hideLocalPaths}
-              onChange={(event) => onHideLocalPathsChange(event.target.checked)}
-              className="size-4 shrink-0 accent-accent"
-            />
-            {t('directory.report.toolbar.hideLocalPaths')}
-          </label>
+            showLabel
+            className="shrink-0"
+          />
           <input
             ref={leftInputRef}
             type="file"
