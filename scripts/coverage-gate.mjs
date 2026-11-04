@@ -19,7 +19,9 @@
  *   order;
  * - the floors ratchet: lowers require a matching `floorLedger` entry;
  * - baseline freshness: `measuredAt.commit` is reachable from HEAD and is at
- *   or after the previous semver tag.
+ *   or after the previous semver tag. A tag on HEAD itself must be excluded:
+ *   on a release-tag checkout it would otherwise make "baseline = previous
+ *   tag" look stale.
  *
  * All failures are printed together and exit non-zero. Every floor number is
  * read from the baseline; only measurement conventions live in this file
@@ -28,6 +30,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const DEFAULT_BASELINE = '.munk/baseline/coverage.json'
@@ -360,18 +363,18 @@ function checkScope(options, baseline) {
   }
 }
 
-function gitOutput(args) {
+function gitOutput(args, cwd = ROOT) {
   return execFileSync('git', args, {
-    cwd: ROOT,
+    cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore']
   }).trim()
 }
 
-function isAncestor(ancestor, descendant) {
+function isAncestor(ancestor, descendant, cwd = ROOT) {
   try {
     execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
-      cwd: ROOT,
+      cwd,
       stdio: ['ignore', 'ignore', 'ignore']
     })
     return true
@@ -380,21 +383,14 @@ function isAncestor(ancestor, descendant) {
   }
 }
 
-/** The nearest semver tag reachable from HEAD, including a tag on HEAD itself. */
-function latestReachableTag() {
-  try {
-    const tag = gitOutput(['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*'])
-    return { tag, sha: gitOutput(['rev-parse', `${tag}^{commit}`]) }
-  } catch {
-    return null
-  }
-}
-
-/** The newest semver tag reachable from HEAD that is not HEAD itself. */
-function previousReleaseTag() {
+/**
+ * The newest semver tag reachable from HEAD that is not HEAD itself.
+ * This is the single source of truth for the freshness baseline.
+ */
+function previousReleaseTag(cwd = ROOT) {
   let tags
   try {
-    tags = gitOutput(['tag', '--merged', 'HEAD', '--sort=-v:refname', '--list', 'v[0-9]*'])
+    tags = gitOutput(['tag', '--merged', 'HEAD', '--sort=-v:refname', '--list', 'v[0-9]*'], cwd)
       .split('\n')
       .filter(Boolean)
   } catch {
@@ -402,14 +398,14 @@ function previousReleaseTag() {
   }
   let head
   try {
-    head = gitOutput(['rev-parse', 'HEAD'])
+    head = gitOutput(['rev-parse', 'HEAD'], cwd)
   } catch {
     return null
   }
   for (const tag of tags) {
     let sha
     try {
-      sha = gitOutput(['rev-parse', `${tag}^{commit}`])
+      sha = gitOutput(['rev-parse', `${tag}^{commit}`], cwd)
     } catch {
       continue
     }
@@ -418,39 +414,56 @@ function previousReleaseTag() {
   return null
 }
 
-function checkBaselineFreshness(baseline) {
+/**
+ * Pure freshness evaluation against a repository at `cwd`.
+ * Returns collected problems/messages without touching module-level state.
+ */
+function evaluateBaselineFreshness(baseline, cwd = ROOT) {
+  const problems = []
+  const messages = []
   const commit = baseline.measuredAt?.commit
   const date = baseline.measuredAt?.date
   if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) {
-    fail('baseline freshness: measuredAt.commit must be a 40-char lowercase hex sha')
-    return
+    problems.push('baseline freshness: measuredAt.commit must be a 40-char lowercase hex sha')
+    return { problems, messages }
   }
   if (typeof date !== 'string' || Number.isNaN(Date.parse(date))) {
-    fail(`baseline freshness: measuredAt.date must be a valid ISO timestamp, got ${JSON.stringify(date)}`)
+    problems.push(
+      `baseline freshness: measuredAt.date must be a valid ISO timestamp, got ${JSON.stringify(date)}`
+    )
   }
   let head
   try {
-    head = gitOutput(['rev-parse', 'HEAD'])
+    head = gitOutput(['rev-parse', 'HEAD'], cwd)
   } catch {
-    fail('baseline freshness: cannot resolve HEAD')
-    return
+    problems.push('baseline freshness: cannot resolve HEAD')
+    return { problems, messages }
   }
-  if (!isAncestor(commit, head)) {
-    fail(`baseline stale: measuredAt.commit ${commit} is not reachable from HEAD ${head}`)
-    return
+  if (!isAncestor(commit, head, cwd)) {
+    problems.push(`baseline stale: measuredAt.commit ${commit} is not reachable from HEAD ${head}`)
+    return { problems, messages }
   }
-  const latestTag = latestReachableTag()
-  if (latestTag === null) {
-    ok(`baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is reachable from HEAD (no semver tag)`)
-    return
-  }
-  if (!isAncestor(latestTag.sha, commit)) {
-    fail(
-      `baseline stale: measuredAt.commit ${commit} is older than the latest semver tag ${latestTag.tag} (${latestTag.sha})`
+  const previousTag = previousReleaseTag(cwd)
+  if (previousTag === null) {
+    messages.push(
+      `baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is reachable from HEAD (no semver tag)`
     )
-    return
+    return { problems, messages }
   }
-  ok(`baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is at or after ${latestTag.tag}`)
+  if (!isAncestor(previousTag.sha, commit, cwd)) {
+    problems.push(
+      `baseline stale: measuredAt.commit ${commit} is older than the previous semver tag ${previousTag.tag} (${previousTag.sha})`
+    )
+    return { problems, messages }
+  }
+  messages.push(`baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is at or after ${previousTag.tag}`)
+  return { problems, messages }
+}
+
+function checkBaselineFreshness(baseline) {
+  const { problems, messages } = evaluateBaselineFreshness(baseline)
+  for (const problem of problems) fail(problem)
+  for (const message of messages) ok(message)
 }
 
 function baselineAtRef(ref) {
@@ -635,4 +648,7 @@ function main() {
   finish(startedAt)
 }
 
-main()
+export { evaluateBaselineFreshness, previousReleaseTag }
+
+const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1])
+if (invokedPath !== '' && invokedPath === fileURLToPath(import.meta.url)) main()
