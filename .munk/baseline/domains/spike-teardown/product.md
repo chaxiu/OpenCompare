@@ -8,7 +8,7 @@ spike 进程树收尾与发布前同镜像预演域：把「spike 失败路径�
 - **失败路径等待真实退出码**：`createWorld().launchApp` 在 `reason === 'process-exited'` 组装 diagnostics 之前 `await proc.waitForExit()`，之后才 `stopChild`；诊断字段与 step log 仍由 `stepDiagnostics` / `formatStepDiagnostics` 唯一产出（契约见 `domains/release-verify`）。
 - **单一收尾实现**：Linux 组信号 + SIGTERM→SIGKILL 升级 + 管道 / 监听释放只在 `spawnCapturedChild` / `stopChild` 一处实现，成功与失败路径共用；`process.exit` 只经脚本入口 `exitAfterFlush`。`waitForExit` 只做有界等待，不复制 kill 逻辑。
 - **预算固定**：`SPIKE_PROCESS_EXIT_BUDGET_MS=5000`、`SPIKE_TARGET_TIMEOUT_MS=60000`、`SPIKE_APP_SHELL_TIMEOUT_MS=60000` 不为治竞态调大；不新增固定 sleep、不加失败重试。
-- **稳定性 soak**：`scripts/spike-process-tree-soak.mjs`（`package.json#test:soak`）逐轮跑真实 `process-exited contract` 用例，默认 100 轮、`--rounds=N` 覆盖，逐轮与总耗时可见。
+- **稳定性 soak**：`scripts/spike-process-tree-soak.mjs`（`package.json#test:soak`）逐轮跑真实 `process-exited contract` 用例，默认 100 轮、`--rounds=N` 覆盖，`--filter=<pattern>` 只服务反向自测，逐轮与总耗时可见。用例选取与轮次判定一律走机器可读结果：轮次前 `pnpm exec vitest list <testFile> --json` 解析全量用例名，要求过滤串命中恰 1 条且等于契约用例全名；每轮用 `--reporter=json --outputFile=<临时文件>` 读回选中用例状态，不解析带 ANSI 的 `Tests 1 passed` 文本。
 - **发布前置腿**：`release.yml#gates` 的 `ubuntu-latest` 50 轮 soak 位于 `pnpm test` 之后、Coverage gate / `pnpm build` / Pre-create release 之前；只读 `.github/workflows/spike-process-tree-preflight.yml` 提供推 tag 前的同镜像预演。
 
 ## 验收
@@ -27,7 +27,11 @@ spike 进程树收尾与发布前同镜像预演域：把「spike 失败路径�
 - **ac-evidence-flushed-before-exit**：`exitAfterFlush` 只在模块入口（库函数零调用），先等 stdout / stderr drain，`SPIKE_EXIT_FLUSH_TIMEOUT_MS` 兜底；退出后 `spike.json` 可 parse、`spike-launch.log` 含启动行与 ≥1 条 `/json/list` 探针。
 - **ac-macos-parity**：macOS 不加 `detached`、启动描述与输出语义不变；`buildSpikeLaunchDescriptor` 与既有 macOS 记录字段零改动。
 - **ac-contract-kept**：失败路径断言仍严格为 `code===1`、`conclusion==='failed'`、`reason==='process-exited'`、`exitCode===0`、log 含 `process-exited`、grandchild 不存活；无 `.skip` / `.only` / 空 catch 吞断言 / 放宽比较。
-- **ac-spike-soak**：`node scripts/spike-process-tree-soak.mjs` 默认 100 轮运行失败路径用例，逐轮打印耗时并输出 `100/100 passed` 与总耗时；每轮必须命中恰 1 条用例（`Tests 1 passed`），任一轮红或零命中即非零退出并打印该轮输出。
+- **ac-spike-soak**：`node scripts/spike-process-tree-soak.mjs` 默认 100 轮运行失败路径用例，逐轮打印耗时并输出 `100/100 passed` 与总耗时；`pnpm test:soak -- --rounds=50` 输出 `50/50 passed`；任一轮红即非零退出并打印该轮输出。
+- **ac-soak-filter-hits-contract**：默认过滤串经 `vitest list src/spike-process-tree-gate.test.ts --json` 解析后恰好命中 1 条，全名为 `spike CLI teardown > reaps the tree and keeps the process-exited contract on the failure path`；解析结果不是该全名即非 0 退出并打印实际值与期望值。
+- **ac-soak-zero-match-hard-fail**：`--filter=` 命中 0 条或多于 1 条时脚本非 0 退出，打印命中数与过滤串，并逐行列出该测试文件当前全部可用用例名（至少含上述契约用例全名）；不得静默 pass，不得用 skip 掩盖。
+- **ac-soak-machine-readable-verdict**：命中判定只来自 `vitest list --json` 与每轮 `--reporter=json --outputFile=<临时文件>` 报告——选中用例状态必须为 `passed`、`numPassedTests === 1`、无 failed 用例；不依赖带 ANSI 的颜色摘要行，`CI=1 FORCE_COLOR=1` 下 `--rounds=1` 仍退出 0。
+- **ac-soak-scope-only**：本类修复只落在 `scripts/spike-process-tree-soak.mjs`；`src/spike-process-tree-gate.test.ts` 与进程树回收实现零 diff，不整文件重写测试，不新增依赖。
 - **ac-release-soak-leg**：`release.yml#gates` 在 `pnpm test` 之后、Coverage gate / `pnpm build` / Pre-create the tag's release 之前，存在 `ubuntu-latest` 上把该用例循环 ≥50 次（`pnpm test:soak -- --rounds=50`）的步骤，任一轮失败使 gates 失败；`pnpm test`、`release.needs='gates'`、finalize 与 publish 步骤及其顺序均不变。
 - **ac-pretag-preflight-workflow**：`.github/workflows/spike-process-tree-preflight.yml` 触发仅 `pull_request` + `workflow_dispatch`，`runs-on: ubuntu-latest`，`permissions: contents: read`，先跑完整 `src/spike-process-tree-gate.test.ts` 再循环该用例 ≥50 次，零 `secrets.*`、零 tag / release / upload / `gh` 写动作。
 - **ac-workflow-pinned**：`src/main/release-packaging.test.ts` 的 gates `pnpm` 步骤顺序断言与 `src/main/__fixtures__/release-packaging.json` 同步包含新增 soak 腿（`gates-soak-position` 钉 soak → Coverage → Pre-create），release 顺序、secret、upload 既有断言零改动。
@@ -56,7 +60,7 @@ spike 进程树收尾与发布前同镜像预演域：把「spike 失败路径�
 
 ## 最近交付证明
 
-- WI：`wi_intake_f6bb9fce2c16367e`（修复 spike 失败路径 `exitCode=null` 竞态 + 发布前置同镜像 soak，`kind: fix`）；日期：2026-11-04；`deliveryIntent: local merge`。
-- 结果：`code_gates` passed（29 门，attempt 001，`.munk/runs/run_intake_f6bb9fce2c16367e/code-gates/attempts/001`，`summary = "code_gates passed (29 gates, attempt 001)"`，`failedGateIds: []`）；`pnpm test` 135 files / 2177 passed + 1 skipped / 2178。
-- 改动面：`scripts/verify-release.mjs`（`waitForExit` + `launchApp` 在 `process-exited` 前等待 + catch 分支不再丢弃 diagnostics 前先收尾）、`.d.mts`、`src/spike-process-tree-gate.test.ts`（改为断言真实 `{code:0,signal:null}` 与 log 含 `exitCode=0`）、`scripts/spike-process-tree-soak.mjs` + `package.json#test:soak`、`release.yml#gates` soak 腿、只读 `spike-process-tree-preflight.yml`、`release-packaging.test.ts` + fixture 顺序钉板、`docs/lessons.md` 第 15 节。
-- 关键点：① 同步点从子进程 marker 改成父进程事件，`SPIKE_*` 预算与断言强度零放宽；② 等待只加在 `process-exited` 分支，成功路径与 SIGTERM→SIGKILL 收尾仍只有一份实现；③ 未完成证据：本 worktree 无 push / `gh auth`，真实 `ubuntu-latest` preflight / release soak run 未产出，`ac-spike-run-record` 标注为「待 Owner 授权 dispatch/PR 的未完成证据」；本地 100 轮 soak 亦未在交付阶段复跑，现有证据为 29 门全绿 + `test` 单次全量与 `spike-process-tree-gate` 11 例。
+- WI：`wi_intake_200a464da498c410`（`kind: fix`）——修 workflow_dispatch 预检腿 1：soak 选取改为机器可读判定，消除 ANSI 打断 `Tests 1 passed` 导致的 `ran no matching case` 恒红；日期：2026-11-05；`deliveryIntent: local merge`。
+- 改动面：仅 `scripts/spike-process-tree-soak.mjs`。默认过滤串钉为契约用例全名子串；轮次前 `vitest list --json` 要求命中恰 1 条且等于契约全名；每轮 `--reporter=json --outputFile` 校验选中用例 `passed` + `numPassedTests===1` + 无 failed；命中 0 / >1 打印全部可用用例名并非 0 退出；新增 `--filter=` 反向自测口。`src/**`、测试文件、`.github/workflows/**`、进程树回收实现零 diff。
+- 证据（绝对路径 `.munk/changes/wi_intake_200a464da498c410/evidence/`）：`pnpm test:soak -- --rounds=50` 退出 0、`50/50 passed (total 21.20s)`（`soak-50-rounds.log`）；`--rounds=1` 与 `CI=1 FORCE_COLOR=1` 均退出 0（`soak-ansi-proof.log`）；`--filter=no-such-case` 退出 1、`matched 0 cases` + 11 条可用用例名（`soak-zero-match.log`）；`--filter='reaps the tree'` 退出 1、`matched 2 cases`（`soak-multi-match.log`）。
+- 未闭环项：真实 `ubuntu-latest` preflight run 仍未产出（本 worktree 无 push / dispatch），`ac-spike-run-record` 仍标注为待 Owner 授权。
