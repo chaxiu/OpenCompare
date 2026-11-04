@@ -1,0 +1,19 @@
+{
+  "commit": "11170a5d300b5318c320913eaf6fea54ac510173",
+  "capturedAt": "2026-11-04T17:06:57.558Z",
+  "fourStateCounts": {
+    "same": 6,
+    "added": 4,
+    "removed": 4,
+    "modified": 5
+  },
+  "ignoreSwitches": {
+    "ignoreWhitespace": false,
+    "ignoreNewline": true,
+    "ignoreEncoding": true
+  },
+  "directoryHtml": {
+    "bytes": 5367,
+    "sha256": "8cfacec99138c21ef24b5eead14d4171ec4f4d657e815f1b8ba888bfc830a69b"
+  }
+}

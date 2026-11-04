@@ -3,6 +3,7 @@ import type { DragEvent as ReactDragEvent, FormEvent, JSX, KeyboardEvent } from 
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { ToolbarButton } from '@renderer/components/Button'
+import { Checkbox } from '@renderer/components/Checkbox'
 import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
 import { formatBytes } from '@renderer/components/utils'
@@ -560,16 +561,14 @@ export function TemplateDialog({
     return (
       <div className="flex h-6 items-center gap-2 px-2" data-template-row title={entry.relativePath}>
         {selectable ? (
-          <input
-            type="checkbox"
-            className="size-4 shrink-0 accent-accent"
-            aria-label={t('directory.template.checkSlot', { path: entry.relativePath })}
+          <Checkbox
+            label={t('directory.template.checkSlot', { path: entry.relativePath })}
             checked={checked.has(entry.relativePath) && (entry.outcome !== 'conflict' || choice !== undefined)}
             onChange={() => toggleChecked(entry.relativePath)}
             disabled={blocked || (entry.outcome === 'conflict' && choice === undefined)}
           />
         ) : (
-          <span aria-hidden className="size-4 shrink-0" />
+          <span aria-hidden className="h-4 w-7 shrink-0" />
         )}
         {shownSource !== null ? (
           <>
@@ -600,10 +599,8 @@ export function TemplateDialog({
           </span>
         ) : null}
         {selectable ? (
-          <input
-            type="checkbox"
-            className="size-4 shrink-0 accent-accent"
-            aria-label={t('directory.template.moveCheck', { path: entry.relativePath })}
+          <Checkbox
+            label={t('directory.template.moveCheck', { path: entry.relativePath })}
             checked={action === 'move'}
             onChange={() => toggleMove(entry.relativePath)}
             disabled={blocked || !movable}
@@ -634,7 +631,7 @@ export function TemplateDialog({
             </select>
           </>
         ) : null}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span className="ml-auto flex shrink-0 items-center gap-2">
           {rejection !== undefined ? (
             <span className="text-2xs text-danger">{t(REJECTION_KEYS[rejection])}</span>
           ) : entry.overwrite ? (

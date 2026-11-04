@@ -33,6 +33,7 @@
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
     "screenshots": "electron-vite build && node scripts/capture-readme-screenshots.mjs",
+    "visual:baseline": "electron-vite build && node scripts/capture-visual-baseline.mjs",
     "test:cancel": "vitest run src/cancel-gate.test.ts",
     "test:memory": "vitest run src/memory-gate.test.ts",
     "test:structured": "vitest run src/structured-semantics-gate.test.ts",

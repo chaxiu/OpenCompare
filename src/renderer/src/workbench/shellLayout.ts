@@ -92,7 +92,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     paddingY: 'py-0',
     gap: 'gap-2',
     stackGap: 'gap-0',
-    controlHeight: 'h-6'
+    controlHeight: 'h-[var(--height-control-sm)]'
   },
   sessions: {
     height: 'h-9',
@@ -100,7 +100,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     paddingY: 'py-0',
     gap: 'gap-2',
     stackGap: 'gap-0',
-    controlHeight: 'h-7'
+    controlHeight: 'h-[var(--height-control-sm)]'
   },
   events: {
     height: 'h-7',
@@ -108,7 +108,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     paddingY: 'py-0',
     gap: 'gap-3',
     stackGap: 'gap-0',
-    controlHeight: 'h-6'
+    controlHeight: 'h-[var(--height-control-sm)]'
   },
   'view-toolbar': {
     height: 'h-7',
@@ -116,7 +116,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     paddingY: 'py-0.5',
     gap: 'gap-2',
     stackGap: 'gap-1.5',
-    controlHeight: 'h-6'
+    controlHeight: 'h-[var(--height-control-sm)]'
   },
   panels: {
     height: 'h-8',
@@ -124,7 +124,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     paddingY: 'py-2',
     gap: 'gap-2',
     stackGap: 'gap-2',
-    controlHeight: 'h-6'
+    controlHeight: 'h-[var(--height-control-sm)]'
   },
   status: {
     height: 'h-8',
@@ -132,7 +132,7 @@ export const SHELL_LEVELS: Record<ShellLevel, ShellLevelMetrics> = {
     paddingY: 'py-0',
     gap: 'gap-3',
     stackGap: 'gap-0',
-    controlHeight: 'h-6'
+    controlHeight: 'h-[var(--height-control-sm)]'
   }
 }
 

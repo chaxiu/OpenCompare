@@ -34,12 +34,13 @@ export function DiffBadge({
   return (
     <span
       className={cx(
-        'inline-flex shrink-0 items-center rounded-xs border px-1 text-2xs leading-4',
+        'inline-flex h-5 shrink-0 items-center gap-1 rounded-xs px-2 text-2xs leading-none',
         DIFF_BADGE_CLASSES[status],
         className
       )}
     >
-      {t(labelKeys[status])}
+      <DiffDot status={status} />
+      <span className="whitespace-nowrap">{t(labelKeys[status])}</span>
     </span>
   )
 }

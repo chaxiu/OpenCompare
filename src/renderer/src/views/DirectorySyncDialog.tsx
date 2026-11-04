@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { UI_ICON_ACTIONS } from '@renderer/assets/icons'
 import { ToolbarButton } from '@renderer/components/Button'
+import { Checkbox } from '@renderer/components/Checkbox'
 import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
 import { formatBytes } from '@renderer/components/utils'
@@ -242,15 +243,13 @@ export function DirectorySyncDialog({
                       key={item.relativePath}
                       className="flex items-center gap-2 px-2 py-1 odd:bg-surface-sunken/40"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        label={t('directory.sync.deleteItem', {
+                          path: item.relativePath
+                        })}
                         checked={selected.has(item.relativePath)}
                         onChange={() => toggle(item.relativePath)}
                         disabled={busy}
-                        aria-label={t('directory.sync.deleteItem', {
-                          path: item.relativePath
-                        })}
-                        className="size-4 shrink-0 accent-danger"
                       />
                       <span className="truncate font-mono text-xs text-content-secondary">
                         {item.relativePath}

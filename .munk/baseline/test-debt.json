@@ -1,19 +1,19 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "e079a5ef7c29d79fd6113005278f5e7853a7ace7",
-    "date": "2026-11-04"
+    "commit": "036fd8f7eee5dbf1421e50e82a71b346dcb3f60e",
+    "date": "2026-11-05"
   },
   "ceilings": {
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 48671
+    "repoTestLines": 49021
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1643
+    "repoTestCases": 1677
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 48335,
-      "to": 48671,
-      "reason": "add the dedicated history-safety gate: pure assertions for history entry add / dedupe / single removal / trim, the mixed-kind 20-record cap, bad path preflight with the leftmost failing side, the switch serialization roundtrip and reopen argument parsing, plus the manifest pin for the gate that also runs the existing historySafety and historyHome jsdom suites",
-      "addedCases": 13
+      "from": 48671,
+      "to": 49021,
+      "reason": "add the visual-foundation token and control contracts: read main.css for the type scale, spacing base, radii, control heights and both theme palettes (including the 12% chip tints and the light desaturation literals), prove the pre-token baseline commit is in history and still carries the old stylesheet, and pin the 32px button / 28x16 toggle / 20px chip / 30px tab contracts plus the spacing scan over the files this item touched",
+      "addedCases": 34
     }
   ]
 }

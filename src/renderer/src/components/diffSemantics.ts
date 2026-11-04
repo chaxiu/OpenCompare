@@ -28,9 +28,9 @@ export const DIFF_DOT_CLASSES: Record<DiffStatus, string> = {
 }
 
 export const DIFF_BADGE_CLASSES: Record<DiffStatus, string> = {
-  same: 'border-line-strong text-diff-same',
-  added: 'border-diff-added/40 bg-diff-added-soft text-diff-added',
-  removed: 'border-diff-removed/40 bg-diff-removed-soft text-diff-removed',
-  modified: 'border-diff-modified/40 bg-diff-modified-soft text-diff-modified',
-  conflict: 'border-diff-conflict/45 bg-diff-conflict-soft text-diff-conflict'
+  same: 'bg-surface-sunken text-diff-same',
+  added: 'bg-diff-added-soft text-diff-added',
+  removed: 'bg-diff-removed-soft text-diff-removed',
+  modified: 'bg-diff-modified-soft text-diff-modified',
+  conflict: 'bg-diff-conflict-soft text-diff-conflict'
 }

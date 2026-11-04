@@ -52,10 +52,10 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
             data-session-tab={tab.id}
             style={{ maxWidth: `${budget.tabMaxWidthPx}px` }}
             className={cx(
-              'transition-fast relative flex h-7 shrink-0 items-center rounded-sm border',
+              'transition-fast relative flex h-[30px] shrink-0 items-center rounded-sm',
               active
-                ? 'border-line-strong bg-surface-overlay text-content-primary'
-                : 'border-transparent text-content-muted hover:bg-surface-raised hover:text-content-secondary'
+                ? 'text-content-primary'
+                : 'text-content-muted hover:bg-surface-raised hover:text-content-secondary'
             )}
           >
             <button
@@ -68,7 +68,7 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
               aria-description={tab.dirty ? t('common.unsavedChanges') : undefined}
               title={fullLabel}
               onClick={() => onSelect(tab.id)}
-              className="focus-ring flex h-full min-w-0 items-center gap-2 rounded-sm px-2.5 text-xs whitespace-nowrap"
+              className="focus-ring flex h-full min-w-0 items-center gap-2 rounded-sm px-3 text-xs whitespace-nowrap"
             >
               {tab.icon}
               <span data-tab-part="title" className="min-w-0 truncate font-medium">
@@ -90,7 +90,7 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
                 </>
               ) : null}
               {active ? (
-                <span aria-hidden className="absolute inset-x-2 -bottom-px h-px bg-accent" />
+                <span aria-hidden className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent" />
               ) : null}
             </button>
             {onClose ? (
@@ -98,7 +98,7 @@ export function SessionTabs({ tabs, activeId, onSelect, onClose }: SessionTabsPr
                 label={t('common.closeTitle', { title: tab.title })}
                 icon={<Icon name={UI_ICON_ACTIONS.close} />}
                 onClick={() => onClose(tab.id)}
-                className="mr-0.5"
+                className="mr-1"
               />
             ) : null}
           </div>

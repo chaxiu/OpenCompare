@@ -27,7 +27,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-md border border-line-subtle bg-surface-sunken p-0.5"
+      className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-md border border-line-subtle bg-surface-sunken p-1"
     >
       {options.map((option) => {
         const active = option.value === value
@@ -40,14 +40,17 @@ export function SegmentedControl<T extends string>({
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
-              'focus-ring transition-fast inline-flex h-6 shrink-0 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium whitespace-nowrap disabled:pointer-events-none disabled:opacity-40',
+              'focus-ring transition-fast relative inline-flex h-[30px] shrink-0 items-center gap-2 rounded-sm px-3 text-xs font-medium whitespace-nowrap disabled:pointer-events-none disabled:opacity-40',
               active
-                ? 'bg-surface-hover text-content-primary shadow-panel'
+                ? 'text-content-primary'
                 : 'text-content-secondary hover:bg-surface-overlay hover:text-content-primary'
             )}
           >
             {option.icon}
             {option.label}
+            {active ? (
+              <span aria-hidden className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent" />
+            ) : null}
           </button>
         )
       })}
