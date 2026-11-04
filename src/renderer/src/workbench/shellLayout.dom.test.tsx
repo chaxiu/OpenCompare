@@ -5,6 +5,7 @@ import { ICON_NAMES, ICON_SIZES, strokeWidthFor } from '@renderer/assets/icons'
 import type { IconSize } from '@renderer/assets/icons'
 import { translate } from '@renderer/i18n/context'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
+import { DIRECTORY_STATUS_LABEL_KEYS } from '@renderer/views/directoryCopy'
 import { Workbench } from './Workbench'
 import {
   SHELL_ENTRIES,
@@ -13,11 +14,13 @@ import {
   SHELL_LEVEL_ORDER,
   TIER_WIDTHS,
   TOOLBAR_ROWS,
+  directoryToolbarRowClasses,
   entriesFor,
   entryPresentation,
   levelBandClasses,
   levelHeaderClasses,
   levelRowClasses,
+  measureDirectoryToolbar,
   measureStatusBar,
   statusBarClasses
 } from './shellLayout'
@@ -206,7 +209,7 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     hasClasses(toolbar, levelBandClasses('view-toolbar'))
     const rows = Array.from(toolbar.children)
     expect(rows.length).toBe(1)
-    for (const row of rows) hasClasses(row, levelRowClasses('view-toolbar'))
+    for (const row of rows) hasClasses(row, directoryToolbarRowClasses())
 
     const panels = levelElement(container, 'panels')
     hasClasses(panels, levelBandClasses('panels'))
@@ -235,16 +238,20 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     }
   })
 
-  it('keeps every toolbar row on one line', async () => {
+  it('keeps the app head on one line and lets the directory row wrap', async () => {
     const { container } = renderShell()
     await loadSamples()
 
-    for (const level of ['app', 'view-toolbar'] as const) {
-      const element = levelElement(container, level)
-      const wrapping = Array.from(element.querySelectorAll('[class*="flex-wrap"]'))
-      expect(wrapping).toEqual([])
-      expect(classList(element).some((token) => token.startsWith('flex-wrap'))).toBe(false)
+    const app = levelElement(container, 'app')
+    expect(classList(app).some((token) => token.startsWith('flex-wrap'))).toBe(false)
+    for (const child of Array.from(app.children)) {
+      expect(classList(child).some((token) => token.startsWith('flex-wrap'))).toBe(false)
     }
+
+    const toolbarRow = levelElement(container, 'view-toolbar').children[0]
+    expect(classList(toolbarRow).some((token) => token.startsWith('flex-wrap'))).toBe(true)
+    expect(classList(toolbarRow)).toContain('min-h-8')
+    expect(classList(toolbarRow)).not.toContain('overflow-x-auto')
 
     for (const level of ['sessions', 'panels'] as const) {
       const element = levelElement(container, level)
@@ -271,14 +278,14 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     const rows = Array.from(toolbar.children)
     expect(rows.length).toBe(1)
     const [row] = rows
-    hasClasses(row, levelRowClasses('view-toolbar'))
+    hasClasses(row, directoryToolbarRowClasses())
     // jsdom cannot measure scrollWidth, so the contract is asserted on tokens:
-    // the row is a plain flex row, never a horizontal scroller or wrapper.
+    // the row wraps its lines and never opens a horizontal scroll channel.
+    expect(classList(row)).toContain('flex-wrap')
+    expect(classList(row)).toContain('min-h-8')
     expect(classList(row)).not.toContain('overflow-x-auto')
     expect(classList(row)).not.toContain('scrollbar-none')
-    expect(classList(row).some((token) => token.startsWith('flex-wrap'))).toBe(false)
     expect(classList(row).filter((token) => token.includes(':'))).toEqual([])
-    expect(Array.from(toolbar.querySelectorAll('[class*="flex-wrap"]'))).toEqual([])
 
     // Directory row shape: filter segmented → one solid primary action → more.
     const filterGroup = screen.getByRole('tablist', { name: zh('directory.filter.group') })
@@ -292,6 +299,22 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     )
     expect(primary.length).toBe(1)
     expect(primary[0].getAttribute('data-shell-entry')).toBe('sync')
+
+    // Collapsing only hides copy: every chip keeps its accessible status word.
+    const legend = container.querySelector('[data-shell-legend]')
+    if (!(legend instanceof HTMLElement)) throw new Error('missing directory legend')
+    const chips = Array.from(legend.querySelectorAll('[data-legend-status]'))
+    expect(chips.length).toBeGreaterThan(0)
+    for (const chip of chips) {
+      const status = chip.getAttribute('data-legend-status') as keyof typeof DIRECTORY_STATUS_LABEL_KEYS
+      const statusLabel = zh(DIRECTORY_STATUS_LABEL_KEYS[status])
+      expect(chip.textContent ?? '').not.toContain(statusLabel)
+      expect(chip.getAttribute('title')).toBe(statusLabel)
+      expect(chip.getAttribute('aria-label') ?? '').toContain(statusLabel)
+    }
+    const sync = primary[0]
+    expect(sync.textContent ?? '').toBe('')
+    expect(sync.getAttribute('aria-label')).toBe(zh('directory.toolbar.previewSync'))
 
     // Secondary directory actions stay reachable through the "more" menu.
     fireEvent.click(screen.getByRole('button', { name: zh('shell.toolbar.more') }))
@@ -316,6 +339,34 @@ describe.each(TIERS)('workbench shell at the %s tier', (tier) => {
     expect(container.querySelectorAll('[data-shell-entry="sync"]').length).toBe(1)
     expect(container.querySelector('[data-shell-entry="template"]')).toBeNull()
     expect(container.querySelector('[data-shell-entry="snapshot-export"]')).toBeNull()
+  })
+
+  it('keeps the legend words and sync copy at the wide reference width', async () => {
+    setWindowWidth(1920)
+    const { container } = renderShell()
+    await loadSamples()
+
+    const layout = measureDirectoryToolbar(1920, 'zh')
+    expect(layout).toMatchObject({ rows: 1, legendLabels: true, syncLabel: true })
+
+    // Every inline entry stays on the row, with or without copy.
+    const toolbarRow = levelElement(container, 'view-toolbar').firstElementChild as HTMLElement
+    expect(toolbarRow.querySelectorAll('[role="tab"]').length).toBe(9)
+    expect(toolbarRow.querySelector('[data-shell-entry="filter"]')).not.toBeNull()
+    expect(toolbarRow.querySelector('[data-shell-entry="sync"]')).not.toBeNull()
+    expect(toolbarRow.querySelector('[data-shell-entry="more"]')).not.toBeNull()
+
+    const legend = container.querySelector('[data-shell-legend]')
+    if (!(legend instanceof HTMLElement)) throw new Error('missing directory legend')
+    for (const chip of Array.from(legend.querySelectorAll('[data-legend-status]'))) {
+      const status = chip.getAttribute('data-legend-status') as keyof typeof DIRECTORY_STATUS_LABEL_KEYS
+      expect(chip.textContent ?? '').toContain(zh(DIRECTORY_STATUS_LABEL_KEYS[status]))
+      expect(chip.getAttribute('title')).toBeNull()
+    }
+    const sync = container.querySelector('[data-shell-entry="sync"]')
+    if (!(sync instanceof HTMLElement)) throw new Error('missing sync action')
+    expect(sync.textContent).toBe(zh('directory.toolbar.previewSync'))
+    expect(sync.getAttribute('aria-label')).toBeNull()
   })
 
   it('renders every entry once with the presentation the table declares', async () => {

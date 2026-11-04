@@ -7,7 +7,7 @@ used.
 
 ## Captured commit
 
-- commit: `3b8cfe31af47208a048f3b7918d1b5df31ff5c54`
+- commit: `ade5a1f199c51f5d966dd8ba1c59430a918ae411`
 - both images were rebuilt on a clean working tree at exactly that commit
   (the tracked tree was clean — `git status --porcelain` showed only the
   documentation files added after the capture — and `HEAD` equalled this commit
@@ -24,17 +24,17 @@ used.
 ## Rebuild evidence
 
 The rebuild on the clean tree above printed
-`wrote docs/assets/opencompare-workbench.png (240392 bytes)` and
-`wrote docs/assets/opencompare-file-diff.png (297377 bytes)`. Both rebuilt files
+`wrote docs/assets/opencompare-workbench.png (244495 bytes)` and
+`wrote docs/assets/opencompare-file-diff.png (297855 bytes)`. Both rebuilt files
 differ from the previously committed images (`git diff` reports binary changes
 for both), so the rebuilt PNGs replaced the old ones — the rebuild followed the
-shell-tightening change (32 / 28 / 36 / 24 band, one-row toolbars, 28px tree rows
-and 22px code rows).
+narrow-window directory toolbar model (collapsible legend copy, wrapping row) and
+the light-theme legend contrast hardening (dark tokens unchanged).
 
 | Image | Previous sha256 | Rebuilt sha256 (committed) |
 | --- | --- | --- |
-| `docs/assets/opencompare-workbench.png` | `3965477a752c47076e44c722762505b6c5f841d97b3b80ef3edd9914386dfd22` | `0c395dadbc2c36047bd97a3c2eb18bbc274fa2b2924f73b63d5388328f24977d` |
-| `docs/assets/opencompare-file-diff.png` | `a99c6082cc19dc2c0140d97d6ac32e7e78d34a646bb4f230ed87ffb3ed7bef84` | `d09d8b3e6e4be66cd80b3c325b4198a001ca5947fbf45b56923a1751662d88dd` |
+| `docs/assets/opencompare-workbench.png` | `0c395dadbc2c36047bd97a3c2eb18bbc274fa2b2924f73b63d5388328f24977d` | `94fec62e80d6aa504a951f5fdb419ea9da63a7a17540139c378f4480c0f126d0` |
+| `docs/assets/opencompare-file-diff.png` | `d09d8b3e6e4be66cd80b3c325b4198a001ca5947fbf45b56923a1751662d88dd` | `3b1151c83a3bfe3fdf09590d2598b0eec186e5ee91f86bd90b22f1817d067cc7` |
 
 `src/main/release-artifacts-and-brand.test.ts` guards this record: the captured
 commit must resolve, be an ancestor of `HEAD`, and leave `src/renderer` with a

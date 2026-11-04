@@ -98,19 +98,31 @@
 | `--color-danger` | `#e55d57` | 破坏性确认 |
 | `--color-danger-strong` | `#d24a44` | 破坏性 hover |
 | `--color-danger-soft` | `#fdecee` | 破坏性底 |
-| `--color-diff-same` | `#818890` | 相同 |
-| `--color-diff-added` | `#419b4e` | 仅右 / 新增 |
-| `--color-diff-removed` | `#e55d57` | 仅左 / 删除 |
-| `--color-diff-modified` | `#ad832d` | 修改 |
-| `--color-diff-conflict` | `#b08324` | 冲突（沿用修改色族） |
-| `--color-diff-added-soft` | `#e8f3ea` | 新增底 |
-| `--color-diff-removed-soft` | `#fceceb` | 删除底 |
-| `--color-diff-modified-soft` | `#f5f0e6` | 修改底 |
-| `--color-diff-conflict-soft` | `#f6f0e5` | 冲突底 |
+| `--color-diff-same` | `#63696f` | 相同 |
+| `--color-diff-added` | `#32773c` | 仅右 / 新增 |
+| `--color-diff-removed` | `#b04843` | 仅左 / 删除 |
+| `--color-diff-modified` | `#856523` | 修改 |
+| `--color-diff-conflict` | `#88651c` | 冲突（沿用修改色族） |
+| `--color-diff-added-soft` | `#e6efe8` | 新增底 |
+| `--color-diff-removed-soft` | `#f6e9e8` | 删除底 |
+| `--color-diff-modified-soft` | `#f0ede5` | 修改底 |
+| `--color-diff-conflict-soft` | `#f1ede4` | 冲突底 |
 
 取整依据：亮色语义色保持暗色同名 token 的 HSV 色相（角差 ≤ 12°），饱和度下降 10–15%，
-明度取同时满足「对 `#ffffff` 与各自 soft 底 ≥ 3.0」「四态两两 ΔE ≥ 12」的最亮值，
-再按 sRGB 十六进制取整；`--color-diff-same` 因接近中性灰，取 `#818890`（饱和度下降 13.4%）。
+明度取同时满足「对 `#ffffff` ≥ 3.0」「四态两两 ΔE ≥ 12」的最亮值，再按 sRGB 十六进制取整。
+图例 chip 为 11–13px 小字，故 chip 底（`same` 用 `surface-sunken`，其余用同名 soft）上的对比度
+另取 ≥ 4.5:1，这一条决定最终明度：
+
+| 状态 | 前景 | chip 底 | 对比度 | 对 `#ffffff` | 与其余三态 ΔE76 最小 |
+| --- | --- | --- | --- | --- | --- |
+| `same` | `#63696f` | `surface-sunken` `#eceef3` | 4.79:1 | 5.56:1 | 45.3 |
+| `added` | `#32773c` | `#e6efe8` | 4.66:1 | 5.47:1 | 43.6 |
+| `removed` | `#b04843` | `#f6e9e8` | 4.60:1 | 5.45:1 | 39.7 |
+| `modified` | `#856523` | `#f0ede5` | 4.62:1 | 5.41:1 | 39.7 |
+| `conflict` | `#88651c` | `#f1ede4` | 4.58:1 | 5.35:1 | —（同 modified 色族 3.6） |
+
+soft 底随前景按「语义色 12% 叠 `#ffffff`」重算（`#e6efe8` / `#f6e9e8` / `#f0ede5` / `#f1ede4`），
+这是前景改深后的派生值；暗色块五个 `--color-diff-*` 与上一版逐字节相同。
 
 ### 1.3 控件三件套
 

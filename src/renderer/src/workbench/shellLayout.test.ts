@@ -6,6 +6,7 @@ import {
   REFERENCE_VIEWPORT_HEIGHT_PX,
   contentRowBudget,
   controlPresentation,
+  DIRECTORY_TOOLBAR_WIDTHS,
   HEIGHT_PX,
   SHELL_ENTRIES,
   SHELL_ENTRY_IDS,
@@ -16,6 +17,7 @@ import {
   TIER_WIDTHS,
   TOOLBAR_ROWS,
   chromeHeightPx,
+  directoryToolbarRowClasses,
   entriesFor,
   entryPresentation,
   levelBandClasses,
@@ -23,6 +25,7 @@ import {
   levelHeightPx,
   levelRowClasses,
   mainContentHeightPx,
+  measureDirectoryToolbar,
   measureStatusBar,
   measureToolbar,
   resolveWidthTier,
@@ -334,8 +337,9 @@ describe('toolbar width budgets', () => {
     expect(controlPresentation('merge-open-sides', 'compact')).toBe('icon-only')
     expect(controlPresentation('merge-copy', 'compact')).toBe('icon-only')
     expect(controlPresentation('merge-open-sides', 'regular')).toBe('label')
-    // A row control that has no icon must keep its copy at every width.
-    expect(controlPresentation('legend', 'compact')).toBe('label')
+    // The legend drops its status words on compact; the directory model below
+    // is the real per-width ladder, this table only keeps the tier budget.
+    expect(controlPresentation('legend', 'compact')).toBe('icon-only')
     expect(() => controlPresentation('no-such-control', 'compact')).toThrow()
   })
 
@@ -387,6 +391,74 @@ describe('toolbar width budgets', () => {
       'save'
     ])
     expect(viewToolbarRows('code-diff')).toBe(1)
+  })
+})
+
+describe('directory toolbar layout model', () => {
+  const WIDTHS = [960, 1024, 1280, 1440, 1920] as const
+  const LOCALES = ['zh', 'en'] as const
+
+  it('fits every rendered line at each acceptance width and locale', () => {
+    for (const width of WIDTHS) {
+      for (const locale of LOCALES) {
+        const layout = measureDirectoryToolbar(width, locale)
+        expect(layout.lines.length, `${locale}@${width} lines`).toBe(layout.rows)
+        for (const line of layout.lines) {
+          expect(line, `${locale}@${width} line`).toBeLessThanOrEqual(layout.available)
+        }
+        expect(layout.required).toBe(Math.max(...layout.lines))
+        expect(layout.required).toBeLessThanOrEqual(layout.available)
+      }
+    }
+  })
+
+  it('keeps the 1024 zh reference and every wide zh width on one 36px row', () => {
+    for (const width of [1024, 1280, 1440, 1920] as const) {
+      const layout = measureDirectoryToolbar(width, 'zh')
+      expect(layout.rows, `zh@${width}`).toBe(1)
+      expect(toolbarBandHeightPx(layout.rows)).toBe(36)
+    }
+    // The wide row still carries the legend status words at the 1280 reference.
+    expect(measureDirectoryToolbar(1280, 'zh').legendLabels).toBe(true)
+  })
+
+  it('follows the fixed ladder: legend words, sync copy, then wrapping', () => {
+    expect(measureDirectoryToolbar(1920, 'zh').collapse).toBe('none')
+    expect(measureDirectoryToolbar(1024, 'zh').collapse).toBe('legend')
+    expect(measureDirectoryToolbar(960, 'zh').collapse).toBe('sync')
+    expect(measureDirectoryToolbar(960, 'en').collapse).toBe('wrap')
+
+    const wrapped = measureDirectoryToolbar(960, 'en')
+    expect(wrapped.rows).toBe(2)
+    expect(wrapped.legendLabels).toBe(false)
+    expect(wrapped.syncLabel).toBe(false)
+    expect(toolbarBandHeightPx(wrapped.rows)).toBe(72)
+    expect(toolbarBandHeightPx(wrapped.rows)).toBe(levelHeightPx('view-toolbar') * wrapped.rows)
+  })
+
+  it('derives the wrapped band height from the row count', () => {
+    expect(toolbarBandHeightPx(1)).toBe(36)
+    expect(toolbarBandHeightPx(2)).toBe(72)
+    expect(toolbarBandHeightPx(2)).toBe(levelHeightPx('view-toolbar') * 2)
+  })
+
+  it('renders a wrapping row with no horizontal scroll channel', () => {
+    const tokens = directoryToolbarRowClasses().split(' ')
+    expect(tokens).toContain('flex')
+    expect(tokens).toContain('flex-wrap')
+    expect(tokens).toContain('min-h-8')
+    expect(tokens).not.toContain('h-8')
+    expect(tokens.some((token) => token.startsWith('overflow'))).toBe(false)
+    expect(tokens.some((token) => token.includes(':'))).toBe(false)
+  })
+
+  it('reserves four legend digits so count changes never move the ladder', () => {
+    for (const locale of LOCALES) {
+      const widths = DIRECTORY_TOOLBAR_WIDTHS[locale]
+      expect(widths.legend).toBeGreaterThan(widths.legendCollapsed)
+      expect(widths.sync).toBeGreaterThan(widths.syncCollapsed)
+      expect(widths.legendCollapsed).toBeGreaterThan(0)
+    }
   })
 })
 

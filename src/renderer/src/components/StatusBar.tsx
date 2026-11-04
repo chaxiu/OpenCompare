@@ -51,30 +51,38 @@ export function StatusEntry({
 /** Diff-semantic answer-key counts of the active sample session. */
 export function CompositionLegend({
   composition,
-  labelKeys = DIFF_LABEL_KEYS
+  labelKeys = DIFF_LABEL_KEYS,
+  showLabels = true
 }: {
   readonly composition: SampleComposition
   /** Optional vocabulary override; defaults to the shared text-diff words. */
   readonly labelKeys?: Record<DiffStatus, MessageKey>
+  /** False keeps the dot and count but drops the status word (collapsed row). */
+  readonly showLabels?: boolean
 }): JSX.Element {
   const { t } = useI18n()
   return (
     <span data-shell-legend className="flex shrink-0 items-center gap-3">
       {DIFF_STATUSES.filter((status) => status !== 'conflict' || composition.conflict > 0).map(
-        (status) => (
-          <span
-            key={status}
-            data-legend-status={status}
-            className={cx(
-              'flex h-5 items-center gap-1 rounded-xs px-2 whitespace-nowrap',
-              DIFF_BADGE_CLASSES[status]
-            )}
-          >
-            <DiffDot status={status} />
-            <span className="tabular font-mono">{composition[status]}</span>
-            <span>{t(labelKeys[status])}</span>
-          </span>
-        )
+        (status) => {
+          const label = t(labelKeys[status])
+          return (
+            <span
+              key={status}
+              data-legend-status={status}
+              title={showLabels ? undefined : label}
+              aria-label={showLabels ? undefined : `${composition[status]} ${label}`}
+              className={cx(
+                'flex h-5 items-center gap-1 rounded-xs px-2 whitespace-nowrap',
+                DIFF_BADGE_CLASSES[status]
+              )}
+            >
+              <DiffDot status={status} />
+              <span className="tabular font-mono">{composition[status]}</span>
+              {showLabels ? <span>{label}</span> : null}
+            </span>
+          )
+        }
       )}
     </span>
   )

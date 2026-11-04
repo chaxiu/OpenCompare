@@ -8,12 +8,12 @@
     "appTestLines": 2959,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 49338
+    "repoTestLines": 49566
   },
   "floors": {
     "appTestCases": 94,
     "syncRealGateCases": 32,
-    "repoTestCases": 1689
+    "repoTestCases": 1698
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 49021,
-      "to": 49338,
-      "reason": "add the shell-tightening coverage for this item: one-row toolbar band and overflow reachability, 24px status bar and encoding dedupe, address-bar copy through PlatformPort, active-panel indicator, 28px tree rows and 22px code rows, 2px ruler track plus viewport rectangle, and the before/after evidence contract; dedupe the repeated jsdom viewport and more-menu scaffolding into src/test helpers so the net test growth stays under the declared allowance",
-      "addedCases": 12
+      "from": 49338,
+      "to": 49566,
+      "reason": "add narrow-window directory-toolbar and light-legend contrast coverage for this item: the per-locale pure width model and fixed legend-label -> sync-copy -> wrap ladder over 960/1024/1280/1440/1920 x zh/en, the wrapped band height and no-overflow row-class contract, the collapse-only-hides-copy chip aria/title contract, the five-chip 4.5:1 light-theme contrast assertion read from main.css, and the 1920 viewport fixtures the default jsdom width forced",
+      "addedCases": 9
     }
   ]
 }

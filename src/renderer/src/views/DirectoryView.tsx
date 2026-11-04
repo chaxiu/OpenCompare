@@ -28,7 +28,12 @@ import type {
   TemplatePreviewFailure,
   TemplateRoots
 } from '@renderer/workbench/directoryOps'
-import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
+import {
+  directoryToolbarRowClasses,
+  levelBandClasses,
+  measureDirectoryToolbar
+} from '@renderer/workbench/shellLayout'
+import { useWindowWidth } from '@renderer/workbench/useWidthTier'
 import type { SidePosition } from '@renderer/workbench/snapshotOps'
 import { DirectorySyncDialog } from './DirectorySyncDialog'
 import {
@@ -143,7 +148,9 @@ export function DirectoryView({
   onCancelTemplate,
   onConfirmTemplate
 }: DirectoryViewProps): JSX.Element {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
+  const windowWidth = useWindowWidth()
+  const toolbar = measureDirectoryToolbar(windowWidth, language)
   const [direction, setDirection] = useState<SyncDirection>('left-to-right')
   const [mode, setMode] = useState<SyncMode>('incremental')
   const leftInputRef = useRef<HTMLInputElement>(null)
@@ -310,7 +317,7 @@ export function DirectoryView({
           levelBandClasses('view-toolbar')
         )}
       >
-        <div className={cx('flex w-full items-center min-w-0', levelRowClasses('view-toolbar'))}>
+        <div className={directoryToolbarRowClasses()}>
           <span data-shell-entry="filter" className="flex shrink-0 items-center">
             <SegmentedControl
               label={t('directory.filter.group')}
@@ -322,6 +329,7 @@ export function DirectoryView({
           <CompositionLegend
             composition={visibleCounts}
             labelKeys={DIRECTORY_STATUS_LABEL_KEYS}
+            showLabels={toolbar.legendLabels}
           />
           <SegmentedControl
             label={t('directory.sync.direction')}
@@ -343,8 +351,9 @@ export function DirectoryView({
             onClick={() => onPreviewSync(direction, mode)}
             disabled={busy}
             title={t('directory.toolbar.previewSyncTitle')}
+            aria-label={toolbar.syncLabel ? undefined : t('directory.toolbar.previewSync')}
           >
-            {t('directory.toolbar.previewSync')}
+            {toolbar.syncLabel ? t('directory.toolbar.previewSync') : null}
           </ToolbarButton>
           {reportProgress ? (
             <span

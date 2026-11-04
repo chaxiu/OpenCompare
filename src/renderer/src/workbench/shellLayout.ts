@@ -474,6 +474,181 @@ function collapsible(id: string, label: number, iconOnly: number): ToolbarContro
   return { id, presentation: CONTROL_COMPACT_ICONS, width: { label, 'icon-only': iconOnly } }
 }
 
+/** Locale whose copy widths the directory toolbar model was measured at. */
+export type DirectoryToolbarLocale = 'zh' | 'en'
+
+export interface DirectoryToolbarWidths {
+  readonly filter: number
+  readonly legend: number
+  readonly legendCollapsed: number
+  readonly direction: number
+  readonly mode: number
+  readonly sync: number
+  readonly syncCollapsed: number
+  readonly more: number
+  /** Separator and inter-control chrome that is not part of any one control. */
+  readonly extra: number
+}
+
+/**
+ * Measured width of every directory toolbar control, per locale. The legend
+ * reserves four status words and four counter digits, so a changing count never
+ * changes the collapse stage; `legendCollapsed` keeps the dot and the count.
+ */
+export const DIRECTORY_TOOLBAR_WIDTHS: Readonly<
+  Record<DirectoryToolbarLocale, DirectoryToolbarWidths>
+> = {
+  zh: {
+    filter: 300,
+    legend: 360,
+    legendCollapsed: 200,
+    direction: 110,
+    mode: 88,
+    sync: 125,
+    syncCollapsed: 40,
+    more: 56,
+    extra: 36
+  },
+  en: {
+    filter: 420,
+    legend: 450,
+    legendCollapsed: 250,
+    direction: 155,
+    mode: 145,
+    sync: 135,
+    syncCollapsed: 40,
+    more: 56,
+    extra: 36
+  }
+}
+
+export type DirectoryToolbarCollapse = 'none' | 'legend' | 'sync' | 'wrap'
+
+export interface DirectoryToolbarLayout {
+  /** Window width minus the level's left and right inset. */
+  readonly available: number
+  /** Required width of the widest rendered line. */
+  readonly required: number
+  /** Rendered lines: one, or two when the fixed ladder ran out of width. */
+  readonly rows: number
+  readonly lines: readonly number[]
+  readonly collapse: DirectoryToolbarCollapse
+  /** True while every legend chip keeps its status word. */
+  readonly legendLabels: boolean
+  /** True while the primary sync button keeps its copy. */
+  readonly syncLabel: boolean
+}
+
+/** Control widths of one ladder stage, in render order. */
+function directoryToolbarItems(
+  widths: DirectoryToolbarWidths,
+  legendLabels: boolean,
+  syncLabel: boolean
+): readonly number[] {
+  return [
+    widths.filter,
+    legendLabels ? widths.legend : widths.legendCollapsed,
+    widths.direction,
+    widths.mode,
+    syncLabel ? widths.sync : widths.syncCollapsed,
+    widths.more + widths.extra
+  ]
+}
+
+function singleLineWidth(items: readonly number[], gap: number): number {
+  return items.reduce((sum, width) => sum + width, 0) + gap * (items.length - 1)
+}
+
+/** Greedy line packing of the wrapped stage; every returned line fits. */
+function packToolbarLines(items: readonly number[], available: number, gap: number): number[] {
+  const lines: number[] = []
+  let current = 0
+  for (const item of items) {
+    if (current === 0) current = item
+    else if (current + gap + item <= available) current += gap + item
+    else {
+      lines.push(current)
+      current = item
+    }
+  }
+  if (current > 0) lines.push(current)
+  return lines
+}
+
+/**
+ * Directory view-toolbar layout at one window width and locale. The fixed
+ * ladder is legend status words → primary sync copy → wrapping; the ladder only
+ * hides copy, it never removes a control. Single-row still reports 36px, a
+ * wrapped row reports `toolbarBandHeightPx(2)`.
+ */
+export function measureDirectoryToolbar(
+  width: number,
+  locale: DirectoryToolbarLocale
+): DirectoryToolbarLayout {
+  const widths = DIRECTORY_TOOLBAR_WIDTHS[locale]
+  const metrics = SHELL_LEVELS['view-toolbar']
+  const available = Math.max(1, width - PADDING_X_PX[metrics.paddingX] * 2)
+  const gap = SPACING_PX[metrics.gap]
+
+  const full = directoryToolbarItems(widths, true, true)
+  const fullWidth = singleLineWidth(full, gap)
+  if (fullWidth <= available) {
+    return {
+      available,
+      required: fullWidth,
+      rows: 1,
+      lines: [fullWidth],
+      collapse: 'none',
+      legendLabels: true,
+      syncLabel: true
+    }
+  }
+
+  const legendOnly = directoryToolbarItems(widths, false, true)
+  const legendWidth = singleLineWidth(legendOnly, gap)
+  if (legendWidth <= available) {
+    return {
+      available,
+      required: legendWidth,
+      rows: 1,
+      lines: [legendWidth],
+      collapse: 'legend',
+      legendLabels: false,
+      syncLabel: true
+    }
+  }
+
+  const collapsed = directoryToolbarItems(widths, false, false)
+  const collapsedWidth = singleLineWidth(collapsed, gap)
+  if (collapsedWidth <= available) {
+    return {
+      available,
+      required: collapsedWidth,
+      rows: 1,
+      lines: [collapsedWidth],
+      collapse: 'sync',
+      legendLabels: false,
+      syncLabel: false
+    }
+  }
+
+  const lines = packToolbarLines(collapsed, available, gap)
+  return {
+    available,
+    required: Math.max(...lines),
+    rows: lines.length,
+    lines,
+    collapse: 'wrap',
+    legendLabels: false,
+    syncLabel: false
+  }
+}
+
+/** Utilities of the directory row container: wraps instead of overflowing. */
+export function directoryToolbarRowClasses(): string {
+  return `flex w-full min-w-0 items-center flex-wrap ${SHELL_LEVELS['view-toolbar'].gap} min-h-8`
+}
+
 export interface ToolbarRowSpec {
   readonly id: string
   readonly level: ToolbarLevel
@@ -514,12 +689,16 @@ export const TOOLBAR_ROWS: readonly ToolbarRowSpec[] = [
     entries: ['filter', 'sync'],
     overflow: ['template', 'snapshot-export', 'snapshot-import', 'report-export'],
     controls: [
-      control('legend', 240),
-      control('sync-direction', 112),
-      control('sync-mode', 90),
-      control('more', 60)
+      collapsible(
+        'legend',
+        DIRECTORY_TOOLBAR_WIDTHS.zh.legend,
+        DIRECTORY_TOOLBAR_WIDTHS.zh.legendCollapsed
+      ),
+      control('sync-direction', DIRECTORY_TOOLBAR_WIDTHS.zh.direction),
+      control('sync-mode', DIRECTORY_TOOLBAR_WIDTHS.zh.mode),
+      control('more', DIRECTORY_TOOLBAR_WIDTHS.zh.more)
     ],
-    extra: 13
+    extra: DIRECTORY_TOOLBAR_WIDTHS.zh.extra
   },
   {
     id: 'code-diff',
