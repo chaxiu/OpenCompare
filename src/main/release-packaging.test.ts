@@ -179,7 +179,7 @@ describe('release workflow contracts', () => {
 
   it('pins every gates job command in order', () => {
     const pnpmRuns = gatesSteps.map((step) => (step.run ?? '').trim()).filter((run) => run.startsWith('pnpm '))
-    expect(pnpmRuns, 'gates job pnpm steps').toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm typecheck', 'pnpm test', 'pnpm build'])
+    expect(pnpmRuns, 'gates job pnpm steps').toEqual(['pnpm install --frozen-lockfile', 'pnpm lint', 'pnpm typecheck', 'pnpm test', 'pnpm test:soak -- --rounds=50', 'pnpm build'])
   })
 
   it.each(fixture.stepOrder)('$id keeps the workflow order', (row) => {

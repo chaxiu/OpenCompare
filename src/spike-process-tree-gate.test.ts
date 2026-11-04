@@ -262,7 +262,7 @@ describe('linux process-group teardown', () => {
   it('reaps a grandchild that outlived the group leader', async () => {
     const dir = tempDir()
     const { proc, grandchild } = await startTree(dir, 'leader-exits')
-    await waitFor(() => proc.exitCode() !== null)
+    expect(await proc.waitForExit()).toEqual({ code: 0, signal: null })
     expect(pidAlive(grandchild)).toBe(true)
     await stopChild(proc.child, { processGroup: true, graceMs: 500, killWaitMs: 500 })
     expect(pidAlive(grandchild)).toBe(false)
@@ -301,7 +301,7 @@ describe('spike CLI teardown', () => {
     expect(record.conclusion).toBe('failed')
     expect(record.reason).toBe('process-exited')
     expect(record.exitCode).toBe(0)
-    expect(log.includes('process-exited')).toBe(true)
+    expect(log.includes('process-exited') && log.includes('exitCode=0')).toBe(true)
     expect(pidAlive(readRecordedPid(dir, 'leader-exits'))).toBe(false)
   }, 15_000)
 })

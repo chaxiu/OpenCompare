@@ -479,6 +479,7 @@ export interface CapturedChild {
   alive(): boolean
   exitCode(): number | null
   signal(): string | null
+  waitForExit(options?: { timeoutMs?: number }): Promise<{ code: number | null; signal: string | null } | null>
   stdout(): string
   stderr(): string
   stop(): Promise<void>
