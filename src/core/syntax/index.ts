@@ -17,3 +17,5 @@ export {
 export type { SyntaxCacheOptions, SyntaxParser } from './cache'
 export { overlayLine } from './overlay'
 export type { OverlaySegment } from './overlay'
+export { resolveSyntaxView } from './view'
+export type { SyntaxView } from './view'

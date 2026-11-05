@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
+import { resolveSyntaxView } from '@core/syntax'
 import { diffLineTexts, diffLineTextsWithFacts, overwriteBlock } from '@core/text/diff'
 import type { OverwriteDirection } from '@core/text/diff'
 import { resolveComparisonSwitches } from '@core/text/normalize'
@@ -216,6 +217,11 @@ function CodeDiffView({
     rightFacts,
     switches
   ])
+
+  // Each side resolves once per path/text change; the core cache makes a
+  // repeated render (scroll, resize) a hit and never parses per row.
+  const leftSyntax = useMemo(() => resolveSyntaxView(leftPath, leftText), [leftPath, leftText])
+  const rightSyntax = useMemo(() => resolveSyntaxView(rightPath, rightText), [rightPath, rightText])
 
   /** One mutation for both clicks and keys; the effective value comes from `diff`. */
   function toggleSwitch(
@@ -602,6 +608,7 @@ function CodeDiffView({
                 activeBlock={activeBlock}
                 scrollRef={leftScroll}
                 onScroll={() => syncScroll(leftScroll, rightScroll)}
+                syntaxView={leftSyntax}
               />
             </Panel>,
             <Panel
@@ -624,6 +631,7 @@ function CodeDiffView({
                 activeBlock={activeBlock}
                 scrollRef={rightScroll}
                 onScroll={() => syncScroll(rightScroll, leftScroll)}
+                syntaxView={rightSyntax}
               />
             </Panel>
           ]}
