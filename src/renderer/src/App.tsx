@@ -60,7 +60,7 @@ function LocalizedWorkbench({ platform }: { readonly platform: PlatformPort }): 
   if (preferences === null) return <StartupFrame />
   return (
     <I18nProvider initialLanguage={preferences.language}>
-      <ThemeProvider initialTheme={preferences.theme}>
+      <ThemeProvider initialTheme={preferences.theme} platform={platform}>
         <Workbench platform={platform} showDebugSamples={import.meta.env.DEV} />
       </ThemeProvider>
     </I18nProvider>

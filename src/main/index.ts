@@ -1,12 +1,15 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, shell } from 'electron'
 import { BRAND_NAME, buildAboutPanelOptions, resolveBrandIconPath } from '../shared/brand'
 import { isPerfHarnessActive } from '../shared/perf/args'
 import { PLATFORM_CHANNELS } from '../shared/platform/channels'
+import { DEFAULT_THEME, isTheme } from '../shared/platform/settings'
+import type { ResolvedTheme } from '../shared/platform/types'
+import { resolveWindowBackdrop } from '../shared/platform/windowTheme'
 import { startLaunch } from './launch'
 import { createMenuTemplate } from './menu'
 import { runPerfHarness } from './perf/harness'
-import { registerPlatformIpc, statPath } from './platform/electron-platform'
+import { readUserSettings, registerPlatformIpc, statPath } from './platform/electron-platform'
 
 function brandIconPath(): string {
   return resolveBrandIconPath({
@@ -20,6 +23,17 @@ function currentWindow(): BrowserWindow | null {
   return BrowserWindow.getAllWindows()[0] ?? null
 }
 
+/** The concrete theme the native chrome is currently using. */
+function resolvedNativeTheme(): ResolvedTheme {
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+}
+
+/** Repaints every open window from the same token-backed backdrop map. */
+function applyWindowBackdrop(): void {
+  const backdrop = resolveWindowBackdrop(resolvedNativeTheme())
+  for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(backdrop)
+}
+
 function createWindow(iconPath: string, perf = false): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -27,7 +41,7 @@ function createWindow(iconPath: string, perf = false): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    backgroundColor: '#0b0d12',
+    backgroundColor: resolveWindowBackdrop(resolvedNativeTheme()),
     title: BRAND_NAME,
     icon: iconPath,
     webPreferences: {
@@ -82,7 +96,10 @@ function startNormalApp(): void {
         ? app.setAsDefaultProtocolClient(scheme)
         : app.setAsDefaultProtocolClient(scheme, execPath, args),
     registerIpc: (onRendererReady) =>
-      registerPlatformIpc({ onCompareRequestsReady: onRendererReady }),
+      registerPlatformIpc({
+        onCompareRequestsReady: onRendererReady,
+        onNativeThemeChanged: applyWindowBackdrop
+      }),
     quit: () => app.quit(),
     isReady: () => app.isReady(),
     getWindow: currentWindow,
@@ -104,9 +121,17 @@ function startNormalApp(): void {
     })
   }
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // The instance without the lock is quitting; it never builds a window.
     if (launch === null) return
+
+    // Restore the persisted mode before the first window exists, through the
+    // single settings reader; a missing or corrupt file falls back to dark.
+    const settings = await readUserSettings()
+    nativeTheme.themeSource = isTheme(settings?.theme) ? settings.theme : DEFAULT_THEME
+    // One listener for the normal launch: an OS scheme flip in `system` mode
+    // repaints the native chrome and every window backdrop without a reload.
+    nativeTheme.on('updated', applyWindowBackdrop)
 
     const iconPath = brandIconPath()
 

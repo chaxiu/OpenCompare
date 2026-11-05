@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { JSX, ReactNode } from 'react'
-import type { Theme } from '@shared/platform/types'
+import type { PlatformPort, Theme } from '@shared/platform/types'
 import { ThemeContext } from './context'
 import type { ThemeContextValue } from './context'
 import { applyTheme, LIGHT_SCHEME_QUERY, resolveTheme } from './theme'
@@ -9,6 +9,12 @@ export interface ThemeProviderProps {
   readonly children: ReactNode
   /** Start-up mode, resolved by the shell before the first render. */
   readonly initialTheme?: Theme
+  /**
+   * Optional native-chrome channel. The provider pushes the **mode** (never the
+   * resolved value), so `system` keeps following the OS; a runtime without the
+   * method simply skips the push.
+   */
+  readonly platform?: Pick<PlatformPort, 'setNativeTheme'>
 }
 
 /**
@@ -42,7 +48,11 @@ function useSystemPrefersLight(enabled: boolean): boolean {
  * only: the workbench below it is never remounted, so sessions, tabs and scroll
  * positions survive a theme switch.
  */
-export function ThemeProvider({ children, initialTheme = 'dark' }: ThemeProviderProps): JSX.Element {
+export function ThemeProvider({
+  children,
+  initialTheme = 'dark',
+  platform
+}: ThemeProviderProps): JSX.Element {
   const [theme, setTheme] = useState<Theme>(initialTheme)
   const prefersLight = useSystemPrefersLight(theme === 'system')
   const resolvedTheme = resolveTheme(theme, prefersLight)
@@ -50,6 +60,18 @@ export function ThemeProvider({ children, initialTheme = 'dark' }: ThemeProvider
   useLayoutEffect(() => {
     applyTheme(resolvedTheme)
   }, [resolvedTheme])
+
+  // Mount and every mode change push once. The native channel is optional and
+  // failures are swallowed: a broken chrome update must never fail the switch.
+  useLayoutEffect(() => {
+    const push = platform?.setNativeTheme
+    if (push === undefined) return
+    try {
+      void Promise.resolve(push(theme)).catch(() => undefined)
+    } catch {
+      // A synchronous rejection is equally inert.
+    }
+  }, [theme, platform])
 
   const value = useMemo<ThemeContextValue>(
     () => ({ theme, resolvedTheme, setTheme }),

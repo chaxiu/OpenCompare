@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   BASELINE_DRILLDOWN_BAND_PX,
   BASELINE_TOOLBAR_BAND_PX,
   CHROME_BASELINE_PX,
   REFERENCE_VIEWPORT_HEIGHT_PX,
+  TOOLBAR_BAND_SURFACE,
   contentRowBudget,
   controlPresentation,
   DIRECTORY_TOOLBAR_WIDTHS,
@@ -610,5 +613,42 @@ describe('level class helpers', () => {
       expect(count(row, 'h-')).toBe(1)
       expect(count(row, 'px-')).toBe(0)
     }
+  })
+})
+
+describe('toolbar band surface', () => {
+  const ROOT = process.cwd()
+  const BAND_FILES = [
+    'src/renderer/src/workbench/Workbench.tsx',
+    'src/renderer/src/views/CodeView.tsx',
+    'src/renderer/src/views/CsvView.tsx',
+    'src/renderer/src/views/DirectoryView.tsx',
+    'src/renderer/src/views/StructuredView.tsx'
+  ] as const
+
+  it('keeps both toolbar levels on one existing token', () => {
+    expect(TOOLBAR_BAND_SURFACE).toEqual({
+      app: 'bg-surface-sunken',
+      'view-toolbar': 'bg-surface-sunken'
+    })
+  })
+
+  it('has every rendered band consume the shared constant with no second surface', () => {
+    const offenders: string[] = []
+    let bands = 0
+    for (const file of BAND_FILES) {
+      const source = readFileSync(join(ROOT, file), 'utf8')
+      for (const match of source.matchAll(/data-shell-level="(app|view-toolbar)"/g)) {
+        bands += 1
+        const level = match[1]
+        const slice = source.slice(match.index ?? 0, (match.index ?? 0) + 250)
+        const expected =
+          level === 'app' ? 'TOOLBAR_BAND_SURFACE.app' : "TOOLBAR_BAND_SURFACE['view-toolbar']"
+        if (!slice.includes(expected)) offenders.push(`${file}:${level} missing ${expected}`)
+        if (/'bg-surface-/.test(slice)) offenders.push(`${file}:${level} has a literal surface`)
+      }
+    }
+    expect(bands).toBe(6)
+    expect(offenders).toEqual([])
   })
 })

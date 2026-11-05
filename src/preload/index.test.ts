@@ -68,6 +68,7 @@ describe('preload bridge', () => {
         'realpath',
         'readUserSettings',
         'writeUserSettings',
+        'setNativeTheme',
         'readComparisonHistory',
         'writeComparisonHistory',
         'systemLocale',
@@ -109,6 +110,12 @@ describe('preload bridge', () => {
 
     await platform.systemLocale()
     expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.systemLocale)
+  })
+
+  it('forwards the selected native theme mode over its whitelisted channel', async () => {
+    await platform.setNativeTheme?.('system')
+    expect(invoke).toHaveBeenLastCalledWith(PLATFORM_CHANNELS.setNativeTheme, 'system')
+    expect(PLATFORM_CHANNELS.setNativeTheme).toBe('platform:set-native-theme')
   })
 
   it('forwards comparison history over its two whitelisted channels', async () => {

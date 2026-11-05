@@ -19,7 +19,7 @@ import { DELIMITED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import { parseCsvTable } from '@renderer/workbench/session'
 import type { CsvTables } from '@renderer/workbench/session'
-import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
+import { TOOLBAR_BAND_SURFACE, levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 
 /** Row alignment counts reported up to the workbench status bar. */
 export interface CsvAlignState {
@@ -295,7 +295,8 @@ export function CsvView({
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 flex-col bg-surface-sunken',
+          'flex shrink-0 flex-col',
+          TOOLBAR_BAND_SURFACE['view-toolbar'],
           levelBandClasses('view-toolbar')
         )}
       >

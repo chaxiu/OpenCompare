@@ -30,6 +30,7 @@ export const PLATFORM_CHANNELS = {
   realpath: 'platform:realpath',
   readUserSettings: 'platform:read-user-settings',
   writeUserSettings: 'platform:write-user-settings',
+  setNativeTheme: 'platform:set-native-theme',
   readComparisonHistory: 'platform:read-comparison-history',
   writeComparisonHistory: 'platform:write-comparison-history',
   systemLocale: 'platform:system-locale',

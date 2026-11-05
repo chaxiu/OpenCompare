@@ -1,6 +1,6 @@
 # Domain: theme
 
-亮 / 暗 / 跟随系统三态主题域：**同一组** `--color-*` token 在 `src/renderer/src/assets/main.css` 里给出暗色（Tailwind `@theme` 块）与亮色（`:root[data-theme='light']` 覆盖块）两套取值，渲染侧把选中模式解析成 `light` / `dark` 并同步到 `<html data-theme>` + `color-scheme`，`system` 模式经 `window.matchMedia('(prefers-color-scheme: light)')` 跟随 OS；模式随 `UserSettings` 持久化；另配一个零 DOM / 零 Electron 的对比度工具（从 `main.css` 文本读 token 值，算 WCAG 相对亮度 / 对比度与 CIE76 Lab ΔE）把「可读」与「四态可区分」变成 `pnpm test` 断言。本域管**双色板契约、模式解析与接线、设置持久化契约、对比度自证**；token 家族清单与视觉方向仍归 `design/foundations`，词条与词典面归 `i18n`，壳层入口清单归 `workbench`（本项不新增入口），发布面 / README 截图归 `release`。
+亮 / 暗 / 跟随系统三态主题域：**同一组** `--color-*` token 在 `src/renderer/src/assets/main.css` 里给出暗色（Tailwind `@theme` 块）与亮色（`:root[data-theme='light']` 覆盖块）两套取值，渲染侧把选中模式解析成 `light` / `dark` 并同步到 `<html data-theme>` + `color-scheme`，`system` 模式经 `window.matchMedia('(prefers-color-scheme: light)')` 跟随 OS；模式随 `UserSettings` 持久化；同一模式经一条可选 IPC 推给主进程的 `nativeTheme.themeSource`，让原生菜单栏 / 标题区与窗口背板跟应用内主题一致，背板取 `surface-base` token 的实值；另配一个零 DOM / 零 Electron 的对比度工具（从 `main.css` 文本读 token 值，算 WCAG 相对亮度 / 对比度与 CIE76 Lab ΔE）把「可读」与「四态可区分」变成 `pnpm test` 断言。本域管**双色板契约、模式解析与接线、设置持久化契约、原生主题 / 窗口背板接线、对比度自证**；token 家族清单与视觉方向仍归 `design/foundations`，词条与词典面归 `i18n`，壳层入口清单归 `workbench`（本项不新增入口），发布面 / README 截图归 `release`。
 
 ## 范围
 
@@ -13,6 +13,11 @@
 - **写入不可丢字段**：任一次写入都提交完整 `UserSettings`（`chooseLanguage` 带当前 theme，`chooseTheme` 带当前 language），经串行写队列落到 `PlatformPort.writeUserSettings`；Electron（`userData/settings.json`）与 Web（`localStorage` 单键 `opencompare.userSettings`）同一契约。
 - **跟随系统（`ThemeProvider`）**：`theme === 'system'` 时经 `useSyncExternalStore` 订阅 `matchMedia` 的 `change`，监听只在 `system` 模式存在；显式 `light` / `dark` 下不订阅、不响应 OS 变化，切离 `system` / 卸载即 `removeEventListener`。jsdom 中可经替换 `window.matchMedia` 注入偏好，断言用计数型监听。
 - **零 IO / 零重挂**：主题状态只活在 `ThemeProvider`，`Workbench` 不在其 `key` 上、也不被条件卸载——切主题不重扫目录、不重算摘要、不重读文件，会话、tab、激活项、滚动位置、筛选与折叠集合全部保持。
+- **原生主题通道（`PLATFORM_CHANNELS.setNativeTheme = 'platform:set-native-theme'`）**：`PlatformPort.setNativeTheme?(mode: Theme)` 为可选方法（与 `onCompareRequest?` 同风格），Electron 侧 `preload` 走 `ipcRenderer.invoke`，Web 侧不实现；`ThemeProvider` 在挂载与每次模式变化各推一次**模式**（`light` / `dark` / `system`，不是解析值），方法缺失即跳过、同步 / 异步失败一律吞掉。主进程 `registerPlatformIpc` 用 `isTheme` 校验后写 `nativeTheme.themeSource`，非法值静默忽略。
+- **启动前恢复模式**：`src/main/index.ts` 在 `whenReady` 内、首个窗口创建与 `launch.onAppReady()` 之前，复用 `electron-platform.ts` 导出的 `readUserSettings`（同一 `settings.json` 路径与 `parseUserSettingsJson`）读持久化模式，非法 / 缺失 / 损坏回退 `DEFAULT_THEME`（`dark`），读失败不中断启动。
+- **窗口背板单一来源（`src/shared/platform/windowTheme.ts`）**：零 DOM / 零 Electron，导出 `WINDOW_BACKDROP: Record<'light'|'dark', string>`（暗 `#0b0e12`、亮 `#ffffff`）与 `resolveWindowBackdrop(theme: unknown)`（未知输入回退暗色）。`createWindow` 的 `backgroundColor` 用它替换旧字面量 `#0b0d12`；主题切换 handler 与普通启动路径唯一一次 `nativeTheme.on('updated')` 复用同一函数，对 `BrowserWindow.getAllWindows()` 逐个 `setBackgroundColor`。
+- **工具栏 band 单一来源（`src/renderer/src/workbench/shellLayout.ts`）**：`TOOLBAR_BAND_SURFACE: Readonly<Record<ToolbarLevel, string>>` 覆盖 `app` 与 `view-toolbar` 两级，取值均为既有 `bg-surface-sunken`；`Workbench` app 顶栏与 5 处 `data-shell-level="view-toolbar"` band 全部消费该常量，不扩散到 `sessions` / `events` / `panels` / `status`。
+- **平台口径**：只用 `nativeTheme.themeSource` + 窗口背景色两条原生能力，不引入 `titleBarOverlay` / `titleBarStyle` / `frame:false`，不自绘伪菜单栏；macOS 全局菜单栏由 OS 拥有、不接受应用着色，属已知差异而非缺陷。
 - **对比度工具（`src/core/theme/contrast.ts`）**：`parseThemeTokens(css)` 从 `main.css` 文本取两套 token 映射（找不到 `@theme` / `:root[data-theme='light']` 块即抛错，防静默空跑）、`relativeLuminance` / `contrastRatio`（WCAG）、`labDeltaE76`（CIE76）。零 DOM / 零 Electron，node 环境 vitest 直跑；断言读的是**真实样式表文本**而不是色值副本。
 - **特殊：对话框内的主题分区不改壳层入口**：`SHELL_ENTRIES` / `SHELL_ENTRY_IDS` 与其三档 presentation 零变化；app 头不加主题入口、不新增 shell entry；主题选项不新增图标（若要图标只能取 `UI_ICON_ACTIONS` 既有动作名，本项未用）。
 - **扫描根登记**：新增 `src/renderer/src/theme/` 已进 `src/renderer/src/i18n/mainScan.test.ts` 的 `SCAN_ROOTS`，新目录里的中文注释才会被扫描（否则假绿）。
@@ -42,6 +47,19 @@
 - **ac-theme-state-preserved**：切主题前后会话数量、tab 顺序与激活 tab、双栏 `scrollTop`、当前筛选值与折叠节点集合逐一相等。
 - **ac-theme-write-failure-in-place**：主题写入失败时保持当前选择、就地显示既有 `settings.saveError` 文案，不关闭设置对话框、不回落旧主题。
 
+### 原生主题 / 窗口背板 / 工具栏 band
+
+- **ac-native-theme-mode-sync**：设置里依次切 `light` / `dark` / `system` 后，主进程 `nativeTheme.themeSource` 分别等于该模式（`system` 保持 `'system'`，不得被解析值钉死）；切换不重启、不重建窗口；未知 / 非法载荷被忽略且不向 renderer 抛错。
+- **ac-native-theme-startup**：首个窗口创建前 `nativeTheme.themeSource` 已按 `userData/settings.json` 持久化模式设置；文件缺失 / 损坏 / 语言字段非法时回退 `DEFAULT_THEME`（`dark`），启动不中断，且不出现第二份设置读取 / 解析实现。
+- **ac-native-theme-system-follow**：`system` 模式下渲染侧对 `matchMedia('(prefers-color-scheme: light)')` 的订阅与切换行为不变；OS 偏好翻转后原生菜单栏 / 标题区与窗口背板随之改变，无需重启或重建窗口。
+- **ac-window-backdrop-token**：窗口背景色等于当前解析主题的 `surface-base` token 值（暗 `#0b0e12`、亮 `#ffffff`），由 `main.css` 解析结果比对断言；仓内不再存在与任一 token 值不等的背板字面量（旧 `#0b0d12` 必须消失），无第三个色值。
+- **ac-window-backdrop-live**：主题切换后所有已打开窗口背板更新为新主题 `surface-base`；不 reload、不重建窗口，会话 / tab / 滚动位置不变。
+- **ac-toolbar-band-single-surface**：`Workbench` app 顶栏与全部 5 处 `data-shell-level="view-toolbar"` band 共用 `shellLayout.ts` 导出的同一 band surface 类，取值为既有 `bg-surface-sunken`；任一处 band 出现其它 `bg-surface-*` token 即失败；亮暗两套下 band 与 `surface-base` / `surface-raised` 层级方向一致。
+- **ac-no-new-palette**：不新增 `--color-*` 名称、不新增第二色板 / 第二个定义 token 的样式文件；`src/renderer/src/**` 非测试源码零新增 `#hex` / `rgb(` / `hsl(` 字面量；`themeSources.test.ts` 与 `contrast.test.ts` 全绿且既有阈值一个不放宽。
+- **ac-core-untouched**：`src/core/**` 非测试文件零改动；未新增 `v8 ignore` / `c8 ignore`，未删除源码来取悦门禁。
+- **ac-web-runtime-unaffected**：Web 运行时（`pnpm dev:web`）不提供原生主题能力也照常工作：切换仍只落 `<html data-theme>` + `color-scheme`，`App.theme` 断言全绿，无未处理 Promise 拒绝或控制台错误。
+- **ac-native-chrome-preserved**：不新增自绘菜单栏 / 标题栏：菜单仍由 `Menu.setApplicationMenu(Menu.buildFromTemplate(createMenuTemplate(...)))` 提供，`BrowserWindow` 选项不出现 `frame:false` / `titleBarStyle` / `titleBarOverlay`；`createMenuTemplate` 的菜单项与快捷键结构不变。
+
 ## 非目标
 
 - 不做逐项配色可定制（I#5 十一条分组）、不做字体 / 字号 / 密度自定义，不做主题编辑器或额外的「高对比」模式；`light` / `dark` / `system` 就是全部模式。
@@ -50,6 +68,10 @@
 - 不新增图标包 / 不就地写 SVG / 不新增 npm 依赖（截图与测试均用已有 Electron / vitest）；不引入 CSS-in-JS 或第二套样式方案。
 - 不把 `theme` 写进会话 / 快照 / 导出产物；不做每窗口独立主题、不做主题切换动效 / 过渡动画。
 - 不做浏览器 / 真机 / 桌面点选（L3 由 product-qa 承接）；不新增长跑门禁。
+- 不做真实窗口 GUI / 截图验收（真实窗口验收与 release 截图各归其写项），不派 QA 子项。
+- 不重绘界面、不做整体 UI 重构 / 主题编辑器 / 新配色体系；不改字号 / 圆角 / 控件高 / 间距；不改四态计数、忽略开关、复制 / 导出、快照与对比 / 合并语义；不改 `CodeView` / 工具栏入口集合。
+- 不新增自绘菜单栏 / 标题栏，不给 macOS 全局菜单栏着色，不改菜单项 / 快捷键体系 / 原生 About 面板；不新增依赖。
+- 不改发布通道、签名口径、版本锚点、已公开 tag / Release / 资产。
 
 ## 实现约束
 
@@ -64,11 +86,16 @@
 - **兼容既有断言**：`src/main/platform/electron-platform.test.ts` 原「未知字段 `theme` 被丢弃」的用例按新契约**显式改写**为「缺 theme 升 `dark` / 已知 theme 保留 / 未知 theme 回退 `dark`」三条，不放宽匹配、不删用例；Web 平台补同构用例；`preload/index.test.ts` 的写入 payload 改为完整记录。
 - **新增目录要进扫描根**：`src/renderer/src/theme/` 必须登记进 `src/renderer/src/i18n/mainScan.test.ts` 的 `SCAN_ROOTS`；新中文文案只能进 `messages/{zh,en}` 成对词典，不在组件里写字面量。
 - **测试落点**：`src/core/theme/contrast.test.ts`（node）、`src/renderer/src/theme/theme.test.ts`（node）、`src/renderer/src/theme/themeSources.test.ts`（node 静态扫描）、`src/shared/platform/settings.test.ts`（node）、`src/renderer/src/App.theme.test.tsx`（jsdom，覆写 `clientWidth/clientHeight` 喂虚拟化树、替换 `matchMedia`、用计数型 `PlatformPort` 断言零 IO）；不新增测试依赖、不新增长跑门禁。
+- **原生通道纪律**：`channels.ts` 只新增 `setNativeTheme` 一个白名单 channel；`PlatformPort` 上是**可选**方法，renderer 调用点必须容忍缺失并吞掉失败（主题切换绝不因原生通道报错而可见失败）；主进程 handler 用 `isTheme` 校验，非法值忽略、不抛。通知窗口背板走 `PlatformIpcOptions.onNativeThemeChanged` 测试 seam（与 `onCompareRequestsReady` 同风格），便于单测。
+- **启动顺序与单一读取**：`whenReady` 内先 `readUserSettings()` 设 `themeSource`，再建窗口 / `launch.onAppReady()`；`readUserSettings` 从 `electron-platform.ts` 以窄接口导出复用，禁止复制文件路径或第二份解析逻辑。
+- **背板映射必须由测试实读 `main.css` 证明**：`windowTheme.test.ts` 用 `@core/theme/contrast` 的 `parseThemeTokens` 比对两套主题的 `surface-base` 与 `WINDOW_BACKDROP` 相等（相等即证明是既有 token 值而非新色），并覆盖未知输入回退暗色。
+- **band 常量不得改视觉**：`TOOLBAR_BAND_SURFACE` 两级取值必须与现状一致（`bg-surface-sunken`），不得扩散到非 toolbar 层级；`shellLayout.test.ts` 断言常量取值 + 全仓 band 消费扫描。
+- **接线静态断言**：`createWindow` 不再出现 `#0b0d12`、存在 `nativeTheme.themeSource` 与 `nativeTheme.on('updated')`、无 `titleBarStyle` / `titleBarOverlay` / `frame:false`（沿用 `release-packaging.test.ts` 的源码静态断言手法）。
 
 ## 最近交付证明
 
-- WI：`wi_intake_c4097ed1a9ec9d00`（修窄窗工具栏溢出与浅色图例对比度；本域只承接对比度半边，`kind: fix`）
+- WI：`wi_ws_2b7b5e4b3412a137`（原生菜单栏 / 窗口背板跟随应用内主题 + 工具栏 band 单一表面）
 - 日期：2026-11-05
-- 结果：code_gates passed（29 gates，attempt 002；`pnpm test` 140 files / 2237 passed + 1 skipped / 2238）。
-- 覆盖摘要：亮色块五个 `--color-diff-*` 加深为 `same #63696f` / `added #32773c` / `removed #b04843` / `modified #856523` / `conflict #88651c`，对各自 chip 底实测 4.79 / 4.66 / 4.60 / 4.62 / 4.58（全部 ≥ 4.5）；`-soft` 随前景重算为 `#e6efe8` / `#f6e9e8` / `#f0ede5` / `#f1ede4`（`same` 仍用 `surface-sunken`）；`contrast.test.ts` 的 chip 断言按主题分档（亮 4.5 / 暗 3.0）并新增五色 AA 用例，`tokens.test.ts` 亮色 pin 同批改为新值。暗色五个 `--color-diff-*` 与 `-soft` 逐字节零 diff；四态 ΔE 最小亮 39.7（阈值 12），对 `surface-base` 均 ≥ 5.35。
-- 注：① 亮色 `-soft` 不再是「独立于前景的旧值」，而是由新前景派生的 12% 叠白值——改前景必须同批重算 soft，否则 chip 底与前景会脱节。② `tokens.test.ts` 的亮色取值 pin 已按新值锁定，后续改色会红，属预期。③ `docs/ui-visual-direction.md` 的亮色 token 表与实测表同批更新；`design/foundations.md` 的小字门槛已同步为亮色 ≥ 4.5。④ 暗色与 accent / danger token 零 diff，`-soft` 背景规则未改。
+- 结果：code_gates passed（32 gates，attempt 001；`pnpm test` 154 files / 2377 passed + 1 skipped / 2378）。
+- 覆盖摘要：新增唯一白名单 channel `platform:set-native-theme` 与可选 `PlatformPort.setNativeTheme?(mode)`，主进程 handler 用 `isTheme` 校验后写 `nativeTheme.themeSource`、非法值静默忽略；`ThemeProvider` 在挂载与每次模式变化推**模式**（保留 `system`），方法缺失 / 失败全部吞掉，Web 运行时零行为变化。启动路径在首个窗口前复用 `electron-platform.ts` 导出的 `readUserSettings` 恢复持久化模式（缺失 / 损坏回退 `dark`），普通启动只注册一次 `nativeTheme.on('updated')`。新增零 DOM / 零 Electron 的 `src/shared/platform/windowTheme.ts`（`WINDOW_BACKDROP` 暗 `#0b0e12` / 亮 `#ffffff` + `resolveWindowBackdrop`），`createWindow` 的 `backgroundColor` 由旧字面量 `#0b0d12` 改为该映射，切换与 OS 翻转时对 `BrowserWindow.getAllWindows()` 逐个 `setBackgroundColor`。`shellLayout.ts` 导出 `TOOLBAR_BAND_SURFACE`（app / view-toolbar 两级均 `bg-surface-sunken`），`Workbench` 顶栏与 5 处 view-toolbar band 全部改为消费它。新增 `windowTheme.test.ts`（实读 `main.css` 比对 `surface-base`）、`ThemeProvider.native.test.tsx`、`native-theme-wiring.test.ts` 与 `shellLayout.test.ts` band 扫描；未改菜单结构、未引入 `titleBarStyle` / `titleBarOverlay` / `frame:false`、未新增依赖。
+- 注：① 背板值只能由 `windowTheme.test.ts` 从 `main.css` 实读证明等于 `surface-base`，改 token 必须同批改映射，否则测试红。② `system` 必须推模式而非解析值，否则 OS 翻转被钉死、`ac-native-theme-system-follow` 失效。③ macOS 全局菜单栏由 OS 拥有，应用只能对齐标题区与窗口背板，属已知差异。④ `TOOLBAR_BAND_SURFACE` 只覆盖 app / view-toolbar，扩散到 sessions / events / panels / status 会破坏层级断言。

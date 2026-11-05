@@ -34,6 +34,7 @@ import type { MessageKey } from '@renderer/i18n/messages'
 import { pickProbedTextFile, pickTextFile, textFileFilter } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import {
+  TOOLBAR_BAND_SURFACE,
   controlPresentation,
   levelBandClasses,
   levelRowClasses
@@ -472,7 +473,8 @@ function CodeDiffView({
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 items-center bg-surface-sunken',
+          'flex shrink-0 items-center',
+          TOOLBAR_BAND_SURFACE['view-toolbar'],
           levelBandClasses('view-toolbar')
         )}
       >
@@ -802,7 +804,8 @@ function CodeMergeView({
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 items-center bg-surface-sunken',
+          'flex shrink-0 items-center',
+          TOOLBAR_BAND_SURFACE['view-toolbar'],
           levelBandClasses('view-toolbar')
         )}
       >
