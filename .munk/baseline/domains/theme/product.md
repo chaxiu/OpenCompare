@@ -19,6 +19,7 @@
 - **工具栏 band 单一来源（`src/renderer/src/workbench/shellLayout.ts`）**：`TOOLBAR_BAND_SURFACE: Readonly<Record<ToolbarLevel, string>>` 覆盖 `app` 与 `view-toolbar` 两级，取值均为既有 `bg-surface-sunken`；`Workbench` app 顶栏与 5 处 `data-shell-level="view-toolbar"` band 全部消费该常量，不扩散到 `sessions` / `events` / `panels` / `status`。
 - **平台口径**：只用 `nativeTheme.themeSource` + 窗口背景色两条原生能力，不引入 `titleBarOverlay` / `titleBarStyle` / `frame:false`，不自绘伪菜单栏；macOS 全局菜单栏由 OS 拥有、不接受应用着色，属已知差异而非缺陷。
 - **对比度工具（`src/core/theme/contrast.ts`）**：`parseThemeTokens(css)` 从 `main.css` 文本取两套 token 映射（找不到 `@theme` / `:root[data-theme='light']` 块即抛错，防静默空跑）、`relativeLuminance` / `contrastRatio`（WCAG）、`labDeltaE76`（CIE76）。零 DOM / 零 Electron，node 环境 vitest 直跑；断言读的是**真实样式表文本**而不是色值副本。
+- **切换真伪判定与可复用探针（`docs/evidence/theme-switch-verdict.md` + `scripts/theme-click-probe.mjs`）**：把「Settings 点 Light / Dark 后运行中窗口不变」这类验收失败拆成 `ok-cdp` / `driver-miss` / `product-no-switch` 三态；判定顺序固定为「`elementFromPoint` 是否命中 tab → CDP 坐标点击 + `MutationObserver` → 页面内 `el.click()` 复测」，只有第三层仍无 `data-theme` 变更才归因产品。探针只用 Node 内置 `fetch` + 全局 `WebSocket`，`judgeThemeProbe` 为纯函数、CLI 有 `import.meta.url` 守卫，可被 vitest 直接 import。
 - **特殊：对话框内的主题分区不改壳层入口**：`SHELL_ENTRIES` / `SHELL_ENTRY_IDS` 与其三档 presentation 零变化；app 头不加主题入口、不新增 shell entry；主题选项不新增图标（若要图标只能取 `UI_ICON_ACTIONS` 既有动作名，本项未用）。
 - **扫描根登记**：新增 `src/renderer/src/theme/` 已进 `src/renderer/src/i18n/mainScan.test.ts` 的 `SCAN_ROOTS`，新目录里的中文注释才会被扫描（否则假绿）。
 
@@ -60,6 +61,18 @@
 - **ac-web-runtime-unaffected**：Web 运行时（`pnpm dev:web`）不提供原生主题能力也照常工作：切换仍只落 `<html data-theme>` + `color-scheme`，`App.theme` 断言全绿，无未处理 Promise 拒绝或控制台错误。
 - **ac-native-chrome-preserved**：不新增自绘菜单栏 / 标题栏：菜单仍由 `Menu.setApplicationMenu(Menu.buildFromTemplate(createMenuTemplate(...)))` 提供，`BrowserWindow` 选项不出现 `frame:false` / `titleBarStyle` / `titleBarOverlay`；`createMenuTemplate` 的菜单项与快捷键结构不变。
 
+### 真实控件链路与验收失败归因
+
+- **ac-evidence-verdict-recorded**：`docs/evidence/theme-switch-verdict.md` 存在，结论为「产品正常 / 旧驱动伪失败」，同文含 21:15 与 21:32 两轮 E1 差异、实测 75.8 / 79.1 / 78.9 ms、证据绝对路径，并明示 21:15 的 `e1-light.png` / `e1-dark.png` 实际拍到其他前台应用、不能作主题证据。
+- **ac-theme-tab-contract**：jsdom 挂真实 `App`，在 `[data-shell-entry="settings"]` 打开 Settings 后 `getByRole('tablist', { name: 'Theme' })` 存在且含 3 个 `role="tab"`；点 `Light` 后同一 `act` 内（不 `waitFor`）`documentElement.dataset.theme === 'light'` 且 `style.colorScheme === 'light'`。
+- **ac-light-dark-light-sequence**：同一对话框依次点 Light → Dark → Light，`dataset.theme` / `colorScheme` 三跳为 `light` / `dark` / `light`；写设置队列依次为 `{language, theme:'light'}`、`{language, theme:'dark'}`、`{language, theme:'light'}`（每次都是完整记录）。
+- **ac-native-mode-push**：上述三跳后 `platform.setNativeTheme` 末三次调用（忽略挂载那次）依次为 `'light'` / `'dark'` / `'light'`，推的是模式而非解析值；该方法抛错不影响 DOM 切换。
+- **ac-persist-and-restart**：切换为 Light 后持久记录为 `theme: 'light'`；以同一存储卸载重挂 `App` 后 `dataset.theme === 'light'`（DOM 与持久值一致）。
+- **ac-probe-classifies-hit-vs-product**：`scripts/theme-click-probe.mjs` 导出纯函数 `judgeThemeProbe({ hit, cdpMutated, domClickMutated })`，返回 `ok-cdp` / `driver-miss` / `product-no-switch`；`scripts/theme-click-probe.test.mjs` 覆盖三分支与退出码 0/1/2，并断言 `--help` 以 0 退出、不依赖第三方包。
+- **ac-probe-control-facts**：探针为每个主题 tab 输出 `role`、所在 `tablist` 的 `aria-label`、`aria-selected`、`rect`，以及 `elementFromPoint` 命中元素的 `tagName / role / text / insideTarget`；判 `driver-miss` 时输出坐标处实际元素，判 `product-no-switch` 时输出「页面内 `.click()` 仍无 `data-theme` 变更」的事实。
+- **ac-no-product-change**：本类改动只新增 `scripts/theme-click-probe.mjs`、`scripts/theme-click-probe.test.mjs`、`src/settings-theme-gate.test.tsx`、`docs/evidence/theme-switch-verdict.md`（外加按 growth 登记的 `.munk/baseline/test-debt.json`）；`src/renderer/src/**`、`src/main/**`、`src/shared/**`、`src/core/theme/**` 零改动，不新增色相、不改四态色 / token 语义、不放宽 WCAG 门。
+- **ac-code-gates-green**：`pnpm lint` / `typecheck` / `test` / `build` 与 test-debt 门全绿；新测试抬高 `repoTestLines` 只许按 `scripts/test-debt-gate.mjs` 的 growth 机制登记（`from` = 当期基线、`to` = 实测值、`addedCases` = 新增用例数、理由写清），不得删弱既有断言腾行。
+
 ## 非目标
 
 - 不做逐项配色可定制（I#5 十一条分组）、不做字体 / 字号 / 密度自定义，不做主题编辑器或额外的「高对比」模式；`light` / `dark` / `system` 就是全部模式。
@@ -91,11 +104,14 @@
 - **背板映射必须由测试实读 `main.css` 证明**：`windowTheme.test.ts` 用 `@core/theme/contrast` 的 `parseThemeTokens` 比对两套主题的 `surface-base` 与 `WINDOW_BACKDROP` 相等（相等即证明是既有 token 值而非新色），并覆盖未知输入回退暗色。
 - **band 常量不得改视觉**：`TOOLBAR_BAND_SURFACE` 两级取值必须与现状一致（`bg-surface-sunken`），不得扩散到非 toolbar 层级；`shellLayout.test.ts` 断言常量取值 + 全仓 band 消费扫描。
 - **接线静态断言**：`createWindow` 不再出现 `#0b0d12`、存在 `nativeTheme.themeSource` 与 `nativeTheme.on('updated')`、无 `titleBarStyle` / `titleBarOverlay` / `frame:false`（沿用 `release-packaging.test.ts` 的源码静态断言手法）。
+- **归因顺序不可倒置**：探针先证「坐标命中 tab」，再 CDP 点击 + `MutationObserver`，最后页面内 `el.click()` 复测；没有命中证据的 `appliedMsInPage: null` 只能记 `driver-miss`，不得写成 `product-no-switch`。截图（前台被其他应用遮挡时）不作主题证据，一律以 `documentElement.dataset.theme` / CDP 计算样式为准。
+- **探针零依赖 / 可 import**：只用 Node 内置 `fetch` + 全局 `WebSocket`（同 `qa-driver/lib.mjs` 思路），顶层 `import.meta.url === pathToFileURL(process.argv[1]).href` 守卫，避免被 vitest import 时执行 CLI；参数 `--port`（默认 9601）/ `--label`（默认 `Light`）/ `--expect`（默认 `light`）/ `--timeout`（默认 2000）/ `--help`。
+- **回归测试落点**：`src/settings-theme-gate.test.tsx`（`// @vitest-environment jsdom`），用 `createWebPlatformPort()` 覆写 `writeUserSettings` / `setNativeTheme`，经 `[data-shell-entry="settings"]` 打开真实对话框，用 `getByRole('tablist', { name: 'Theme' })` 定位，禁止文本坐标或 `querySelectorAll('button')` 兜底；新用例会抬高 `repoTestLines`，只按 growth 条目登记（本轮 `from` 51955 / `to` 52136 / `addedCases` 17），增幅 ≤ 400 行。
 
 ## 最近交付证明
 
-- WI：`wi_ws_2b7b5e4b3412a137`（原生菜单栏 / 窗口背板跟随应用内主题 + 工具栏 band 单一表面）
+- WI：`wi_intake_9e8f40030bb9fd90`（Settings 主题切换真伪判定 + 真实控件链路断言 + 可复用探针）
 - 日期：2026-11-05
-- 结果：code_gates passed（32 gates，attempt 001；`pnpm test` 154 files / 2377 passed + 1 skipped / 2378）。
-- 覆盖摘要：新增唯一白名单 channel `platform:set-native-theme` 与可选 `PlatformPort.setNativeTheme?(mode)`，主进程 handler 用 `isTheme` 校验后写 `nativeTheme.themeSource`、非法值静默忽略；`ThemeProvider` 在挂载与每次模式变化推**模式**（保留 `system`），方法缺失 / 失败全部吞掉，Web 运行时零行为变化。启动路径在首个窗口前复用 `electron-platform.ts` 导出的 `readUserSettings` 恢复持久化模式（缺失 / 损坏回退 `dark`），普通启动只注册一次 `nativeTheme.on('updated')`。新增零 DOM / 零 Electron 的 `src/shared/platform/windowTheme.ts`（`WINDOW_BACKDROP` 暗 `#0b0e12` / 亮 `#ffffff` + `resolveWindowBackdrop`），`createWindow` 的 `backgroundColor` 由旧字面量 `#0b0d12` 改为该映射，切换与 OS 翻转时对 `BrowserWindow.getAllWindows()` 逐个 `setBackgroundColor`。`shellLayout.ts` 导出 `TOOLBAR_BAND_SURFACE`（app / view-toolbar 两级均 `bg-surface-sunken`），`Workbench` 顶栏与 5 处 view-toolbar band 全部改为消费它。新增 `windowTheme.test.ts`（实读 `main.css` 比对 `surface-base`）、`ThemeProvider.native.test.tsx`、`native-theme-wiring.test.ts` 与 `shellLayout.test.ts` band 扫描；未改菜单结构、未引入 `titleBarStyle` / `titleBarOverlay` / `frame:false`、未新增依赖。
-- 注：① 背板值只能由 `windowTheme.test.ts` 从 `main.css` 实读证明等于 `surface-base`，改 token 必须同批改映射，否则测试红。② `system` 必须推模式而非解析值，否则 OS 翻转被钉死、`ac-native-theme-system-follow` 失效。③ macOS 全局菜单栏由 OS 拥有，应用只能对齐标题区与窗口背板，属已知差异。④ `TOOLBAR_BAND_SURFACE` 只覆盖 app / view-toolbar，扩散到 sessions / events / panels / status 会破坏层级断言。
+- 结果：code_gates passed（32 gates，attempt 001；`pnpm test` 159 files / 2451 passed + 1 skipped / 2452）。
+- 覆盖摘要：新增 `docs/evidence/theme-switch-verdict.md` 固化 v0.2.24 窗口验收 E1 判定——产品正常、21:15 旧驱动为伪失败（缺 `hitTarget` 证据，截图实为其他前台应用），21:32 同实例实测 75.8 / 79.1 / 78.9 ms 生效，决定性证据取 CDP `dataset.theme` + 计算样式。新增 `src/settings-theme-gate.test.tsx`（jsdom）经 `[data-shell-entry="settings"]` 打开真实 Settings，用 `getByRole('tablist', { name: 'Theme' })` 覆盖 Light → Dark → Light 三跳的 DOM / `colorScheme`、完整 `UserSettings` 写队列、`setNativeTheme` 末三次模式推送、原生通道抛错不阻断切换、卸载重挂恢复 `light`。新增 `scripts/theme-click-probe.mjs`（纯函数 `judgeThemeProbe` 三态 + 命中/控件事实输出 + `--help`，零第三方依赖）与 `scripts/theme-click-probe.test.mjs`（三分支 + 退出码 0/1/2）。`src/renderer/src/**`、`src/main/**`、`src/shared/**`、`src/core/theme/**` 零改动；`repoTestLines` 51955 → 52136 按 growth 机制登记（`addedCases` 17）。
+- 注：① 主题类验收失败先跑探针分 `driver-miss` / `product-no-switch`，不得凭 `appliedMsInPage: null` 判产品缺陷。② 前台被其他应用遮挡时截图不可作证据，只能看 CDP DOM / 计算样式。③ 回归测试必须用真实 Settings 控件与 `role=tablist/tab` 定位，文本坐标或 `querySelectorAll('button')` 兜底属无效覆盖。

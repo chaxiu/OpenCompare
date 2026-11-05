@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 51955
+    "repoTestLines": 52136
   },
   "floors": {
     "appTestCases": 97,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 51571,
-      "to": 51955,
-      "reason": "code-swap-centered: pure centred-scroll and shortcut-matching suites (codeViewScroll.test.ts, codeViewShortcut.test.ts) plus centred jump / toolbar swap / shortcut rescoping in CodeView.ruler.test.tsx, CodeView.rulerTrack.test.tsx, App.ruler.test.tsx and DiffPane.test.tsx",
-      "addedCases": 29
+      "from": 51955,
+      "to": 52136,
+      "reason": "settings theme click chain: real dialog → DOM/native/persist/restart",
+      "addedCases": 17
     },
     {
       "metric": "appTestLines",
