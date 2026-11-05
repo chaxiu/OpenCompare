@@ -8,6 +8,7 @@ import { DIFF_ROW_HEIGHT } from '@renderer/components/DiffPane'
 import { DiffRuler } from '@renderer/components/DiffRuler'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
+import { centeredScrollTop } from './codeViewScroll'
 
 // The 350k model is pre-built; the view only ever runs the mocked comparison.
 const diffModel = vi.hoisted(() => ({ current: null as LineDiffResult | null }))
@@ -43,6 +44,17 @@ const ROW_LIMIT = VIEWPORT_ROWS + 2 * OVERSCAN
 const MARKER_LIMIT = 3 * Math.floor(TRACK_HEIGHT / BAND_HEIGHT)
 /** Marker height floor rendered by `DiffRuler`. */
 const MARKER_MIN_HEIGHT = 2
+
+/** One authoritative centred target for the jump assertions. */
+function jumpScrollTop(blockIndex: number, rowCount = ROW_COUNT): number {
+  const block = model.blocks[blockIndex]
+  return centeredScrollTop({
+    startRow: block.startRow,
+    endRow: block.endRow,
+    rowCount,
+    viewportHeight: PANE_HEIGHT
+  })
+}
 
 const RUN_STRIDE = 2_400
 const RUN_LENGTH = 20
@@ -201,7 +213,7 @@ describe('diff ruler track hit at 350k rows', () => {
       index: expected.blockIndex,
       total: model.blocks.length
     })
-    expect(panes[0].scrollTop).toBe(expected.startRow * DIFF_ROW_HEIGHT)
+    expect(panes[0].scrollTop).toBe(jumpScrollTop(expected.blockIndex))
     expect(panes[1].scrollTop).toBe(panes[0].scrollTop)
   })
 
@@ -243,7 +255,7 @@ describe('diff ruler track hit at 350k rows', () => {
       clickTrack(ruler, offset)
 
       expect(selectedCount(container).index).toBe(expected.blockIndex)
-      expect(panes[0].scrollTop).toBe(expected.startRow * DIFF_ROW_HEIGHT)
+      expect(panes[0].scrollTop).toBe(jumpScrollTop(expected.blockIndex))
       expect(panes[1].scrollTop).toBe(panes[0].scrollTop)
       if (expected.blockIndex !== before) changes += 1
     }
@@ -262,7 +274,7 @@ describe('diff ruler track hit at 350k rows', () => {
 
     // A bubbling track hit would have picked the top of the track instead.
     expect(selectedCount(container).index).toBe(expected)
-    expect(panes[0].scrollTop).toBe(model.blocks[expected].startRow * DIFF_ROW_HEIGHT)
+    expect(panes[0].scrollTop).toBe(jumpScrollTop(expected))
     expect(panes[1].scrollTop).toBe(panes[0].scrollTop)
   })
 
@@ -413,7 +425,7 @@ describe('windowed panes after a track hit', () => {
 
     clickTrack(ruler, offset)
 
-    expect(panes[0].scrollTop).toBe(expected.startRow * DIFF_ROW_HEIGHT)
+    expect(panes[0].scrollTop).toBe(jumpScrollTop(expected.blockIndex))
     expect(panes[1].scrollTop).toBe(panes[0].scrollTop)
     for (const pane of panes) {
       expect(contentOf(pane).dataset.diffWindowStart).toBe(String(expected.startRow))

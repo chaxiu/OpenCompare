@@ -28,6 +28,8 @@ import type { MergeLineView } from '@renderer/components/MergePane'
 import { Panel } from '@renderer/components/Panel'
 import { SegmentedControl } from '@renderer/components/SegmentedControl'
 import { SplitPane } from '@renderer/components/SplitPane'
+import { centeredScrollTop } from './codeViewScroll'
+import { CODE_SWAP_SHORTCUT, isCodeSwapShortcut } from './codeViewShortcut'
 import { cx } from '@renderer/components/utils'
 import { useI18n } from '@renderer/i18n/context'
 import type { MessageKey } from '@renderer/i18n/messages'
@@ -77,6 +79,22 @@ function offsetTop(range: MergeRange): number {
   return Math.max(0, range.start * DIFF_ROW_HEIGHT - 60)
 }
 
+/** Both panes share one centred target; the first mounted pane supplies the height. */
+function blockScrollTop(
+  primary: HTMLDivElement | null,
+  fallback: HTMLDivElement | null,
+  block: { readonly startRow: number; readonly endRow: number },
+  rowCount: number
+): number {
+  const pane = primary ?? fallback
+  return centeredScrollTop({
+    startRow: block.startRow,
+    endRow: block.endRow,
+    rowCount,
+    viewportHeight: pane?.clientHeight ?? 0
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /* Two-column line + inline character diff                             */
 /* ------------------------------------------------------------------ */
@@ -122,6 +140,8 @@ function CodeDiffView({
   readonly onOpenSide?: (side: 'left' | 'right', file: PickedTextFile) => void
 }): JSX.Element {
   const { t } = useI18n()
+  // Toolbar tooltip and menu item read the same action name + binding.
+  const swapLabel = `${t('files.code.swap')} · ${CODE_SWAP_SHORTCUT}`
   const initial = {
     leftPath: buffer?.leftPath ?? pair.left.path,
     rightPath: buffer?.rightPath ?? pair.right.path,
@@ -154,6 +174,8 @@ function CodeDiffView({
 
   const leftScroll = useRef<HTMLDivElement>(null)
   const rightScroll = useRef<HTMLDivElement>(null)
+  // Latest swap closure for the document-level shortcut listener.
+  const swapHandler = useRef<() => void>(() => {})
 
   const leftDirty = leftText !== leftSource
   const rightDirty = rightText !== rightSource
@@ -235,13 +257,19 @@ function CodeDiffView({
   const activeIndex = blockCount === 0 ? -1 : Math.min(active, blockCount - 1)
   const activeBlock = activeIndex >= 0 ? diff.blocks[activeIndex] : null
 
+  /** The pane's own scroll element owns the height; both panes share the target. */
   useEffect(() => {
     if (skipBlockScroll.current) {
       skipBlockScroll.current = false
       return
     }
     if (activeIndex < 0) return
-    const top = diff.blocks[activeIndex].startRow * DIFF_ROW_HEIGHT
+    const top = blockScrollTop(
+      leftScroll.current,
+      rightScroll.current,
+      diff.blocks[activeIndex],
+      diff.rows.length
+    )
     for (const pane of [leftScroll.current, rightScroll.current]) {
       if (pane) pane.scrollTop = top
     }
@@ -264,7 +292,7 @@ function CodeDiffView({
   function scrollToBlock(index: number): void {
     const block = diff.blocks[index]
     if (!block) return
-    const top = block.startRow * DIFF_ROW_HEIGHT
+    const top = blockScrollTop(leftScroll.current, rightScroll.current, block, diff.rows.length)
     for (const pane of [leftScroll.current, rightScroll.current]) {
       if (pane) pane.scrollTop = top
     }
@@ -416,6 +444,22 @@ function CodeDiffView({
     )
   }
 
+  // The ref keeps the listener stable while swap always sees fresh state.
+  useEffect(() => {
+    swapHandler.current = swapSides
+  })
+
+  useEffect(() => {
+    if (!onPairChange) return undefined
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (!isCodeSwapShortcut(event)) return
+      event.preventDefault()
+      swapHandler.current()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onPairChange])
+
   /** The "more" menu carries every secondary pair action and comparison switch. */
   function selectMore(id: string): void {
     switch (id) {
@@ -462,7 +506,7 @@ function CodeDiffView({
       label: `${switches.ignoreWhitespace ? '[x] ' : ''}${t('files.code.ignoreWhitespace')}`
     },
     ...(readSide ? [{ id: 'code-reload', label: t('files.code.reload') }] : []),
-    ...(onPairChange ? [{ id: 'code-swap', label: t('files.code.swap') }] : []),
+    ...(onPairChange ? [{ id: 'code-swap', label: swapLabel }] : []),
     { id: 'reset', label: t('files.code.reset') },
     { id: 'open-left', label: t('files.action.openLeft') },
     { id: 'open-right', label: t('files.action.openRight') }
@@ -494,6 +538,18 @@ function CodeDiffView({
             onClick={() => step(1)}
             disabled={blockCount === 0}
           />
+          {onPairChange ? (
+            <span data-code-pair-actions className="flex shrink-0 items-center gap-2">
+              <ToolbarButton
+                size="sm"
+                data-code-action="swap"
+                aria-label={t('files.code.swap')}
+                title={swapLabel}
+                icon={<Icon name={UI_ICON_ACTIONS.swap} />}
+                onClick={() => swapSides()}
+              />
+            </span>
+          ) : null}
           <span data-shell-entry="override" className="flex shrink-0 items-center gap-2">
             <ToolbarButton
               size="sm"

@@ -45,7 +45,7 @@ const EXPECTED_GATES = [
   {
     id: 'code-pair-actions',
     command:
-      'pnpm test src/core/text/diff.test.ts src/renderer/src/views/CodeView.switches.test.tsx src/renderer/src/workbench/comparisonSwitches.dom.test.tsx src/renderer/src/workbench/directoryCompare.test.ts'
+      'pnpm test src/core/text/diff.test.ts src/renderer/src/views/CodeView.switches.test.tsx src/renderer/src/views/codeViewScroll.test.ts src/renderer/src/views/codeViewShortcut.test.ts src/renderer/src/views/CodeView.ruler.test.tsx src/renderer/src/views/CodeView.rulerTrack.test.tsx src/renderer/src/workbench/comparisonSwitches.dom.test.tsx src/renderer/src/workbench/directoryCompare.test.ts'
   },
   { id: 'test-compare-request', command: 'pnpm test src/shared/compareRequest.test.ts' },
   { id: 'history-store', command: 'pnpm test src/history-store-gate.test.ts' },

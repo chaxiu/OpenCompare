@@ -8,6 +8,7 @@ import type { TextFileFacts } from '@shared/platform/types'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
+import { CODE_SWAP_SHORTCUT } from './codeViewShortcut'
 import { moreItem as menuItem, moreTrigger, openMore } from '../../../test/shellMenu'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair, FilePairProbes } from '@renderer/workbench/session'
@@ -126,6 +127,12 @@ function panelTitles(): string[] {
 }
 function action(name: 'reload' | 'swap'): HTMLElement {
   return menuItem(ACTION_LABELS[name])
+}
+/** The directly visible swap entry in the code diff toolbar. */
+function toolbarSwap(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[data-shell-level="view-toolbar"] [data-code-action="swap"]'
+  )
 }
 
 afterEach(() => {
@@ -376,5 +383,65 @@ describe('code pair actions and whitespace switch', () => {
         name
       ).toBeDefined()
     }
+    const button = toolbarSwap()
+    expect(button?.getAttribute('aria-label')).toBe('Swap sides')
+    expect(button?.getAttribute('title')).toContain(CODE_SWAP_SHORTCUT)
+  })
+})
+
+describe('explicit swap entry and centred jump', () => {
+  it('shows the swap action directly in the toolbar only when the shell can commit', () => {
+    const view = renderDiff('alpha\nbeta\n', 'alpha\n', undefined, undefined, vi.fn())
+    const button = toolbarSwap()
+    expect(button).not.toBeNull()
+    expect(button?.getAttribute('aria-label')).toBe('交换左右')
+    expect(button?.getAttribute('title')).toContain(CODE_SWAP_SHORTCUT)
+    expect(button?.hasAttribute('data-shell-entry')).toBe(false)
+    // The same action stays available from the overflow menu with the same binding.
+    expect(action('swap').textContent).toContain(CODE_SWAP_SHORTCUT)
+    view.unmount()
+
+    renderDiff('alpha\nbeta\n', 'alpha\n')
+    expect(toolbarSwap()).toBeNull()
+  })
+
+  it('runs toolbar, menu and shortcut through the same swap action without writing', () => {
+    const [left, right] = ['alpha\nbeta\n', 'alpha\n']
+    const write = vi.spyOn(platform, 'writeTextFile')
+    const onPairChange = vi.fn()
+    renderDiff(left, right, undefined, undefined, onPairChange)
+
+    fireEvent.click(toolbarSwap()!)
+    fireEvent.click(action('swap'))
+    fireEvent.keyDown(document, { key: 's', metaKey: true, shiftKey: true })
+
+    expect(onPairChange).toHaveBeenCalledTimes(3)
+    expect(onPairChange.mock.calls.map((call) => call[0])).toEqual([
+      { left: { path: '/r.ts', text: right }, right: { path: '/l.ts', text: left } },
+      { left: { path: '/l.ts', text: left }, right: { path: '/r.ts', text: right } },
+      { left: { path: '/r.ts', text: right }, right: { path: '/l.ts', text: left } }
+    ])
+    expect(panelTitles()).toEqual(['/r.ts', '/l.ts'])
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('guards the shortcut and only prevents default on a real swap', () => {
+    const onPairChange = vi.fn()
+    renderDiff('alpha\nbeta\n', 'alpha\n', undefined, undefined, onPairChange)
+
+    expect(fireEvent.keyDown(document, { key: 'n', metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(document, { key: 's', metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(document, { key: 's', ctrlKey: true, shiftKey: true, altKey: true })).toBe(true)
+    expect(fireEvent.keyDown(document, { key: 's', metaKey: true, shiftKey: true, repeat: true })).toBe(true)
+    expect(onPairChange).not.toHaveBeenCalled()
+
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    expect(fireEvent.keyDown(input, { key: 's', metaKey: true, shiftKey: true })).toBe(true)
+    input.remove()
+    expect(onPairChange).not.toHaveBeenCalled()
+
+    expect(fireEvent.keyDown(document, { key: 's', ctrlKey: true, shiftKey: true })).toBe(false)
+    expect(onPairChange).toHaveBeenCalledTimes(1)
   })
 })

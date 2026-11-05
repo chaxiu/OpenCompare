@@ -6,6 +6,7 @@ import type { DiffBlock, DiffRow } from '@core/text/diff'
 import type { DiffStatus } from '@shared/fixtures'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from '@renderer/views/CodeView'
+import { centeredScrollTop } from '@renderer/views/codeViewScroll'
 import { DIFF_ROW_HEIGHT, DiffPane } from './DiffPane'
 import { installJsdomViewport } from '../../../test/jsdomViewport'
 
@@ -542,16 +543,24 @@ describe('windowed diff scroll sync', () => {
     if (!marker) throw new Error('no ruler marker for the distant block')
     fireEvent.click(marker)
 
-    // CodeView's jump effect written `scrollTop` on both panes; a browser
-    // follows a programmatic scroll with a scroll event, which is what the
-    // window state is refreshed from.
-    expect(left.scrollTop).toBe(900 * DIFF_ROW_HEIGHT)
-    expect(right.scrollTop).toBe(900 * DIFF_ROW_HEIGHT)
+    // CodeView's jump effect writes one centred `scrollTop` on both panes; a
+    // browser follows a programmatic scroll with a scroll event, which is what
+    // the window state is refreshed from.
+    const target = centeredScrollTop({
+      startRow: 900,
+      endRow: 900,
+      rowCount: 1_500,
+      viewportHeight: VIEWPORT_HEIGHT
+    })
+    expect(left.scrollTop).toBe(target)
+    expect(right.scrollTop).toBe(target)
     fireEvent.scroll(left)
     fireEvent.scroll(right)
 
-    expect(contentOf(left).dataset.diffWindowStart).toBe('900')
-    expect(contentOf(right).dataset.diffWindowStart).toBe('900')
+    const windowStart = Number(contentOf(left).dataset.diffWindowStart)
+    expect(windowStart).toBeLessThanOrEqual(900)
+    expect(windowStart).toBeGreaterThan(700)
+    expect(contentOf(right).dataset.diffWindowStart).toBe(String(windowStart))
     expect(rowAt(left, 900).textContent).toContain('line-900')
     expect(rowAt(right, 900).textContent).toContain('changed-900')
     expect(left.scrollTop).toBe(right.scrollTop)
