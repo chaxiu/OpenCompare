@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { resolveSyntaxView } from '@core/syntax'
-import type { SyntaxView } from '@core/syntax'
+import { resolveSyntaxView } from '@core/syntax/view'
+import type { SyntaxView } from '@core/syntax/view'
 import { diffLineTexts } from '@core/text/diff'
 import type { DiffRow, InlineSegment } from '@core/text/diff'
 import { DIFF_ROW_HEIGHT, DiffPane } from './DiffPane'
