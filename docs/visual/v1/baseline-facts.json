@@ -14,7 +14,7 @@
   },
   "directoryHtml": {
     "bytes": 5367,
-    "sha256": "e35b1ec92765017613ae23c1f749aeeaf8501b1261831201eedeced4caefe93b",
+    "sha256": "a812c706f5a54b3a849ff24336b06595c4d37fd0c24d83c9bf0cf8a3ffb0e9c3",
     "preToken": {
       "commit": "11170a5d300b5318c320913eaf6fea54ac510173",
       "appVersion": "0.2.20",
@@ -23,11 +23,11 @@
       "sha256": "8cfacec99138c21ef24b5eead14d4171ec4f4d657e815f1b8ba888bfc830a69b"
     },
     "refreshed": {
-      "commit": "c383579dad1d99e65fdc25a768a7e863888e768b",
-      "appVersion": "0.2.23",
-      "capturedAt": "2026-11-05T04:48:25.175Z",
+      "commit": "bb09adedfdb0f3244fcd1d1f7bad7108e091bff0",
+      "appVersion": "0.2.24",
+      "capturedAt": "2026-11-05T12:03:35.924Z",
       "bytes": 5367,
-      "sha256": "e35b1ec92765017613ae23c1f749aeeaf8501b1261831201eedeced4caefe93b"
+      "sha256": "a812c706f5a54b3a849ff24336b06595c4d37fd0c24d83c9bf0cf8a3ffb0e9c3"
     }
   }
 }
