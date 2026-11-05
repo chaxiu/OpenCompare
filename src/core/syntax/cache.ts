@@ -131,6 +131,24 @@ export function cachedSyntaxTokens(
   return defaultCache.get(text, language)
 }
 
+/** Read-only counters of the module-level cache, used by the perf probe/gate. */
+export interface SyntaxCacheStats {
+  readonly size: number
+  readonly charCount: number
+  readonly hits: number
+  readonly misses: number
+}
+
+/** Current module-level cache readings; never mutates recency or counters. */
+export function syntaxCacheStats(): SyntaxCacheStats {
+  return {
+    size: defaultCache.size,
+    charCount: defaultCache.charCount,
+    hits: defaultCache.hits,
+    misses: defaultCache.misses
+  }
+}
+
 /** Drops every cached document; the next read parses again. */
 export function clearSyntaxCache(): void {
   defaultCache.clear()

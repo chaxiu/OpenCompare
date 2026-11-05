@@ -74,7 +74,10 @@ export default tseslint.config(
     // zero-assertion evidence printer, outside the vitest include; every real
     // suite keeps the sentinel rule.
     files: ['**/*.test.{ts,tsx}'],
-    ignores: ['scripts/measure-symlink-footer.evidence.test.ts'],
+    ignores: [
+      'scripts/measure-symlink-footer.evidence.test.ts',
+      'scripts/syntax-perf.evidence.test.ts'
+    ],
     plugins: { opencompare },
     rules: { 'opencompare/no-test-sentinel': 'error' }
   },

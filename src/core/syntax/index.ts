@@ -12,10 +12,11 @@ export {
   SYNTAX_CACHE_MAX_ENTRIES,
   SyntaxCache,
   cachedSyntaxTokens,
-  clearSyntaxCache
+  clearSyntaxCache,
+  syntaxCacheStats
 } from './cache'
-export type { SyntaxCacheOptions, SyntaxParser } from './cache'
+export type { SyntaxCacheOptions, SyntaxCacheStats, SyntaxParser } from './cache'
 export { overlayLine } from './overlay'
 export type { OverlaySegment } from './overlay'
-export { resolveSyntaxView } from './view'
+export { SYNTAX_MAX_HIGHLIGHT_CHARS, resolveSyntaxView } from './view'
 export type { SyntaxView } from './view'

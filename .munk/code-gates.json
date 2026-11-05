@@ -43,6 +43,11 @@
       "command": "pnpm test src/core/syntax src/renderer/src/components/DiffPane.syntax.test.tsx src/renderer/src/views/CodeView.syntax.test.tsx src/core/theme/contrast.test.ts"
     },
     {
+      "id": "syntax-perf",
+      "cwd": ".",
+      "command": "pnpm test src/core/syntax src/syntax-perf-gate.test.tsx"
+    },
+    {
       "id": "code-pair-actions",
       "cwd": ".",
       "command": "pnpm test src/core/text/diff.test.ts src/renderer/src/views/CodeView.switches.test.tsx src/renderer/src/workbench/comparisonSwitches.dom.test.tsx src/renderer/src/workbench/directoryCompare.test.ts"

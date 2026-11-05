@@ -39,6 +39,10 @@ const EXPECTED_GATES = [
       'pnpm test src/core/syntax src/renderer/src/components/DiffPane.syntax.test.tsx src/renderer/src/views/CodeView.syntax.test.tsx src/core/theme/contrast.test.ts'
   },
   {
+    id: 'syntax-perf',
+    command: 'pnpm test src/core/syntax src/syntax-perf-gate.test.tsx'
+  },
+  {
     id: 'code-pair-actions',
     command:
       'pnpm test src/core/text/diff.test.ts src/renderer/src/views/CodeView.switches.test.tsx src/renderer/src/workbench/comparisonSwitches.dom.test.tsx src/renderer/src/workbench/directoryCompare.test.ts'
@@ -200,22 +204,36 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly thirty-one pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly thirty-two pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(31)
+    expect(defaultManifest.gates).toHaveLength(32)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the thirty-one commands verbatim with cwd "."', () => {
+  it('keeps the thirty-two commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
     for (const gate of defaultManifest.gates) {
       expect(gate.cwd).toBe('.')
     }
+  })
+
+  it('keeps the syntax-perf threshold gate on the core threshold and root DOM/evidence suites', () => {
+    const gate = gateById(defaultManifest, 'syntax-perf')
+    expect(gate).toBeDefined()
+    expect(gate?.cwd).toBe('.')
+    const command = gate?.command ?? ''
+    for (const file of ['src/core/syntax', 'src/syntax-perf-gate.test.tsx']) {
+      expect(command, `syntax-perf: names ${file}`).toContain(file)
+    }
+    for (const forbidden of SINGLE_ARGV_FORBIDDEN) {
+      expect(command, 'syntax-perf is single argv').not.toContain(forbidden)
+    }
+    expect(existsSync(resolve(process.cwd(), 'src/syntax-perf-gate.test.tsx'))).toBe(true)
   })
 
   it('keeps cancel-gate, memory-gate and the real-disk sync gate in the matrix', () => {

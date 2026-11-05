@@ -8,7 +8,9 @@
 - **整篇一次解析 + 有界缓存**：每侧把 `foldSyntaxText(text)` 的同一份折叠文本交给 `cachedSyntaxTokens`，一次渲染不按行重复解析。
 - **逐可见行叠合**：`overlayLine(lineText, lineStartOffset, tokens, inlineSegments?)` 把整篇 token 与既有字符级 `InlineSegment[]` 压成逐段 `{ text, token, changed }`，只对虚拟化窗口内已渲染行计算。
 - **前景 / 背景正交**：语法 token 只输出 `text-syntax-*` 前景；行级差异只用既有 `bg-diff-*-soft`，字符级差异只用 soft 背景 + 下划线；语法四色不含红，红只属于 `removed`。
-- **回落**：无映射扩展名、空文本、含孤立 `\r`，以及解析异常、后续大文件阈值，统一由**一个**导出纯函数判定为「不着色」，走改动前一致的纯文本渲染。
+- **回落**：无映射扩展名、空文本、含孤立 `\r`，以及解析异常、超阈值大文件，统一由**一个**导出纯函数判定为「不着色」，走改动前一致的纯文本渲染。
+- **大文件阈值（第二波）**：`resolveSyntaxView` 在 `foldSyntaxText` 之后、`cachedSyntaxTokens` 之前按折叠后字符数判定；`length <= SYNTAX_MAX_HIGHLIGHT_CHARS` 照常着色，超阈值直接返回 `null`，不触发 tokenizer、不占缓存；`CodeView` / `DiffPane` 不加第二处尺寸判断，虚拟化与滚动同步零改动。
+- **实测证据与门禁**：由 `pnpm measure:syntax` 的真实探针写 `docs/evidence/syntax-perf.{json,md}`（阶梯尺寸、冷/热耗时、缓存读数、机器口径），新增 `syntax-perf` gate 复核阈值边界、缓存有界与证据/常量一致。
 - **零变更守卫**：四态计数、忽略换行 / 编码 / 空白开关、复制文本、导出文本、行窗口化与滚动映射均不因着色改变；既有渲染测试不放宽。
 - **门禁与 provenance**：`.munk/code-gates.json` 新增 `syntax-view` gate 并保留 `syntax-core`；`src/renderer` 变更触发既有 `readme-screenshots` 门，须重跑 `pnpm screenshots` 并把 `docs/screenshots.md` 的 captured commit 与四张 PNG 的字节数 / sha256 重钉到该提交。
 
@@ -38,10 +40,27 @@
 - **ac-core-boundary**：`src/core/**` 不新增 Electron / React / DOM 依赖，renderer 只经 `@core/syntax` 入口消费且不新增运行时依赖；`pnpm typecheck` / `pnpm build` / `pnpm build:web` 全绿。
 - **ac-version-anchors-untouched**：`package.json#version`、`CHANGELOG.md`、`README.md` 第 5 行、`release.yml` dispatch 默认 tag、`docs/release-notes/**` 零改动。
 - **ac-screenshot-provenance**：渲染变更提交后重跑 `pnpm screenshots`，把 `docs/screenshots.md` 的 captured commit 与四张 PNG 的字节数 / sha256 重钉到该提交；README 图片引用与中英隔离不变，禁止只改 commit 字段或手写 sha。
+- **ac-threshold-inside-highlights**：长度恰好等于导出阈值 `T` 的真实 `.ts` 文本经 `resolveSyntaxView` 返回非 `null` 且 tokens 非空；双栏渲染中该侧至少出现一个 `[data-syntax]`。
+- **ac-threshold-outside-plain**：同一内容补到 `T + 1` 字符后返回 `null`，渲染后该侧 `[data-syntax]` 数量为 0，且行数、每行 `textContent`、行状态与同一内容以 `.txt` 纯文本渲染逐项相等。
+- **ac-threshold-boundary-flip**：阈值按折叠后字符数判定，`T` 与 `T + 1` 之间即翻转；同一内容的 LF 与 CRLF 版本折叠后等长时同进同出，不因换行编码改变着色与否。
+- **ac-single-predicate-preserved**：阈值常量只由 `src/core/syntax` 导出并仅在 `resolveSyntaxView` 内使用；`CodeView` / `DiffPane` 不引用该常量、不含尺寸字面量比较（源码扫描 + 渲染测试双向证明），双栏仍只经同一入口取结果。
+- **ac-oversized-not-parsed**：超阈值文本被拒时模块级缓存 `misses` 与 `charCount` 不变（未进 tokenizer），同一次调用不抛错。
+- **ac-existing-fallbacks-intact**：未知扩展名、空文本、孤立 `\r`、解析异常仍返回 `null`，既有 `src/core/syntax/view.test.ts` 断言不放宽、不删除。
+- **ac-cache-still-bounded**：连续对 40 份不同大文本（每份 ≤ 阈值）调用 `resolveSyntaxView` 后，缓存 `size <= SYNTAX_CACHE_MAX_ENTRIES` 且 `charCount <= SYNTAX_CACHE_MAX_CHARS`；两个上限常量取值保持不变。
+- **ac-cache-hit-at-threshold**：阈值内文本可被缓存保留：首次 miss，第二次 hit 且 tokens 与首次一致（阈值不超过缓存字符上限，重复渲染不重解析）。
+- **ac-diff-semantics-parity**：同内容对比下，超阈值回落路径与 `.txt` 纯文本路径的四态计数、差异块数、行号、`data-diff-window-start`、`data-diff-content-height` 完全一致。
+- **ac-windowing-untouched**：`DIFF_ROW_HEIGHT`、`ROW_OVERSCAN`、`WINDOW_THRESHOLD`、滚动同步与 ruler 跳转零改动（既有窗口化测试不放宽且全绿）。
+- **ac-version-anchors-untouched**：`package.json#version`、`CHANGELOG.md`、`README.md` 第 5 行、`release.yml` dispatch 默认 tag、`docs/release-notes/**` 零改动。
+- **ac-syntax-perf-gate**：`.munk/code-gates.json` 新增 `syntax-perf` gate，覆盖阈值边界、缓存有界与证据一致性断言；`src/munk-gates.test.ts` 门清单同步；`syntax-perf` 与既有 `syntax-core` / `syntax-view` / `test-debt-gate` 等全部门禁全绿。
+- **ac-probe-artifact**：`docs/evidence/syntax-perf.json` 与 `.md` 由探针脚本真实运行写入（禁止手填），含每个尺寸档的字节数、字符数、行数、冷/热耗时、tokens 数与缓存读数，以及阈值、判定规则、机器口径（平台 / 架构 / OS 版本 / CPU 型号 / 核数 / 总内存 / Node 版本）、执行命令与时间戳。
+- **ac-evidence-path-mapping**：证据 `.md` 与交付说明给出可直接打开的绝对路径，并同时标注 worktree 根与产品仓根（`/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/codebases/projects/open-compare`）的映射关系。
+- **ac-evidence-threshold-in-sync**：证据 JSON 的 `threshold` 与代码导出常量相等；证据记录阶梯尺寸与「冷启动中位数 ≤ 150 ms 且 ≤ 缓存字符上限」的取值规则，可被 `syntax-perf` gate 复核。
+- **ac-screenshot-gate-quiet**：本波不修改 `src/renderer/**` 下任何非测试文件（该门已排除 `*.test.ts(x)`），`release-artifacts-and-brand` 截图门保持绿；若确需改非测试 renderer 文件，必须按既有流程重拍并重钉 `docs/screenshots.md` 的 commit 与 sha256。
 
 ## 非目标
 
-- 不做大文件阈值与阈值两侧行为（第二波）；本项只为它留单一可判定入口，不引入新的尺寸分支。
+- 不做分块 / 增量 / 异步解析或 Worker；阈值只做「着色 / 不着色」二元回落。
+- 不加用户可见的阈值配置、提示、i18n 文案或状态条；不改缓存双上限数值与 LRU 淘汰策略，不新增第二层缓存。
 - 不改 `MergePane` 着色，不给合并 / 结构化 / CSV / 目录视图加语法色。
 - 不新增第五个前景色相，不改任何既有 `--color-*` 取值与 `main.css` 四色定义。
 - 不做主题选择器、逐语言配置、内容自动探测、编辑器组件（Monaco / CodeMirror）。
@@ -57,16 +76,21 @@
 - **渲染契约**：token 只用 Tailwind v4 由 `--color-syntax-*` 生成的 `text-syntax-keyword|string|number|comment`，不写新 CSS、不写字面量颜色；`data-syntax="<class>"` 仅供断言；着色模式下 changed 段只叠加既有 soft 背景与下划线，不加 `text-diff-*`；未着色路径 `INLINE_CHANGED_CLASSES` 逐位不变。
 - **组件 API 最小扩展**：`DiffPane` 新增可选 `syntaxView`，缺省行为与现状完全一致；只有 `CodeView` 两个调用点传入，`StructuredPanes` 等仅引用常量的调用方不受影响。
 - **虚拟化不动**：`DIFF_ROW_HEIGHT` / `ROW_OVERSCAN` / `WINDOW_THRESHOLD`、滚动同步与 ruler 跳转逻辑不修改；叠合在 `DiffRowView` 内对已渲染行完成，每侧 tokens 在 `CodeView` 用 `useMemo` 缓存。
-- **单点判定**：`resolveSyntaxView(path, text)` 返回 `{ language, tokens, lineStarts } | null`，内部承担扩展名映射、空文本、孤立 CR、解析异常与第二波阈值；遵循 `docs/lessons.md §9`，UI 与门禁共用同一判定。
+- **单点判定**：`resolveSyntaxView(path, text)` 返回 `{ language, tokens, lineStarts } | null`，内部承担扩展名映射、空文本、孤立 CR、解析异常与超阈值回落（`SYNTAX_MAX_HIGHLIGHT_CHARS`）；遵循 `docs/lessons.md §9`，UI 与门禁共用同一判定。
+- **阈值落点与顺序**：`SYNTAX_MAX_HIGHLIGHT_CHARS` 定义并导出在 `src/core/syntax/view.ts`，由 `@core/syntax` 再导出；判定放在 `foldSyntaxText` 之后、`cachedSyntaxTokens` 之前，且仍排在语言映射 / 空文本 / 孤立 `\r` 之后，不改变既有回落优先级。取值由阶梯实测冻结为整数字面量并注释测量依据，重跑探针后 `threshold` 必须与常量一致。
 - **测试口径**：渲染断言用 jsdom（`// @vitest-environment jsdom`）并复用 `test/jsdomViewport`；样本为真实 `.ts` / `.py` / `.json` 文本；断言从 DOM / 源码实读，不抄颜色值。
-- **门禁注册**：`.munk/code-gates.json` 追加 `syntax-view`（`pnpm test src/core/syntax src/renderer/src/components/DiffPane.syntax.test.tsx src/renderer/src/views/CodeView.syntax.test.tsx src/core/theme/contrast.test.ts`），保留 `syntax-core`；`src/munk-gates.test.ts` 的 31 门清单同步。
+- **门禁注册**：`.munk/code-gates.json` 追加 `syntax-view`（`pnpm test src/core/syntax src/renderer/src/components/DiffPane.syntax.test.tsx src/renderer/src/views/CodeView.syntax.test.tsx src/core/theme/contrast.test.ts`）与第二波 `syntax-perf`（`pnpm test src/core/syntax src/syntax-perf-gate.test.tsx`），保留 `syntax-core`；`src/munk-gates.test.ts` 的 32 门清单同步。
 - **已知门禁耦合**：`readme-screenshots` 会在任何被提交的 `src/renderer` 变更后失败；必须先提交渲染变更，再以最终构建的真实 Electron 会话重拍并追加 provenance 重钉提交（参照 `f08d539`），截图像素允许因语法着色变化。
 - **验证范围**：只走 `code_gates`（Node / vitest / build），不做浏览器、真机或桌面 GUI 验收检查；截图捕获仅作为既有门禁产物重生成，不作为新增用户场景验收证据。
+- **缓存读数出口**：为可测性新增只读统计 `syntaxCacheStats()` → `{ size, charCount, hits, misses }`，由默认缓存提供；不新增淘汰逻辑、不改上限常量。
+- **证据探针**：`scripts/syntax-perf.evidence.test.ts`（`vitest.evidence.config.mts` 收集）在系统临时目录生成确定性真实文件、读回磁盘后调用 `resolveSyntaxView`，记录超阈值档拒绝耗时，写 `docs/evidence/syntax-perf.json`（支持 `OPENCOMPARE_SYNTAX_EVIDENCE_OUT` 覆盖）并由同份数据渲染 `.md`；新增 `pnpm measure:syntax`，不进默认门禁矩阵。
+- **第二波测试落点**：边界与 DOM 纯文本一致性断言落在 `src/core/syntax/view.test.ts` / `cache.test.ts` 与仓库根 `src/syntax-perf-gate.test.tsx`（复用既有 jsdom 视口工具，参照 `src/diff-normalize-real-gate.test.tsx`），不在 `src/renderer/**` 新增非测试文件以避免截图重钉。
+- **测试债基线**：新增测试抬高 `repoTestLines` / `repoTestCases`，须按实测同步 `.munk/baseline/test-debt.json` 的 `ceilings` / `floors` 并追加 `growth` 说明，保持 `test-debt-gate` 绿；不得删除或放宽既有断言凑数。
 
 ## 最近交付证明
 
-- WI：`wi_ws_cc70f61b58347b77`（语法着色接线：双栏每侧独立判定 / 单点回落 / token×差异正交叠合 / 零变更守卫）
+- WI：`wi_ws_ac1ff79086dc036b`（第二波：大文件阈值 / 边界与缓存有界回归 / 实测耗时证据）
 - 日期：2026-11-05
-- 结果：code_gates passed（31 gates，attempt 002，`.munk/runs/run_ws_99a53c01da964134/code-gates/attempts/002`；`pnpm test` 150 files / 2345 passed + 1 skipped（2346）；新增 gate `syntax-view`：9 files / 52 tests passed）。
-- 覆盖摘要：新增 `src/core/syntax/view.ts` 的 `resolveSyntaxView` 单一入口（扩展名映射 + CRLF 折叠 + 缓存整篇 token + 孤立 `\r` / 空文本 / 空 token / 解析异常回落 `null`）并从 `@core/syntax` 导出；`CodeView` 每侧 `useMemo` 解析并传入 `DiffPane`；`DiffPane` 新增可选 `syntaxView`，`DiffRowView` 对已渲染行调用 `overlayLine` 输出 `text-syntax-*` 前景 span 与仅背景 + 下划线的 changed 外层 span，行 tone 仍由单元格承载；新增 `DiffPane.syntax.test.tsx` / `CodeView.syntax.test.tsx` 覆盖上述 AC；`syntax-view` gate 与 test-debt 记录同步。
-- 后续注意：① `overlayLine` 的 `lineStartOffset` 必须来自 `resolveSyntaxView.lineStarts`（同一份折叠文本），自行按 `splitLines` 重算会在 CRLF 文本上错位；② 大文件阈值第二波只能加在 `resolveSyntaxView` 内，否则双栏会出现第二处判定分支；③ 任何后续 `src/renderer` 提交都会再次触发 `readme-screenshots`，需再次重拍重钉。
+- 结果：code_gates passed（32 gates，attempt 001，`.munk/runs/run_ws_c2df4ea7a75f295a/code-gates/attempts/001`；`pnpm test` 151 files / 2361 passed + 1 skipped（2362）；新增 gate `syntax-perf`：7 files / 46 tests passed）。
+- 覆盖摘要：`src/core/syntax/view.ts` 新增并导出 `SYNTAX_MAX_HIGHLIGHT_CHARS = 262144`，在 `foldSyntaxText` 之后、`cachedSyntaxTokens` 之前按折叠后字符数判定 `null` 回落；`cache.ts` 新增只读 `syntaxCacheStats()`；新增 `scripts/syntax-perf.evidence.test.ts` + `pnpm measure:syntax` 产出 `docs/evidence/syntax-perf.{json,md}`（阶梯 32K→4M，262144 档冷中位 49.2 ms，超阈值档 0.14–1.19 ms 直接拒绝，40 份有界回归 size 13 / charCount 260026）；边界与 `.txt` 一致性断言落在 `src/core/syntax/view.test.ts` 与 `src/syntax-perf-gate.test.tsx`；`.munk/code-gates.json` / `src/munk-gates.test.ts` / `test-debt.json` 同步，`src/renderer/**` 非测试文件零改动（截图门保持绿）。
+- 后续注意：① 阈值由「冷中位 ≤ 150 ms 的最大档」再以 `SYNTAX_CACHE_MAX_CHARS` 钳制得出，本场实测 262144 档仅 49 ms，真正生效的是缓存字符上限而非测量值——放宽上限前必须重跑 `pnpm measure:syntax` 并同步冻结常量与证据；② `measure:syntax` 不进默认门禁矩阵，阈值改动后须手动重跑，否则 `syntax-perf` gate 的证据一致性断言会失败；③ 任何后续 `src/renderer` 提交仍会触发 `readme-screenshots`，需重拍重钉。
