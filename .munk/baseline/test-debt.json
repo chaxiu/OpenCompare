@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 50556
+    "repoTestLines": 50954
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 50159,
-      "to": 50556,
-      "reason": "syntax-core V1 pure-logic coverage: explicit extension map plus registry parity, whole-document lowlight tokenizing with CRLF folding and four-class JSON mapping, bounded LRU cache entry/character limits, token x inline-diff overlay boundaries, and WCAG/hue checks for the four new syntax foreground tokens",
-      "addedCases": 26
+      "from": 50556,
+      "to": 50954,
+      "reason": "dual-pane syntax render wiring coverage: per-side resolveSyntaxView extension mapping and .txt fallback DOM parity, four foreground classes in the .jsonc pane, token x character-change overlay (internal change, cross-boundary split, row tone retained, red only on removed), CRLF/LF span and gutter parity, bounded virtual window on a coloured 5k-line side, and CodeView count/switch/theme/merge parity",
+      "addedCases": 18
     }
   ]
 }

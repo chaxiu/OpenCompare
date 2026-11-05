@@ -34,6 +34,11 @@ const EXPECTED_GATES = [
     command: 'pnpm test src/core/syntax src/core/theme/contrast.test.ts'
   },
   {
+    id: 'syntax-view',
+    command:
+      'pnpm test src/core/syntax src/renderer/src/components/DiffPane.syntax.test.tsx src/renderer/src/views/CodeView.syntax.test.tsx src/core/theme/contrast.test.ts'
+  },
+  {
     id: 'code-pair-actions',
     command:
       'pnpm test src/core/text/diff.test.ts src/renderer/src/views/CodeView.switches.test.tsx src/renderer/src/workbench/comparisonSwitches.dom.test.tsx src/renderer/src/workbench/directoryCompare.test.ts'
@@ -195,16 +200,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly thirty pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly thirty-one pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(30)
+    expect(defaultManifest.gates).toHaveLength(31)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the thirty commands verbatim with cwd "."', () => {
+  it('keeps the thirty-one commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )

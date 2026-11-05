@@ -1,6 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { JSX, Ref, ReactNode, UIEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { overlayLine } from '@core/syntax'
+import type { SyntaxTokenClass, SyntaxView } from '@core/syntax'
 import type { DiffBlock, DiffRow } from '@core/text/diff'
 import type { DiffStatus } from '@shared/fixtures'
 import { cx } from './utils'
@@ -42,6 +44,34 @@ const ROW_TONE: Record<DiffStatus, string> = {
   conflict: 'bg-diff-conflict-soft'
 }
 
+/**
+ * Foreground-only classes for the four V1 syntax semantics. Kept as literal
+ * strings so Tailwind's scanner emits every utility; no dynamic class names.
+ */
+const SYNTAX_FOREGROUND: Record<SyntaxTokenClass, string> = {
+  keyword: 'text-syntax-keyword',
+  string: 'text-syntax-string',
+  number: 'text-syntax-number',
+  comment: 'text-syntax-comment'
+}
+
+/**
+ * Character-level change marks while syntax colouring is active: the same soft
+ * wash and underline as the plain path, but never a `text-*` colour, so the
+ * token foreground stays in charge.
+ */
+const INLINE_CHANGED_BACKGROUND: Record<DiffStatus, string> = {
+  same: 'rounded-xs bg-diff-modified/12 underline decoration-diff-modified decoration-1 underline-offset-2',
+  added:
+    'rounded-xs bg-diff-added/12 underline decoration-diff-added decoration-1 underline-offset-2',
+  removed:
+    'rounded-xs bg-diff-removed/12 underline decoration-diff-removed decoration-1 underline-offset-2',
+  modified:
+    'rounded-xs bg-diff-modified/12 underline decoration-diff-modified decoration-1 underline-offset-2',
+  conflict:
+    'rounded-xs bg-diff-conflict/12 underline decoration-diff-conflict decoration-1 underline-offset-2'
+}
+
 function inlineContent(row: DiffRow, side: 'left' | 'right'): ReactNode {
   const text = side === 'left' ? row.leftText : row.rightText
   const segments = side === 'left' ? row.leftSegments : row.rightSegments
@@ -59,17 +89,63 @@ function inlineContent(row: DiffRow, side: 'left' | 'right'): ReactNode {
   )
 }
 
+/**
+ * Syntax path: overlay whole-document tokens with the row's inline runs, then
+ * paint the token as a foreground span and any change as an outer background /
+ * underline span. The row cell keeps its own status tone, so neither layer eats
+ * the other and red still belongs only to `removed` rows.
+ */
+function syntaxContent(
+  row: DiffRow,
+  side: 'left' | 'right',
+  view: SyntaxView
+): ReactNode {
+  const text = side === 'left' ? row.leftText : row.rightText
+  if (text === null) return '\u00a0'
+  const lineIndex = side === 'left' ? row.leftIndex : row.rightIndex
+  const lineStart = view.lineStarts[lineIndex] ?? 0
+  const segments = overlayLine(
+    text,
+    lineStart,
+    view.tokens,
+    side === 'left' ? row.leftSegments : row.rightSegments
+  )
+  if (segments.length === 0) return text.length > 0 ? text : '\u00a0'
+
+  return segments.map((segment, index) => {
+    const token = segment.token
+    const foreground =
+      token === null ? (
+        segment.text
+      ) : (
+        <span key="syntax" data-syntax={token} className={SYNTAX_FOREGROUND[token]}>
+          {segment.text}
+        </span>
+      )
+    return (
+      <span
+        key={index}
+        className={segment.changed ? INLINE_CHANGED_BACKGROUND[row.status] : undefined}
+      >
+        {foreground}
+      </span>
+    )
+  })
+}
+
 /** One aligned {@link DIFF_ROW_HEIGHT}px line: sticky gutter plus inline text cell. */
 function DiffRowView({
   row,
   side,
   index,
-  active
+  active,
+  syntaxView
 }: {
   readonly row: DiffRow
   readonly side: 'left' | 'right'
   readonly index: number
   readonly active: boolean
+  readonly syntaxView?: SyntaxView | null
 }): JSX.Element {
   const line = side === 'left' ? row.leftLine : row.rightLine
   const filler = line === null
@@ -97,7 +173,9 @@ function DiffRowView({
           row.status === 'same' || filler ? 'text-content-secondary' : 'text-content-primary'
         )}
       >
-        {inlineContent(row, side)}
+        {syntaxView !== undefined && syntaxView !== null
+          ? syntaxContent(row, side, syntaxView)
+          : inlineContent(row, side)}
       </span>
     </div>
   )
@@ -110,6 +188,11 @@ export interface DiffPaneProps {
   readonly activeBlock?: DiffBlock | null
   readonly scrollRef?: Ref<HTMLDivElement>
   readonly onScroll?: (event: UIEvent<HTMLDivElement>) => void
+  /**
+   * Pre-resolved highlight for this side from `resolveSyntaxView`. Omitted or
+   * `null` keeps the historical plain-text rendering untouched.
+   */
+  readonly syntaxView?: SyntaxView | null
 }
 
 /**
@@ -128,7 +211,8 @@ export function DiffPane({
   side,
   activeBlock,
   scrollRef,
-  onScroll
+  onScroll,
+  syntaxView
 }: DiffPaneProps): JSX.Element {
   const windowed = rows.length > WINDOW_THRESHOLD
   const scrollElement = useRef<HTMLDivElement | null>(null)
@@ -210,6 +294,7 @@ export function DiffPane({
                   side={side}
                   index={item.index}
                   active={active}
+                  syntaxView={syntaxView}
                 />
               )
             })
@@ -225,6 +310,7 @@ export function DiffPane({
                   index >= activeBlock.startRow &&
                   index <= activeBlock.endRow
                 }
+                syntaxView={syntaxView}
               />
             ))}
       </div>
