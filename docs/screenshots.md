@@ -7,7 +7,7 @@ old image or composed artwork is used.
 
 ## Captured commit
 
-- commit: `9f59ffa459b470495d96f38187e3b3ecddf94d1c`
+- commit: `4f2a2d005a0bf9426a8e8d16da9040bd98506d97`
 - all four images were captured from a `pnpm build` made on a clean working tree
   at exactly that commit (`HEAD` equalled this commit and `git status
   --porcelain` reported nothing under `src/**` before the build), then
