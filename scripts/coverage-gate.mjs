@@ -13,7 +13,12 @@
  *   `--started-at` (no fallback to a committed/historical summary);
  * - totals floors and per-module branch floor, with the two 0-branch modules
  *   exempt and proven to still have zero branches;
- * - module set equality against the baseline (no silent denominator shrink);
+ * - module set equality against the baseline (no silent denominator shrink),
+ *   with one explicit per-module exemption for modules whose fresh-summary
+ *   totals are all 0 (0 executable statements, e.g. an empty barrel); those
+ *   are audited one line each and never inferred from a path allowlist;
+ * - the per-module branch floor skips the same 0-statement modules, so a
+ *   meaningless `branches.pct` of 0 cannot turn into a floor failure;
  * - zero `v8 ignore` / `c8 ignore` directives under `src/core`;
  * - the measured scope literals equal the baseline scope, literally and in
  *   order;
@@ -227,21 +232,96 @@ function checkTotals(summary, baseline) {
   }
 }
 
-function checkModuleSet(entries, baseline) {
-  const baselineKeys = Object.keys(baseline.modules ?? {})
-  if (baselineKeys.length === 0) {
-    fail('baseline modules: no module entries')
-    return
+const ZERO_STATEMENT_METRICS = ['statements', 'lines', 'functions', 'branches']
+
+/**
+ * Fail-closed 0-executable-statement verdict for one module entry.
+ * Every metric total must be a non-negative integer; only then do all four
+ * being 0 prove the module has nothing executable. Anything malformed returns
+ * a problem instead of defaulting to an exemption.
+ */
+function zeroStatementVerdict(entry) {
+  for (const metric of ZERO_STATEMENT_METRICS) {
+    const total = entry?.[metric]?.total
+    if (!Number.isInteger(total) || total < 0) {
+      return {
+        exempt: false,
+        problem: `${metric}.total must be a non-negative integer, got ${JSON.stringify(total)}`
+      }
+    }
   }
+  return {
+    exempt: ZERO_STATEMENT_METRICS.every((metric) => entry[metric].total === 0),
+    problem: null
+  }
+}
+
+/**
+ * Pure module-level evaluation consumed by `main()`:
+ * - modules whose four totals are all 0 are exempted explicitly, one audited
+ *   message per module, from both set equality and the branch floor;
+ * - every other module keeps strict two-way set equality and the per-module
+ *   branch floor;
+ * - malformed totals fail closed.
+ */
+function evaluateModuleCoverage(entries, baseline, exemptModules = new Set()) {
+  const problems = []
+  const messages = []
+  const zeroStatement = new Set()
+
+  const examine = (moduleName, entry) => {
+    const verdict = zeroStatementVerdict(entry)
+    if (verdict.problem !== null) {
+      problems.push(`module ${moduleName}: ${verdict.problem}`)
+      return
+    }
+    if (!verdict.exempt) return
+    zeroStatement.add(moduleName)
+    messages.push(`exempt module ${moduleName}: 0 executable statements`)
+  }
+
+  for (const [moduleName, entry] of entries) examine(moduleName, entry)
+
+  const baselineModules = baseline.modules ?? {}
+  const baselineKeys = Object.keys(baselineModules)
+  if (baselineKeys.length === 0) {
+    problems.push('baseline modules: no module entries')
+    return { problems, messages }
+  }
+  for (const moduleName of baselineKeys) {
+    if (entries.has(moduleName)) continue
+    examine(moduleName, baselineModules[moduleName])
+  }
+
   const expected = new Set(baselineKeys)
   const actual = new Set(entries.keys())
-  const missing = [...expected].filter((key) => !actual.has(key))
-  const extra = [...actual].filter((key) => !expected.has(key))
-  if (missing.length > 0) fail(`module set: missing from fresh summary: ${missing.join(', ')}`)
-  if (extra.length > 0) fail(`module set: unexpected modules in fresh summary: ${extra.join(', ')}`)
+  const missing = [...expected].filter((key) => !actual.has(key) && !zeroStatement.has(key))
+  const extra = [...actual].filter((key) => !expected.has(key) && !zeroStatement.has(key))
+  if (missing.length > 0) problems.push(`module set: missing from fresh summary: ${missing.join(', ')}`)
+  if (extra.length > 0) problems.push(`module set: unexpected modules in fresh summary: ${extra.join(', ')}`)
   if (missing.length === 0 && extra.length === 0) {
-    ok(`module set: ${actual.size} modules match baseline`)
+    const matched = [...actual].filter((key) => expected.has(key)).length
+    messages.push(`module set: ${matched} modules match baseline`)
   }
+
+  const min = baseline.floors?.moduleBranchesMin
+  if (typeof min !== 'number') {
+    problems.push(`baseline floors.moduleBranchesMin must be a number, got ${JSON.stringify(min)}`)
+    return { problems, messages }
+  }
+  let lowest = null
+  for (const [moduleName, entry] of entries) {
+    if (exemptModules.has(moduleName) || zeroStatement.has(moduleName)) continue
+    const value = pctOf(entry, 'branches')
+    if (value === null) {
+      problems.push(`module ${moduleName}: branches.pct is missing`)
+      continue
+    }
+    if (lowest === null || value < lowest.pct) lowest = { path: moduleName, pct: value }
+    if (value < min) problems.push(`module branches: ${moduleName} ${value}% < ${min}%`)
+  }
+  if (lowest !== null) messages.push(`module branches min: ${lowest.path} ${lowest.pct}% >= ${min}%`)
+  return { problems, messages }
 }
 
 /** The exemption list is fixed; every exempt module must still have 0 branches. */
@@ -272,26 +352,6 @@ function checkExemptModules(entries, baseline) {
     ok(`exempt module ${moduleName}: 0 branches`)
   }
   return expected
-}
-
-function checkModuleBranches(entries, baseline, exempt) {
-  const min = baseline.floors?.moduleBranchesMin
-  if (typeof min !== 'number') {
-    fail(`baseline floors.moduleBranchesMin must be a number, got ${JSON.stringify(min)}`)
-    return
-  }
-  let lowest = null
-  for (const [moduleName, entry] of entries) {
-    if (exempt.has(moduleName)) continue
-    const value = pctOf(entry, 'branches')
-    if (value === null) {
-      fail(`module ${moduleName}: branches.pct is missing`)
-      continue
-    }
-    if (lowest === null || value < lowest.pct) lowest = { path: moduleName, pct: value }
-    if (value < min) fail(`module branches: ${moduleName} ${value}% < ${min}%`)
-  }
-  if (lowest !== null) ok(`module branches min: ${lowest.path} ${lowest.pct}% >= ${min}%`)
 }
 
 function walkTs(dir, out = []) {
@@ -636,9 +696,10 @@ function main() {
   checkScope(options, baseline)
   checkTotals(summary, baseline)
   const entries = moduleEntries(summary)
-  checkModuleSet(entries, baseline)
   const exempt = checkExemptModules(entries, baseline)
-  checkModuleBranches(entries, baseline, exempt)
+  const moduleCoverage = evaluateModuleCoverage(entries, baseline, exempt)
+  for (const problem of moduleCoverage.problems) fail(problem)
+  for (const message of moduleCoverage.messages) ok(message)
   checkIgnoreDirectives(baseline)
 
   const previousTag = previousReleaseTag()
@@ -648,7 +709,7 @@ function main() {
   finish(startedAt)
 }
 
-export { evaluateBaselineFreshness, previousReleaseTag }
+export { evaluateBaselineFreshness, previousReleaseTag, evaluateModuleCoverage, zeroStatementVerdict }
 
 const invokedPath = process.argv[1] === undefined ? '' : resolve(process.argv[1])
 if (invokedPath !== '' && invokedPath === fileURLToPath(import.meta.url)) main()
