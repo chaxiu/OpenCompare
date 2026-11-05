@@ -7,13 +7,14 @@ old image or composed artwork is used.
 
 ## Captured commit
 
-- commit: `3e0744aaaf7baaafbdcda7acbe53df91ae3afb07`
+- commit: `59485c05485499ba0cdd247cdb32270c5b437cf1`
 - all four images were captured from a `pnpm build` made on a clean working tree
   at exactly that commit (`HEAD` equalled this commit and `git status
   --porcelain` reported nothing under `src/**` before the build), then
   `node scripts/capture-readme-screenshots.mjs` ran once and wrote all four PNGs.
-  This recorded commit is the build the images came from; `src/renderer` and the
-  rest of `src/**` have a zero diff from it to `HEAD`.
+  This recorded commit is the build the images came from; `src/renderer` has a
+  zero diff from it to `HEAD`. The `src/core` large-file threshold follow-up is
+  allowed to differ — only the renderer (the part that decides pixels) is pinned.
 
 ## Language pinning
 

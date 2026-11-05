@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CodeSceneFixture } from '@shared/fixtures'
+import type { PlatformPort } from '@shared/platform/types'
+import type { MergeResolutions } from '@core/text/merge'
+import { buildMergeModel, renderMerge, renderMergeText } from '@core/text/merge'
 import type { FilePair } from '@renderer/workbench/session'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
@@ -83,5 +86,83 @@ describe('syntax colouring keeps the comparison feature-parity', () => {
   it('never colours the untouched three-way merge view', () => {
     renderWithI18n(<CodeView fixture={MERGE_FIXTURE} defaultMode="merge" platform={platform} />)
     expect(document.querySelectorAll('[data-syntax]')).toHaveLength(0)
+  })
+})
+
+const MERGE_TEXT = {
+  base: 'const value = 1\n',
+  ours: 'const value = 2\n',
+  theirs: 'const value = 3\n'
+} as const
+
+function mergeFixture(extension: 'ts' | 'txt'): CodeSceneFixture {
+  const side = (name: string, text: string): { path: string; text: string } => ({
+    path: `/samples/${name}.${extension}`,
+    text
+  })
+  return {
+    scene: 'code',
+    composition: { same: 0, added: 0, removed: 0, modified: 0, conflict: 1 },
+    diff: { left: side('left', 'alpha\n'), right: side('right', 'beta\n') },
+    merge: {
+      base: side('base', MERGE_TEXT.base),
+      ours: side('ours', MERGE_TEXT.ours),
+      theirs: side('theirs', MERGE_TEXT.theirs)
+    }
+  }
+}
+
+/** Resolves the single conflict, then reads the copy and export payloads verbatim. */
+async function mergedOutput(extension: 'ts' | 'txt'): Promise<{ copied: string; exported: string }> {
+  const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  let saved = ''
+  const port: PlatformPort = {
+    ...createWebPlatformPort(),
+    saveFile: async (options) => {
+      saved = options.content
+      return '/tmp/merged.txt'
+    }
+  }
+  renderWithI18n(
+    <CodeView fixture={mergeFixture(extension)} defaultMode="merge" platform={port} />,
+    'en'
+  )
+  const exportButton = (): HTMLButtonElement =>
+    screen.getByRole('button', { name: 'Export merged text' }) as HTMLButtonElement
+
+  // Equal to the pre-highlighting gate: unresolved keeps both actions inert.
+  expect(exportButton().disabled).toBe(true)
+  expect(moreItem('Copy').textContent).toContain('Unresolved blocks are kept as conflict markers')
+  fireEvent.click(moreItem('Copy'))
+  expect(writeText).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getAllByRole('button', { name: 'Accept Ours' })[0])
+  await waitFor(() => expect(exportButton().disabled).toBe(false))
+
+  fireEvent.click(moreItem('Copy'))
+  await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+  fireEvent.click(exportButton())
+  await waitFor(() => expect(saved).not.toBe(''))
+  return { copied: writeText.mock.calls[0]![0], exported: saved }
+}
+
+describe('merge copy and export stay byte-identical under syntax colouring', () => {
+  afterEach(() => Reflect.deleteProperty(navigator, 'clipboard'))
+
+  it('writes the same renderMergeText bytes for .ts and .txt merge sides', async () => {
+    const model = buildMergeModel(MERGE_TEXT.base, MERGE_TEXT.ours, MERGE_TEXT.theirs)
+    const resolutions = Object.fromEntries(
+      model.conflictIds.map((id) => [id, 'ours'])
+    ) as MergeResolutions
+    const expected = renderMergeText(renderMerge(model, resolutions))
+    expect(expected).not.toContain('<<<<<<<')
+
+    const ts = await mergedOutput('ts')
+    cleanup()
+    const txt = await mergedOutput('txt')
+
+    expect(ts).toEqual({ copied: expected, exported: expected })
+    expect(txt).toEqual(ts)
   })
 })
