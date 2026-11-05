@@ -8,9 +8,9 @@
 
 OpenCompare 是面向 Beyond Compare 5 Pro 使用场景的现代跨平台桌面对比与三向合并工具：目录对比与同步、代码 diff 与合并、CSV 主键对齐、JSON / YAML 语义对比、目录快照。基于 Electron + React 19 + TypeScript，同一套代码同时提供桌面应用与浏览器预览。
 
-![OpenCompare 工作台双目录对比](docs/assets/opencompare-workbench.png)
+![OpenCompare 工作台双目录对比](docs/assets/opencompare-workbench.zh.png)
 
-![OpenCompare 代码视图的文件 diff 与右侧指示条](docs/assets/opencompare-file-diff.png)
+![OpenCompare 代码视图的文件 diff 与右侧指示条](docs/assets/opencompare-file-diff.zh.png)
 
 ## 下载与安装
 

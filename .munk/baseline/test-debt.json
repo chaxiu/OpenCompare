@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 50019
+    "repoTestLines": 50056
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 49681,
-      "to": 50019,
-      "reason": "unknown-extension content fallback coverage: new fileExtensions family tests, isTextProbe encoding/binary matrix, zero-read request validation, single-read pair/drilldown/merge opens on real disk, GBK decoding, binary side attribution, and mixed-family retention",
-      "addedCases": 29
+      "from": 50019,
+      "to": 50056,
+      "reason": "bilingual README screenshot provenance guard: per-language README asset sets and alt-script checks, per-language committed PNG dimension/ignore/track checks, single captured commit plus settings-injection tokens, per-language sha256 and byte-count lines, and distinct per-scene bytes between languages",
+      "addedCases": 1
     }
   ]
 }

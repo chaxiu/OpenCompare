@@ -24,9 +24,15 @@ interface DocsRow {
   absent: Strings; absentPatterns: Strings
 }
 interface NotesRow { id: string; doc: string; heading: string; sentences: number; sentenceSeparator: string; code: Strings; text: Strings; absent: Strings }
+interface ScreenshotAsset { path: string; scene: string }
+interface ScreenshotLanguage {
+  id: string; readme: string; altCjk: boolean; settingsPath: string; settingsKey: string; settingsValue: string
+  htmlLang: string; assets: ScreenshotAsset[]
+}
 interface Screenshots {
-  id: string; readmes: Strings; assets: Strings; record: string; commitPattern: string; reproduce: string
+  id: string; record: string; commitPattern: string; reproduce: string
   width: number; height: number; minBytes: number; rendererDir: string; cleanTreeTokens: Strings; rerunHint: string
+  languages: ScreenshotLanguage[]
 }
 interface RenderRow { id: string; builderPath: string; arch: string; ext: string; expected: string }
 interface WinCase { id: string; script: 'version' | 'feed' | 'assets'; artifacts?: 'both' | 'zip-only' | 'exe-only' | 'none'; latest?: 'installer-only' | 'with-zip'; omit?: 'none' | 'zip' | 'exe'; status: 'zero' | 'nonzero'; tokens: Strings; absent: Strings }
@@ -221,41 +227,68 @@ describe('documentation markers', () => {
 })
 
 describe('readme screenshots and capture provenance', () => {
-  it('references both screenshots from both READMEs', () => {
-    useRow(fixture.screenshots.id)
-    for (const readme of fixture.screenshots.readmes) {
-      const targets = new Set(parseMarkdown(readText(readme)).links.map((link) => link.target))
-      for (const asset of fixture.screenshots.assets) expect(targets.has(asset), `${readme}: ${asset}`).toBe(true)
+  const shots = fixture.screenshots
+  const record = (): string => readText(shots.record)
+  const bytesOf = (asset: string): Buffer => readBytes(join(repoRoot, asset))
+  const cjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/
+  const scenes = new Map<string, string[]>()
+
+  it('links each README to exactly its own language screenshots', () => {
+    useRow(shots.id)
+    for (const row of shots.languages) {
+      const doc = parseMarkdown(readText(row.readme))
+      const images = doc.links.filter((link) => link.target.startsWith('docs/assets/'))
+      expect(images.map((link) => link.target).sort(), `${row.readme} images`).toEqual(row.assets.map((asset) => asset.path).sort())
+      for (const image of images) expect(cjk.test(image.text), `${row.readme}: ${image.target} alt`).toBe(row.altCjk)
+      for (const asset of row.assets) scenes.set(asset.scene, [...(scenes.get(asset.scene) ?? []), asset.path])
+    }
+    const [en, zh] = shots.languages
+    expect(parseMarkdown(readText(en.readme)).links.some((link) => link.target === './README.zh-CN.md'), 'en → zh').toBe(true)
+    expect(parseMarkdown(readText(zh.readme)).links.some((link) => link.target === './README.md'), 'zh → en').toBe(true)
+    expect((readText(en.readme).match(/^## /gm) ?? []).length, 'en H2').toBe(9)
+    expect((readText(zh.readme).match(/^## /gm) ?? []).length, 'zh H2').toBe(9)
+    expect(readText(en.readme).split(/\s+/).filter((token) => /[A-Za-z]/.test(token)).length, 'en words').toBeLessThanOrEqual(700)
+  })
+
+  it.each(shots.languages)('$id ships committed 2560x1584 PNG files', (row) => {
+    const { width, height, minBytes } = shots
+    for (const asset of row.assets) {
+      const bytes = bytesOf(asset.path)
+      expect(bytes.length, `${asset.path} bytes`).toBeGreaterThan(minBytes)
+      expect([...bytes.subarray(0, 4)], `${asset.path} PNG signature`).toEqual([0x89, 0x50, 0x4e, 0x47])
+      expect(bytes.readUInt32BE(16), `${asset.path} width`).toBe(width)
+      expect(bytes.readUInt32BE(20), `${asset.path} height`).toBe(height)
+      expect(spawnSync('git', ['check-ignore', '--quiet', '--', asset.path], { cwd: repoRoot }).status, `${asset.path} gitignored`).toBe(1)
+      expect(spawnSync('git', ['ls-files', '--error-unmatch', '--', asset.path], { cwd: repoRoot }).status, `${asset.path} tracked`).toBe(0)
     }
   })
 
-  it('ships both screenshots as committed 2560x1584 PNG files', () => {
-    const { width, height, minBytes } = fixture.screenshots
-    for (const asset of fixture.screenshots.assets) {
-      const bytes = readBytes(join(repoRoot, asset))
-      expect(bytes.length, `${asset} bytes`).toBeGreaterThan(minBytes)
-      expect([...bytes.subarray(0, 4)], `${asset} PNG signature`).toEqual([0x89, 0x50, 0x4e, 0x47])
-      expect(bytes.readUInt32BE(16), `${asset} width`).toBe(width)
-      expect(bytes.readUInt32BE(20), `${asset} height`).toBe(height)
-      const ignored = spawnSync('git', ['check-ignore', '--quiet', '--', asset], { cwd: repoRoot })
-      expect(ignored.status, `${asset} must not be gitignored`).toBe(1)
-      const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', asset], { cwd: repoRoot })
-      expect(tracked.status, `${asset} must be tracked`).toBe(0)
-    }
-  })
-
-  it('records a capture commit the local repository can resolve', () => {
-    const record = readText(fixture.screenshots.record)
-    const commit = new RegExp(fixture.screenshots.commitPattern).exec(record)?.[1] ?? ''
+  it('records one capture commit the repository can resolve', () => {
+    const text = record()
+    const commits = [...text.matchAll(new RegExp(shots.commitPattern, 'g'))]
+    expect(commits, 'single captured commit').toHaveLength(1)
+    const commit = commits[0]?.[1] ?? ''
     expect(commit, 'captured commit shape').toMatch(/^[0-9a-f]{40}$/)
-    const lookup = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: repoRoot })
-    expect(lookup.status, `git cat-file ${commit}`).toBe(0)
-    expectTokens(record, [fixture.screenshots.reproduce, ...fixture.screenshots.cleanTreeTokens], fixture.screenshots.id)
+    expect(spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: repoRoot }).status, `git cat-file ${commit}`).toBe(0)
+    expectTokens(text, [shots.reproduce, ...shots.cleanTreeTokens], shots.id)
   })
 
-  it('keeps the whole renderer unchanged since the captured commit', () => {
-    useRow(fixture.screenshots.id)
-    const { record: recordPath, commitPattern, rendererDir, rerunHint } = fixture.screenshots
+  it('records per-language injection and matching sha256 byte counts', () => {
+    const text = record()
+    for (const row of shots.languages) {
+      expectTokens(text, [row.settingsPath, row.settingsKey, row.settingsValue, row.htmlLang], `${shots.id}/${row.id}`)
+      for (const asset of row.assets) {
+        const line = text.split('\n').find((entry) => entry.includes(asset.path)) ?? ''
+        const bytes = bytesOf(asset.path)
+        expect(line, `${asset.path} bytes`).toContain(`${bytes.length} bytes`)
+        expect(line, `${asset.path} sha256`).toContain(createHash('sha256').update(bytes).digest('hex'))
+      }
+    }
+  })
+
+  it('keeps the renderer unchanged and the two languages visually distinct', () => {
+    useRow(shots.id)
+    const { record: recordPath, commitPattern, rendererDir, rerunHint } = shots
     const commit = new RegExp(commitPattern).exec(readText(recordPath))?.[1] ?? ''
     const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], { cwd: repoRoot })
     expect(ancestor.status, `git merge-base --is-ancestor ${commit} HEAD`).toBe(0)
@@ -264,6 +297,10 @@ describe('readme screenshots and capture provenance', () => {
     if (quiet.status !== 0) {
       const changed = spawnSync('git', ['diff', '--name-only', range, '--', rendererDir], { cwd: repoRoot, encoding: 'utf8' })
       expect.fail(`${rerunHint}\n${rendererDir} changed since the captured commit ${commit}:\n${changed.stdout.trim()}`)
+    }
+    for (const [scene, paths] of scenes) {
+      const distinct = new Set(paths.map((path) => bytesOf(path).toString('hex')))
+      expect(distinct.size, `${scene} per-language bytes`).toBe(paths.length)
     }
   })
 })
