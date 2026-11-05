@@ -14,7 +14,7 @@ import {
   type ReleaseHistoryFacts,
   type VersionSourceFacts
 } from './release-gate'
-import { changelog, currentTag, markdownSection, parseMarkdown, pkg, releaseFacts } from './release-doc-fixtures.test-helpers'
+import { changelog, currentTag, markdownSection, parseMarkdown, pkg, readmeEn, readmeZh, releaseFacts } from './release-doc-fixtures.test-helpers'
 
 const expectVerdict = (verdict: GateVerdict, codes: string[]): void => {
   expect(verdict.ok).toBe(codes.length === 0)
@@ -150,6 +150,11 @@ describe('repository release facts', () => {
     expect(judgePublishedAnchor(releaseFacts.publishedAnchor)).toEqual({ ok: true, issues: [] })
     expect(judgeNotesHeadings(releaseFacts.notes)).toEqual({ ok: true, issues: [] })
     expect(releaseFacts.versionSources.pkgVersion).toBe(pkg.version)
+  })
+
+  it('points both readme line-5 links at the announced tag', () => {
+    const tag = releaseFacts.publishedAnchor.publishedTag
+    for (const text of [readmeEn, readmeZh]) expect(text.split(/\r?\n/)[4]).toContain(`[${tag}](https://github.com/chaxiu/OpenCompare/releases/tag/${tag})`)
   })
 
   const noteFacts: Array<[string, readonly string[]]> = [

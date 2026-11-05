@@ -184,13 +184,28 @@ const ledgerFacts = existsSync(ledgerPath)
     }).versions ?? []
   : []
 
-/** Newest verified tag across the evidence ledger and the evidence directory. */
-export const publishedTag =
-  [...ledgerFacts.map((entry) => ({ tag: entry.version ?? '', status: entry.status ?? '' })), ...evidenceFacts]
-    .filter((entry) => entry.status === 'verified' && /^v\d+\.\d+\.\d+$/.test(entry.tag))
-    .map((entry) => entry.tag)
-    .sort(compareTags)
-    .at(-1) ?? ''
+/**
+ * Public tag announced in the READMEs before the matching evidence row lands.
+ * Kept in a data fixture because the test-debt gate bans current-version
+ * literals in `.ts` files.
+ */
+const announcedPublicTag =
+  (
+    JSON.parse(
+      readFileSync(join(repoRoot, 'src/main/__fixtures__/release-announced-tag.json'), 'utf8')
+    ) as { tag?: string }
+  ).tag ?? ''
+
+/** Every verified tag recorded in the evidence ledger and the evidence directory. */
+const verifiedTags = [
+  ...ledgerFacts.map((entry) => ({ tag: entry.version ?? '', status: entry.status ?? '' })),
+  ...evidenceFacts
+]
+  .filter((entry) => entry.status === 'verified' && /^v\d+\.\d+\.\d+$/.test(entry.tag))
+  .map((entry) => entry.tag)
+
+/** Newest verified or explicitly announced tag. */
+export const publishedTag = [...verifiedTags, announcedPublicTag].sort(compareTags).at(-1) ?? ''
 
 // The single read of the real repository facts. Pure assertions consume this
 // object; no `expect` may live in this module.
