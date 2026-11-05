@@ -17,9 +17,9 @@
 - **打包后硬校验**：上传前校验 `.app` 图标与版本身份、`codesign` / `stapler` / `spctl`、产物名与 `latest*.yml`；`finalize` 再断言唯一公开 Release、资产完整与本 tag 为最新公开 Release。
 - **发布说明与发布前验证**：`CHANGELOG.md` 与双语 notes 由 `package.json#version` 派生，预建 Release 经 `--notes-file` 写入并 fail-closed，`finalize` 反读 body 校验双语；publish **之前**以当前 Release 状态（`mode=draft|published`）派发 `post-release-verify.yml`，校验 run、`aggregate` 与 artifact 通过后才公开，公开后再跑轻量 public L1。
 - **证据归档**：真实产物经只读就绪门、仓库外下载、字节 + sha256 与签名复核后写入 `docs/release-evidence/<tag>.md`（`verified` / `blocked`，产物不入库），台账登记版本、状态与资产数。
-- **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、两张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
+- **仓库门面**：`README.md` 英文默认 + `README.zh-CN.md` 中文镜像（9 节对应、第 3 行互链、第 5 行状态块、每场景中英各一张真实截图），`LICENSE` 为 MIT 全文，`docs/repo-metadata.md` 记录简介、Topics 与 `gh repo edit` 命令。
 - **发布配置断言单测**：Node 环境读取仓库根配置与文档做断言，拆为 packaging（打包 / 发布配置 + 证据台账）、version-gate（版本门 / 祖先门 / 重跑入口 / 门面结构）、artifacts-and-brand（品牌 / 协议 / 产物名 / 单 Release）三层。
-- **README 截图出处与门面治理断言**：两张 `docs/assets/*.png` 必须在干净工作树（`git status --porcelain` 为空）、HEAD = 开工时 main HEAD 上先 `pnpm build` 再跑 `node scripts/capture-readme-screenshots.mjs` 重拍，输入为脚本自建的真实 `/tmp` 目录树与真实文件对，不读 `src/shared/fixtures/**`、不用旧图或拼图；按实测落 A（重建 sha256 与旧图不同 → 替换图片）或 B（逐字节相同 → 保留旧图并记 sha256 对照）之一，不得混写。`docs/screenshots.md` 记录该构建 commit（40 位十六进制、可解析、HEAD 祖先）与 `src/renderer` 到 HEAD 的全目录零 diff。门面断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture（`screenshots` 行）：PNG 签名 / 宽高 2560×1584 / 体积 / 未被 gitignore 且被 git 跟踪、两版 README 引用、provenance 解析与零 diff。只用 `node:fs` 与本地 git 子进程，不联网。`repoTestLines` 超 ceiling 时只按既有 ratchet 规则写 growth 条目（增量 ≤ 400 行），floor 只上调。
+- **README 截图按语言拆两套 + 采集语言固定**：`docs/assets/` 每场景两种语言各一张（两场景 × `en` / `zh`），不再保留无语言后缀的单语图；`README.md` 只引 `.en.png`、`README.zh-CN.md` 只引 `.zh.png`。`scripts/capture-readme-screenshots.mjs` 不读宿主 locale：每次 launch 前把 `{"language":"en"|"zh"}` 写入该次临时 profile（`--user-data-dir`）下的 `settings.json`（主题沿用默认 dark），并以 `<html lang>`（`en` / `zh-CN`）为 ready 条件。`pnpm screenshots`（`electron-vite build` + node 脚本）一次运行产出四张 2560×1584 PNG；`docs/screenshots.md` 按 en / zh 两节登记资产、语言注入方式、字节与 sha256，全篇只留一条共用 `- commit:`。守卫沿用既有 `src/main/release-artifacts-and-brand.test.ts` + fixture：语言交叉引用、缺图、sha 不符、四图 commit 不一致 / 非 HEAD 祖先、`src/renderer` 非零 diff、同场景两语言字节相同均失败。`repoTestLines` 超 ceiling 时按既有 ratchet 写 growth（≤400 行），floor 只上调。
 - **版本收敛轮**：发版前单独一轮只收敛版本事实——`package.json#version`、`release.yml` 的 `workflow_dispatch.inputs.tag.default`、`docs/release-process.md` 的同一字面量、`CHANGELOG.md` 新段、双语 notes 与版本门测试 token；产品源码、证据台账与 README 状态行零 diff，不执行任何发版动作（版本锚点契约的现行口径与白名单见 `domains/release-version-anchor`）。
 
 ## 验收
@@ -77,7 +77,8 @@
 - **ac-published-anchor**：两版 `README.md` 第 5 行只指向最新已发布 tag 的公开 Release（各恰 1 个 `releases/tag/` 链接），收敛未发布窗口里不出现当前未发布版本与「待发布」字样。
 - **ac-readme-en-default**：`README.md` 首行为 `# OpenCompare`；除第 3 行语言切换外全文零汉字（`\p{Script=Han}` 0 命中），不含中文二级标题。
 - **ac-en-structure**：`README.md` 恰好 9 个 `##` 且按序为 Download and install / Features / Quickstart / Requirements and development / Project structure / Known issues / Evidence and docs / Open Rebuilds 001 / License，中文镜像逐节对应；下载区只链 `/releases` 与非版本化产物名。
-- **ac-readme-two-screenshots**：两版各引用 `docs/assets/opencompare-workbench.png` 与 `docs/assets/opencompare-file-diff.png`，图注 en / zh 语义镜像；两图由最终构建的真实会话产出，`pnpm screenshots` 可复现并记录被测 commit。
+- **ac-readme-en-assets-only / ac-readme-zh-assets-only**：`README.md` 图片目标集合恰为两张 `.en.png`、零 `.zh.png`、零旧无后缀资产，alt 不含中日韩字符；`README.zh-CN.md` 恰为两张 `.zh.png`、零 `.en.png`，alt 含中文字符。
+- **ac-readme-mirror-intact**：两份 README 第 3 行互链互指；`## ` 二级标题各 9 个且顺序语义一一对应；第 5 行版本指针与改动前逐字节相同；`README.md` 正文英文词数 ≤700；除第 11/13 两行图片行外正文无其他 diff。
 - **ac-evidence-sections**：`docs/release-evidence/<tag>.md` 与既有证据同构，含 tag / 发布点、公开 Release、Release CI、资产表（名称 / 字节 / sha256 / 公开 URL）、双语正文门、签名与公证、L1 结论、未覆盖面，引用一律绝对路径。
 - **ac-status-verified-once**：全文恰好一处 `status:` 且取值为 `verified` 或 `blocked`，不出现 `pending`；`verified` 分支缺任一必需标记即失败。
 - **ac-blocked-no-fabrication**：`status: blocked` 时只记录就绪门命令原始输出、缺失项与待人工动作，不含任何「通过」记录、产物 sha256 或本地 / 仓库 `release/` 产物，并已升级 Owner。
@@ -90,16 +91,14 @@
 - **ac-finalize-permissions**：`finalize` 声明 job 级 `permissions` 且同时含 `contents: write` 与 `actions: write`（两项 `toEqual` 钉死，job 级覆盖不丢 `contents`）。
 - **ac-finalize-dispatch**：publish 之前存在步骤执行 `gh workflow run post-release-verify.yml -f tag="${RELEASE_TAG}" -f mode="$(cat "${RUNNER_TEMP}/release-state.txt")"`，步骤正文零版本字面量；mode 由只读的 `Resolve the tag's release state` 读出（draft / published）。
 - **ac-finalize-aggregate-gate**：派发后 300 s 内按 `displayTitle` 含 tag 且 `createdAt >= since` 匹配本次 run，查不到即失败；随后有界等待 `aggregate` 为 `success`（failure / cancelled / timed_out / 非 success / 超时均失败），artifact 名含 tag 与 `run_id`；该 gate 先于 `Make the tag's release public`，失败即保持 draft。
-- **ac-capture-clean-head**：采集前 `git status --porcelain` 为空且 HEAD 等于开工时 main HEAD，执行顺序为 `pnpm build` → `node scripts/capture-readme-screenshots.mjs`；`docs/screenshots.md` 写明该 commit 与「在该 commit 的干净工作树上重建」。
-- **ac-capture-real-source**：两图由脚本经 `out/main` + `out/renderer` 真实 Electron 窗口 + DevTools 协议、真实 `/tmp/oc-readme-*` 树与真实文件对产出，运行输出含两行 `wrote docs/assets/<file> (N bytes)`，不读 `src/shared/fixtures/**`、不用旧图或拼接图；真实窗口起不来不得出图。
-- **ac-png-branch-decided**：恰好落地 A 或 B 之一并在 `docs/screenshots.md` 写明依据——A 记旧 / 新 sha256 与「已替换」，B 记「重建 sha256 = 仓内 sha256」对照 + 构建命令 + commit；两种口径不得同时出现。
-- **ac-png-format**：两图均为有效 PNG（前 4 字节 `89 50 4E 47`）、尺寸 2560×1584、体积 > 10240 字节。
-- **ac-screenshots-current-shell**：截图肉眼可确认是当前 shell——顶栏与工作流工具栏无 demo 入口，会话 tab 与工具栏归位；若 UI 与 `docs/screenshots.md` 描述不符，只记录并上报，不在本项改 UI。
-- **ac-provenance-resolvable**：`docs/screenshots.md` 的 captured commit 为 40 位小写 hex，`git cat-file -e <sha>^{commit}` 与 `git merge-base --is-ancestor <sha> HEAD` 均退出 0（不可解析或非祖先即 fail）。
-- **ac-provenance-renderer-zero-diff**：以 `git diff --quiet <captured>..HEAD -- src/renderer` 全目录判定；非 0 时失败文案含 `git diff --name-only` 的实际文件清单与「请重跑 `pnpm screenshots` 并更新 docs/screenshots.md」，禁止硬编码文件名或只比对部分文件（`dc781cd` 作 captured commit 时必须报出全部 8 个变更文件）。
-- **ac-readme-unchanged**：两版 `README*.md` 对两图的引用仍在，9 个二级标题集合与第 5 行版本行不变，`git diff --exit-code -- README.md README.zh-CN.md` 为空。
-- **ac-png-gate-extended**：PNG / provenance 断言都落在既有 `src/main/release-artifacts-and-brand.test.ts` 截图 describe 内、期望值放既有 fixture `.screenshots`；不新建测试文件、不新增依赖、不联网。
-- **ac-negative-selftest / ac-scope-diff**：把 captured commit 改回 `dc781cd` 时该测试文件必须 fail 并列出 8 个文件与重跑提示，恢复后 pass（命令 + 输出写入交付说明）；改动只落两张 PNG（仅 A）、`docs/screenshots.md`、该测试与其 fixture，`git diff --name-only <start>..HEAD -- src/renderer` 为空。
+- **ac-capture-clean-head / ac-capture-one-command**：在干净树（`git status --porcelain` 仅允许本项改动）当前 commit 上先 `pnpm build` 再 `pnpm screenshots`，一次运行写出四张 PNG（贴命令、退出码与文件清单 + 字节数），无需人工分次运行或事后改名。
+- **ac-capture-language-injected**：每条采集前显式写该次临时 profile（`--user-data-dir`）下 `settings.json` 的 `language`，ready 条件含 `document.documentElement.lang`（`en` / `zh-CN`）且截图前复核未变；宿主 `LANG` / `LC_ALL` / 系统 locale 不参与选择。证据：`LANG=zh_CN.UTF-8` 与 `LANG=en_US.UTF-8` 各跑一次，四图 sha256 分别一致。
+- **ac-capture-deterministic / ac-png-format**：同一构建连跑两次脚本，四图 sha256 逐张相同；四图均 2560×1584、PNG 签名有效（`89 50 4E 47`）、>10 KB。
+- **ac-capture-real-session**：四图均来自 `out/main` + `out/renderer` 当次构建、`/tmp` 真实临时目录树与真实 `src/session.ts` 文件对；脚本不 import / 不读 `src/shared/fixtures/**`，不提交旧图、合成图、占位图或人工标注图。
+- **ac-provenance-per-language / ac-provenance-sha-matches**：`docs/screenshots.md` 含 en / zh 两节，各列本语言两张资产、语言注入方式（settings.json 路径 / 键 / 值）、字节与 sha256；全篇仅一条 `- commit: \`<40 hex>\`` 且两语言共用；四图记录 sha256 / 字节与磁盘真实文件逐一相等（贴校验输出）。
+- **ac-guard-per-language / ac-guard-single-capture-commit**：守卫对「英文 README 引中文资产」「中文 README 引英文资产」「某语言缺图」均失败；断言四图 provenance commit 完全一致、可被 `git cat-file -e` 解析且为 `HEAD` 祖先，`git diff --quiet <commit>..HEAD -- src/renderer` 为零，并断言同场景 `.en.png` 与 `.zh.png` 字节不同（防止一套图复制成两套）；任一侧重拍致 commit 不一致或只重拍一套时失败。
+- **ac-visual-review**：四图逐张人工复核并在 `docs/screenshots.md` 记结论——英文图 UI 文案全英文、中文图全中文；字号与既有基线一致；未被裁切（右侧 `data-diff-ruler` 指示条与底部状态栏完整）；same / added / removed / modified 高亮可辨。
+- **ac-scope-diff / ac-gates-green**：diff 只含 4 张新增 PNG、2 张删除旧 PNG、两份 README、`docs/screenshots.md`、`scripts/capture-readme-screenshots.mjs`、守卫测试与 fixture、`.munk/changes/**`（及必要的 `test-debt.json` growth）；对 `src/**`（测试与 fixture 除外）、`package.json`、`CHANGELOG*`、`docs/release-notes*` / `release-evidence/**`、`.github/**` 零 diff；`lint` / `typecheck` / `build` / `test` / `test-debt-gate` 全绿且 `code-gates.json` 不新增条目。
 - **ac-gov-offline**：新增断言只用 `node:fs` 与本地 `git` 子进程（`spawnSync` / `execFileSync`），不发起 HTTP / fetch / 网络拉取；不依赖 CI 浅克隆之外的数据（发布门禁 `fetch-depth: 0` 已保证历史可见）。
 - **ac-coverage-audit-four**：对四处口径给出逐条覆盖映射（文件 + 用例名）：(1) 顶栏与工作流工具栏 demo 入口为 0、设置内 5 类示例可达；(2) 图标全部 `currentColor`、图标按钮 `aria-label`、无 emoji / 文字充当图标；(3) 两套主题 token 同名 + WCAG 对比度 + 四态 ΔE + 亮 / 暗 / 跟随系统三态持久化；(4) tab 三级截断 + title tooltip 预算。已有覆盖不重写；只对真实缺口在既有文件内补断言，且测试用例总数不下降。本轮新增缺口断言：`App.theme.test.tsx` 已存 `system` 模式启动即跟随系统、`SessionTabs.test.tsx` regular 档 title、`shellLayout.dom.test.tsx` 单字符非字母数字且无 `data-icon` 的按钮不得无 `aria-label`；主题 / tab / 图标的域归属分别见 `domains/theme`、`domains/workbench`、`domains/icon-system`，本域只记录门面侧断言位置。
 - **ac-test-debt-green**：`node scripts/test-debt-gate.mjs` 通过；新增断言使 `repoTestLines` 超 ceiling 时按既有 ratchet 规则更新 `.munk/baseline/test-debt.json` 的 growth 条目（`from` = 上一提交 ceiling、`to` = 新 ceiling、写明 reason 与 `addedCases`，增量 ≤ 400 行），只上调不下调 floor。
@@ -127,13 +126,12 @@
 - 品牌资产唯一入库位置为 `build/`，生成脚本只用 Node 标准库与本机系统工具；`electron-builder.yml` 只加必需字段、不重排既有配置。
 - 版本单一来源 `package.json#version`；`currentTag` 派生、`latestPublishedTag` 单独钉住，发布通道在收敛 / 收尾 / 取证轮全程只读（不打 tag、不 push、不 dispatch、不写 Release）。
 - 门禁命令为单条 argv；提交前 `pnpm lint && pnpm typecheck && pnpm test`；`.munk/code-gates.json` 全绿且不新增 gate 项。
-- **截图与门面断言批次的改动面**：只改两张 `docs/assets/*.png`、`docs/screenshots.md`，README 仅在引用缺失时修正；断言只扩既有 `src/main/release-artifacts-and-brand.test.ts` + fixture 与 `test-debt` ratchet 字段；单条提交，交付时工作区干净，不为单个验收点新开测试文件、不重排既有套件或减少用例数。
+- **截图与门面断言批次的改动面**：只改 `docs/assets/` 四张语言资产（并删除两张旧单语图）、`docs/screenshots.md`、两份 README 的第 11/13 图片行、采集脚本与既有 `release-artifacts-and-brand.test.ts` + fixture；语言注入只走既有持久化 `settings.json`，不加 IPC / 环境变量开关；单条提交，交付时工作区干净，不为单个验收点新开测试文件、不重排既有套件或减少用例数。
 
 ## 最近交付证明
 
-- WI：`wi_intake_0fe51dec7e7a9795`（README 截图 provenance 修复：在最新 main 干净树重拍并钉成回归断言；`deliveryIntent: local merge`）
-- 日期：2026-11-04
-- 结果：`code_gates` passed；重建前后均由真实窗口采集，反向自测（captured commit 改回 `dc781cd` → 红，报出 8 个 `src/renderer` 变更文件；恢复 → 绿）留证于交付说明。
-- 改动面：在干净树 HEAD `e079a5ef7c29d79fd6113005278f5e7853a7ace7` 上先 `pnpm build` 再跑采集脚本；两图重建 2560×1584（`opencompare-workbench.png` 291,046 B、`opencompare-file-diff.png` 324,539 B），sha256 与旧图不同 → 落 **A** 分支替换。`docs/screenshots.md` 记该 commit、干净树重建措辞与旧 / 新 sha256 对照；`release-artifacts-and-brand.test.ts` + fixture 增 PNG 宽高 / 体积 / gitignore / 被跟踪与 provenance 祖先 + `src/renderer` 全目录零 diff 断言（失败带变更清单与重跑提示）；`test-debt` 只走 growth 46539→46563（+1 case），两版 README 零 diff。
-- 验收落点：`ac-capture-clean-head` / `ac-capture-real-source` / `ac-png-branch-decided` / `ac-png-format` / `ac-provenance-resolvable` / `ac-provenance-renderer-zero-diff` / `ac-readme-unchanged` / `ac-png-gate-extended` / `ac-negative-selftest` / `ac-scope-diff` 满足。
-- 注：① 本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），本域无新增折叠用例。② captured commit 不再要求等于 WI tip，只要求可解析、为 HEAD 祖先且 `src/renderer` 零 diff——版本收敛等非渲染层提交不算过期。③ 断言禁止硬编码文件名，`dc781cd` 场景必须报出全部 8 个变更文件。
+- WI：`wi_intake_b9be6bd2de6bff04`（README 截图按 en / zh 拆两套 + 采集语言固定；`deliveryIntent: local merge`）；日期：2026-11-05；change pack 仅 `prd.md`，无 `tests/cases/**`，本域无新增折叠用例。
+- 结果：`docs/assets/` 由两张单语图改为四张（workbench / file-diff × en / zh），旧图删除；两份 README 第 11/13 行只引本语言资产；`pnpm screenshots` 一次产出四图（`9f59ffa459b470495d96f38187e3b3ecddf94d1c` 干净树构建，2560×1584，251,392 / 299,936 / 240,835 / 300,435 B）。
+- 关键偏差：macOS Electron `userData` 不跟随临时 `HOME`，语言注入改用每次 launch 的 `--user-data-dir` 临时 profile + 其中 `settings.json`（`{"language":"en"|"zh"}`），仍不读宿主 locale；`docs/screenshots.md` 按 en / zh 两节登记注入方式与 sha256，全篇一条共用 commit。
+- 改动面：4 张新增 PNG + 2 张删除旧 PNG、两份 README（仅图片行）、`docs/screenshots.md`、采集脚本、`release-artifacts-and-brand.test.ts` + fixture（4 个 `it` 按语言改造）；`test-debt` growth 50019→50056（+1 case）。
+- 验收落点：`ac-readme-*` / `ac-capture-*` / `ac-provenance-per-language` / `ac-guard-single-capture-commit` / `ac-visual-review` 满足；`LANG=zh_CN.UTF-8` 与 `LANG=en_US.UTF-8` 各跑一次四图 sha256 一致。

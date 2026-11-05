@@ -19,8 +19,8 @@ import { createRequire } from 'node:module'
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   rmSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
@@ -48,8 +48,39 @@ const BUILD_ENTRIES = [
   'out/renderer/index.html'
 ]
 
-const WORKBENCH_PNG = 'opencompare-workbench.png'
-const FILE_DIFF_PNG = 'opencompare-file-diff.png'
+// The two shots the READMEs embed. Each language gets its own copy so an
+// English README can never pick up a Chinese UI screenshot.
+const LANGUAGES = [
+  { id: 'en', htmlLang: 'en' },
+  { id: 'zh', htmlLang: 'zh-CN' }
+]
+
+// `<html lang>` is the readiness gate: the persisted settings must have been
+// read and applied before the shot is valid.
+const SCENES = [
+  { id: 'workbench', ready: `document.querySelectorAll('[role="tree"]').length >= 2 &&
+    document.querySelectorAll('[role="treeitem"]').length > 10 &&
+    !document.querySelector('[role="status"][aria-label*="progress" i]')` },
+  { id: 'file-diff', ready: `!!document.querySelector('[data-diff-ruler="true"]') &&
+    document.querySelectorAll('[role="tree"]').length === 0` }
+]
+
+/**
+ * Electron's `userData` does not follow `HOME` on macOS, so the temporary
+ * profile is passed explicitly with Chromium's `--user-data-dir` switch. This
+ * keeps the real profile untouched and makes the whole capture hermetic.
+ */
+function userDataDir(scratch, language) {
+  return join(scratch, 'userdata', language)
+}
+
+/** Persisted settings are the only language channel; nothing here reads the host locale. */
+function writeLanguageSettings(userData, language) {
+  mkdirSync(userData, { recursive: true })
+  const path = join(userData, 'settings.json')
+  writeFileSync(path, JSON.stringify({ language }))
+  return path
+}
 
 const SESSION_TS_LEFT = `import { createStore } from './store'
 import type { Session, SessionId } from './types'
@@ -173,6 +204,11 @@ const TOOLBAR_TSX = `export function mountToolbar(host, sessions) {
 }
 `
 
+// Every file gets the same mtime on both sides: the comparison's size + mtime
+// fast path must not depend on how fast the two trees happened to be written,
+// otherwise identical bodies flip between `same` and `modified` run to run.
+const FIXED_MTIME = 1_767_225_600
+
 const README_TEXT = (name) => `# ${name}
 
 A tiny sample project used while comparing two working copies.
@@ -202,6 +238,7 @@ function writeTree(base, side) {
     const path = join(base, side, relative)
     mkdirSync(join(path, '..'), { recursive: true })
     writeFileSync(path, text)
+    utimesSync(path, FIXED_MTIME, FIXED_MTIME)
   }
 }
 
@@ -275,6 +312,11 @@ class Devtools {
     throw new Error(`timed out waiting for ${description}`)
   }
 
+  /** Parks the pointer so a real cursor resting on a row cannot paint a hover band. */
+  async moveMouse(x, y) {
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' })
+  }
+
   async screenshot() {
     const result = await this.send('Page.captureScreenshot', {
       format: 'png',
@@ -288,13 +330,17 @@ class Devtools {
   }
 }
 
-function runApp(paths, port, home) {
+function runApp(paths, port, home, userData) {
+  const env = { ...process.env, HOME: home }
+  // The temp HOME is the whole point: a host XDG_CONFIG_HOME would route
+  // userData outside it on Linux.
+  delete env.XDG_CONFIG_HOME
   return spawn(
     electronBinary,
-    [root, ...paths, `--remote-debugging-port=${port}`],
+    [root, ...paths, `--user-data-dir=${userData}`, `--remote-debugging-port=${port}`],
     {
       cwd: root,
-      env: { ...process.env, HOME: home },
+      env,
       stdio: ['ignore', 'pipe', 'pipe']
     }
   )
@@ -312,14 +358,29 @@ function stop(child) {
   })
 }
 
-async function capture({ paths, port, home, ready, output }) {
-  const child = runApp(paths, port, home)
+async function capture({ paths, port, home, userData, ready, output, language }) {
+  const child = runApp(paths, port, home, userData)
   try {
     const devtools = await Devtools.connect(port)
     try {
-      await devtools.waitFor(ready, `${output} to render`)
+      const langCondition = `document.documentElement.lang === '${language}'`
+      await devtools.waitFor(`${ready} && ${langCondition}`, `${output} to render in ${language}`)
       // One more paint after the session settles, so no transition is mid-flight.
       await new Promise((resolve) => setTimeout(resolve, 600))
+      // Outside the viewport, not merely off the rows: a real cursor resting on
+      // any control would otherwise bake a hover band into the PNG. Repeated
+      // because a late input event can re-hit-test under the cursor.
+      let hovered = 1
+      for (let attempt = 0; attempt < 10 && hovered !== 0; attempt += 1) {
+        await devtools.moveMouse(-5, -5)
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        hovered = await devtools.evaluate("document.querySelectorAll(':hover').length")
+      }
+      if (hovered !== 0) throw new Error(`${output}: ${hovered} element(s) left in hover state`)
+      const settled = await devtools.evaluate('document.documentElement.lang')
+      if (settled !== language) {
+        throw new Error(`${output}: expected <html lang="${language}">, got "${settled}"`)
+      }
       const png = await devtools.screenshot()
       writeFileSync(join(assetsDir, output), png)
       return png.length
@@ -339,35 +400,45 @@ async function main() {
   }
   mkdirSync(assetsDir, { recursive: true })
 
-  // `/tmp` keeps the paths in the capture short; the tree is removed afterwards.
-  const scratch = mkdtempSync(join('/tmp', 'oc-readme-'))
+  // A fixed path, not `mkdtemp`: the absolute paths are rendered in the window,
+  // so a random suffix would change the PNG bytes on every run. `/tmp` keeps
+  // them short and the tree is recreated and removed around the capture.
+  const scratch = join('/tmp', 'opencompare-readme-capture')
+  rmSync(scratch, { recursive: true, force: true })
+  mkdirSync(scratch, { recursive: true })
   const home = join(scratch, 'home')
   mkdirSync(home, { recursive: true })
   writeTree(scratch, 'left')
   writeTree(scratch, 'right')
   const left = join(scratch, 'left')
   const right = join(scratch, 'right')
+  const pathsFor = {
+    workbench: [left, right],
+    'file-diff': [join(left, 'src/session.ts'), join(right, 'src/session.ts')]
+  }
 
   try {
-    const workbenchBytes = await capture({
-      paths: [left, right],
-      port: 9311,
-      home,
-      output: WORKBENCH_PNG,
-      ready: `document.querySelectorAll('[role="tree"]').length >= 2 &&
-        document.querySelectorAll('[role="treeitem"]').length > 10 &&
-        !document.querySelector('[role="status"][aria-label*="progress" i]')`
-    })
-    const diffBytes = await capture({
-      paths: [join(left, 'src/session.ts'), join(right, 'src/session.ts')],
-      port: 9312,
-      home,
-      output: FILE_DIFF_PNG,
-      ready: `!!document.querySelector('[data-diff-ruler="true"]') &&
-        document.querySelectorAll('[role="tree"]').length === 0`
-    })
-    console.log(`wrote docs/assets/${WORKBENCH_PNG} (${workbenchBytes} bytes)`)
-    console.log(`wrote docs/assets/${FILE_DIFF_PNG} (${diffBytes} bytes)`)
+    for (const [languageIndex, language] of LANGUAGES.entries()) {
+      const userData = userDataDir(scratch, language.id)
+      // Written before every launch: a launch can never inherit the previous
+      // shot's language or the host locale.
+      const settings = writeLanguageSettings(userData, language.id)
+      for (const [sceneIndex, scene] of SCENES.entries()) {
+        const output = `opencompare-${scene.id}.${language.id}.png`
+        const bytes = await capture({
+          paths: pathsFor[scene.id],
+          port: 9311 + languageIndex * SCENES.length + sceneIndex,
+          home,
+          userData,
+          output,
+          language: language.htmlLang,
+          ready: scene.ready
+        })
+        console.log(
+          `wrote docs/assets/${output} (${bytes} bytes; language ${language.id} via ${settings})`
+        )
+      }
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }

@@ -8,9 +8,9 @@ English | [简体中文](./README.zh-CN.md)
 
 OpenCompare is a modern cross-platform desktop diff and three-way merge tool for Beyond Compare 5 Pro workflows: directory comparison and sync, code diff and merge, CSV key alignment, JSON / YAML semantic comparison, and directory snapshots. It is built with Electron + React 19 + TypeScript, and the same codebase runs as a desktop app and a browser preview.
 
-![OpenCompare workbench comparing two directory trees](docs/assets/opencompare-workbench.png)
+![OpenCompare workbench comparing two directory trees](docs/assets/opencompare-workbench.en.png)
 
-![OpenCompare code view showing a file diff with the indicator bar](docs/assets/opencompare-file-diff.png)
+![OpenCompare code view showing a file diff with the indicator bar](docs/assets/opencompare-file-diff.en.png)
 
 ## Download and install
 

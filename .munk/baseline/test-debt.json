@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 50124
+    "repoTestLines": 50159
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 50019,
-      "to": 50124,
-      "reason": "release verify four-state legend: semantic [data-shell-legend] reader unit/shape cases, real jsdom DirectoryView reading plus missing/duplicate/non-finite negative fixtures, and step fail reasons",
-      "addedCases": 5
+      "from": 50056,
+      "to": 50159,
+      "reason": "merged ratchet: release verify four-state legend (semantic [data-shell-legend] reader unit/shape cases, real jsdom DirectoryView reading plus missing/duplicate/non-finite negative fixtures, step fail reasons) plus bilingual README screenshot provenance guard (per-language README asset sets and alt-script checks, per-language PNG dimension/ignore/track checks, single captured commit plus settings-injection tokens, per-language sha256/byte lines, distinct per-scene bytes between languages)",
+      "addedCases": 6
     }
   ]
 }
