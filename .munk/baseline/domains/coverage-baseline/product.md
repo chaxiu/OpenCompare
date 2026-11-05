@@ -25,7 +25,7 @@
 
 - **ac-baseline-module-set-exact**：baseline `modules` 键集合与 `src/core/**` 全部非测试 `.ts` 完全相等（当前 **28** 个，含 `theme/tokens.ts` 与 `syntax/{cache,language,overlay,tokenize,view}.ts`），不含测试 / fixtures / `.d.ts`，每条含数值型 lines / branches / functions。
 - **ac-baseline-matches-evidence**：baseline `totals` 与全部模块百分比与同一次运行的 `coverage-summary.json` 两位小数逐条相等（当前 lines 98.24% 2290/2331、branches 90.31% 1474/1632、functions 99.54% 439/441、statements 96.33% 2579/2677）。
-- **ac-coverage-command-recorded** / **ac-baseline-measured-at**：baseline `command` 与 `scope` 逐字记录口径（provider v8、include `src/core/**`、三个 exclude 字面量、reporter 含 json-summary），原始日志含 `Coverage enabled with v8` 与 `exit=0`；`measuredAt.commit` 为 40 位小写 hex、`git cat-file -e <sha>^{commit}` 成功、从 HEAD 可达且严格晚于 `v0.2.21`；`measuredAt.date` 为合法 ISO UTC、等于本轮实测落盘时间、不晚于系统时钟。
+- **ac-coverage-command-recorded** / **ac-baseline-measured-at**：baseline `command` 与 `scope` 逐字记录口径（provider v8、include `src/core/**`、三个 exclude 字面量、reporter 含 json-summary），原始日志含 `Coverage enabled with v8` 与 `exit=0`；`measuredAt.commit` 为 40 位小写 hex、`git cat-file -e <sha>^{commit}` 成功、从 HEAD 可达且严格晚于 `v0.2.23`（发布点采样 `82c32a8005f5af521a63288dc69b14842a5505fe`）；`measuredAt.date` 为合法 ISO UTC、等于本轮实测落盘时间、不晚于系统时钟。
 - **ac-reproducible**：同口径冷跑复测时 `totals` 与全部模块 lines / branches / functions 与 baseline 逐项一致；差异必须停手写「未闭环」，不得改数字或换口径凑齐。
 - **ac-release-step-in-quality-gates** / **ac-release-workflow-intact**：release.yml 的 `Quality gates` job 内恰一个覆盖率 step（`pnpm test` 之后、`pnpm build` 之前、无 `continue-on-error`）；该 step 仍调 `node scripts/coverage-gate.mjs` 且参数 / 断言未弱化；`git diff --exit-code .github/workflows/release.yml` 为空。
 - **ac-gate-script-single-source**：`scripts/coverage-gate.mjs` 存在且可被 `node` 直接执行；不新增 npm 依赖、不 import 仓库运行时源码、不访问网络；数字只从 fresh summary 与 baseline 读取，脚本内不保留 floor 副本。
@@ -53,7 +53,7 @@
 - **ac-lines-floor-97-with-single-ledger**：`floors.totals` 恰 `{lines:97, branches:90, functions:99}`，唯一 `floorLedger` 的 `reason` 明写把 `theme/tokens.ts` 纳入 module set；不新增第二条 ledger、不新增 exclude、不改测量口径。
 - **ac-baseline-no-regression-masking**：实测任一项低于地板时禁止下调地板或写 `floorLedger` 圆过；必须把实测值 / 地板值 / 差值写进 evidence 并 `munk_report_owner` 上报真回归，不得把红伪装成绿。
 - **ac-baseline-decision**：`decision.floor === true`、`decision.gate === "release-ci"`、`decision.reason` 中 lines / branches / functions 数字与本次实测 totals 一致。
-- **ac-preflight-green** / **ac-preflight-triple**：HEAD 建本地 `v9.9.9-rehearsal` 后正档退出 0 且含 `PREFLIGHT positive: PASS`、`module set: 28 modules match baseline`、`totals lines: 98.24% >= 97%`、`baseline freshness: … is at or after v0.2.21`、`PREFLIGHT baseline untouched: PASS`、`PREFLIGHT rehearsal tag removed: PASS`、`PREFLIGHT overall: PASS`。
+- **ac-preflight-green** / **ac-preflight-triple**：HEAD 建本地 `v9.9.9-rehearsal` 后正档退出 0 且含 `PREFLIGHT positive: PASS`、`module set: 28 modules match baseline`、`totals lines: 98.24% >= 97%`、`baseline freshness: … is at or after v0.2.23`、`PREFLIGHT baseline untouched: PASS`、`PREFLIGHT rehearsal tag removed: PASS`、`PREFLIGHT overall: PASS`。
 - **ac-preflight-negative-red**：`--negative floor` 内层 exit 1 且含 `needs a matching floorLedger entry`；`--negative stale` 内层 exit 1 且含 `older than the previous semver tag` 或 `not reachable from HEAD`；真实 baseline 字节前后一致。
 - **ac-preflight-ratchet-anchor** / **ac-preflight-no-residue** / **ac-no-residue**：三条 preflight 在 baseline 刷新提交之后运行（ratchet 锚点为新地板）；运行后 `git tag --list 'v9.9.9-rehearsal*'` 为空、baseline 字节一致、`git status --short` 无临时 summary / lcov / 临时 baseline，全程无 `git push`、无 tag 推到远端。
 - **ac-anti-vacuous**：把 freshness 调用临时改回 `latestReachableTag()` 后 `ac-head-tag-regression-pass` 对应用例非 0；恢复后全绿，两次输出留证。
@@ -65,7 +65,7 @@
 - **ac-release-only-not-per-delivery** / **ac-no-renderer-floor**：覆盖率门不存在于默认交付矩阵；塞进 `code_gates` / `test-debt-gate` / 条件 profile 均违反本项；renderer 与 jsdom 不设覆盖率地板、阈值或 gate。
 - **ac-workflow-file** / **ac-workflow-trigger** / **ac-workflow-readonly**：`.github/workflows/coverage-gate-preflight.yml` 非空且可被 `yaml.parse` 解析为对象、顶层 `name` 非空；`on` 键恰 `pull_request` + `workflow_dispatch`（`inputs.tag` 非必填、`type: string`、默认 `v0.0.0-preflight`）、`run-name` 恰 `coverage-gate preflight ${{ inputs.tag || github.ref_name }}`；`permissions` 恰 `{contents: read}`，body 无 `secrets.` / `contents: write` / `gh release` / `git push` / `git tag` / `continue-on-error`。
 - **ac-workflow-runner-setup** / **ac-workflow-positive-step** / **ac-workflow-negative-floor-step** / **ac-workflow-negative-stale-step** / **ac-workflow-header-posture**：单 job `ubuntu-latest`，按序 `actions/checkout@v4`（`fetch-depth: 0`）、`pnpm/action-setup@v4`（10.18.3）、`actions/setup-node@v4`（22、`cache: pnpm`）、`pnpm install --frozen-lockfile`；三步 `run` 恰为正档与两条 `--negative`，负档不再二次反转退出码（内层如预期红则整体 0，意外变绿则 1）；header 写明只读 pre-tag rehearsal、同 release runner image、绝不 push / 不改 baseline / 不触 Release 与 secrets。
-- **ac-scope-guard**：`git diff --name-only` 只含本项预期改动——本次为 `scripts/coverage-gate.mjs`、`scripts/coverage-gate-zero-statement.test.mjs`、`.munk/changes/{workItemId}/**`、本域 baseline 文档；`src/**`、`package.json`、`pnpm-lock.yaml`、`vitest.config.mts`、`.munk/code-gates.json`、两个 workflow、`CHANGELOG.md`、`docs/release-notes/**` 零 diff。
+- **ac-scope-freeze** / **ac-scope-guard**：重采样类改动 `git diff --name-only` 只含 `.munk/baseline/coverage.json`、`.munk/changes/{workItemId}/**` 与本域 baseline 文档；门脚本改动类只允许 `scripts/coverage-gate*.mjs`（含自测）与 `vitest.config.mts` 的 `test.include` 一行。两类均要求 `src/**`（含测试）、`scripts/coverage-gate*.mjs`（重采样类）、`vitest.config.mts`、`package.json` / `pnpm-lock.yaml`、`.munk/code-gates.json`、两个 workflow、`CHANGELOG.md`、`docs/release-notes/**` 零 diff。
 - **ac-dispatch-run-evidence**：**交付后置项，不属于 code_gates**。合入本地 main 并推进 origin/main 后，在该 tip 执行 `gh workflow run coverage-gate-preflight.yml --ref main`，轮询 `gh run list --workflow=coverage-gate-preflight.yml --limit 5 --json databaseId,status,conclusion,headSha`，把 `headSha == origin/main tip`、`status == completed`、`conclusion == success` 的 `databaseId` 与 `headSha` 写入回执；403 / `human_required` / `gh` 不可用时回执写明被挡与原始错误并 `munk_report_owner`，不得伪造 run id。
 
 ## 非目标
@@ -74,7 +74,7 @@
 - 不改测量口径（provider / include / exclude / command）与证据路径规则；不新增 ignore 指令，不扩 exclude 缩小分母。
 - 不恢复或改动 `src/core/**` 源码（含此前被删的 `src/core/syntax/index.ts`）；不靠增删源码取绿。
 - 不新增 baseline 字段做白名单豁免；`moduleBranchesMinExempt` 固定两项语义不放宽，新豁免不得变成路径白名单。
-- 不做发布点重采样，不改 `measuredAt` / `totals` / `modules` / `command`（属后继 coverage resample）；不动 version / CHANGELOG / README 版本表 / release notes / release evidence / 已公开 tag / Release / 资产。
+- 常规门槛改动不顺手改 `measuredAt` / `totals` / `modules` / `command`：发布点重采样须作为独立项按本域协议执行（见「最近交付证明」），不得混在门脚本或 workflow 改动里；不动 version / CHANGELOG / README 版本表 / release notes / release evidence / 已公开 tag / Release / 资产。
 - 不给 renderer / jsdom 设地板；不新增 `src/**` 测试、不改既有测试文件。
 - 不改 `.github/workflows/release.yml` 门逻辑与参数，不改 `coverage-gate-preflight.yml` 调用参数，不 dispatch `release.yml`。
 - 不做无关重构（不重命名现有导出、不改 freshness / ratchet 逻辑）。
@@ -97,7 +97,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_ee8fde19eceed4ee`（`kind: chore`）——给覆盖率门的模块级评估加 **0 可执行语句显式豁免**：`evaluateModuleCoverage` / `zeroStatementVerdict` 成为 `main()` 的唯一模块判定入口，四项 total 全 0 的模块从 module set 与单模块 branches 地板中豁免并逐模块打印 `exempt module <path>: 0 executable statements`，fail-closed 语义保留；`checkExemptModules` 固定两项 0 分支豁免不变。日期：2026-11-05；`deliveryIntent: local merge`。
-- 结果：`code_gates` passed（32 gates，attempt 001）；新增 `scripts/coverage-gate-zero-statement.test.mjs`（CLI 正反断言 + 纯函数断言，覆盖空 barrel 多出 / 缺失、0 语句不发红、真实 0 覆盖仍红、豁免行唯一可审计、floors 与 scope 静态不变、真实 baseline 字节不变），经 `vitest.config.mts` 的 `scripts/**/*.test.mjs` 进入默认 `pnpm test`。
-- 面差：`scripts/coverage-gate.mjs`、新增 `scripts/coverage-gate-zero-statement.test.mjs`、本 change pack、本域 baseline 文档；`.munk/baseline/coverage.json`、`.munk/code-gates.json`、`vitest.config.mts`、两个 workflow、`src/**`、`package.json` / 锁文件零 diff，覆盖率门仍只在发版 CI。
-- 注：① 本 change pack 无 `tests/cases/**` / `tech.md` / `ux/**`，无 qa 用例 copy、无 tech / ux 手合。② 真实 `ubuntu-latest` preflight run 仍未产出（本项不 push / 不 dispatch），`ac-dispatch-run-evidence` 作为交付后置项留在回执中。
+- WI：`wi_ws_bbc28c351c07ec18`（`kind: chore`）——发布点基线独立重采样：在 `v0.2.23` 之后 5 个提交的 `82c32a8005f5af521a63288dc69b14842a5505fe` 上做一次真实 v8 冷跑（`--coverage.provider=v8` + `src/core/**` + 三个 exclude + `json-summary`，reports 落 `$TMPDIR/coverage-gate-20261105T091047Z/reports`），按 fresh summary 刷新 `.munk/baseline/coverage.json` 的 `measuredAt {commit,date}`、`command`、`totals`、`modules`、`decision.reason`；`floors` / `floorLedger` / `scope` / `ignoreDirectives` 原字节保留。日期：2026-11-05；`deliveryIntent: local merge`。
+- 结果：实测 totals 与既有 baseline 数值一致（lines 98.24 2290/2331、branches 90.31 1474/1632、functions 99.54 439/441、statements 96.33 2579/2677），28 个非 0 语句模块逐项一致，`src/core/**` 的 `v8 ignore` / `c8 ignore` 仍为 0。`node scripts/coverage-gate.mjs` positive 退出 0（`baseline freshness: … is at or after v0.2.23`）；`--baseline <tmp>` 的 negative floor（lines 97→96，缺 ledger）与 negative stale（commit `2646a761…`）均退出 1 且错误文本符合预期，真实 baseline 前后 sha256 一致。
+- 证据：`.munk/changes/wi_ws_bbc28c351c07ec18/evidence/` 下 `fresh-coverage-summary.json`、`positive.*`、`negative-floor.*`、`negative-stale.*`、`baseline-before.json` / `baseline-after.json` / `baseline.diff`、`sampling.json`，正文均为绝对路径；运行后无仓内临时 summary / lcov / 临时 baseline 残留，无 push / tag / dispatch，`package.json#version` 仍 `0.2.23`。
+- 面差：仅 `.munk/baseline/coverage.json`、本 change pack 与本域 baseline 文档；`src/**`、`scripts/coverage-gate*.mjs`、`vitest.config.mts`、`package.json` / 锁文件、`.munk/code-gates.json`、`.github/workflows/**` 零 diff。
+- 注：本 change pack 无 `tests/cases/**` / `tech.md` / `ux/**`，无 qa 用例 copy、无 tech / ux 手合；真实 `ubuntu-latest` preflight run 仍未产出（本项不 push / 不 dispatch），`ac-dispatch-run-evidence` 作为交付后置项。

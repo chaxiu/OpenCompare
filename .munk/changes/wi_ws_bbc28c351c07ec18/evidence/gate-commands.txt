@@ -1,0 +1,8 @@
+POSITIVE:
+node scripts/coverage-gate.mjs --summary /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports/coverage-summary.json --started-at 1793869847 --include 'src/core/**' --exclude '**/*.test.ts' --exclude '**/*.test.tsx' --exclude '**/__fixtures__/**'
+
+NEGATIVE FLOOR (temp baseline: floors.totals.lines 97 -> 96, no ledger):
+node scripts/coverage-gate.mjs --summary /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports/coverage-summary.json --started-at 1793869847 --include 'src/core/**' --exclude '**/*.test.ts' --exclude '**/*.test.tsx' --exclude '**/__fixtures__/**' --baseline /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/negative-floor-baseline.json
+
+NEGATIVE STALE (temp baseline: measuredAt.commit = 2646a7611373b96aef4dc7cdd15c2d1a19f10713):
+node scripts/coverage-gate.mjs --summary /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports/coverage-summary.json --started-at 1793869847 --include 'src/core/**' --exclude '**/*.test.ts' --exclude '**/*.test.tsx' --exclude '**/__fixtures__/**' --baseline /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/negative-stale-baseline.json

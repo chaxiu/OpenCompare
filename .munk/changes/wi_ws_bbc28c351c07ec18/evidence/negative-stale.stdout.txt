@@ -1,0 +1,15 @@
+ok   fresh summary: /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports/coverage-summary.json (mtime 2026-11-05T09:11:25.364Z >= started-at 2026-11-05T09:10:47.000Z)
+ok   scope: include "src/core/**", exclude ["**/*.test.ts","**/*.test.tsx","**/__fixtures__/**"]
+ok   totals lines: 98.24% >= 97%
+ok   totals branches: 90.31% >= 90%
+ok   totals functions: 99.54% >= 99%
+ok   exempt module src/core/directory/hash.ts: 0 branches
+ok   exempt module src/core/text/lines.ts: 0 branches
+ok   module set: 28 modules match baseline
+ok   module branches min: src/core/theme/contrast.ts 75% >= 75%
+ok   ignore directives: v8 0 <= 0, c8 0 <= 0
+ok   floor ratchet previous committed baseline: lines 97 -> 97 (tightened or unchanged)
+ok   floor ratchet previous committed baseline: branches 90 -> 90 (tightened or unchanged)
+ok   floor ratchet previous committed baseline: functions 99 -> 99 (tightened or unchanged)
+ok   floor ratchet previous committed baseline: moduleBranchesMin 75 -> 75 (tightened or unchanged)
+ok   floor ratchet previous committed baseline: ignoreDirectivesMax 0 -> 0 (tightened or unchanged)

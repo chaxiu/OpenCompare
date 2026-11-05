@@ -1,0 +1,28 @@
+{
+  "commit": "82c32a8005f5af521a63288dc69b14842a5505fe",
+  "commitReachableFromHead": true,
+  "commitsAheadOfSample": 0,
+  "commitsAfterV0223": 5,
+  "startedAtEpochSeconds": 1793869847,
+  "endedAtEpochSeconds": 1793869885,
+  "endedAtUtc": "2026-11-05T09:11:25Z",
+  "measuredAtDate": "2026-11-05T09:11:25.000Z",
+  "reportsDirectory": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports",
+  "freshSummary": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports/coverage-summary.json",
+  "evidenceDir": "/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_ws_bbc28c351c07ec18/.munk/changes/wi_ws_bbc28c351c07ec18/evidence",
+  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports",
+  "provider": "v8",
+  "scope": {
+    "include": "src/core/**",
+    "exclude": [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/__fixtures__/**"
+    ]
+  },
+  "ignoreDirectives": {
+    "v8": 0,
+    "c8": 0
+  },
+  "note": "reportsDirectory string retains the trailing-slash double slash from $TMPDIR; the resolved path is the real directory."
+}
