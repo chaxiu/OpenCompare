@@ -13,6 +13,7 @@
 - **实测证据与门禁**：由 `pnpm measure:syntax` 的真实探针写 `docs/evidence/syntax-perf.{json,md}`（阶梯尺寸、冷/热耗时、缓存读数、机器口径），新增 `syntax-perf` gate 复核阈值边界、缓存有界与证据/常量一致。
 - **零变更守卫**：四态计数、忽略换行 / 编码 / 空白开关、复制文本、导出文本、行窗口化与滚动映射均不因着色改变；既有渲染测试不放宽。
 - **门禁与 provenance**：`.munk/code-gates.json` 新增 `syntax-view` gate 并保留 `syntax-core`；`src/renderer` 变更触发既有 `readme-screenshots` 门，须重跑 `pnpm screenshots` 并把 `docs/screenshots.md` 的 captured commit 与四张 PNG 的字节数 / sha256 重钉到该提交。
+- **收尾波（第三波）**：不改任何产品行为，只做三件事——在含语法着色 + 大文件回落阈值的最终合入构建上重拍四张 README 截图；按语言重钉 provenance 并把 captured commit 钉到最终合入提交（`src/renderer` 相对它零差异）；把「着色前后逐位一致」的计数 / 开关 / 复制导出断言落进**已登记 gate**（优先扩展现有 `syntax-view` / `code-pair-actions` 测试文件，不新增重复 gate）。
 
 ## 验收
 
@@ -29,9 +30,9 @@
 - **ac-empty-and-error-fallback**：任一侧为空文本时该侧零 syntax span、不抛错；token 结果为空或解析抛错时该侧回落纯文本，另一侧照常着色，页面不崩。
 - **ac-lone-cr-fallback**：含孤立 `\r`（非 CRLF）的文本按回落处理为纯文本，不出现错位着色或 off-by-one 行偏移。
 - **ac-single-mode-predicate**：「是否着色」由一个导出纯函数按（路径, 文本）判定，未知扩展名 / 空文本 / 需回落时返回 `null`；双栏两个面板都通过它取结果，渲染层无第二处扩展名判断分支。
-- **ac-counts-parity**：同一内容分别以 `.ts` 与 `.txt` 路径打开，`[data-code-diff-count]`、差异块计数（`x/y`）、每行状态与行号完全一致。
+- **ac-counts-parity**：同一内容分别以 `.ts` 与 `.txt` 路径打开，`[data-code-diff-count]`、差异块计数（`x/y`）、每行状态与行号完全一致；忽略换行 / 编码 / 空白的四种开关组合下同样一致。
 - **ac-switch-parity**：忽略换行 / 编码 / 空白三个开关逐个切换后，着色与否不改变四态计数、块边界、行状态与行号。
-- **ac-copy-export-parity**：双栏复制仍复制同一路径字符串；合并视图的复制 / 导出文本与改动前逐字节一致（合并渲染路径未被着色触碰），既有导出门禁与未解决冲突禁用条件不变。
+- **ac-copy-export-parity**：双栏复制仍复制同一路径字符串；合并视图「复制」写入剪贴板的文本与「导出」写入 `platform.saveFile` 的 content 均与 `renderMergeText(renderMerge(model, resolutions))` 逐字节相等，且 `.ts` 着色侧与 `.txt` 纯文本侧输出相同；未解决冲突时复制 / 导出仍禁用，既有导出门禁与禁用条件不变。
 - **ac-windowing-preserved**：350k 行大 diff 仍只渲染视口 + overscan 行，`data-diff-window-start`、`data-diff-content-height` 与滚动同步不变；叠合只发生在已渲染行，行高与滚动映射不受影响。
 - **ac-existing-tests-unmodified**：既有 `DiffPane.test.tsx`、`CodeView.test.tsx`、`CodeView.switches.test.tsx`、`CodeView.ruler*.test.tsx` 在不放宽、不删除断言的前提下全绿。
 - **ac-parse-once-per-side**：一次渲染中每侧整篇 token 化最多 1 次（缓存命中不重复解析），tokenizer 调用次数不随行数线性增长。
@@ -50,12 +51,23 @@
 - **ac-cache-hit-at-threshold**：阈值内文本可被缓存保留：首次 miss，第二次 hit 且 tokens 与首次一致（阈值不超过缓存字符上限，重复渲染不重解析）。
 - **ac-diff-semantics-parity**：同内容对比下，超阈值回落路径与 `.txt` 纯文本路径的四态计数、差异块数、行号、`data-diff-window-start`、`data-diff-content-height` 完全一致。
 - **ac-windowing-untouched**：`DIFF_ROW_HEIGHT`、`ROW_OVERSCAN`、`WINDOW_THRESHOLD`、滚动同步与 ruler 跳转零改动（既有窗口化测试不放宽且全绿）。
-- **ac-version-anchors-untouched**：`package.json#version`、`CHANGELOG.md`、`README.md` 第 5 行、`release.yml` dispatch 默认 tag、`docs/release-notes/**` 零改动。
 - **ac-syntax-perf-gate**：`.munk/code-gates.json` 新增 `syntax-perf` gate，覆盖阈值边界、缓存有界与证据一致性断言；`src/munk-gates.test.ts` 门清单同步；`syntax-perf` 与既有 `syntax-core` / `syntax-view` / `test-debt-gate` 等全部门禁全绿。
 - **ac-probe-artifact**：`docs/evidence/syntax-perf.json` 与 `.md` 由探针脚本真实运行写入（禁止手填），含每个尺寸档的字节数、字符数、行数、冷/热耗时、tokens 数与缓存读数，以及阈值、判定规则、机器口径（平台 / 架构 / OS 版本 / CPU 型号 / 核数 / 总内存 / Node 版本）、执行命令与时间戳。
 - **ac-evidence-path-mapping**：证据 `.md` 与交付说明给出可直接打开的绝对路径，并同时标注 worktree 根与产品仓根（`/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/codebases/projects/open-compare`）的映射关系。
 - **ac-evidence-threshold-in-sync**：证据 JSON 的 `threshold` 与代码导出常量相等；证据记录阶梯尺寸与「冷启动中位数 ≤ 150 ms 且 ≤ 缓存字符上限」的取值规则，可被 `syntax-perf` gate 复核。
 - **ac-screenshot-gate-quiet**：本波不修改 `src/renderer/**` 下任何非测试文件（该门已排除 `*.test.ts(x)`），`release-artifacts-and-brand` 截图门保持绿；若确需改非测试 renderer 文件，必须按既有流程重拍并重钉 `docs/screenshots.md` 的 commit 与 sha256。
+
+- **ac-four-shots-final-build**：四张 PNG 全部由同一次 `pnpm screenshots`（`electron-vite build` + `node scripts/capture-readme-screenshots.mjs`）在 captured commit 的干净工作树上重写；脚本逐张报告 4 个输出文件、字节数与语言注入路径；四张文件 mtime 均晚于本次运行开始时间（证明是重拍而非沿用旧图）。
+- **ac-png-dimensions**：四张 PNG 均为 2560×1584（PNG IHDR width/height），均被 git 跟踪且未被 `.gitignore` 忽略。
+- **ac-single-captured-commit**：`docs/screenshots.md` 只出现一个 40 位十六进制 captured commit；该 commit 可被 `git cat-file -e` 解析、是 HEAD 的祖先，且 `git diff --quiet <commit>..HEAD -- src/renderer`（排除 `*.test.ts(x)`）为 0，沿用 `release-artifacts-and-brand` 既有守卫口径、不放宽。
+- **ac-captured-commit-is-final**：captured commit 为 `59485c0` 或其后代，即含语法高亮渲染与大文件回落的最终合入状态；不得回钉到 `3e0744a` 等未含第二波的旧提交。
+- **ac-provenance-per-language**：`docs/screenshots.md` 的 en / zh 两段各自登记 settings 文件路径、key `language`、value `"en"` / `"zh"`、期望 `<html lang>` `en` / `zh-CN`；每张图登记的字节数与 sha256 与该文件实际内容完全一致（由实测写入，禁止手抄）。
+- **ac-provenance-honest-src**：`docs/screenshots.md` 不再声称 `src/renderer` 与其余 `src/**` 都零差异；如实表述为 `src/renderer` 相对 captured commit 零差异（`src/core` 的第二波改动允许存在）。
+- **ac-readme-en-only**：`README.md` 中所有 `docs/assets/*.png` 引用恰好是 `opencompare-workbench.en.png` 与 `opencompare-file-diff.en.png`，无 zh 图；alt 文本不含 CJK 字符。
+- **ac-readme-zh-only**：`README.zh-CN.md` 中所有 `docs/assets/*.png` 引用恰好是 `opencompare-workbench.zh.png` 与 `opencompare-file-diff.zh.png`，无 en 图；alt 文本含 CJK 字符。
+- **ac-languages-differ**：同一场景的 en / zh 两张 PNG 字节内容不同（不得同图改名充数）；两 README 互链（`./README.zh-CN.md` / `./README.md`）保持存在。
+- **ac-regression-in-gates**：着色前后计数 / 开关 / 复制导出的逐位一致断言由 `.munk/code-gates.json` 中已登记的可执行 gate 覆盖（扩展现有 `syntax-view` / `code-pair-actions` 的测试文件，或新增 gate 并同步 `src/munk-gates.test.ts` 的 `EXPECTED_GATES`）；只在本地手跑一次不算交付。
+- **ac-gates-green**：默认 `.munk/code-gates.json` 全量 gate 绿（含 `lint` / `typecheck` / `build` / `build-web` / `test` / `syntax-core` / `syntax-view` / `syntax-perf` 与 `release-artifacts-and-brand` 所在的 `test` 覆盖）。
 
 ## 非目标
 
@@ -89,8 +101,8 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_ac1ff79086dc036b`（第二波：大文件阈值 / 边界与缓存有界回归 / 实测耗时证据）
+- WI：`wi_ws_0751bf5d1cec0b97`（收尾波：最终构建重拍截图 / provenance 重钉 / 零变更复验落门禁）
 - 日期：2026-11-05
-- 结果：code_gates passed（32 gates，attempt 001，`.munk/runs/run_ws_c2df4ea7a75f295a/code-gates/attempts/001`；`pnpm test` 151 files / 2361 passed + 1 skipped（2362）；新增 gate `syntax-perf`：7 files / 46 tests passed）。
-- 覆盖摘要：`src/core/syntax/view.ts` 新增并导出 `SYNTAX_MAX_HIGHLIGHT_CHARS = 262144`，在 `foldSyntaxText` 之后、`cachedSyntaxTokens` 之前按折叠后字符数判定 `null` 回落；`cache.ts` 新增只读 `syntaxCacheStats()`；新增 `scripts/syntax-perf.evidence.test.ts` + `pnpm measure:syntax` 产出 `docs/evidence/syntax-perf.{json,md}`（阶梯 32K→4M，262144 档冷中位 49.2 ms，超阈值档 0.14–1.19 ms 直接拒绝，40 份有界回归 size 13 / charCount 260026）；边界与 `.txt` 一致性断言落在 `src/core/syntax/view.test.ts` 与 `src/syntax-perf-gate.test.tsx`；`.munk/code-gates.json` / `src/munk-gates.test.ts` / `test-debt.json` 同步，`src/renderer/**` 非测试文件零改动（截图门保持绿）。
-- 后续注意：① 阈值由「冷中位 ≤ 150 ms 的最大档」再以 `SYNTAX_CACHE_MAX_CHARS` 钳制得出，本场实测 262144 档仅 49 ms，真正生效的是缓存字符上限而非测量值——放宽上限前必须重跑 `pnpm measure:syntax` 并同步冻结常量与证据；② `measure:syntax` 不进默认门禁矩阵，阈值改动后须手动重跑，否则 `syntax-perf` gate 的证据一致性断言会失败；③ 任何后续 `src/renderer` 提交仍会触发 `readme-screenshots`，需重拍重钉。
+- 结果：code_gates passed（32 gates，attempt 002，`.munk/runs/run_ws_dfbad22191a1b0b4/code-gates/attempts/002`；`pnpm test` 151 files / 2362 passed + 1 skipped（2363）；`syntax-view` gate 9 files / 59 tests passed；`test-debt-gate` 实测 `repoTestLines` 51350 = ceiling）。
+- 覆盖摘要：`src/renderer` 产品代码零改动；`docs/screenshots.md` 的 captured commit 从 `3e0744a` 重钉到最终合入 `59485c0`（`59485c0..HEAD` 的 `src/renderer` 非测试文件零差异），并如实改写为「仅 renderer 零差异、`src/core` 阈值后续允许不同」；四张 PNG 于 `pnpm screenshots` 重拍（mtime 12:18，尺寸 2560×1584，字节/sha256 与旧值一致，属确定性渲染的逐位同图）；复制 / 导出逐字节一致性断言扩进 `CodeView.syntax.test.tsx`（解决冲突后剪贴板与 `platform.saveFile` content 均等于 `renderMergeText(renderMerge(...))`，`.ts` 与 `.txt` 输出相同，未解决时两个动作仍 disabled），落在既有 `syntax-view` gate，不新增 gate。
+- 后续注意：① 截图门只钉 `src/renderer`；`src/core`（阈值等）改到会影响像素时须自行确认 `src/renderer` 是否真零差异，不能只看 commit 漂移；② 任何后续 `src/renderer` 提交仍触发 `readme-screenshots`，必须在最终合入提交上重拍再重钉；③ 零变更断言已并入 `syntax-view` 测试文件，新增渲染行为时须同时保持这些逐字节断言不放松。

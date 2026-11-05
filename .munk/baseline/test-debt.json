@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 51269
+    "repoTestLines": 51350
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 50954,
-      "to": 51269,
-      "reason": "large-file syntax threshold coverage: T / T+1 boundary and CRLF-folded flip, oversized rejection before the cache, forty-document bounded-cache regression and threshold-sized cache hit in the core view suite, plus the root syntax-perf gate for threshold rendering, .txt plain parity, single-predicate source scan, untouched virtualisation constants and evidence/threshold consistency",
-      "addedCases": 16
+      "from": 51269,
+      "to": 51350,
+      "reason": "merge copy/export zero-change parity under syntax colouring: one CodeView.syntax case resolves the conflict, then asserts the clipboard payload and platform.saveFile content both equal renderMergeText(renderMerge(model, resolutions)) for .ts and .txt merge sides, with copy and export still inert while unresolved",
+      "addedCases": 1
     }
   ]
 }
