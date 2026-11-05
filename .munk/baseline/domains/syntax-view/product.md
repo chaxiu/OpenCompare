@@ -44,6 +44,7 @@
 - **ac-threshold-inside-highlights**：长度恰好等于导出阈值 `T` 的真实 `.ts` 文本经 `resolveSyntaxView` 返回非 `null` 且 tokens 非空；双栏渲染中该侧至少出现一个 `[data-syntax]`。
 - **ac-threshold-outside-plain**：同一内容补到 `T + 1` 字符后返回 `null`，渲染后该侧 `[data-syntax]` 数量为 0，且行数、每行 `textContent`、行状态与同一内容以 `.txt` 纯文本渲染逐项相等。
 - **ac-threshold-boundary-flip**：阈值按折叠后字符数判定，`T` 与 `T + 1` 之间即翻转；同一内容的 LF 与 CRLF 版本折叠后等长时同进同出，不因换行编码改变着色与否。
+- **ac-threshold-explicit-timeout**：`src/syntax-perf-gate.test.tsx` 中两个 262,144 规模用例（`highlights a threshold-sized .ts side` 与 `renders one character over the threshold exactly like the .txt plain path`）各自以 `}, 30_000)` 结束；`THRESHOLD` 仍为 `262_144`，两用例的断言（含 `toBeNull` / `syntaxSpans === 0` / 渲染签名相等）与规模未删改；不改 vitest 全局 `testTimeout`，不以本机耗时作为超时证据。
 - **ac-single-predicate-preserved**：阈值常量只由 `src/core/syntax` 导出并仅在 `resolveSyntaxView` 内使用；`CodeView` / `DiffPane` 不引用该常量、不含尺寸字面量比较（源码扫描 + 渲染测试双向证明），双栏仍只经同一入口取结果。
 - **ac-oversized-not-parsed**：超阈值文本被拒时模块级缓存 `misses` 与 `charCount` 不变（未进 tokenizer），同一次调用不抛错。
 - **ac-existing-fallbacks-intact**：未知扩展名、空文本、孤立 `\r`、解析异常仍返回 `null`，既有 `src/core/syntax/view.test.ts` 断言不放宽、不删除。
@@ -97,12 +98,13 @@
 - **缓存读数出口**：为可测性新增只读统计 `syntaxCacheStats()` → `{ size, charCount, hits, misses }`，由默认缓存提供；不新增淘汰逻辑、不改上限常量。
 - **证据探针**：`scripts/syntax-perf.evidence.test.ts`（`vitest.evidence.config.mts` 收集）在系统临时目录生成确定性真实文件、读回磁盘后调用 `resolveSyntaxView`，记录超阈值档拒绝耗时，写 `docs/evidence/syntax-perf.json`（支持 `OPENCOMPARE_SYNTAX_EVIDENCE_OUT` 覆盖）并由同份数据渲染 `.md`；新增 `pnpm measure:syntax`，不进默认门禁矩阵。
 - **第二波测试落点**：边界与 DOM 纯文本一致性断言落在 `src/core/syntax/view.test.ts` / `cache.test.ts` 与仓库根 `src/syntax-perf-gate.test.tsx`（复用既有 jsdom 视口工具，参照 `src/diff-normalize-real-gate.test.tsx`），不在 `src/renderer/**` 新增非测试文件以避免截图重钉。
+- **规模用例超时纪律**：262,144 字符规模用例在 CI 慢机上会超过 vitest 默认 per-test 超时，必须显式 `}, 30_000)`（沿用 `DiffRuler.scale.test.tsx` / `historySafety.dom.test.tsx` 既有写法）；不得缩规模、删断言或改全局 `testTimeout` 换绿灯，超时补丁只动回调结尾。
 - **测试债基线**：新增测试抬高 `repoTestLines` / `repoTestCases`，须按实测同步 `.munk/baseline/test-debt.json` 的 `ceilings` / `floors` 并追加 `growth` 说明，保持 `test-debt-gate` 绿；不得删除或放宽既有断言凑数。
 
 ## 最近交付证明
 
-- WI：`wi_ws_0751bf5d1cec0b97`（收尾波：最终构建重拍截图 / provenance 重钉 / 零变更复验落门禁）
+- WI：`wi_intake_c7a93220660b74a9`（`syntax-perf` 两个 262,144 字符规模用例补显式 per-test `30_000` 超时；随 v0.2.23 版本锚点批次交付，`deliveryIntent: local merge`）
 - 日期：2026-11-05
-- 结果：code_gates passed（32 gates，attempt 002，`.munk/runs/run_ws_dfbad22191a1b0b4/code-gates/attempts/002`；`pnpm test` 151 files / 2362 passed + 1 skipped（2363）；`syntax-view` gate 9 files / 59 tests passed；`test-debt-gate` 实测 `repoTestLines` 51350 = ceiling）。
-- 覆盖摘要：`src/renderer` 产品代码零改动；`docs/screenshots.md` 的 captured commit 从 `3e0744a` 重钉到最终合入 `59485c0`（`59485c0..HEAD` 的 `src/renderer` 非测试文件零差异），并如实改写为「仅 renderer 零差异、`src/core` 阈值后续允许不同」；四张 PNG 于 `pnpm screenshots` 重拍（mtime 12:18，尺寸 2560×1584，字节/sha256 与旧值一致，属确定性渲染的逐位同图）；复制 / 导出逐字节一致性断言扩进 `CodeView.syntax.test.tsx`（解决冲突后剪贴板与 `platform.saveFile` content 均等于 `renderMergeText(renderMerge(...))`，`.ts` 与 `.txt` 输出相同，未解决时两个动作仍 disabled），落在既有 `syntax-view` gate，不新增 gate。
-- 后续注意：① 截图门只钉 `src/renderer`；`src/core`（阈值等）改到会影响像素时须自行确认 `src/renderer` 是否真零差异，不能只看 commit 漂移；② 任何后续 `src/renderer` 提交仍触发 `readme-screenshots`，必须在最终合入提交上重拍再重钉；③ 零变更断言已并入 `syntax-view` 测试文件，新增渲染行为时须同时保持这些逐字节断言不放松。
+- 结果：code_gates passed（32 gates，attempt 002，`.munk/runs/run_intake_c7a93220660b74a9/code-gates/attempts/002`；`syntax-perf` 7 files / 46 tests passed，`pnpm test` 151 files / 2362 passed + 1 skipped（2363））。
+- 覆盖摘要：`src/syntax-perf-gate.test.tsx` 的 `highlights a threshold-sized .ts side` 与 `renders one character over the threshold exactly like the .txt plain path` 两个用例回调结尾改为 `}, 30_000)`（+2 / −2，其余行零改动）；`THRESHOLD = 262_144`、`T + 1` 对照与 `resolveSyntaxView(...).toBeNull()` / `[data-syntax]` 数量为 0 / 渲染签名相等断言全部保留；未改 vitest 全局 `testTimeout`、未缩规模、未新增 skip（`ac-threshold-explicit-timeout`）。
+- 备注：本 WI change pack 仅 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`）；截图 provenance 未变（`src/renderer` 非测试文件零改动）。
