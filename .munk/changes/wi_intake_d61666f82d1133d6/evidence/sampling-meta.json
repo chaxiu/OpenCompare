@@ -1,0 +1,16 @@
+{
+  "sampledCommit": "2646a7611373b96aef4dc7cdd15c2d1a19f10713",
+  "sampledAtUtc": "2026-11-05T05:58:09.000Z",
+  "startedAtEpoch": 1793858289,
+  "summarySha256": "8b38e201bda613e853ba15c44bd89e9afd7dcaa85fb7834fcd775c215f01debb",
+  "summary": ".munk/changes/wi_intake_d61666f82d1133d6/evidence/coverage-sampling/coverage-summary.json",
+  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=text --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reportsDirectory=.munk/changes/wi_intake_d61666f82d1133d6/evidence/coverage-sampling",
+  "testRun": "151 files passed, 2362 tests passed, 1 skipped",
+  "supersededSample": {
+    "commit": "952c98c02e81546f2d97017476504b63fd4e16a5",
+    "summarySha256": "7bfe33529940ebf00a65f41c4bac10aac1f2177f4b2b00fe58ad0070b3a83a4e",
+    "reason": "tree still contained the zero-statement src/core/syntax/index.ts barrel; replaced by the Owner-directed barrel deletion, so its numbers do not describe the new tree",
+    "path": ".munk/changes/wi_intake_d61666f82d1133d6/evidence/superseded-952c98c"
+  },
+  "note": "One authoritative measurement on the new tree (28 modules). An earlier attempt on the same tree aborted before writing a summary because the screenshot-provenance guard rejected the renderer import diff; after recapturing screenshots at the source commit (all four PNGs byte-identical) the single authoritative run produced the recorded summary. No number was swapped to make a gate green."
+}
