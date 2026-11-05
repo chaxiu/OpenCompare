@@ -135,6 +135,47 @@ function toolbarSwap(): HTMLElement | null {
   )
 }
 
+type DiffStateName = 'same' | 'removed' | 'added' | 'modified'
+interface RowSnapshot {
+  /** Gutter line number, empty on a filler row. */
+  readonly gutter: string
+  readonly text: string
+}
+
+/** Per-row gutter + content of one pane, in rendered order. */
+function rowSnapshots(container: HTMLElement, side: 0 | 1): RowSnapshot[] {
+  return Array.from(paneElements(container)[side].querySelectorAll<HTMLElement>('[data-diff-row]')).map(
+    (row) => ({
+      gutter: row.children[0]?.textContent ?? '',
+      text: row.children[1]?.textContent ?? ''
+    })
+  )
+}
+
+/**
+ * Four-state counts normalised by state name: rows pair up by `data-diff-row`
+ * index across the panes, and the state follows gutter presence + text equality
+ * rather than DOM column order.
+ */
+function stateCounts(container: HTMLElement): Record<DiffStateName, number> {
+  const left = rowSnapshots(container, 0)
+  const right = rowSnapshots(container, 1)
+  expect(left.length).toBe(right.length)
+  const counts: Record<DiffStateName, number> = { same: 0, removed: 0, added: 0, modified: 0 }
+  for (let index = 0; index < left.length; index += 1) {
+    const hasLeft = left[index].gutter !== ''
+    const hasRight = right[index].gutter !== ''
+    if (hasLeft && hasRight) {
+      counts[left[index].text === right[index].text ? 'same' : 'modified'] += 1
+    } else if (hasLeft) {
+      counts.removed += 1
+    } else if (hasRight) {
+      counts.added += 1
+    }
+  }
+  return counts
+}
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -443,5 +484,43 @@ describe('explicit swap entry and centred jump', () => {
 
     expect(fireEvent.keyDown(document, { key: 's', ctrlKey: true, shiftKey: true })).toBe(false)
     expect(onPairChange).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the same/removed/added/modified counts and restores rows across two swaps', () => {
+    const left = 'same-1\nleft-only\nsame-2\nmodified-old\nsame-3\n'
+    const right = 'same-1\nsame-2\nmodified-new\nsame-3\nright-only\n'
+    const view = renderDiff(left, right, undefined, undefined, vi.fn())
+
+    // Visibility + label here; the three-entry same-handler flow is covered above.
+    const expectSwapVisible = (): void => {
+      const button = toolbarSwap()
+      expect(button).not.toBeNull()
+      expect(button!.hidden).toBe(false)
+      expect(window.getComputedStyle(button!).display).not.toBe('none')
+      expect(button!.getAttribute('aria-label')).toBe('交换左右')
+    }
+    expectSwapVisible()
+
+    const leftBefore = rowSnapshots(view.container, 0)
+    const rightBefore = rowSnapshots(view.container, 1)
+    const counts: Record<DiffStateName, number> = { same: 3, removed: 1, added: 1, modified: 1 }
+    expect(stateCounts(view.container)).toEqual(counts)
+    expect(counts.same + counts.removed + counts.added + counts.modified).toBe(6)
+
+    fireEvent.click(toolbarSwap()!)
+    expectSwapVisible()
+    expect(paneText(view.container, 0)).toContain('modified-new')
+    expect(paneText(view.container, 0)).toContain('right-only')
+    expect(paneText(view.container, 1)).toContain('left-only')
+    expect(paneText(view.container, 1)).toContain('modified-old')
+    expect(panelTitles()).toEqual(['/r.ts', '/l.ts'])
+    expect(stateCounts(view.container)).toEqual(counts)
+
+    fireEvent.click(toolbarSwap()!)
+    expectSwapVisible()
+    expect(rowSnapshots(view.container, 0)).toEqual(leftBefore)
+    expect(rowSnapshots(view.container, 1)).toEqual(rightBefore)
+    expect(panelTitles()).toEqual(['/l.ts', '/r.ts'])
+    expect(stateCounts(view.container)).toEqual(counts)
   })
 })

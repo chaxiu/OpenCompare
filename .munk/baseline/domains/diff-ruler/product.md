@@ -36,6 +36,9 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 - **ac-jump-centered**：视口高度为正且块高小于视口时，跳转后两栏 `scrollTop` 相等且等于 `round(blockTop + blockHeight / 2 - viewportHeight / 2)`（`blockTop = startRow * 22`，`blockHeight = (endRow - startRow + 1) * 22`），块上下两侧均可见上下文行。
 - **ac-jump-clamped**：首块目标夹到 0；末块夹到 `max(0, rows * 22 - viewportHeight)`；文档总高 ≤ 视口高时目标恒为 0；视口为 0 / 未知（`clientHeight` 非有限或 ≤ 0）或块高 ≥ 视口高时退回夹取后的块顶；结果始终为有限数且落在 `[0, maxScroll]`。
 - **ac-jump-stable**：同一块重复触发跳转后 `scrollTop` 不变；跳转后派发一次 pane `scroll` 事件，两侧 `scrollTop` 仍相等且不回弹；`skipBlockScroll` 仍使重载 / 交换后不重算滚动。
+- **ac-nav-loop-wrap**：在 18 个独立差异块的真实行模型上，从块 4 连点工具栏 `[data-shell-entry="next-diff"]` 到末块（计数 `18/18`），再点一次下一处断言计数 `1/18`、当前块为第 1 块（两侧 `border-accent` 行集合等于首块行区间）；在块 1 点 `[data-shell-entry="prev-diff"]` 断言计数 `18/18`、当前块为末块。首末块外沿不越界、不抖动。
+- **ac-nav-loop-landing**：末块 / 首块 / 回绕后的落点，两侧 pane `scrollTop` 相等且严格等于 `centeredScrollTop` 纯函数目标（测试调用同一函数，不内联公式），值为有限数且 `0 ≤ scrollTop ≤ max(0, rows * 22 - viewportHeight)`；回绕后重复读取并派发一次 pane `scroll`，`scrollTop` 不变。
+- **ac-nav-loop-fixture**：仓库既有 `LONG_PAIR` 仅 4 块，循环用例在 `CodeView.ruler.test.tsx` 内构造 test-only 的 18 组 `same-i` / `left-i` / `right-i` 行模型并显式断言 `blocks.length === 18`；不新增产品代码、不改块构建语义。
 - **ac-ruler-keyboard**：指示条可 Tab 聚焦并显 focus ring，`aria-label` 随 zh/en 词典变化；`ArrowUp`/`ArrowDown` 按 `blocks` 顺序循环并完成双栏定位，`Enter` 重新定位当前块；标记可访问名称含状态与行区间。
 - **ac-ruler-regression**：空 diff/全相同仍常驻（零标记，全相同时视口窗仍随滚动移动）；仅左删只 removed、仅右增只 added 且位置对应真实行；单行/无尾换行/CRLF 不越界；行内高亮、覆写/重置/保存与 `SplitPane` 交互保持原状；滚动与点选不新增 `diffLineTexts` 与 `PlatformPort` 调用；zh/en 无硬编码中文残留。
 
@@ -108,7 +111,7 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 
 ## 最近交付证明
 
-- WI：`wi_ws_ffb42f2dade463ee`（代码视图显式左右交换与居中差异跳转；`kind: feature`），日期 2026-11-05。
-- 结果：code_gates passed（attempt 001，`.munk/runs/run_ws_3c29034655b7007a/code-gates/attempts/001`：32 道门禁全绿，`pnpm test` 157 files / 2418 passed + 1 skipped（2419））。
-- 覆盖摘要：`CodeView` 的 `selectBlock` / `step` / `jumpActive` 与「下一个 / 上一个差异块」effect 统一改调 `codeViewScroll.centeredScrollTop`，可视高度取 pane `clientHeight`、行数取 `diff.rows.length`，两栏写同一目标；`CodeView.ruler.test.tsx` 的跳转期望改为调用同一纯函数并新增「居中跳转保留上下文」用例，`CodeView.rulerTrack.test.tsx` / `App.ruler.test.tsx` / `DiffPane.test.tsx` 同步改锚；`codeViewScroll.test.ts` 覆盖居中、首末块、短文档、视口未知 / 为 0、块高 ≥ 视口与幂等。
-- 保留：358k 规模的 `DiffRuler.scale.test.tsx` 显式 30s 超时与逐行覆盖断言一字未动（承接 `wi_ws_b21636d826817b53`）。
+- WI：`wi_intake_b263d67b0d4ef595`（钉住差异块导航首末循环与交换四态计数；`kind: test`），日期 2026-11-05。
+- 结果：code_gates passed（32 gates，attempt 001，`.munk/runs/run_intake_b263d67b0d4ef595/code-gates/attempts/001`；`pnpm test` 159 files / 2453 passed + 1 skipped（2454））。
+- 覆盖摘要：test-only。`CodeView.ruler.test.tsx` 新增「diff ruler block navigation loop」一例：本地 18 块行模型（显式断言 `blocks.length === 18`），先验证块 3 / 4 的当前块 accent 行与居中偏差 ≤ 1px，再经真实工具栏按钮走到末块（`18/18`）→ 下一处回 `1/18` 首块 → 上一处回 `18/18` 末块，每次断言两侧 `scrollTop` 相等且等于同一 `centeredScrollTop` 目标、落点在 `[0, maxScroll]` 且为有限数；回绕后再派发一次 `scroll` 断言落点不变。产品源码与 `codeViewScroll` / `ruler.ts` 零改动。
+- 保留：`DiffRuler.scale.test.tsx` 的 358k 规模显式 30s 超时与逐行覆盖断言、`CodeView.rulerTrack.test.tsx` 轨道级命中口径均未改动。

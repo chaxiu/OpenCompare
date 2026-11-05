@@ -20,6 +20,9 @@
 - **ac-reload-readonly**：重载全程只调用既有读取 / 探针接口，不调用任何写文件接口，两侧磁盘文件字节不变。
 - **ac-swap-swaps-derived**：交换一次后左右面板文本与路径标题、状态栏左右行数与换行 / 编码探针、差异行（`added` ↔ `removed` 镜像、左右文本对调）、差异计数与指示条 marker 区间同步对调。
 - **ac-swap-twice-restores**：连续交换两次后左右路径、两侧原始文本、探针值、`rows` / `blocks`、差异计数与指示条 marker 序列与交换前逐项一致。
+- **ac-swap-four-state-counts**：同时含 `same` / `removed`（仅左）/ `added`（仅右）/ `modified` 四种行的真实夹具（六行对齐）上，按状态名归一的四态计数向量交换前显式为 `{ same: 3, removed: 1, added: 1, modified: 1 }` 且合计等于渲染行数 6；经真实工具栏交换按钮交换一次与两次后，同一读取函数给出的向量与交换前逐位相等（深比较），不得退化为元素存在性或空读数。
+- **ac-swap-rows-and-gutter-restored**：第一次交换后左 pane 呈现原右内容（含 `modified-new` / `right-only`）、右 pane 呈现原左内容（含 `left-only` / `modified-old`），面板标题路径顺序对调；第二次交换后左右 pane 的逐行内容与 gutter 行号快照与交换前完全一致（深比较）。
+- **ac-swap-entry-always-visible**：交换前、第一次交换后、第二次交换后三个时点，交换按钮均存在、`hidden === false`、计算样式 `display !== 'none'`，且 `aria-label` 恒为「交换左右」。
 - **ac-swap-drilldown-scoped**：目录下钻文件视图交换后，父目录会话 id、目录统计、过滤 / 折叠状态、快照内容与格式均不变；返回目录视图得到与下钻前一致的目录结果，再次进入该文件对后可继续交换。
 - **ac-swap-no-write**：交换不调用写文件接口、不写回磁盘、不复制或改写文件内容，两侧磁盘文件字节保持不变。
 - **ac-swap-toolbar-visible**：shell 传入 `onPairChange` 时，`[data-shell-level="view-toolbar"]` 内直接存在 `[data-code-action="swap"]` 按钮，无需打开「更多」菜单；未传 `onPairChange` 时不渲染该按钮（与菜单项同条件），且该按钮不带 `data-shell-entry`。
@@ -52,7 +55,7 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_ffb42f2dade463ee`（代码视图显式左右交换与居中差异跳转；`kind: feature`），日期 2026-11-05。
-- 结果：code_gates passed（32 gates，attempt 001，`.munk/runs/run_ws_3c29034655b7007a/code-gates/attempts/001`；`pnpm test` 157 files / 2418 passed + 1 skipped（2419））。
-- 覆盖摘要：`CodeDiffView` 在 `[data-shell-level="view-toolbar"]` 内直接渲染 `[data-code-action="swap"]`（仍只在 `onPairChange` 存在时），`aria-label` 取 `files.code.swap`、`title` 与菜单文案同用 `swapLabel`；新增 `codeViewShortcut.ts`（`CODE_SWAP_SHORTCUT` / `isCodeSwapShortcut` / `isEditableTarget`），`Cmd/Ctrl+Shift+S` 由 `document.keydown` 监听、经 ref 调同一 `swapSides()`，仅实际命中时 `preventDefault`；`codeViewScroll.ts` 的 `centeredScrollTop` 同批落地（契约归本域配套的 `diff-ruler`）。测试补 `CodeView.switches.test.tsx` 3 例（工具栏可见性 / 三入口同一动作且零写盘 / 快捷键守卫）、`codeViewShortcut.test.ts` 5 例、`codeViewScroll.test.ts` 覆盖居中与夹取；gate `code-pair-actions` 命令扩到 8 个测试文件。
-- 后续注意：① `readSide` 缺省时重载按钮不渲染、`onPairChange` 缺省时交换按钮与快捷键都不生效，独立渲染（无 shell）属预期；② 交换只换视图与会话 `pair`，若后续把编辑缓冲（`CodeFileBuffer`）持久化到 `adhoc`，交换必须同步换缓冲左右路径，否则脏标记与保存指向旧侧；③ 滚动快照保持依赖 `skipBlockScroll` 一次性标记，任何新增「提交后自动滚到首块」逻辑都要尊重它；④ 新增可见工具栏按钮会改变 `docs/screenshots.md` 的文件对截图，renderer 变更后必须重跑 `pnpm screenshots` 并重钉 captured commit。
+- WI：`wi_intake_b263d67b0d4ef595`（钉住交换左右四态计数与差异块导航循环；`kind: test`），日期 2026-11-05。
+- 结果：code_gates passed（32 gates，attempt 001，`.munk/runs/run_intake_b263d67b0d4ef595/code-gates/attempts/001`；`pnpm test` 159 files / 2453 passed + 1 skipped（2454）；`code-pair-actions` gate 8 files / 109 passed）。
+- 覆盖摘要：test-only。`CodeView.switches.test.tsx` 新增一例：六行四态夹具按状态名归一计数（`3/1/1/1`，合计 6），经真实工具栏按钮两次交换断言计数向量逐位不变、第一次交换后内容与面板标题对调、第二次交换后逐行内容 + gutter 快照与交换前深相等，三个时点断言按钮可见性与 `aria-label`；三入口同一 handler 复用既有 `runs toolbar, menu and shortcut through the same swap action without writing`，不重复实现。`git diff --stat` 仅 `CodeView.switches.test.tsx` / `CodeView.ruler.test.tsx` / `test-debt.json`（growth 登记），产品源码零改动。
+- 后续注意：四态夹具的 `removed` / `added` 各 1 行、`same` 3 行、`modified` 1 行是当前交换只做左右镜像的口径；若将来交换改为非镜像语义（如按侧重排），该向量断言必须同步重钉。
