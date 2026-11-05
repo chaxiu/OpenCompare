@@ -28,6 +28,7 @@ import { TEXT_PROBE_CASES, expectTextProbeFacts, ipcPort } from '../../test/shar
 import { buildSyncPlan, SyncTargetError } from '@core/directory/sync'
 import { DIRECTORY_SCENE, DIRECTORY_SAMPLE_PATHS, SAMPLE_FIXTURE_FILES } from '@shared/fixtures'
 import { createComparisonHistoryEntry } from '@shared/history/model'
+import { PLATFORM_CHANNELS } from '@shared/platform/channels'
 import type {
   DigestFilesResult,
   DirectoryEntry,
@@ -49,7 +50,7 @@ import {
 import type { DigestReadStream, ListableStat } from './electron-platform'
 import { OperationCancelledError } from '@core/io'
 
-const { handlers, dialogs, appState } = vi.hoisted(() => ({
+const { handlers, dialogs, appState, nativeThemeState } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   dialogs: {
     open: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
@@ -57,7 +58,8 @@ const { handlers, dialogs, appState } = vi.hoisted(() => ({
   },
   // The settings file lives under `userData`; every test points that at its own
   // scratch directory instead of the real user profile.
-  appState: { userData: '', locale: 'en-US' }
+  appState: { userData: '', locale: 'en-US' },
+  nativeThemeState: { themeSource: 'system' as string }
 }))
 
 vi.mock('electron', () => ({
@@ -65,6 +67,7 @@ vi.mock('electron', () => ({
     getPath: (name: string) => (name === 'userData' ? appState.userData : tmpdir()),
     getLocale: () => appState.locale
   },
+  nativeTheme: nativeThemeState,
   dialog: {
     showOpenDialog: (...args: unknown[]) => dialogs.open(...(args as [])),
     showSaveDialog: (...args: unknown[]) => dialogs.save(...(args as []))
@@ -1577,6 +1580,32 @@ describe('electron user settings', () => {
     appState.locale = 'zh-Hant-TW'
 
     await expect(platform.systemLocale()).resolves.toBe('zh-Hant-TW')
+  })
+})
+
+describe('electron native theme channel', () => {
+  it('writes a valid mode and notifies the backdrop seam', async () => {
+    const changed = vi.fn()
+    registerPlatformIpc({ onNativeThemeChanged: changed })
+    nativeThemeState.themeSource = 'system'
+
+    for (const mode of ['light', 'dark', 'system'] as const) {
+      await invoke(PLATFORM_CHANNELS.setNativeTheme, mode)
+      expect(nativeThemeState.themeSource).toBe(mode)
+    }
+    expect(changed).toHaveBeenCalledTimes(3)
+  })
+
+  it('ignores an unknown or non-string payload without throwing', async () => {
+    const changed = vi.fn()
+    registerPlatformIpc({ onNativeThemeChanged: changed })
+    nativeThemeState.themeSource = 'dark'
+
+    for (const payload of ['sepia', '', null, 3, { mode: 'light' }]) {
+      await expect(invoke(PLATFORM_CHANNELS.setNativeTheme, payload)).resolves.toBeUndefined()
+    }
+    expect(nativeThemeState.themeSource).toBe('dark')
+    expect(changed).not.toHaveBeenCalled()
   })
 })
 

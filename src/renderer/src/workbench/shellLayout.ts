@@ -24,6 +24,16 @@ export const SHELL_LEVEL_ORDER: readonly ShellLevel[] = [
 /** Levels that own a horizontal toolbar row (and therefore a width budget). */
 export type ToolbarLevel = Extract<ShellLevel, 'app' | 'view-toolbar'>
 
+/**
+ * The one band surface both toolbar levels render. It stays an existing token
+ * (`surface-sunken`), so the app head and every view toolbar cannot drift into
+ * a second colour or an inverted hierarchy.
+ */
+export const TOOLBAR_BAND_SURFACE: Readonly<Record<ToolbarLevel, string>> = {
+  app: 'bg-surface-sunken',
+  'view-toolbar': 'bg-surface-sunken'
+}
+
 /** The three window widths the shell is designed for. */
 export type WidthTier = 'compact' | 'regular' | 'wide'
 

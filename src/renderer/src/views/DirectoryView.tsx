@@ -29,6 +29,7 @@ import type {
   TemplateRoots
 } from '@renderer/workbench/directoryOps'
 import {
+  TOOLBAR_BAND_SURFACE,
   directoryToolbarRowClasses,
   levelBandClasses,
   measureDirectoryToolbar
@@ -313,7 +314,8 @@ export function DirectoryView({
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 items-center bg-surface-sunken',
+          'flex shrink-0 items-center',
+          TOOLBAR_BAND_SURFACE['view-toolbar'],
           levelBandClasses('view-toolbar')
         )}
       >

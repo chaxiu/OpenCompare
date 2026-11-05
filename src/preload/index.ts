@@ -78,6 +78,8 @@ const platform: PlatformPort = {
     ipcRenderer.invoke(PLATFORM_CHANNELS.readUserSettings) as Promise<UserSettings | null>,
   writeUserSettings: (settings) =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.writeUserSettings, settings) as Promise<void>,
+  setNativeTheme: (mode) =>
+    ipcRenderer.invoke(PLATFORM_CHANNELS.setNativeTheme, mode) as Promise<void>,
   readComparisonHistory: () =>
     ipcRenderer.invoke(PLATFORM_CHANNELS.readComparisonHistory) as Promise<
       ComparisonHistoryEntry[]

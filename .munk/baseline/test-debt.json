@@ -1,14 +1,14 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "7bd2c9c5540862fa5cfeeab3937f652a956b4932",
+    "commit": "3131f4f6f681d383a1ffd97c4c92b19c5740af28",
     "date": "2026-11-05"
   },
   "ceilings": {
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 51350
+    "repoTestLines": 51571
   },
   "floors": {
     "appTestCases": 97,
@@ -30,18 +30,18 @@
   },
   "growth": [
     {
+      "metric": "repoTestLines",
+      "from": 51566,
+      "to": 51571,
+      "reason": "merge of the default branch's release-version-gate readme-tag case (+1 case, 5 lines) onto this branch's native-window-theme growth; the 51566 anchor already carried the native theme sync tests",
+      "addedCases": 1
+    },
+    {
       "metric": "appTestLines",
       "from": 2959,
       "to": 2988,
       "reason": "unknown-extension content fallback coverage in App.test.tsx: manual dialog opens a .vue text pair with UTF-8 status, binary .vue reports the failing side with the new copy, tree double-click opens a .vue text file and a binary drilldown shows the readable notice without a blank tab, plus the sample hex-dump .png now opens as text",
       "addedCases": 3
-    },
-    {
-      "metric": "repoTestLines",
-      "from": 51269,
-      "to": 51350,
-      "reason": "merge copy/export zero-change parity under syntax colouring: one CodeView.syntax case resolves the conflict, then asserts the clipboard payload and platform.saveFile content both equal renderMergeText(renderMerge(model, resolutions)) for .ts and .txt merge sides, with copy and export still inert while unresolved",
-      "addedCases": 1
     }
   ]
 }

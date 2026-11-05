@@ -119,7 +119,7 @@ import { HistoryHome } from './historyHome'
 import { buildMergeSession, mergeSessionErrorMessage } from './mergeSession'
 import type { MergePaths } from '@shared/mergeRequest'
 import type { CodeFileBuffer, FilePair, FilePairProbes, WorkbenchSession } from './session'
-import { entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
+import { TOOLBAR_BAND_SURFACE, entryPresentation, levelBandClasses, levelRowClasses } from './shellLayout'
 import type { ShellEntryId } from './shellLayout'
 import { useWidthTier } from './useWidthTier'
 
@@ -1834,7 +1834,8 @@ export function Workbench({
       <header
         data-shell-level="app"
         className={cx(
-          'flex shrink-0 items-center border-b border-line-subtle bg-surface-sunken',
+          'flex shrink-0 items-center border-b border-line-subtle',
+          TOOLBAR_BAND_SURFACE.app,
           levelRowClasses('app'),
           levelBandClasses('app')
         )}

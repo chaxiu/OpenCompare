@@ -27,7 +27,7 @@ import { classifyFile } from '@renderer/workbench/fileKinds'
 import { STRUCTURED_FILE_FILTER, pickTextFile } from '@renderer/workbench/fileIO'
 import type { PickedTextFile } from '@renderer/workbench/fileIO'
 import type { FilePair } from '@renderer/workbench/session'
-import { levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
+import { TOOLBAR_BAND_SURFACE, levelBandClasses, levelRowClasses } from '@renderer/workbench/shellLayout'
 import { StructuredChangeList, StructuredSourcePane } from './StructuredPanes'
 import type { StructuredHighlight } from './StructuredPanes'
 import {
@@ -492,7 +492,8 @@ export function StructuredView({
       <div
         data-shell-level="view-toolbar"
         className={cx(
-          'flex shrink-0 flex-col bg-surface-sunken',
+          'flex shrink-0 flex-col',
+          TOOLBAR_BAND_SURFACE['view-toolbar'],
           levelBandClasses('view-toolbar')
         )}
       >

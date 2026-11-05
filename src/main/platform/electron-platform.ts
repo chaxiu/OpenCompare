@@ -25,7 +25,7 @@ import { createReadStream, constants } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { app, clipboard, dialog, ipcMain } from 'electron'
+import { app, clipboard, dialog, ipcMain, nativeTheme } from 'electron'
 import type { FileFilter } from 'electron'
 import { OperationCancelledError, mapWithLimit, toReadableIoError } from '@core/io'
 import { probeTextBytes } from '@core/text/probe'
@@ -36,7 +36,7 @@ import {
   serializeComparisonHistory
 } from '@shared/history/model'
 import { PLATFORM_CHANNELS } from '@shared/platform/channels'
-import { parseUserSettings, parseUserSettingsJson } from '@shared/platform/settings'
+import { isTheme, parseUserSettings, parseUserSettingsJson } from '@shared/platform/settings'
 import type {
   ComparisonHistoryEntry,
   DigestFilesOptions,
@@ -814,7 +814,7 @@ function userSettingsPath(): string {
  * an unsupported language all read as "no record": a broken settings file must
  * never make the app fail to start.
  */
-async function readUserSettings(): Promise<UserSettings | null> {
+export async function readUserSettings(): Promise<UserSettings | null> {
   try {
     return parseUserSettingsJson(await readFile(userSettingsPath(), 'utf8'))
   } catch {
@@ -893,6 +893,11 @@ function systemLocale(): string {
 export interface PlatformIpcOptions {
   /** Called when the renderer announces its launch-request subscription. */
   readonly onCompareRequestsReady?: () => void
+  /**
+   * Test seam: lets the host repaint every open window's backdrop after the
+   * native theme source changed.
+   */
+  readonly onNativeThemeChanged?: () => void
   /**
    * Test seam: replaces the digest read streams, so a gate can hold a real read
    * in flight and cancel it deterministically.
@@ -1074,6 +1079,14 @@ export function registerPlatformIpc(options: PlatformIpcOptions = {}): void {
     const parsed = parseUserSettings(settings)
     if (parsed === null) throw new TypeError('Expected user settings with a supported language.')
     return writeUserSettings(parsed)
+  })
+  // The renderer pushes the selected mode itself (never the resolved one), so
+  // `system` keeps following the OS. Unknown payloads are ignored silently:
+  // a theme push must never surface as a renderer error.
+  ipcMain.handle(PLATFORM_CHANNELS.setNativeTheme, (_event, mode: unknown) => {
+    if (!isTheme(mode)) return
+    nativeTheme.themeSource = mode
+    options.onNativeThemeChanged?.()
   })
   // History payloads are validated by the shared schema before they reach disk;
   // a malformed list rejects this call with `TypeError` and writes nothing.

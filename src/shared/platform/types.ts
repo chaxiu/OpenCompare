@@ -315,6 +315,12 @@ export interface PlatformPort {
   /** Persists the settings through the runtime's single storage slot. */
   writeUserSettings(settings: UserSettings): Promise<void>
   /**
+   * Mirrors the selected mode onto the host's native chrome (menu bar / title
+   * area). Optional: a runtime without native chrome (the web build) omits it
+   * and the renderer treats it as a no-op.
+   */
+  setNativeTheme?(mode: Theme): Promise<void>
+  /**
    * The persisted comparison history, newest first. A missing, corrupt or
    * schema-mismatched document reads as an empty list instead of rejecting.
    */
