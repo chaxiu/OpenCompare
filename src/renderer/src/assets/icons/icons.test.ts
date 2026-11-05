@@ -176,7 +176,9 @@ describe('dependency set', () => {
     expect(Object.keys(manifest.dependencies).sort()).toEqual([
       '@tanstack/react-virtual',
       'diff',
+      'highlight.js',
       'jsonc-parser',
+      'lowlight',
       'node-diff3',
       'papaparse',
       'react',

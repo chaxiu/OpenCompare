@@ -54,6 +54,12 @@
   --color-diff-modified-soft: #231f14;
   --color-diff-conflict-soft: #242014;
 
+  /* Syntax foreground — four classes only; stronger tints of the families above */
+  --color-syntax-keyword: #6da4ff;
+  --color-syntax-string: #56d364;
+  --color-syntax-number: #e3b341;
+  --color-syntax-comment: #9aa4b2;
+
   /* Spacing — Tailwind's single base; 1/2/3/4/6 steps are 4/8/12/16/24px */
   --spacing: 0.25rem;
 
@@ -143,6 +149,12 @@
   --color-diff-removed-soft: #f6e9e8;
   --color-diff-modified-soft: #f0ede5;
   --color-diff-conflict-soft: #f1ede4;
+
+  /* Syntax foreground — same four classes, darkened for the light surfaces */
+  --color-syntax-keyword: #1d4ed8;
+  --color-syntax-string: #2a6a35;
+  --color-syntax-number: #7a5c1e;
+  --color-syntax-comment: #5b6470;
 }
 
 @layer base {
