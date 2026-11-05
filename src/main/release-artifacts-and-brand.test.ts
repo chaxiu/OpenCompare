@@ -293,9 +293,11 @@ describe('readme screenshots and capture provenance', () => {
     const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], { cwd: repoRoot })
     expect(ancestor.status, `git merge-base --is-ancestor ${commit} HEAD`).toBe(0)
     const range = `${commit}..HEAD`
-    const quiet = spawnSync('git', ['diff', '--quiet', range, '--', rendererDir], { cwd: repoRoot })
+    // `*.test.*` never enters the bundle, so a test-only change is not a pixel change; bundled files stay guarded.
+    const source = [rendererDir, `:(exclude,glob)${rendererDir}/**/*.test.ts`, `:(exclude,glob)${rendererDir}/**/*.test.tsx`]
+    const quiet = spawnSync('git', ['diff', '--quiet', range, '--', ...source], { cwd: repoRoot })
     if (quiet.status !== 0) {
-      const changed = spawnSync('git', ['diff', '--name-only', range, '--', rendererDir], { cwd: repoRoot, encoding: 'utf8' })
+      const changed = spawnSync('git', ['diff', '--name-only', range, '--', ...source], { cwd: repoRoot, encoding: 'utf8' })
       expect.fail(`${rerunHint}\n${rendererDir} changed since the captured commit ${commit}:\n${changed.stdout.trim()}`)
     }
     for (const [scene, paths] of scenes) {
