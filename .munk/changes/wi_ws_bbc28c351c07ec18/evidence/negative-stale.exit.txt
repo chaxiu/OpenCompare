@@ -1,0 +1,1 @@
+negative-stale exit=1

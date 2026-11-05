@@ -1,0 +1,2 @@
+.munk/baseline/coverage.json
+.munk/baseline/domains/coverage-baseline/product.md
