@@ -1,0 +1,271 @@
+diff --git a/.munk/changes/wi_intake_d61666f82d1133d6/evidence/baseline-before.json b/.munk/baseline/coverage.json
+index 537afab..abc6060 100644
+--- a/.munk/changes/wi_intake_d61666f82d1133d6/evidence/baseline-before.json
++++ b/.munk/baseline/coverage.json
+@@ -1,11 +1,11 @@
+ {
+   "version": 1,
+   "measuredAt": {
+-    "commit": "0809e5b583b6d30d0fc93ab72e10da8fdb7479d0",
+-    "date": "2026-11-04T23:10:52.000Z"
++    "commit": "2646a7611373b96aef4dc7cdd15c2d1a19f10713",
++    "date": "2026-11-05T05:58:09.000Z"
+   },
+   "provider": "v8",
+-  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=text --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reportsDirectory=.munk/changes/wi_intake_7e1cad0afa235fc2/evidence/coverage-coding",
++  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=text --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reportsDirectory=.munk/changes/wi_intake_d61666f82d1133d6/evidence/coverage-sampling",
+   "scope": {
+     "include": "src/core/**",
+     "exclude": [
+@@ -41,27 +41,49 @@
+   ],
+   "totals": {
+     "lines": {
+-      "pct": 98.12,
+-      "covered": 2141,
+-      "total": 2182
++      "pct": 98.24,
++      "covered": 2290,
++      "total": 2331
+     },
+     "branches": {
+-      "pct": 90.15,
+-      "covered": 1373,
+-      "total": 1523
++      "pct": 90.31,
++      "covered": 1474,
++      "total": 1632
+     },
+     "functions": {
+-      "pct": 99.51,
+-      "covered": 414,
+-      "total": 416
++      "pct": 99.54,
++      "covered": 439,
++      "total": 441
+     },
+     "statements": {
+-      "pct": 96.28,
+-      "covered": 2411,
+-      "total": 2504
++      "pct": 96.33,
++      "covered": 2579,
++      "total": 2677
+     }
+   },
+   "modules": {
++    "src/core/io.ts": {
++      "lines": {
++        "pct": 95.45,
++        "covered": 42,
++        "total": 44
++      },
++      "branches": {
++        "pct": 92.59,
++        "covered": 25,
++        "total": 27
++      },
++      "functions": {
++        "pct": 93.75,
++        "covered": 15,
++        "total": 16
++      },
++      "statements": {
++        "pct": 94.11,
++        "covered": 48,
++        "total": 51
++      }
++    },
+     "src/core/csv/align.ts": {
+       "lines": {
+         "pct": 100,
+@@ -260,28 +282,6 @@
+         "total": 342
+       }
+     },
+-    "src/core/io.ts": {
+-      "lines": {
+-        "pct": 95.45,
+-        "covered": 42,
+-        "total": 44
+-      },
+-      "branches": {
+-        "pct": 92.59,
+-        "covered": 25,
+-        "total": 27
+-      },
+-      "functions": {
+-        "pct": 93.75,
+-        "covered": 15,
+-        "total": 16
+-      },
+-      "statements": {
+-        "pct": 94.11,
+-        "covered": 48,
+-        "total": 51
+-      }
+-    },
+     "src/core/structured/diff.ts": {
+       "lines": {
+         "pct": 98.41,
+@@ -392,6 +392,116 @@
+         "total": 20
+       }
+     },
++    "src/core/syntax/cache.ts": {
++      "lines": {
++        "pct": 100,
++        "covered": 45,
++        "total": 45
++      },
++      "branches": {
++        "pct": 86.36,
++        "covered": 19,
++        "total": 22
++      },
++      "functions": {
++        "pct": 100,
++        "covered": 13,
++        "total": 13
++      },
++      "statements": {
++        "pct": 95.83,
++        "covered": 46,
++        "total": 48
++      }
++    },
++    "src/core/syntax/language.ts": {
++      "lines": {
++        "pct": 100,
++        "covered": 10,
++        "total": 10
++      },
++      "branches": {
++        "pct": 83.33,
++        "covered": 10,
++        "total": 12
++      },
++      "functions": {
++        "pct": 100,
++        "covered": 1,
++        "total": 1
++      },
++      "statements": {
++        "pct": 92.3,
++        "covered": 12,
++        "total": 13
++      }
++    },
++    "src/core/syntax/overlay.ts": {
++      "lines": {
++        "pct": 100,
++        "covered": 42,
++        "total": 42
++      },
++      "branches": {
++        "pct": 96.77,
++        "covered": 30,
++        "total": 31
++      },
++      "functions": {
++        "pct": 100,
++        "covered": 3,
++        "total": 3
++      },
++      "statements": {
++        "pct": 97.91,
++        "covered": 47,
++        "total": 48
++      }
++    },
++    "src/core/syntax/tokenize.ts": {
++      "lines": {
++        "pct": 100,
++        "covered": 34,
++        "total": 34
++      },
++      "branches": {
++        "pct": 89.28,
++        "covered": 25,
++        "total": 28
++      },
++      "functions": {
++        "pct": 100,
++        "covered": 5,
++        "total": 5
++      },
++      "statements": {
++        "pct": 97.43,
++        "covered": 38,
++        "total": 39
++      }
++    },
++    "src/core/syntax/view.ts": {
++      "lines": {
++        "pct": 100,
++        "covered": 17,
++        "total": 17
++      },
++      "branches": {
++        "pct": 100,
++        "covered": 14,
++        "total": 14
++      },
++      "functions": {
++        "pct": 100,
++        "covered": 2,
++        "total": 2
++      },
++      "statements": {
++        "pct": 100,
++        "covered": 24,
++        "total": 24
++      }
++    },
+     "src/core/text/diff.ts": {
+       "lines": {
+         "pct": 99.38,
+@@ -482,24 +592,24 @@
+     },
+     "src/core/text/probe.ts": {
+       "lines": {
+-        "pct": 96.66,
+-        "covered": 116,
+-        "total": 120
++        "pct": 96.69,
++        "covered": 117,
++        "total": 121
+       },
+       "branches": {
+-        "pct": 93.33,
+-        "covered": 126,
+-        "total": 135
++        "pct": 94.16,
++        "covered": 129,
++        "total": 137
+       },
+       "functions": {
+         "pct": 100,
+-        "covered": 13,
+-        "total": 13
++        "covered": 14,
++        "total": 14
+       },
+       "statements": {
+-        "pct": 93.15,
+-        "covered": 136,
+-        "total": 146
++        "pct": 93.19,
++        "covered": 137,
++        "total": 147
+       }
+     },
+     "src/core/text/ruler.ts": {
+@@ -572,6 +682,6 @@
+   "decision": {
+     "floor": true,
+     "gate": "release-ci",
+-    "reason": "Measured lines 98.12 / branches 90.15 / functions 99.51; pin those measured values as a release-CI-only hard gate, never part of the delivery matrix."
++    "reason": "Measured lines 98.24 / branches 90.31 / functions 99.54; pin those measured values as a release-CI-only hard gate, never part of the delivery matrix."
+   }
+ }

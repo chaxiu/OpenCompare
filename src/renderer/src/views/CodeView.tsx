@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import { SHELL_ENTRY_ICONS, UI_ICON_ACTIONS } from '@renderer/assets/icons'
-import { resolveSyntaxView } from '@core/syntax'
+import { resolveSyntaxView } from '@core/syntax/view'
 import { diffLineTexts, diffLineTextsWithFacts, overwriteBlock } from '@core/text/diff'
 import type { OverwriteDirection } from '@core/text/diff'
 import { resolveComparisonSwitches } from '@core/text/normalize'

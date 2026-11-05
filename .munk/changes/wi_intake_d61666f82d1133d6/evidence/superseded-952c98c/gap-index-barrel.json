@@ -1,0 +1,16 @@
+{
+  "module": "src/core/syntax/index.ts",
+  "moduleShape": "pure re-export barrel, 22 source lines, lcov FNF 0 / LF 0 / BRF 0 (no executable statements)",
+  "summaryEntry": {"lines":{"total":0,"covered":0,"pct":0},"branches":{"total":0,"covered":0,"pct":0},"functions":{"total":0,"covered":0,"pct":0},"statements":{"total":0,"covered":0,"pct":0}},
+  "gateFailure": "FAIL module branches: src/core/syntax/index.ts 0% < 75%",
+  "totals": {"lines":98.24,"branches":90.31,"functions":99.54,"statements":96.33},
+  "floors": {"lines":97,"branches":90,"functions":99,"moduleBranchesMin":75},
+  "attemptedFix": "added src/core/syntax/index.test.ts importing the barrel and exercising SYNTAX_LANGUAGES / tokenizeSyntax / cachedSyntaxTokens / overlayLine / resolveSyntaxView; full re-sample summary sha256 stayed 7bfe33529940ebf00a65f41c4bac10aac1f2177f4b2b00fe58ad0070b3a83a4e (byte-identical), test removed afterwards",
+  "rootCause": "with the fixed gate command (vitest v8, coverage.all defaults true) a file with zero executable statements is reported as 0% for every metric; no test can add executable statements to the barrel. Diagnostics: same suite with --coverage.all=false keeps the same 29 src/core modules and reports src/core/syntax/index.ts at 100% (branches 0/0), proving the module is loaded and the 0% comes from the all=true empty-file path.",
+  "evidence": [
+    ".munk/changes/wi_intake_d61666f82d1133d6/evidence/gate-positive-gap.log",
+    ".munk/changes/wi_intake_d61666f82d1133d6/evidence/coverage-sampling/diagnostic-full-with-barrel-test.log",
+    ".munk/changes/wi_intake_d61666f82d1133d6/evidence/coverage-sampling/diagnostic-all-false.log"
+  ],
+  "forbiddenLevers": ["lower floors / moduleBranchesMin", "change moduleBranchesMinExempt", "change scripts/coverage-gate*.mjs", "add exclude / v8 ignore", "change the measured command (all provider/include/exclude/reporter literals fixed by the PRD)"]
+}

@@ -9,13 +9,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { cleanup } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  SYNTAX_CACHE_MAX_CHARS,
-  SYNTAX_CACHE_MAX_ENTRIES,
-  SYNTAX_MAX_HIGHLIGHT_CHARS,
-  resolveSyntaxView,
-  syntaxCacheStats
-} from '@core/syntax'
+import { SYNTAX_CACHE_MAX_CHARS, SYNTAX_CACHE_MAX_ENTRIES, syntaxCacheStats } from '@core/syntax/cache'
+import { SYNTAX_MAX_HIGHLIGHT_CHARS, resolveSyntaxView } from '@core/syntax/view'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { DIFF_ROW_HEIGHT, ROW_OVERSCAN, WINDOW_THRESHOLD } from '@renderer/components/DiffPane'
