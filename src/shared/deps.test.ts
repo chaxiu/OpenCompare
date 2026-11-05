@@ -1,6 +1,8 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { diffLines } from 'diff'
+import hljs from 'highlight.js'
 import { parse as parseJsonc } from 'jsonc-parser'
+import { createLowlight } from 'lowlight'
 import { diff3MergeRegions } from 'node-diff3'
 import Papa from 'papaparse'
 import { parse as parseYaml } from 'yaml'
@@ -19,6 +21,8 @@ describe('core dependencies', () => {
     expect(typeof parseYaml).toBe('function')
     expect(typeof parseJsonc).toBe('function')
     expect(typeof useVirtualizer).toBe('function')
+    expect(typeof createLowlight).toBe('function')
+    expect(typeof hljs.highlight).toBe('function')
   })
 
   it('resolves the vendored icon table instead of an icon package', () => {

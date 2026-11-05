@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 50159
+    "repoTestLines": 50556
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 50056,
-      "to": 50159,
-      "reason": "merged ratchet: release verify four-state legend (semantic [data-shell-legend] reader unit/shape cases, real jsdom DirectoryView reading plus missing/duplicate/non-finite negative fixtures, step fail reasons) plus bilingual README screenshot provenance guard (per-language README asset sets and alt-script checks, per-language PNG dimension/ignore/track checks, single captured commit plus settings-injection tokens, per-language sha256/byte lines, distinct per-scene bytes between languages)",
-      "addedCases": 6
+      "from": 50159,
+      "to": 50556,
+      "reason": "syntax-core V1 pure-logic coverage: explicit extension map plus registry parity, whole-document lowlight tokenizing with CRLF folding and four-class JSON mapping, bounded LRU cache entry/character limits, token x inline-diff overlay boundaries, and WCAG/hue checks for the four new syntax foreground tokens",
+      "addedCases": 26
     }
   ]
 }

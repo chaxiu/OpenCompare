@@ -75,6 +75,10 @@
 | `--color-diff-removed-soft` | `#271619` | 删除底 |
 | `--color-diff-modified-soft` | `#231f14` | 修改底 |
 | `--color-diff-conflict-soft` | `#242014` | 冲突底 |
+| `--color-syntax-keyword` | `#6da4ff` | 语法关键字（accent 色族） |
+| `--color-syntax-string` | `#56d364` | 语法字符串（added 色族） |
+| `--color-syntax-number` | `#e3b341` | 语法数字（modified 色族） |
+| `--color-syntax-comment` | `#9aa4b2` | 语法注释（中性灰） |
 
 亮色 token（同色相、语义色降饱和）：
 
@@ -107,6 +111,10 @@
 | `--color-diff-removed-soft` | `#f6e9e8` | 删除底 |
 | `--color-diff-modified-soft` | `#f0ede5` | 修改底 |
 | `--color-diff-conflict-soft` | `#f1ede4` | 冲突底 |
+| `--color-syntax-keyword` | `#1d4ed8` | 语法关键字（accent 色族） |
+| `--color-syntax-string` | `#2a6a35` | 语法字符串（added 色族） |
+| `--color-syntax-number` | `#7a5c1e` | 语法数字（modified 色族） |
+| `--color-syntax-comment` | `#5b6470` | 语法注释（中性灰） |
 
 取整依据：亮色语义色保持暗色同名 token 的 HSV 色相（角差 ≤ 12°），饱和度下降 10–15%，
 明度取同时满足「对 `#ffffff` ≥ 3.0」「四态两两 ΔE ≥ 12」的最亮值，再按 sRGB 十六进制取整。

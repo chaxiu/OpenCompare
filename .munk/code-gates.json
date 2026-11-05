@@ -33,6 +33,11 @@
       "command": "pnpm test"
     },
     {
+      "id": "syntax-core",
+      "cwd": ".",
+      "command": "pnpm test src/core/syntax src/core/theme/contrast.test.ts"
+    },
+    {
       "id": "code-pair-actions",
       "cwd": ".",
       "command": "pnpm test src/core/text/diff.test.ts src/renderer/src/views/CodeView.switches.test.tsx src/renderer/src/workbench/comparisonSwitches.dom.test.tsx src/renderer/src/workbench/directoryCompare.test.ts"
