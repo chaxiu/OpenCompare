@@ -8,12 +8,12 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 50954
+    "repoTestLines": 51269
   },
   "floors": {
     "appTestCases": 97,
     "syncRealGateCases": 32,
-    "repoTestCases": 1739
+    "repoTestCases": 1799
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 50556,
-      "to": 50954,
-      "reason": "dual-pane syntax render wiring coverage: per-side resolveSyntaxView extension mapping and .txt fallback DOM parity, four foreground classes in the .jsonc pane, token x character-change overlay (internal change, cross-boundary split, row tone retained, red only on removed), CRLF/LF span and gutter parity, bounded virtual window on a coloured 5k-line side, and CodeView count/switch/theme/merge parity",
-      "addedCases": 18
+      "from": 50954,
+      "to": 51269,
+      "reason": "large-file syntax threshold coverage: T / T+1 boundary and CRLF-folded flip, oversized rejection before the cache, forty-document bounded-cache regression and threshold-sized cache hit in the core view suite, plus the root syntax-perf gate for threshold rendering, .txt plain parity, single-predicate source scan, untouched virtualisation constants and evidence/threshold consistency",
+      "addedCases": 16
     }
   ]
 }

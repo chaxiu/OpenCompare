@@ -25,6 +25,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "measure:symlink": "vitest run --config vitest.evidence.config.mts",
+    "measure:syntax": "vitest run --config vitest.evidence.config.mts scripts/syntax-perf.evidence.test.ts",
     "perf:dir": "electron-vite build && node scripts/perf-dir.mjs",
     "perf:gate": "electron-vite build && node scripts/perf-gate.mjs",
     "release:metadata": "node scripts/release-metadata.mjs",

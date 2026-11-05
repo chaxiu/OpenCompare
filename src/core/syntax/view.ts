@@ -15,6 +15,17 @@ export interface SyntaxView {
   readonly lineStarts: readonly number[]
 }
 
+/**
+ * Large-file threshold in folded (CRLF → LF) document characters.
+ *
+ * Chosen from the ladder measured by `pnpm measure:syntax` (see
+ * `docs/evidence/syntax-perf.md`): the largest tier whose cold median stayed
+ * under 150 ms, clamped to `SYNTAX_CACHE_MAX_CHARS` so a highlighted document
+ * can always be retained by the bounded cache. `length <= threshold` colours,
+ * `length > threshold` falls back to plain text before the cache/tokenizer.
+ */
+export const SYNTAX_MAX_HIGHLIGHT_CHARS = 262_144
+
 /** A `\r` that is not part of a CRLF pair cannot share the folded line map. */
 const LONE_CR = /\r(?!\n)/
 
@@ -46,6 +57,7 @@ export function resolveSyntaxView(
   if (LONE_CR.test(text)) return null
 
   const folded = foldSyntaxText(text)
+  if (folded.length > SYNTAX_MAX_HIGHLIGHT_CHARS) return null
   let tokens: readonly SyntaxToken[]
   try {
     tokens = cachedSyntaxTokens(folded, language)

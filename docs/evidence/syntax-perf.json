@@ -1,0 +1,295 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-05T04:05:34.314Z",
+  "command": "pnpm measure:syntax",
+  "threshold": 262144,
+  "selection": {
+    "chosenChars": 262144,
+    "maxColdMedianMs": 150,
+    "capChars": 262144
+  },
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "osVersion": "24.6.0",
+    "cpuModel": "Apple M3 Max",
+    "cpuCount": 16,
+    "totalMemoryBytes": 137438953472,
+    "nodeVersion": "v24.4.1"
+  },
+  "paths": {
+    "worktreeRoot": "/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_ws_ac1ff79086dc036b",
+    "productRepoRoot": "/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/codebases/projects/open-compare",
+    "json": "/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_ws_ac1ff79086dc036b/docs/evidence/syntax-perf.json",
+    "markdown": "/Users/zhutao/Library/Application Support/Munk-AI/munk-auto/worktrees/codebase_b2d550b56d98d0c5/wi_ws_ac1ff79086dc036b/docs/evidence/syntax-perf.md"
+  },
+  "ladder": [
+    {
+      "targetChars": 32768,
+      "bytes": 32768,
+      "chars": 32768,
+      "foldedChars": 32768,
+      "lines": 1128,
+      "status": "highlighted",
+      "timing": {
+        "coldMs": [
+          12.676,
+          8.247,
+          7.554
+        ],
+        "coldMedianMs": 8.247,
+        "hotMs": [
+          0.078,
+          0.067,
+          0.072
+        ],
+        "hotMedianMs": 0.072
+      },
+      "tokens": 3384,
+      "cache": {
+        "size": 1,
+        "charCount": 32768,
+        "hits": 0,
+        "misses": 1
+      },
+      "sha256": "19200f73a5136629e3adff6b6271df3b289f8f5f73149a4e3af8a306c787767d"
+    },
+    {
+      "targetChars": 65536,
+      "bytes": 65536,
+      "chars": 65536,
+      "foldedChars": 65536,
+      "lines": 2185,
+      "status": "highlighted",
+      "timing": {
+        "coldMs": [
+          15.335,
+          12.634,
+          11.539
+        ],
+        "coldMedianMs": 12.634,
+        "hotMs": [
+          0.146,
+          0.142,
+          0.131
+        ],
+        "hotMedianMs": 0.142
+      },
+      "tokens": 6555,
+      "cache": {
+        "size": 1,
+        "charCount": 65536,
+        "hits": 0,
+        "misses": 1
+      },
+      "sha256": "44789d73d3a228b32ff94a22a8c5b27392a8b9a0cd2b7cec7409200a06fbe4ab"
+    },
+    {
+      "targetChars": 131072,
+      "bytes": 131072,
+      "chars": 131072,
+      "foldedChars": 131072,
+      "lines": 4299,
+      "status": "highlighted",
+      "timing": {
+        "coldMs": [
+          23.787,
+          22.903,
+          24.63
+        ],
+        "coldMedianMs": 23.787,
+        "hotMs": [
+          0.308,
+          0.286,
+          0.283
+        ],
+        "hotMedianMs": 0.286
+      },
+      "tokens": 12897,
+      "cache": {
+        "size": 1,
+        "charCount": 131072,
+        "hits": 0,
+        "misses": 1
+      },
+      "sha256": "ca44be201117bf970ed31a8ecc668fbce8535e32b444619686526bc296b2cbce"
+    },
+    {
+      "targetChars": 262144,
+      "bytes": 262144,
+      "chars": 262144,
+      "foldedChars": 262144,
+      "lines": 8527,
+      "status": "highlighted",
+      "timing": {
+        "coldMs": [
+          50.164,
+          49.227,
+          46.389
+        ],
+        "coldMedianMs": 49.227,
+        "hotMs": [
+          0.568,
+          0.531,
+          0.504
+        ],
+        "hotMedianMs": 0.531
+      },
+      "tokens": 25581,
+      "cache": {
+        "size": 1,
+        "charCount": 262144,
+        "hits": 0,
+        "misses": 1
+      },
+      "sha256": "fad03a0f27cae22e7602497c7b34efcb898ca09e009de9a8213223dd778ea391"
+    },
+    {
+      "targetChars": 524288,
+      "bytes": 524288,
+      "chars": 524288,
+      "foldedChars": 524288,
+      "lines": 16560,
+      "status": "rejected",
+      "timing": {
+        "coldMs": [
+          0.141,
+          0.142,
+          0.14
+        ],
+        "coldMedianMs": 0.141,
+        "hotMs": [
+          0.141,
+          0.14,
+          0.149
+        ],
+        "hotMedianMs": 0.141
+      },
+      "tokens": 0,
+      "cache": {
+        "size": 0,
+        "charCount": 0,
+        "hits": 0,
+        "misses": 0
+      },
+      "sha256": "19dec9f70264ab2a17a334cb23856c0d68174a1556e33a5ccb5afc11a77ae5dd"
+    },
+    {
+      "targetChars": 1048576,
+      "bytes": 1048576,
+      "chars": 1048576,
+      "foldedChars": 1048576,
+      "lines": 32448,
+      "status": "rejected",
+      "timing": {
+        "coldMs": [
+          0.298,
+          0.293,
+          0.28
+        ],
+        "coldMedianMs": 0.293,
+        "hotMs": [
+          0.296,
+          0.299,
+          0.299
+        ],
+        "hotMedianMs": 0.299
+      },
+      "tokens": 0,
+      "cache": {
+        "size": 0,
+        "charCount": 0,
+        "hits": 0,
+        "misses": 0
+      },
+      "sha256": "342dc3dd796ab6a77745bcaa651f3f65d19122fac29481e2bf34582d1574584f"
+    },
+    {
+      "targetChars": 2097152,
+      "bytes": 2097152,
+      "chars": 2097152,
+      "foldedChars": 2097152,
+      "lines": 64223,
+      "status": "rejected",
+      "timing": {
+        "coldMs": [
+          0.557,
+          0.588,
+          0.599
+        ],
+        "coldMedianMs": 0.588,
+        "hotMs": [
+          0.644,
+          0.61,
+          0.622
+        ],
+        "hotMedianMs": 0.622
+      },
+      "tokens": 0,
+      "cache": {
+        "size": 0,
+        "charCount": 0,
+        "hits": 0,
+        "misses": 0
+      },
+      "sha256": "bd13beeda99cab81db703807d01df041a52f31a2b20dc2a23377e43f5d82532b"
+    },
+    {
+      "targetChars": 4194304,
+      "bytes": 4194304,
+      "chars": 4194304,
+      "foldedChars": 4194304,
+      "lines": 126186,
+      "status": "rejected",
+      "timing": {
+        "coldMs": [
+          1.141,
+          1.191,
+          1.218
+        ],
+        "coldMedianMs": 1.191,
+        "hotMs": [
+          1.205,
+          1.219,
+          1.215
+        ],
+        "hotMedianMs": 1.215
+      },
+      "tokens": 0,
+      "cache": {
+        "size": 0,
+        "charCount": 0,
+        "hits": 0,
+        "misses": 0
+      },
+      "sha256": "b958f387b56a84ab66433d6627d1e7c972af5cae8715d748fea21f121a4a2fa5"
+    }
+  ],
+  "cacheBounded": {
+    "rounds": 40,
+    "docChars": 20000,
+    "size": 13,
+    "charCount": 260026,
+    "hits": 0,
+    "misses": 40,
+    "maxEntries": 32,
+    "maxChars": 262144,
+    "withinBounds": true
+  },
+  "cacheHitAtThreshold": {
+    "chars": 262144,
+    "first": {
+      "size": 1,
+      "charCount": 262144,
+      "hits": 0,
+      "misses": 1
+    },
+    "second": {
+      "size": 1,
+      "charCount": 262144,
+      "hits": 1,
+      "misses": 1
+    },
+    "sameTokens": true
+  }
+}
