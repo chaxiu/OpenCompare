@@ -188,11 +188,7 @@ describe('four-state legend fail-closed reading', () => {
     const parent = legend.parentNode
     const next = legend.nextSibling
     legend.remove()
-    expect(readFourStateLegend(document)).toMatchObject({
-      ok: false,
-      reason: 'legend-missing',
-      detail: { selector: FOUR_STATE_LEGEND_SELECTOR }
-    })
+    expect(readFourStateLegend(document)).toMatchObject({ ok: false, reason: 'legend-missing', detail: { selector: FOUR_STATE_LEGEND_SELECTOR } })
     parent?.insertBefore(legend, next)
     expect(readFourStateLegend(document)).toEqual(baseline)
 

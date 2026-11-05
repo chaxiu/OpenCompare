@@ -101,4 +101,4 @@
 
 - WI：`wi_intake_4420ed14d7cfc185`（**发布核验四态图例选择器失配修复**，`deliveryIntent: local merge`）；日期：2026-11-05。
 - 结果：v0.2.21 draft 验证 run 唯一失败 `linux-directory-compare` 的根因是脚本在 footer 状态栏找图例而图例已渲染到 `DirectoryView` 工具栏；改为按 `[data-shell-legend]` 语义读取，四态失败原因可区分（`legend-missing` / `legend-duplicate` / `status-missing` / `count-non-finite`），CI 仍 15 项、local 仍 3 项。
-- 改动面：`scripts/four-state-legend.mjs` + `.d.mts`（新增）、`scripts/verify-release.mjs`（Linux 腿与 local 三轮消费新形态）、`src/verify-release-gate.test.ts`（共享选择器 + fail-closed 原因）、`directoryStatusLegend.test.tsx`（真实 DOM 正反向 + 单源断言）、`test-debt.json`（ceiling growth）。
+- 改动面：`scripts/four-state-legend.mjs` + `.d.mts`（新增）、`scripts/verify-release.mjs`（Linux 腿与 local 三轮消费新形态）、`src/verify-release-gate.test.ts`（共享选择器 + fail-closed 原因）、`directoryStatusLegend.test.tsx`（真实 DOM 正反向 + 单源断言）、`release-artifacts-and-brand.test.ts`（截图溯源 diff 限定为打进 bundle 的 renderer 文件，排除 `*.test.*`）、`test-debt.json`（ceiling growth）。
