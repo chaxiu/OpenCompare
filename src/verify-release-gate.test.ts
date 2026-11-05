@@ -26,6 +26,12 @@ import type {
   CiPlatform, CommandResult, FourStateCounts, LaunchHandle, ReleaseMetadata, StepDiagnostics, StepRecord,
   StepStatus, Summary, World
 } from '../scripts/verify-release.mjs'
+import {
+  FOUR_STATE_EXPRESSION,
+  FOUR_STATE_LEGEND_SELECTOR,
+  readFourStateLegend
+} from '../scripts/four-state-legend.mjs'
+import type { ReadFourStateLegendResult } from '../scripts/four-state-legend.mjs'
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const TAG = 'v9.9.9'
 const VERSION = '9.9.9'
@@ -81,7 +87,7 @@ const buildAsar = (files: Record<string, Buffer>): Buffer => {
 interface FakeOptions {
   macVersion?: string; debVersion?: string; linuxVersion?: string; windowsVersion?: string
   authenticode?: string; authenticodeExit?: number; codesignStatus?: number; gatekeeperOutput?: string
-  staplerStatus?: number; fourState?: FourStateCounts; fourStateSequence?: FourStateCounts[]; cancelNoise?: string
+  staplerStatus?: number; fourState?: FourStateCounts; fourStateSequence?: FourStateCounts[]; fourStateReading?: ReadFourStateLegendResult; cancelNoise?: string
   progressAppears?: boolean; cancelButton?: boolean; operableAfterCancel?: boolean; missingAsset?: string
   metadataSize?: (name: string) => number; metadataSha?: (name: string) => string | null
   releaseTag?: string; releaseDraft?: boolean; duplicateRelease?: boolean; missingAssetId?: boolean; downloadStatus?: number
@@ -175,8 +181,9 @@ class FakeHost {
     return sequence !== undefined ? sequence[Math.min(this.round, sequence.length - 1)] : (this.options.fourState ?? SMOKE_TREE)
   }
   private evaluate(expression: string): unknown {
-    if (expression.includes('footer[data-shell-level="status"]')) {
-      this.round += 1; if (this.options.failFourStateAtRound === this.round) throw new Error('injected round failure'); return this.fourState()
+    if (expression.includes(FOUR_STATE_LEGEND_SELECTOR)) {
+      this.round += 1; if (this.options.failFourStateAtRound === this.round) throw new Error('injected round failure')
+      return this.options.fourStateReading ?? { ok: true, counts: this.fourState() }
     }
     if (expression.includes('button.ml-auto')) return this.options.cancelButton !== false
     if (expression.includes('data-session-tab')) return { tabs: 0, trees: 0 }
@@ -498,6 +505,18 @@ describe('Linux launch shape', () => {
     })
     expect(run.steps['cancel-leg']).toMatchObject({ status: 'pass', actual: { treeFilesPerSide: CANCEL_TREE_FILES_PER_SIDE, leftovers: 0 } })
   })
+  it.each([
+    ['legend-missing', { selector: FOUR_STATE_LEGEND_SELECTOR }],
+    ['legend-duplicate', { count: 2 }],
+    ['count-non-finite', { status: 'same', text: 'n/a' }]
+  ] as const)('fails the directory leg with the %s reason', async (reason, detail) => {
+    const run = await runCi(new FakeHost({ fourStateReading: { ok: false, reason, detail } }), ['--platform=linux'])
+    const step = run.steps['linux-directory-compare']
+    expect(step.status).toBe('fail')
+    expect(step.actual).toMatchObject({ counts: null, legend: { ok: false, reason, detail } })
+    expect((step.actual as { error: string }).error).toContain(reason)
+    expect(run.code).toBeGreaterThan(0)
+  })
   it('fails closed when the unpacked AppImage has no AppRun launcher', async () => {
     const run = await runCi(new FakeHost({ omitAppRun: true }), ['--platform=linux'])
     expect(run.steps['linux-appimage-version'].status).toBe('fail')
@@ -671,6 +690,7 @@ describe('local B layer', () => {
   it.each([
     ['the real directory pair is missing', { fixturePresent: false, heapSequence: HAPPY_HEAP, fourState: LOCAL_COUNTS }, 'local-fixture'],
     ['a round is missing', { heapSequence: HAPPY_HEAP, failFourStateAtRound: 2 }, 'local-rounds-4state'],
+    ['a round legend cannot be read', { heapSequence: HAPPY_HEAP, fourStateReading: { ok: false, reason: 'legend-missing', detail: { selector: FOUR_STATE_LEGEND_SELECTOR } } }, 'local-rounds-4state'],
     ['the four-state sum is not the round total', { heapSequence: HAPPY_HEAP, fourState: { same: 9, added: 1, removed: 0, modified: 0 } }, 'local-rounds-4state'],
     ['the three rounds disagree', { heapSequence: HAPPY_HEAP, fourStateSequence: [
       { same: 2, added: 1, removed: 0, modified: 0 }, { same: 1, added: 2, removed: 0, modified: 0 }, { same: 2, added: 1, removed: 0, modified: 0 }
@@ -678,6 +698,13 @@ describe('local B layer', () => {
   ] as Array<[string, FakeOptions, string]>)('fails when %s', async (_name, options, step) => {
     const run = await runLocal(new FakeHost(options))
     expect(run.steps[step].status).toBe('fail'); expect(run.code).toBeGreaterThan(0)
+  })
+  it('carries the local round reading reason into the step evidence', async () => {
+    const run = await runLocal(new FakeHost({ heapSequence: HAPPY_HEAP, fourStateReading: { ok: false, reason: 'count-non-finite', detail: { status: 'added', text: '?' } } }))
+    const actual = run.steps['local-rounds-4state'].actual as { rounds: Array<{ legend: { reason: string } }>; problems: string[] }
+    expect(run.steps['local-rounds-4state'].status).toBe('fail')
+    expect(actual.rounds.map((round) => round.legend.reason)).toEqual(['count-non-finite', 'count-non-finite', 'count-non-finite'])
+    expect(actual.problems.join('\n')).toContain('四态读取失败 count-non-finite {"status":"added","text":"?"}')
   })
   it('fails when round 3 grows the retained heap by more than 16 MiB', async () => {
     const over = 120 * MIB + RETENTION_THRESHOLD_BYTES + 1
@@ -687,6 +714,11 @@ describe('local B layer', () => {
   })
 })
 describe('pure judgments', () => {
+  it('serializes the one four-state reader for CDP', () => {
+    expect(FOUR_STATE_EXPRESSION).toBe(`(${readFourStateLegend.toString()})(document)`)
+    expect(FOUR_STATE_EXPRESSION).toContain(FOUR_STATE_LEGEND_SELECTOR)
+    expect(FOUR_STATE_EXPRESSION).not.toContain('footer[data-shell-level="status"]')
+  })
   it('normalises only the v prefix and X.Y.Z', () => {
     expect(['v9.9.9', '9.9.9', '9.9.9-1', 'nightly', undefined].map((value) => normalizeVersion(value))).toEqual(['9.9.9', '9.9.9', '9.9.9', null, null]); expect([versionEqualsTag('v9.9.9', 'v9.9.9'), versionEqualsTag('9.9.8', 'v9.9.9')]).toEqual([true, false])
   })
@@ -752,6 +784,15 @@ describe('pure judgments', () => {
     const rounds = [1, 2, 3].map((index) => ({ index, counts: { same: 2, added: 1, removed: 0, modified: 0 }, totalRows: 3, closedTabs: 0, closedTrees: 0, uncollectedHeapBytes: null, retainedHeapBytes: null }))
     expect([judgeLocalRounds({ rounds }).ok, judgeLocalRounds({ rounds: rounds.slice(0, 2) }).ok]).toEqual([true, false])
     expect(judgeLocalRounds({ rounds: rounds.map((round, index) => (index === 2 ? { ...round, closedTabs: 1 } : round)) }).ok).toBe(false)
+  })
+  it('records a round legend failure by reason instead of arithmetic on null counts', () => {
+    const round = (index: number, legend: ReadFourStateLegendResult) => ({ index, legend, totalRows: 3, closedTabs: 0, closedTrees: 0, uncollectedHeapBytes: null, retainedHeapBytes: null })
+    const counts = { ok: true as const, counts: { same: 2, added: 1, removed: 0, modified: 0 } }
+    const result = judgeLocalRounds({ rounds: [round(1, counts), round(2, { ok: false, reason: 'legend-duplicate', detail: { count: 2 } }), round(3, counts)] })
+    expect(result.ok).toBe(false)
+    expect(result.problems).toContain('第 2 轮四态读取失败 legend-duplicate {"count":2}')
+    expect(result.problems.join('\n')).not.toContain('第 2 轮四态和')
+    expect(judgeLocalRounds({ rounds: [round(1, counts), round(2, counts), round(3, counts)] }).ok).toBe(true)
   })
   it('counts cancel noise only for the fixed pattern and reads an asar JSON entry', () => {
     expect(String(CANCEL_NOISE_PATTERN)).toBe('/OperationCancelledError|ECANCELED/'); expect([scanCancelNoise([{ source: 'a', text: 'all good' }]).count, scanCancelNoise([{ source: 'a', text: 'OperationCancelledError: x' }]).count, scanCancelNoise([{ source: 'b', text: 'write ECANCELED\nmore' }]).count]).toEqual([0, 1, 1])

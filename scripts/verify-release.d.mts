@@ -1,6 +1,7 @@
 /** Types for `scripts/verify-release.mjs` so the vitest gate can import it. */
 
 import type { ChildProcess } from 'node:child_process'
+import type { ReadFourStateLegendResult } from './four-state-legend.mjs'
 
 export type Layer = 'local' | 'ci'
 export type CiPlatform = 'mac' | 'linux' | 'windows'
@@ -86,7 +87,9 @@ export interface FourStateCounts {
 
 export interface LocalRound {
   index: number
-  counts: FourStateCounts | null
+  /** New reading shape; `counts` stays for hand-built fixtures. */
+  legend?: ReadFourStateLegendResult
+  counts?: FourStateCounts | null
   totalRows: number
   closedTabs: number | null
   closedTrees: number | null

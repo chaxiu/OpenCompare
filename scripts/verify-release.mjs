@@ -53,6 +53,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { FOUR_STATE_EXPRESSION, FOUR_STATE_LEGEND_SELECTOR } from './four-state-legend.mjs'
 
 /* ------------------------------------------------------------------ */
 /* Registry: the one place the expected check ids live.                */
@@ -146,20 +147,6 @@ const NO_PROGRESS_EXPRESSION = `!document.querySelector('[data-shell-level="even
 const READY_DIRECTORY_EXPRESSION = `document.querySelectorAll('[role="tree"]').length >= 2 &&
   document.querySelectorAll('[role="treeitem"]').length > 0 &&
   !document.querySelector('[data-shell-level="events"] [role="status"]')`
-const FOUR_STATE_EXPRESSION = `(() => {
-  const footer = document.querySelector('footer[data-shell-level="status"]')
-  if (!footer) return null
-  const legend = Array.from(footer.querySelectorAll('span')).find((span) => {
-    const cells = Array.from(span.children)
-    return cells.length === 4 && cells.every((cell) => cell.querySelector('.tabular'))
-  })
-  if (!legend) return null
-  const values = Array.from(legend.children).map((cell) =>
-    Number(cell.querySelector('.tabular').textContent.trim())
-  )
-  if (values.some((value) => !Number.isFinite(value))) return null
-  return { same: values[0], added: values[1], removed: values[2], modified: values[3] }
-})()`
 const SESSION_STATE_EXPRESSION = `(() => ({
   tabs: document.querySelectorAll('[data-session-tab]').length,
   trees: document.querySelectorAll('[role="tree"]').length
@@ -478,6 +465,29 @@ function sameCounts(left, right) {
   )
 }
 
+/**
+ * Normalises one round's new `{ ok, counts, reason, detail }` reading (falling
+ * back to a bare `counts` fixture) into counts plus an optional failure.
+ */
+function roundLegend(round) {
+  const reading = round?.legend
+  if (reading === undefined) return { counts: round?.counts ?? null, failure: null }
+  if (reading === null || typeof reading !== 'object') {
+    return { counts: null, failure: { reason: 'legend-missing', detail: '读取结果为空' } }
+  }
+  if (reading.ok === true) return { counts: reading.counts ?? null, failure: null }
+  return {
+    counts: null,
+    failure: { reason: String(reading.reason ?? 'legend-missing'), detail: reading.detail ?? null }
+  }
+}
+
+/** Renders a reading failure's detail into the round problem text. */
+function formatLegendDetail(detail) {
+  if (detail === null || detail === undefined) return ''
+  return typeof detail === 'string' ? ` ${detail}` : ` ${JSON.stringify(detail)}`
+}
+
 /** B-layer four-state judgment: three rounds, arithmetic sum, stable counts. */
 export function judgeLocalRounds({ rounds } = {}) {
   const problems = []
@@ -485,18 +495,24 @@ export function judgeLocalRounds({ rounds } = {}) {
   if (list.length !== LOCAL_ROUND_COUNT) {
     problems.push(`轮次 ${list.length} ≠ ${LOCAL_ROUND_COUNT}`)
   }
-  for (const round of list) {
-    const counts = round.counts
-    const values =
-      counts === null || counts === undefined
-        ? null
-        : [counts.same, counts.added, counts.removed, counts.modified]
-    if (values === null || values.some((value) => !Number.isFinite(value))) {
-      problems.push(`第 ${round.index} 轮四态缺失`)
+  const judged = list.map((round) => ({ round, ...roundLegend(round) }))
+  for (const { round, counts, failure } of judged) {
+    if (failure !== null) {
+      problems.push(
+        `第 ${round.index} 轮四态读取失败 ${failure.reason}${formatLegendDetail(failure.detail)}`
+      )
     } else {
-      const sum = values.reduce((total, value) => total + value, 0)
-      if (sum !== round.totalRows) {
-        problems.push(`第 ${round.index} 轮四态和 ${sum} ≠ 总行数 ${round.totalRows}`)
+      const values =
+        counts === null || counts === undefined
+          ? null
+          : [counts.same, counts.added, counts.removed, counts.modified]
+      if (values === null || values.some((value) => !Number.isFinite(value))) {
+        problems.push(`第 ${round.index} 轮四态缺失`)
+      } else {
+        const sum = values.reduce((total, value) => total + value, 0)
+        if (sum !== round.totalRows) {
+          problems.push(`第 ${round.index} 轮四态和 ${sum} ≠ 总行数 ${round.totalRows}`)
+        }
       }
     }
     if (round.closedTabs !== 0 || round.closedTrees !== 0) {
@@ -505,11 +521,11 @@ export function judgeLocalRounds({ rounds } = {}) {
       )
     }
   }
-  const baseline = list[0]
+  const baseline = judged[0]
   if (baseline !== undefined) {
-    for (const round of list.slice(1)) {
-      if (!sameCounts(baseline.counts, round.counts)) {
-        problems.push(`第 ${round.index} 轮四态与第 1 轮不一致`)
+    for (const item of judged.slice(1)) {
+      if (!sameCounts(baseline.counts, item.counts)) {
+        problems.push(`第 ${item.round.index} 轮四态与第 1 轮不一致`)
       }
     }
   }
@@ -2410,7 +2426,7 @@ async function runLinuxDirectoryCompare(ctx) {
   const tree = writeSmokeTree(ctx)
   const port = 9900 + Math.floor(Math.random() * 90)
   let launch
-  let counts
+  let reading
   try {
     launch = await ctx.world.launchApp({
       ...buildXvfbAppLaunch({ executable: appImage.appRun, args: [tree.left, tree.right], port }),
@@ -2421,14 +2437,34 @@ async function runLinuxDirectoryCompare(ctx) {
     await launch.cdp.waitFor(READY_DIRECTORY_EXPRESSION, 'synthetic comparison to settle', {
       timeoutMs: 120_000
     })
-    counts = await launch.cdp.evaluate(FOUR_STATE_EXPRESSION)
+    reading = await launch.cdp.evaluate(FOUR_STATE_EXPRESSION)
   } catch (error) {
     return fail(expected, launchFailureActual(error, { tree }))
   } finally {
     if (launch !== undefined) await launch.stop()
   }
-  if (counts === null || counts === undefined) {
-    return fail(expected, { counts, error: '读不到四态计数' })
+  if (reading === null || reading === undefined || typeof reading !== 'object') {
+    const legend = {
+      ok: false,
+      reason: 'legend-missing',
+      detail: { selector: FOUR_STATE_LEGEND_SELECTOR }
+    }
+    return fail(expected, { counts: null, legend, error: '读不到四态计数 (legend-missing)' })
+  }
+  if (reading.ok !== true) {
+    return fail(expected, {
+      counts: null,
+      legend: reading,
+      error: `读不到四态计数 (${reading.reason ?? 'legend-missing'})`
+    })
+  }
+  const counts = reading.counts
+  if (counts === null || counts === undefined || typeof counts !== 'object') {
+    return fail(expected, {
+      counts: null,
+      legend: { ok: false, reason: 'legend-missing', detail: { selector: FOUR_STATE_LEGEND_SELECTOR } },
+      error: '读不到四态计数 (legend-missing)'
+    })
   }
   const total = counts.same + counts.added + counts.removed + counts.modified
   const actual = { ...counts, totalRows: total, tree }
@@ -2783,7 +2819,7 @@ async function runLocalRounds(ctx) {
       await launch.cdp.waitFor(READY_DIRECTORY_EXPRESSION, `round ${index} to settle`, {
         timeoutMs: 600_000
       })
-      const counts = await launch.cdp.evaluate(FOUR_STATE_EXPRESSION)
+      const legend = await launch.cdp.evaluate(FOUR_STATE_EXPRESSION)
       await launch.cdp.evaluate(CLOSE_ALL_SESSIONS_EXPRESSION)
       await launch.cdp.waitFor(
         `document.querySelectorAll('[data-session-tab]').length === 0 &&
@@ -2798,7 +2834,8 @@ async function runLocalRounds(ctx) {
       const retainedHeapBytes = await launch.readRetainedHeap()
       const round = {
         index,
-        counts,
+        legend,
+        counts: legend?.ok === true ? legend.counts : null,
         totalRows,
         closedTabs: closed?.tabs ?? null,
         closedTrees: closed?.trees ?? null,
