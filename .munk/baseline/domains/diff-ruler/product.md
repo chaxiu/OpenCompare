@@ -9,9 +9,10 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 - **差异块命中**：给定行号或比例求最近差异块索引；点击落点 → 最近差异块 → 目标行（`block.startRow`）与目标 `scrollTop`。
 - **算法落位**：以上能力全为 `src/core/text/ruler.ts` 纯函数，`src/core/text/ruler.test.ts` 用纯 vitest（无 DOM）在 Node 直接单测；大模型用循环构造的最小 `DiffRow` 形状生成，不调用 `diffLineTexts`。
 - **指示条组件**：`src/renderer/src/components/DiffRuler.tsx` 消费 `@core/text/ruler` 现有导出，绘制常驻轨道、四态色带（`same`/`conflict` 不画）、当前差异块描边与随滚动同步的视口窗；整条可聚焦并支持 `ArrowUp`/`ArrowDown`/`Enter`，点选标记派发差异块索引；不重新 diff、不遍历行文本、不新增平台调用。锚点：轨道 `data-diff-ruler`，标记 `data-diff-status`/`data-start-row`/`data-end-row`，视口窗 `data-window-top`/`data-window-height`。
-- **双栏接线**：`CodeView.tsx` 的 `CodeDiffView` 把指示条作为 `SplitPane` 外侧兄弟节点渲染，内置样本与下钻 `pair` 共用；点选/键盘只改现有 `active` 块索引（+ jump 令牌保证重复选择仍重新定位），两栏 `scrollTop` 一起对齐到 `startRow * DIFF_ROW_HEIGHT`，工具栏计数与 `DiffBadge` 自然同步；三栏 merge 不渲染；覆写/重置/打开文件在同一提交内重投影；文案进 `files.code.ruler.*`（zh/en）。
+- **双栏接线**：`CodeView.tsx` 的 `CodeDiffView` 把指示条作为 `SplitPane` 外侧兄弟节点渲染，内置样本与下钻 `pair` 共用；点选/键盘只改现有 `active` 块索引（+ jump 令牌保证重复选择仍重新定位），两栏 `scrollTop` 一起写到同一居中目标（见「居中跳转目标」）；工具栏计数与 `DiffBadge` 自然同步；三栏 merge 不渲染；覆写/重置/打开文件在同一提交内重投影；文案进 `files.code.ruler.*`（zh/en）。
 - **轨道级命中**：整条轨道即命中面，`DiffRuler.tsx` 在 track 元素挂 click，把 `clientY - rect.top` 除以轨道高（矩形高 0 时退回 `clientHeight`，两者皆 ≤ 0 或 `rows.length === 0` 直接返回）夹到 `[0,1)` 得比例，交 `resolveJumpTargetAtRatio` 解析最近块并 `onSelectBlock(blockIndex)`；组件内只做「像素 → 比例」，不另写块距离算法。
-- **轨道级选的精度与接线**：marker 保留自身精确选中（`nearestBlockIndex(blocks, marker.dataset.startRow)`）并 `stopPropagation`，两路径各只派发一次。marker 渲染高度设 2px 可点下限（组件内常量 `RULER_MARKER_MIN_HEIGHT`，与 `RULER_BAND_HEIGHT` 同处，不进 `@core`）并在 track 内夹取，`data-*` 行区间不因视觉下限改变。`CodeView` 在 `selectBlock`/`step`/`jumpActive` 里于 `setActive` 之前把两栏 `scrollTop` 直接写为 `block.startRow × DIFF_ROW_HEIGHT`，让窗口化面板靠元素真实 `scrollTop` 折回窗口、不依赖 scroll 事件。
+- **轨道级选的精度与接线**：marker 保留自身精确选中（`nearestBlockIndex(blocks, marker.dataset.startRow)`）并 `stopPropagation`，两路径各只派发一次。marker 渲染高度设 2px 可点下限（组件内常量 `RULER_MARKER_MIN_HEIGHT`，与 `RULER_BAND_HEIGHT` 同处，不进 `@core`）并在 track 内夹取，`data-*` 行区间不因视觉下限改变。`CodeView` 在 `selectBlock`/`step`/`jumpActive` 里于 `setActive` 之前把两栏 `scrollTop` 直接写为同一居中目标，让窗口化面板靠元素真实 `scrollTop` 折回窗口、不依赖 scroll 事件。
+- **居中跳转目标**：`上一个 / 下一个差异块`、指示条点选、`Enter` 重定位与 jump 令牌触发的滚动都经 `src/renderer/src/views/codeViewScroll.ts` 的纯函数 `centeredScrollTop` 求同一目标——块垂直居中并保留上下上下文，首末块、短文档、视口未知 / 为 0、块高 ≥ 视口高度一律确定性夹取到 `[0, maxScroll]`；可视高度取 pane `clientHeight`，行数取 `diff.rows.length`，两栏写同一值；`skipBlockScroll` 的「重载 / 交换后不重算」语义保留。该目标取代本域早期「对齐到块顶 `startRow * rowHeight`」的 UI 口径（`@core/text/ruler` 的 `resolveJumpTarget` 纯函数语义不变，仍供几何层与其它调用方使用）。
 - **规模护栏与证据锚点**：358k 行规模上限、大模型边界、3 tab / 下钻会话回归链路与 `data-*`/`aria-*` 证据入口契约全部由 `DiffRuler.scale.test.tsx` 与 `App.ruler.test.tsx`（jsdom）在 `pnpm test` 内钉住；护栏只观察「投影次数 / 标记节点数 / 平台 IO 计数」等可计数事实，不在生产代码加计数器、测试钩子或改 props 契约。
 
 ## 验收
@@ -31,7 +32,10 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 - **ac-ruler-persistent**：内置样本 diff 与 `pair` 下钻渲染后立即存在指示条，且不在 `SplitPane` 分隔节点序列（`role="separator"` 仍为 1，指示条非 pane）；切 merge 不渲染；覆写/重置/打开文件后仍在。
 - **ac-ruler-aggregation**：标记集合与行级状态逐行一致——每个非 `same` 行都被同状态标记覆盖（`data-start-row <= 行 <= data-end-row`），`same` 无标记；同一块内混合状态按真实行级状态着色、不压成块级汇总；标记按 `data-start-row` 升序；足够轨道高时每条标记恰为极大同态连续段。
 - **ac-ruler-window**：视口窗由 `scrollTop`/视口高/行高/轨道高算出并两端钳制（`top >= 0`、`height >= 0`、`top + height <= 轨道高`）；滚动任一栏后视口窗跟随、两栏 `scrollTop` 仍相等；滚动不改变标记数量与行区间。
-- **ac-ruler-jump**：点击标记后两栏 `scrollTop` 均为该块 `startRow * 20` 且相等，工具栏计数与 `DiffBadge` 同步，块内行显 `border-accent`；连续点选可连续跳转，重复点击已激活标记仍重新定位。
+- **ac-ruler-jump**：点击标记后两栏 `scrollTop` 相等且等于该块的居中目标（`centeredScrollTop`），工具栏计数与 `DiffBadge` 同步，块内行显 `border-accent`；连续点选可连续跳转，重复点击已激活标记仍重新定位。
+- **ac-jump-centered**：视口高度为正且块高小于视口时，跳转后两栏 `scrollTop` 相等且等于 `round(blockTop + blockHeight / 2 - viewportHeight / 2)`（`blockTop = startRow * 22`，`blockHeight = (endRow - startRow + 1) * 22`），块上下两侧均可见上下文行。
+- **ac-jump-clamped**：首块目标夹到 0；末块夹到 `max(0, rows * 22 - viewportHeight)`；文档总高 ≤ 视口高时目标恒为 0；视口为 0 / 未知（`clientHeight` 非有限或 ≤ 0）或块高 ≥ 视口高时退回夹取后的块顶；结果始终为有限数且落在 `[0, maxScroll]`。
+- **ac-jump-stable**：同一块重复触发跳转后 `scrollTop` 不变；跳转后派发一次 pane `scroll` 事件，两侧 `scrollTop` 仍相等且不回弹；`skipBlockScroll` 仍使重载 / 交换后不重算滚动。
 - **ac-ruler-keyboard**：指示条可 Tab 聚焦并显 focus ring，`aria-label` 随 zh/en 词典变化；`ArrowUp`/`ArrowDown` 按 `blocks` 顺序循环并完成双栏定位，`Enter` 重新定位当前块；标记可访问名称含状态与行区间。
 - **ac-ruler-regression**：空 diff/全相同仍常驻（零标记，全相同时视口窗仍随滚动移动）；仅左删只 removed、仅右增只 added 且位置对应真实行；单行/无尾换行/CRLF 不越界；行内高亮、覆写/重置/保存与 `SplitPane` 交互保持原状；滚动与点选不新增 `diffLineTexts` 与 `PlatformPort` 调用；zh/en 无硬编码中文残留。
 
@@ -45,7 +49,7 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 - **ac-scale-large-edges**：358k 下空（0 行）、全相同、仅左删、仅右增、超长单行（达 `INLINE_CHAR_LIMIT` 量级）五个模型各自：不抛错、标记数满足 ac-scale-marker-bound 上界；空与全相同标记数为 0 且指示条仍挂载、视口窗 `top >= 0`、`top + height <= trackHeight`；仅左删只产 `removed`、仅右增只产 `added`。
 - **ac-tabs-switch-no-io**：3 个会话 tab 同时驻留（≥2 个带指示条的双栏 diff），在 3 tab 间各切换 2 轮后 platform 的 `readTextFile`/`listDirectory`/`listDirectories`/`digestFiles`/`realpath` 计数增量全为 0，且无扫描/摘要重建进度提示。
 - **ac-tabs-ruler-isolation**：两个不同文件对的 diff tab 各标记区间（`data-diff-status`+`data-start-row`+`data-end-row` 序列）互不相同；来回切换后每个 tab 序列与首次逐项相同；激活目录 tab 时 DOM 无 `[data-diff-ruler]`，切回 code tab 后重现。
-- **ac-drilldown-roundtrip**：目录会话下钻文件对后 DOM 恰存在 1 个 `[data-diff-ruler]` 且标记数 ≥ 1；点标记后两栏 `scrollTop` 相等且 = 目标块 `startRow * 20`；点「返回上级目录视图」后指示条移除、目录树标题与筛选/折叠状态如下钻前、platform 读取/扫描/哈希计数增量 0；再下钻同一对，标记区间序列与首次逐项相同。
+- **ac-drilldown-roundtrip**：目录会话下钻文件对后 DOM 恰存在 1 个 `[data-diff-ruler]` 且标记数 ≥ 1；点标记后两栏 `scrollTop` 相等且等于该块的居中目标；点「返回上级目录视图」后指示条移除、目录树标题与筛选/折叠状态如下钻前、platform 读取/扫描/哈希计数增量 0；再下钻同一对，标记区间序列与首次逐项相同。
 - **ac-evidence-anchors**：证据入口契约稳定：轨道 `data-diff-ruler="true"`、`role="listbox"`、`aria-label` zh `差异指示条`/en `Difference ruler`；每个标记 `role="option"`、`data-diff-status` ∈ {added, removed, modified}、`data-start-row`/`data-end-row` 为数字且 `start <= end`、`aria-label` 匹配 zh `^(新增|删除|修改) · 第 \d+–\d+ 行$` / en `^(Added|Removed|Modified) · lines \d+–\d+$`；视口窗带可解析为数字的 `data-window-top`/`data-window-height`。这些选取器不得重命名。
 - **ac-scope-bounded**：变更路径只含测试文件（确需缺口时 `DiffRuler.tsx` 仅可新增纯附加 `data-*`/`aria-*`）；`ruler.ts`、`diff.ts`、`DiffPane.tsx`、`SplitPane.tsx`、`CodeView.tsx`、`TreeView.tsx`、`CsvView.tsx`、`.munk/code-gates.json`、`.munk/code-gates.perf.json` 零 diff；不新增 `test:*` 脚本、不改 vitest 配置。
 - **ac-target-explicit-timeout**：描述串为 `covers every non-same row with a same-status marker in one synchronised pass` 的 `it(...)`（全文件唯一）第三个参数为 `30_000`，闭合为 `}, 30_000)`，正则/AST 可断言。
@@ -65,7 +69,7 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 - **ac-track-click-hit**：350,000 行、`trackHeight=608`、`bandHeight=4`（jsdom 桩 `clientHeight` 与 `getBoundingClientRect`）下，在 track 以 `clientY = rect.top + 304` 触发 click 后，选中块索引严格等于 `resolveJumpTargetAtRatio(blocks, 304 / 608, 350000, 20).blockIndex`，工具栏计数显示 `index+1/total`。
 - **ac-track-click-top-end**：同一渲染下再以 `clientY = rect.top` 与 `rect.top + 607` 点击 track，各自选中块严格等于 `resolveJumpTargetAtRatio` 在比例 `0` 与 `607 / 608` 的返回值；顶部/中部/末端索引按行序单调不减，且至少两个不同索引。
 - **ac-track-no-dead-zone**：在 `[rect.top, rect.top + 608)` 均匀取 ≥20 个 `clientY`（含落在 marker 渲染高度之外、高 < 1px 桶上）逐一点击，每次 `onSelectBlock` 都收到 `resolveJumpTargetAtRatio` 同比例解析出的非负索引（无 NO-OP、无 `-1`）；350k 下至少 10 次选中块与点击前不同。
-- **ac-scroll-both-panes**：上述每次命中后左右两栏 `scrollTop` 严格相等且严格等于该块 `startRow × 20`。
+- **ac-scroll-both-panes**：上述每次命中后左右两栏 `scrollTop` 严格相等且严格等于该块的居中目标（与 `centeredScrollTop` 同值，测试调用同一函数而非内联公式）。
 - **ac-marker-click-precedence**：点击某 marker 时选中其覆盖的块（`nearestBlockIndex(blocks, marker.dataset.startRow)`），且 `onSelectBlock` 只调一次（不因 track 级监听二次触发）。
 - **ac-zero-blocks-click**：0 个差异块（两侧相同或都为空）时点击 track 任意 y 不抛异常，两栏 `scrollTop` 保持点击前值不变，计数仍 `0/0`，指示条与视口窗仍在 DOM。
 - **ac-ratio-pure-boundaries**：纯函数单测全绿：①桶高 < 1px（350k/608/4 抽样含首/中/末 band，band 中点比例经 `nearestBlockIndexAtRatio` 得含该 band `startRow` 的块）；②相邻同状态合并（`trackHeight = rowCount`、`bandHeight = 1` 时连续同状态行产一条 band，跨度内任意比例解析同块）；③首末桶（比例 0 → 含第 0 行/最近块，比例 1 → 含末行/最近块，`ratioToRow(1, n) = n-1`、`ratioToRow(-1|NaN, n) = 0`、`ratioToRow(r, 0) = -1`）；④任意比例（0→1 抽样递增时块索引非递减且恒在 `[-1, blocks.length)`）；⑤0 块（三函数分别返 `-1`/`{blockIndex:-1,startRow:-1,scrollTop:0}`，`buildRulerBands([], …)` 为 `[]`）。
@@ -100,10 +104,11 @@ v0.2.10 代码/文本双栏 Diff 的「指示条（ruler / overview bar）」。
 - 350k 用例不得实时跑 `diffLineTexts`：用 `vi.mock('@core/text/diff')` 返回预构造 `{ rows, blocks }`；jsdom 无布局，必须显式桩 `clientHeight`（track 608 / pane 视口）与 `getBoundingClientRect`，断言不依赖 jsdom 恒为 0 的 `scrollHeight`。
 - 既有六个测试文件（`ruler.test.ts`、`DiffRuler.scale.test.tsx`、`DiffPane.test.tsx`、`CodeView.test.tsx`、`CodeView.ruler.test.tsx`、`App.ruler.test.tsx`）内容零改动是回归红线；若既有断言与 track 级命中冲突，先上报，不得改测试凑绿。
 - 窗口跟随以元素真实 `scrollTop` 为唯一真相源：程序化写 `scrollTop` 后下一次渲染要能折回窗口；`CodeView` 的写入必须发生在 `setActive` 之前，`DiffPane.tsx` 的窗口化框架与常量不得重写。
+- 跳转目标的唯一来源是 `codeViewScroll.centeredScrollTop`：组件与测试都不再内联 `startRow * DIFF_ROW_HEIGHT`，可视高度只从 pane 自身 `clientHeight` 读，行数只从 `diff.rows.length` 读；`@core/text/ruler` 的像素无关契约不因居中口径改动。
 
 ## 最近交付证明
 
-- WI：`wi_ws_b21636d826817b53`（v0.2.10 CI 超时修复：358k 用例显式 per-test 超时，`kind: test/fix`），日期 2026-10-29。
-- 结果：`needSelfTest=false`，UI 自测按裁决跳过；code_gates passed（attempt 001，9 道门禁全绿：install/lint/typecheck/build/build:web/test/test:compare-request/test:cancel/test:memory）。
-- 覆盖摘要：`DiffRuler.scale.test.tsx` 的 `covers every non-same row with a same-status marker in one synchronised pass` 由 `})` 改为 `}, 30_000)`（沿用 `TreeView.test.tsx` 既有写法），用例体一行未改；用例上方注释写明 CI attempt1 实测 `6,816ms` 撞默认 5000ms、本机全量 `27.42s`（69 files / 1104 passed）、30s ≈ 4.4x 余量、358k 规模与逐行覆盖断言不变；`vitest.config.mts` 零 diff（`grep -c "testTimeout\|hookTimeout"` == 0）。
-- 变更面与实测：提交恰 1 个文件 `src/renderer/src/components/DiffRuler.scale.test.tsx`（+6/−1）；`ROW_COUNT = 358_000`、`it(` 8 个、`expect(` 57 个均保留；单文件 `pnpm test` → 8 passed，全量 → 69 files / 1104 passed，总耗时 27.85s（gates 内）/ 27.42s（基线）。
+- WI：`wi_ws_ffb42f2dade463ee`（代码视图显式左右交换与居中差异跳转；`kind: feature`），日期 2026-11-05。
+- 结果：code_gates passed（attempt 001，`.munk/runs/run_ws_3c29034655b7007a/code-gates/attempts/001`：32 道门禁全绿，`pnpm test` 157 files / 2418 passed + 1 skipped（2419））。
+- 覆盖摘要：`CodeView` 的 `selectBlock` / `step` / `jumpActive` 与「下一个 / 上一个差异块」effect 统一改调 `codeViewScroll.centeredScrollTop`，可视高度取 pane `clientHeight`、行数取 `diff.rows.length`，两栏写同一目标；`CodeView.ruler.test.tsx` 的跳转期望改为调用同一纯函数并新增「居中跳转保留上下文」用例，`CodeView.rulerTrack.test.tsx` / `App.ruler.test.tsx` / `DiffPane.test.tsx` 同步改锚；`codeViewScroll.test.ts` 覆盖居中、首末块、短文档、视口未知 / 为 0、块高 ≥ 视口与幂等。
+- 保留：358k 规模的 `DiffRuler.scale.test.tsx` 显式 30s 超时与逐行覆盖断言一字未动（承接 `wi_ws_b21636d826817b53`）。

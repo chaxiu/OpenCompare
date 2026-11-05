@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 51571
+    "repoTestLines": 51955
   },
   "floors": {
     "appTestCases": 97,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 51566,
-      "to": 51571,
-      "reason": "merge of the default branch's release-version-gate readme-tag case (+1 case, 5 lines) onto this branch's native-window-theme growth; the 51566 anchor already carried the native theme sync tests",
-      "addedCases": 1
+      "from": 51571,
+      "to": 51955,
+      "reason": "code-swap-centered: pure centred-scroll and shortcut-matching suites (codeViewScroll.test.ts, codeViewShortcut.test.ts) plus centred jump / toolbar swap / shortcut rescoping in CodeView.ruler.test.tsx, CodeView.rulerTrack.test.tsx, App.ruler.test.tsx and DiffPane.test.tsx",
+      "addedCases": 29
     },
     {
       "metric": "appTestLines",

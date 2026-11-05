@@ -9,6 +9,7 @@ import { DIFF_ROW_HEIGHT } from '@renderer/components/DiffPane'
 import { renderWithI18n } from '@renderer/i18n/testing'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { CodeView } from './CodeView'
+import { centeredScrollTop, maxScrollTop } from './codeViewScroll'
 
 // Pass-through spy: the projection must not re-run while scrolling or selecting.
 vi.mock('@core/text/diff', async (importOriginal) => {
@@ -107,6 +108,16 @@ const LONG_PAIR = {
 }
 
 const longDiff = diffLineTexts(LONG_LEFT, LONG_RIGHT)
+
+/** One authoritative target for every jump assertion. */
+function jumpScrollTop(block: DiffBlock): number {
+  return centeredScrollTop({
+    startRow: block.startRow,
+    endRow: block.endRow,
+    rowCount: longDiff.rows.length,
+    viewportHeight: PANE_HEIGHT
+  })
+}
 
 function rulerOf(container: HTMLElement): HTMLElement {
   const ruler = container.querySelector<HTMLElement>('[data-diff-ruler="true"]')
@@ -330,8 +341,8 @@ describe('diff ruler jump', () => {
 
     const target = blocks[2]
     fireEvent.click(markersOfBlock(container, target)[0])
-    expect(left.scrollTop).toBe(target.startRow * DIFF_ROW_HEIGHT)
-    expect(right.scrollTop).toBe(target.startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(target))
+    expect(right.scrollTop).toBe(jumpScrollTop(target))
     expect(screen.getByText(`${target.index + 1}/${blocks.length}`)).toBeDefined()
     expect(screen.getByText('新增')).toBeDefined()
     expect(container.querySelectorAll('.border-accent')).toHaveLength(
@@ -341,16 +352,120 @@ describe('diff ruler jump', () => {
     // Consecutive selection moves up again.
     const first = blocks[0]
     fireEvent.click(markersOfBlock(container, first)[0])
-    expect(left.scrollTop).toBe(first.startRow * DIFF_ROW_HEIGHT)
-    expect(right.scrollTop).toBe(first.startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(first))
+    expect(right.scrollTop).toBe(jumpScrollTop(first))
     expect(screen.getByText(`1/${blocks.length}`)).toBeDefined()
 
     // Re-clicking the already active band re-targets its block start.
     left.scrollTop = 0
     right.scrollTop = 0
     fireEvent.click(markersOfBlock(container, first)[0])
-    expect(left.scrollTop).toBe(first.startRow * DIFF_ROW_HEIGHT)
-    expect(right.scrollTop).toBe(first.startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(first))
+    expect(right.scrollTop).toBe(jumpScrollTop(first))
+  })
+})
+
+describe('diff ruler centred jump', () => {
+  it('centres the next block and keeps context above and below both panes', () => {
+    const { container } = render(<CodeView pair={LONG_PAIR} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+    const target = longDiff.blocks[1]
+    const blockTop = target.startRow * DIFF_ROW_HEIGHT
+
+    fireEvent.click(screen.getByRole('button', { name: '下一个差异块' }))
+
+    const expected = jumpScrollTop(target)
+    expect(left.scrollTop).toBe(expected)
+    expect(right.scrollTop).toBe(expected)
+    // Centred means the block start sits below the viewport top and the block
+    // end sits above the viewport bottom.
+    expect(expected).toBeGreaterThanOrEqual(0)
+    expect(expected).toBeLessThan(blockTop)
+    expect(expected + PANE_HEIGHT).toBeGreaterThan((target.endRow + 1) * DIFF_ROW_HEIGHT)
+  })
+
+  it('clamps the first and last blocks into the legal scroll range', () => {
+    const pair = {
+      left: { path: '/memory/clamp-left.ts', text: 'a\nb\nc\nd\ne\n' },
+      right: { path: '/memory/clamp-right.ts', text: 'A\nb\nc\nd\nE\n' }
+    }
+    const clampDiff = diffLineTexts(pair.left.text, pair.right.text)
+    expect(clampDiff.blocks.length).toBe(2)
+    const { container } = render(<CodeView pair={pair} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+    const maxScroll = maxScrollTop(clampDiff.rows.length, PANE_HEIGHT)
+
+    // Initial block 0 -> next moves to the last block, which clamps to max scroll.
+    fireEvent.click(screen.getByRole('button', { name: '下一个差异块' }))
+    expect(left.scrollTop).toBe(maxScroll)
+    expect(right.scrollTop).toBe(maxScroll)
+
+    fireEvent.click(screen.getByRole('button', { name: '上一个差异块' }))
+    expect(left.scrollTop).toBe(0)
+    expect(right.scrollTop).toBe(0)
+  })
+
+  it('pins a short document to the top', () => {
+    const pair = {
+      left: { path: '/memory/short-left.ts', text: 'a\nb\n' },
+      right: { path: '/memory/short-right.ts', text: 'A\nb\n' }
+    }
+    const shortDiff = diffLineTexts(pair.left.text, pair.right.text)
+    expect(maxScrollTop(shortDiff.rows.length, PANE_HEIGHT)).toBe(0)
+    const { container } = render(<CodeView pair={pair} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+
+    fireEvent.click(screen.getByRole('button', { name: '下一个差异块' }))
+    expect(left.scrollTop).toBe(0)
+    expect(right.scrollTop).toBe(0)
+  })
+
+  it('falls back to the block top when the viewport height is unknown', () => {
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.diffRuler === 'true' ? TRACK_HEIGHT : 0
+      }
+    })
+    const { container } = render(<CodeView pair={LONG_PAIR} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+    const target = longDiff.blocks[2]
+
+    fireEvent.click(markersOfBlock(container, target)[0])
+    expect(left.scrollTop).toBe(target.startRow * DIFF_ROW_HEIGHT)
+    expect(right.scrollTop).toBe(target.startRow * DIFF_ROW_HEIGHT)
+    expect(Number.isFinite(left.scrollTop)).toBe(true)
+  })
+
+  it('falls back to the block top when the block is taller than the viewport', () => {
+    const pair = {
+      left: { path: '/memory/tall-left.ts', text: 'a\nb\nc\n' },
+      right: { path: '/memory/tall-right.ts', text: 'a\nx1\nx2\nx3\nx4\nx5\nx6\nb\nc\n' }
+    }
+    const tallDiff = diffLineTexts(pair.left.text, pair.right.text)
+    const block = tallDiff.blocks[0]
+    expect((block.endRow - block.startRow + 1) * DIFF_ROW_HEIGHT).toBeGreaterThanOrEqual(PANE_HEIGHT)
+    const { container } = render(<CodeView pair={pair} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+
+    fireEvent.click(markersOfBlock(container, block)[0])
+    expect(left.scrollTop).toBe(block.startRow * DIFF_ROW_HEIGHT)
+    expect(right.scrollTop).toBe(block.startRow * DIFF_ROW_HEIGHT)
+  })
+
+  it('is stable on a repeated jump and after a sync scroll event', () => {
+    const { container } = render(<CodeView pair={LONG_PAIR} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+    const target = longDiff.blocks[2]
+
+    fireEvent.click(markersOfBlock(container, target)[0])
+    const first = left.scrollTop
+    fireEvent.click(markersOfBlock(container, target)[0])
+    expect(left.scrollTop).toBe(first)
+    expect(right.scrollTop).toBe(first)
+
+    fireEvent.scroll(left)
+    expect(right.scrollTop).toBe(left.scrollTop)
   })
 })
 
@@ -368,27 +483,27 @@ describe('diff ruler keyboard', () => {
     ruler.focus()
     fireEvent.keyDown(ruler, { key: 'ArrowDown' })
     expect(screen.getByText(`2/${blocks.length}`)).toBeDefined()
-    expect(left.scrollTop).toBe(blocks[1].startRow * DIFF_ROW_HEIGHT)
-    expect(right.scrollTop).toBe(blocks[1].startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(blocks[1]))
+    expect(right.scrollTop).toBe(jumpScrollTop(blocks[1]))
 
     fireEvent.keyDown(ruler, { key: 'ArrowUp' })
-    expect(left.scrollTop).toBe(blocks[0].startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(blocks[0]))
 
     // ArrowUp on the first block wraps to the last one.
     fireEvent.keyDown(ruler, { key: 'ArrowUp' })
     const last = blocks[blocks.length - 1]
-    expect(left.scrollTop).toBe(last.startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(last))
     expect(screen.getByText(`${blocks.length}/${blocks.length}`)).toBeDefined()
 
     // ArrowDown on the last block wraps back to the first.
     fireEvent.keyDown(ruler, { key: 'ArrowDown' })
-    expect(left.scrollTop).toBe(blocks[0].startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(blocks[0]))
 
     left.scrollTop = 0
     right.scrollTop = 0
     fireEvent.keyDown(ruler, { key: 'Enter' })
-    expect(left.scrollTop).toBe(blocks[0].startRow * DIFF_ROW_HEIGHT)
-    expect(right.scrollTop).toBe(blocks[0].startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(jumpScrollTop(blocks[0]))
+    expect(right.scrollTop).toBe(jumpScrollTop(blocks[0]))
   })
 
   it('names every marker with its status and row range, in zh and en', () => {

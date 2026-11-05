@@ -5,12 +5,15 @@ import { CODE_SCENE, DIRECTORY_SAMPLE_PATHS } from '@shared/fixtures'
 import type { PlatformPort } from '@shared/platform/types'
 import { diffLineTexts } from '@core/text/diff'
 import type { DiffBlock } from '@core/text/diff'
-import { DIFF_ROW_HEIGHT } from '@renderer/components/DiffPane'
+import { centeredScrollTop } from '@renderer/views/codeViewScroll'
 import { createWebPlatformPort } from '@renderer/platform/web-platform'
 import { Workbench } from '@renderer/workbench/Workbench'
 import { installJsdomViewport } from '../../test/jsdomViewport'
 
 installJsdomViewport()
+
+/** The fixed jsdom pane height the jump maths sees. */
+const PANE_HEIGHT = 640
 
 beforeEach(() => {
   localStorage.setItem('opencompare.userSettings', JSON.stringify({ language: 'zh' }))
@@ -287,7 +290,14 @@ describe('directory drilldown ruler roundtrip', () => {
     const [left, right] = paneElements(container)
 
     fireEvent.click(marker)
-    expect(left.scrollTop).toBe(target.startRow * DIFF_ROW_HEIGHT)
+    expect(left.scrollTop).toBe(
+      centeredScrollTop({
+        startRow: target.startRow,
+        endRow: target.endRow,
+        rowCount: drilled.rows.length,
+        viewportHeight: PANE_HEIGHT
+      })
+    )
     expect(right.scrollTop).toBe(left.scrollTop)
     expect(screen.getByText(`${target.index + 1}/${drilled.blocks.length}`)).toBeDefined()
 
