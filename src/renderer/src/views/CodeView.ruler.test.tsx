@@ -119,6 +119,51 @@ function jumpScrollTop(block: DiffBlock): number {
   })
 }
 
+/**
+ * 18 independent modification blocks: the shared `same-i` row keeps each
+ * `left-i` / `right-i` pair on its own block. `LONG_PAIR` only carries four
+ * blocks, so this is a local test-only row model (no product change).
+ */
+const CYCLE_LEFT = Array.from({ length: 18 }, (_, index) => `same-${index}\nleft-${index}`).join(
+  '\n'
+)
+const CYCLE_RIGHT = Array.from({ length: 18 }, (_, index) => `same-${index}\nright-${index}`).join(
+  '\n'
+)
+const CYCLE_PAIR = {
+  left: { path: '/memory/cycle-left.ts', text: CYCLE_LEFT },
+  right: { path: '/memory/cycle-right.ts', text: CYCLE_RIGHT }
+}
+const cycleDiff = diffLineTexts(CYCLE_LEFT, CYCLE_RIGHT)
+
+/** Same centred target as {@link jumpScrollTop}, for the 18-block fixture. */
+function cycleScrollTop(block: DiffBlock): number {
+  return centeredScrollTop({
+    startRow: block.startRow,
+    endRow: block.endRow,
+    rowCount: cycleDiff.rows.length,
+    viewportHeight: PANE_HEIGHT
+  })
+}
+
+function blockRows(block: DiffBlock): number[] {
+  return Array.from({ length: block.endRow - block.startRow + 1 }, (_, index) => block.startRow + index)
+}
+
+/** Distance between the block centre and the viewport centre, in pixels. */
+function centreDeviation(block: DiffBlock, scrollTop: number): number {
+  const top = block.startRow * DIFF_ROW_HEIGHT
+  const height = (block.endRow - block.startRow + 1) * DIFF_ROW_HEIGHT
+  return Math.abs(top + height / 2 - (scrollTop + PANE_HEIGHT / 2))
+}
+
+/** Rows carrying the active-block accent in one pane. */
+function activeRows(container: HTMLElement, side: 0 | 1): number[] {
+  return Array.from(
+    paneElements(container)[side].querySelectorAll<HTMLElement>('[data-diff-row].border-accent')
+  ).map((row) => Number(row.dataset.diffRow))
+}
+
 function rulerOf(container: HTMLElement): HTMLElement {
   const ruler = container.querySelector<HTMLElement>('[data-diff-ruler="true"]')
   if (!ruler) throw new Error('no diff ruler was rendered')
@@ -635,5 +680,69 @@ describe('diff ruler empty and edge cases', () => {
     expect(diffCalls).not.toHaveBeenCalled()
     expect(readTextFile).not.toHaveBeenCalled()
     expect(selectFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('diff ruler block navigation loop', () => {
+  it('wraps next/prev across the first and last of 18 blocks without drifting', () => {
+    expect(cycleDiff.blocks.length).toBe(18)
+    const { container } = render(<CodeView pair={CYCLE_PAIR} platform={createWebPlatformPort()} />)
+    const [left, right] = paneElements(container)
+    const maxScroll = maxScrollTop(cycleDiff.rows.length, PANE_HEIGHT)
+    const first = cycleDiff.blocks[0]
+    const last = cycleDiff.blocks[17]
+    const clickNext = (): void => { fireEvent.click(document.querySelector('[data-shell-entry="next-diff"]')!) }
+    const clickPrev = (): void => { fireEvent.click(document.querySelector('[data-shell-entry="prev-diff"]')!) }
+
+    // Blocks 3 and 4 land centred within one pixel on both panes.
+    clickNext()
+    clickNext()
+    expect(activeRows(container, 0)).toEqual(blockRows(cycleDiff.blocks[2]))
+    expect(activeRows(container, 1)).toEqual(blockRows(cycleDiff.blocks[2]))
+    expect(centreDeviation(cycleDiff.blocks[2], left.scrollTop)).toBeLessThanOrEqual(1)
+    expect(centreDeviation(cycleDiff.blocks[2], right.scrollTop)).toBeLessThanOrEqual(1)
+    clickNext()
+    expect(activeRows(container, 0)).toEqual(blockRows(cycleDiff.blocks[3]))
+    expect(activeRows(container, 1)).toEqual(blockRows(cycleDiff.blocks[3]))
+    expect(centreDeviation(cycleDiff.blocks[3], left.scrollTop)).toBeLessThanOrEqual(1)
+    expect(centreDeviation(cycleDiff.blocks[3], right.scrollTop)).toBeLessThanOrEqual(1)
+
+    // Walk the real button from block 4 to the last block.
+    for (let step = cycleDiff.blocks.length - 4; step > 0; step -= 1) clickNext()
+    expect(screen.getByText('18/18')).toBeDefined()
+    expect(activeRows(container, 0)).toEqual(blockRows(last))
+    expect(activeRows(container, 1)).toEqual(blockRows(last))
+    expect(left.scrollTop).toBe(cycleScrollTop(last))
+    expect(right.scrollTop).toBe(left.scrollTop)
+    expect(Number.isFinite(left.scrollTop)).toBe(true)
+    expect(left.scrollTop).toBeGreaterThanOrEqual(0)
+    expect(left.scrollTop).toBeLessThanOrEqual(maxScroll)
+
+    // Next on the last block wraps to the first.
+    clickNext()
+    expect(screen.getByText('1/18')).toBeDefined()
+    expect(activeRows(container, 0)).toEqual(blockRows(first))
+    expect(activeRows(container, 1)).toEqual(blockRows(first))
+    expect(left.scrollTop).toBe(cycleScrollTop(first))
+    expect(right.scrollTop).toBe(left.scrollTop)
+    expect(Number.isFinite(left.scrollTop)).toBe(true)
+    expect(left.scrollTop).toBeGreaterThanOrEqual(0)
+    expect(left.scrollTop).toBeLessThanOrEqual(maxScroll)
+
+    // Previous on the first block wraps back to the last.
+    clickPrev()
+    expect(screen.getByText('18/18')).toBeDefined()
+    expect(activeRows(container, 0)).toEqual(blockRows(last))
+    expect(activeRows(container, 1)).toEqual(blockRows(last))
+    expect(left.scrollTop).toBe(cycleScrollTop(last))
+    expect(right.scrollTop).toBe(left.scrollTop)
+
+    // Repeated reads and a scroll sync keep the same landing point.
+    const stable = left.scrollTop
+    fireEvent.scroll(left)
+    expect(left.scrollTop).toBe(stable)
+    expect(right.scrollTop).toBe(stable)
+    expect(left.scrollTop).toBe(cycleScrollTop(last))
+    expect(left.scrollTop).toBeLessThanOrEqual(maxScroll)
   })
 })
