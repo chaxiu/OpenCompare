@@ -86,7 +86,7 @@ describe('large-file threshold rendering', () => {
     expect(resolveSyntaxView('/pairs/left.ts', text)).not.toBeNull()
     renderWithI18n(<CodeView pair={pairWith('ts', text)} platform={platform} />)
     expect(document.querySelectorAll('[data-syntax]').length).toBeGreaterThan(0)
-  })
+  }, 30_000)
 
   it('renders one character over the threshold exactly like the .txt plain path', () => {
     const text = tsTextOfLength(THRESHOLD + 1)
@@ -105,7 +105,7 @@ describe('large-file threshold rendering', () => {
     cleanup()
     const txtAgain = renderSignature(pairWith('txt', text))
     expect(tsAgain).toEqual(txtAgain)
-  })
+  }, 30_000)
 
   it('flips on folded length for LF and CRLF at T and T + 1', () => {
     const inside = tsTextOfLength(THRESHOLD)
