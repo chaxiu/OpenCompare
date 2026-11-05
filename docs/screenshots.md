@@ -7,7 +7,7 @@ old image or composed artwork is used.
 
 ## Captured commit
 
-- commit: `4f2a2d005a0bf9426a8e8d16da9040bd98506d97`
+- commit: `3e0744aaaf7baaafbdcda7acbe53df91ae3afb07`
 - all four images were captured from a `pnpm build` made on a clean working tree
   at exactly that commit (`HEAD` equalled this commit and `git status
   --porcelain` reported nothing under `src/**` before the build), then
@@ -41,7 +41,7 @@ Used only by `README.md`.
 | Image | Session | Bytes | sha256 |
 | --- | --- | --- | --- |
 | `docs/assets/opencompare-workbench.en.png` | Two real neighbouring directory trees (`left` / `right`) opened through the launch intake: the four states, their counts and both panes. | 251392 bytes | `dc9dc1ac704dbda7bfc6b4fd295342673befd69aecae19f55d7cf92fbf229fc8` |
-| `docs/assets/opencompare-file-diff.en.png` | A real `src/session.ts` pair opened as a file session: side-by-side character diff with the indicator bar (`data-diff-ruler`) on the right. | 299936 bytes | `48b8c91db27b0818c7d64e2237f490566f34a462dbb5e659bc51491321f5d04f` |
+| `docs/assets/opencompare-file-diff.en.png` | A real `src/session.ts` pair opened as a file session: side-by-side character diff with syntax-coloured foreground and the indicator bar (`data-diff-ruler`) on the right. | 316631 bytes | `5e5359360736ed134801d4c893d249b77dcf1bd2165240f8642dd46e0c5f57c0` |
 
 Visual review of both PNGs: the workbench chrome, tabs, filter segments, tree
 status labels, tooltips and the status bar are entirely English; the type scale
@@ -56,7 +56,7 @@ removed / modified badges and inline diff highlights are distinguishable.
 | Image | Session | Bytes | sha256 |
 | --- | --- | --- | --- |
 | `docs/assets/opencompare-workbench.zh.png` | 两棵真实相邻目录树（`left` / `right`）经启动接入打开：四态、计数与左右双栏。 | 240835 bytes | `dca3344139d5d4edcf4f1d4bb1b1aad8cc889cfedd6201ee1dc24f115479b8c8` |
-| `docs/assets/opencompare-file-diff.zh.png` | 真实 `src/session.ts` 文件对打开为文件会话：并排字符级 diff，右侧为指示条（`data-diff-ruler`）。 | 300435 bytes | `acab0a780d4868de60706fe339e60b5dfd0496f1412c5b6242ba8c29f7e70de6` |
+| `docs/assets/opencompare-file-diff.zh.png` | 真实 `src/session.ts` 文件对打开为文件会话：并排字符级 diff，前景带语法着色，右侧为指示条（`data-diff-ruler`）。 | 317093 bytes | `5ec1a8f9efe885e05c43ebebc4119bca2b32e9d03d9d5c59317d349fffd02d7e` |
 
 逐张视觉复核：工作台外壳、标签页、筛选段、目录行状态文案、提示与底部状态栏
 全为中文；字号与既有基线一致；右侧 `data-diff-ruler` 指示条与底部状态栏完整
