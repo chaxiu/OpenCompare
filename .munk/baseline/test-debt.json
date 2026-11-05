@@ -8,12 +8,12 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 50019
+    "repoTestLines": 50124
   },
   "floors": {
     "appTestCases": 97,
     "syncRealGateCases": 32,
-    "repoTestCases": 1734
+    "repoTestCases": 1739
   },
   "harness": {
     "perFileMaxLines": 400,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 49681,
-      "to": 50019,
-      "reason": "unknown-extension content fallback coverage: new fileExtensions family tests, isTextProbe encoding/binary matrix, zero-read request validation, single-read pair/drilldown/merge opens on real disk, GBK decoding, binary side attribution, and mixed-family retention",
-      "addedCases": 29
+      "from": 50019,
+      "to": 50124,
+      "reason": "release verify four-state legend: semantic [data-shell-legend] reader unit/shape cases, real jsdom DirectoryView reading plus missing/duplicate/non-finite negative fixtures, and step fail reasons",
+      "addedCases": 5
     }
   ]
 }

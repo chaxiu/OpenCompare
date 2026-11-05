@@ -378,7 +378,7 @@ describe('public L1 after publish', () => {
       const assets = [{ name: 'OpenCompare.dmg', browser_download_url: 'https://github.test/OpenCompare.dmg', size: payload.length, digest: options.digest ?? digestOf(payload) }]
       const meta = JSON.stringify({ draft: false, html_url: `https://github.test/releases/tag/${currentTag}`, assets })
       mkdirSync(join(dir, 'scripts'), { recursive: true })
-      copyFileSync(join(repoRoot, 'scripts/verify-release.mjs'), join(dir, 'scripts/verify-release.mjs'))
+      for (const name of ['verify-release.mjs', 'four-state-legend.mjs']) copyFileSync(join(repoRoot, 'scripts', name), join(dir, 'scripts', name))
       const mode = options.manifest ?? 'match'
       const manifest = JSON.stringify({
         version: 1, tag: currentTag, target: 'mac',
