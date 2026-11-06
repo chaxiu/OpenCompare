@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 52324
+    "repoTestLines": 52352
   },
   "floors": {
     "appTestCases": 97,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 52136,
-      "to": 52324,
-      "reason": "code view swap four-state counts and 18-block navigation loop: CodeView.switches.test.tsx normalises same/removed/added/modified counts across two real toolbar swaps with per-row gutter snapshots, CodeView.ruler.test.tsx walks next/prev across an 18-block row model and pins the wrap-around landing point",
-      "addedCases": 2
+      "from": 52324,
+      "to": 52352,
+      "reason": "coverage-gate-preflight determinism: spike-process-tree-gate.test.ts reaps through one bounded waitForGone / expectGone primitive plus a still-alive reverse guard; measured >2s suites (DirectoryView 50k window, local B layer, App settings language switch) get explicit per-test timeouts",
+      "addedCases": 1
     },
     {
       "metric": "appTestLines",

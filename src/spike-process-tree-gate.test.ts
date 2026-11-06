@@ -57,6 +57,25 @@ const pidAlive = (pid: number): boolean => {
     return false
   }
 }
+/** Linux can keep a killed-but-unreaped process visible as a zombie; treat `Z` as no longer running. */
+const zombieOnLinux = (pid: number): boolean => {
+  if (process.platform !== 'linux') return false
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    const commandEnd = stat.lastIndexOf(')')
+    return commandEnd !== -1 && stat.slice(commandEnd + 2, commandEnd + 3) === 'Z'
+  } catch {
+    return false
+  }
+}
+const pidRunning = (pid: number): boolean => pidAlive(pid) && !zombieOnLinux(pid)
+/** Bounded poll shared by every "process is gone" assertion; never a fixed single sleep. */
+const waitForGone = (pid: number, timeoutMs = 5_000): Promise<boolean> => waitFor(() => !pidRunning(pid), timeoutMs)
+/** Wait out the instrumentation-widened reap window, then still require the pid to be gone. */
+const expectGone = async (pid: number): Promise<void> => {
+  expect(await waitForGone(pid)).toBe(true)
+  expect(pidRunning(pid)).toBe(false)
+}
 const readRecordedPid = (dir: string, mode: TreeMode): number =>
   Number(readFileSync(pidFileOf(dir, mode), 'utf8').trim())
 
@@ -240,8 +259,8 @@ describe('linux process-group teardown', () => {
     const dir = tempDir()
     const { proc, grandchild } = await startTree(dir, 'normal')
     await proc.stop()
-    expect(pidAlive(proc.child.pid as number)).toBe(false)
-    expect(pidAlive(grandchild)).toBe(false)
+    await expectGone(proc.child.pid as number)
+    await expectGone(grandchild)
     expect(proc.child.stdout?.destroyed).toBe(true)
     expect(proc.child.stderr?.destroyed).toBe(true)
     expect(proc.child.listenerCount('exit')).toBe(0)
@@ -254,8 +273,8 @@ describe('linux process-group teardown', () => {
     const { proc, grandchild } = await startTree(dir, 'stubborn')
     expect(pidAlive(grandchild)).toBe(true)
     await stopChild(proc.child, { processGroup: true, graceMs: 200, killWaitMs: 1_000 })
-    expect(pidAlive(proc.child.pid as number)).toBe(false)
-    expect(pidAlive(grandchild)).toBe(false)
+    await expectGone(proc.child.pid as number)
+    await expectGone(grandchild)
     expect(proc.child.stdout?.destroyed).toBe(true)
   }, 15_000)
 
@@ -265,7 +284,16 @@ describe('linux process-group teardown', () => {
     expect(await proc.waitForExit()).toEqual({ code: 0, signal: null })
     expect(pidAlive(grandchild)).toBe(true)
     await stopChild(proc.child, { processGroup: true, graceMs: 500, killWaitMs: 500 })
-    expect(pidAlive(grandchild)).toBe(false)
+    await expectGone(grandchild)
+  }, 15_000)
+
+  it('flags the bounded guard red while a spawned grandchild is still alive', async () => {
+    const dir = tempDir()
+    const { proc, grandchild } = await startTree(dir, 'normal')
+    expect(await waitForGone(grandchild, 300)).toBe(false)
+    expect(pidRunning(grandchild)).toBe(true)
+    await stopChild(proc.child, { processGroup: true, graceMs: 500, killWaitMs: 500 })
+    await expectGone(grandchild)
   }, 15_000)
 
   it('keeps the group flag Linux-only and the budgets untouched', () => {
@@ -290,8 +318,8 @@ describe('spike CLI teardown', () => {
     expect((record.portProbe as SpikePortProbe[]).length).toBe(1)
     expect(existsSync(join(outDir, 'spike-launch.log'))).toBe(true)
     expect(log.includes('window-booted')).toBe(true)
-    expect(pidAlive(launched[0]?.child.pid as number)).toBe(false)
-    expect(pidAlive(readRecordedPid(dir, 'normal'))).toBe(false)
+    await expectGone(launched[0]?.child.pid as number)
+    await expectGone(readRecordedPid(dir, 'normal'))
   }, 15_000)
 
   it('reaps the tree and keeps the process-exited contract on the failure path', async () => {
@@ -302,7 +330,7 @@ describe('spike CLI teardown', () => {
     expect(record.reason).toBe('process-exited')
     expect(record.exitCode).toBe(0)
     expect(log.includes('process-exited') && log.includes('exitCode=0')).toBe(true)
-    expect(pidAlive(readRecordedPid(dir, 'leader-exits'))).toBe(false)
+    await expectGone(readRecordedPid(dir, 'leader-exits'))
   }, 15_000)
 })
 
@@ -322,7 +350,7 @@ describe('deterministic CLI exit', () => {
     expect(log.includes(`id=${String(record.id)}`)).toBe(true)
     expect(log.includes('/json/list')).toBe(true)
     expect(log.includes('pageTargets=1')).toBe(true)
-    expect(pidAlive(readRecordedPid(dir, 'normal'))).toBe(false)
+    await expectGone(readRecordedPid(dir, 'normal'))
   }, 20_000)
 
   it('wires the bounded exit only at the module entry', () => {

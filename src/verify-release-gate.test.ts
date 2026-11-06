@@ -686,7 +686,7 @@ describe('local B layer', () => {
     for (const entry of run.summary.manual) expect(run.summary.checks.some((check) => check.id === entry.id)).toBe(false)
     expect(run.summary.checks.every((check) => check.status === 'pass')).toBe(true); expect(readdirSync(join(run.out, 'evidence')).sort()).toEqual(['round-1.json', 'round-2.json', 'round-3.json'])
     expect(host.heapCalls.filter((call) => call === 'JSHeapUsedSize')).toHaveLength(6); expect(host.heapCalls.filter((call) => call === 'HeapProfiler.collectGarbage')).toHaveLength(3)
-  })
+  }, 30_000)
   it.each([
     ['the real directory pair is missing', { fixturePresent: false, heapSequence: HAPPY_HEAP, fourState: LOCAL_COUNTS }, 'local-fixture'],
     ['a round is missing', { heapSequence: HAPPY_HEAP, failFourStateAtRound: 2 }, 'local-rounds-4state'],
@@ -698,20 +698,20 @@ describe('local B layer', () => {
   ] as Array<[string, FakeOptions, string]>)('fails when %s', async (_name, options, step) => {
     const run = await runLocal(new FakeHost(options))
     expect(run.steps[step].status).toBe('fail'); expect(run.code).toBeGreaterThan(0)
-  })
+  }, 30_000)
   it('carries the local round reading reason into the step evidence', async () => {
     const run = await runLocal(new FakeHost({ heapSequence: HAPPY_HEAP, fourStateReading: { ok: false, reason: 'count-non-finite', detail: { status: 'added', text: '?' } } }))
     const actual = run.steps['local-rounds-4state'].actual as { rounds: Array<{ legend: { reason: string } }>; problems: string[] }
     expect(run.steps['local-rounds-4state'].status).toBe('fail')
     expect(actual.rounds.map((round) => round.legend.reason)).toEqual(['count-non-finite', 'count-non-finite', 'count-non-finite'])
     expect(actual.problems.join('\n')).toContain('四态读取失败 count-non-finite {"status":"added","text":"?"}')
-  })
+  }, 30_000)
   it('fails when round 3 grows the retained heap by more than 16 MiB', async () => {
     const over = 120 * MIB + RETENTION_THRESHOLD_BYTES + 1
     const run = await runLocal(new FakeHost({ fourState: LOCAL_COUNTS, heapSequence: [...HAPPY_HEAP.slice(0, 5), over] }))
     expect(run.steps['local-retained-heap'].actual).toMatchObject({ deltaBytes: RETENTION_THRESHOLD_BYTES + 1 })
     expect(run.steps['local-retained-heap'].status).toBe('fail'); expect(run.code).toBeGreaterThan(0)
-  })
+  }, 30_000)
 })
 describe('pure judgments', () => {
   it('serializes the one four-state reader for CDP', () => {
