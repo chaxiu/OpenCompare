@@ -385,7 +385,7 @@ describe('DirectoryView windowed tree', () => {
     expect(Math.max(...rowCounts)).toBeLessThanOrEqual(80)
     expect(new Set(rowCounts).size).toBeLessThanOrEqual(2)
     expect(new Set(elementCounts).size).toBeLessThanOrEqual(2)
-  })
+  }, 30_000)
 
   it('renders the same window for 5,000 rows and 50k rows', () => {
     const big = render(<Harness comparison={fixture.comparison} initial={INITIAL_STATE} />)

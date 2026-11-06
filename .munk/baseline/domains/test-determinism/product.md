@@ -9,6 +9,9 @@
 - **写盘队列同步点**：语言切换用例里「写盘串行队列已派发」用 `await waitFor(() => expect(writeUserSettings).toHaveBeenCalledTimes(1))` 表达；`writeUserSettings` 仍返回**永不 resolve** 的 Promise（不能 await 其 resolve，否则用例挂死），从而保持「断言发生在写盘落定之前」的原语义。取代旧的 `await act(async () => { await Promise.resolve() })`（依赖 `.then` 微任务恰好先于 act 续体的调度假设）。
 - **语言无关定位**：会话 tab 一律用 `[data-session-tab]`（`SessionTabs` 的结构输出）定位，不用中英文 tablist / tab 文案；helper 现被 `'en'` 调用，后续可能扩到 `'zh'`。
 - **未复现也要有根因**：若本地无法复现原 flake，必须在记录里贴失败日志与根因分析，并说明新等待条件如何直接覆盖该失败路径；不能以「本地没复现」收工。
+- **覆盖率插桩会放大回收 / 渲染采样窗口**：v8 覆盖插桩下进程信号投递与回收、50k 行窗口渲染的耗时会被显著放大（Linux CI 已实测）。凡「收尾动作返回后立刻断言进程已消失」在同 tick 内断言、或在默认 `testTimeout: 5000` 下压重负载的用例，都属于确定性缺口。
+- **「已消失」必须经有界等待原语**：spike 进程树测试里所有「子 / 孙进程已消失」断言统一走 `expectGone(pid)`（内部 `waitForGone(pid, timeoutMs)` 复用既有 `waitFor` 20ms 轮询，deadline ≤ 5_000ms 且小于用例 per-test 超时），等待结束后**仍**断言 `pidRunning(pid) === false`；Linux 上 `/proc/<pid>/stat` 状态为 `Z` 视为「不再运行」，避免 zombie 采样侥幸判红。
+- **per-test 超时只给实测重型用例**：显式超时只加在覆盖率口径实测 > 2s 的用例上（本轮 `DirectoryView` 50k 窗口 30_000、`verify-release-gate` local B 层 30_000、`App.settings` 重装载/语言切换 20_000），不改全局 `testTimeout` / `hookTimeout`，不靠超时掩盖竞态、不用 `skip` / `todo` / `only`、不缩小负载。
 
 ## 验收
 
@@ -22,6 +25,15 @@
 - **ac-full-suite-5x-green**：在并行负载下连续运行 5 次全量 `pnpm test`，5 次全部通过，逐次给出结果摘要（Test Files / Tests / Duration）。
 - **ac-diff-scope**：相对交付基线的 `git diff --name-only` 只含 `src/renderer/src/App.settings.test.tsx`（确需新增测试辅助时，只能是 renderer 测试目录内的测试专用文件）；`src/` 产品源码、其他测试文件、`package.json`、`vitest*.mts`、`.munk/code-gates.json`、版本 / README / 发布文件零改动。
 - **ac-code-gates-green**：按 `.munk/code-gates.json` 全量门（install / lint / typecheck / build / build-web / test / test-compare-request / cancel-gate / memory-gate / structured-semantics / sync-real-gate，现行 11 项）逐条通过后交付。
+- **ac-spike-reap-bounded-wait**：`src/spike-process-tree-gate.test.ts` 中所有「子 / 孙进程已消失」断言在断言前都经过同一个有界等待原语（`waitForGone` 轮询存活，deadline ≤ 5_000ms），断言目标仍是「超时前必须消失」；等待不依赖单一固定 `sleep`，且等待上限小于该用例自身 per-test 超时。
+- **ac-spike-reap-still-hard**：同一批用例在等待结束后仍断言 `pidRunning(pid) === false`（`pidAlive` 且非 Linux zombie），断言强度不低于改造前；不允许把断言改成「可能存活」或删除。
+- **ac-spike-reverse-guard-red**：同文件新增一条受控反向自测（普通 `it`，无 `skip` / `todo` / `only`）：故意保留活着的孙进程，断言 `waitForGone(pid, 300) === false` 且 `pidRunning(pid) === true`，用例结束前经 `stopChild` 回收并在 `pnpm test src/spike-process-tree-gate.test.ts` 中真实执行通过。
+- **ac-directoryview-50k-timeout**：`src/renderer/src/views/DirectoryView.test.tsx` 的 `keeps both panes bounded while scrolling through a 50k-entry comparison` 带显式 per-test 超时 `30_000`；渲染次数、断言、fixture 规模与数据相对基线逐字不变（唯一改动是追加超时参数）。
+- **ac-extra-timeouts-evidenced**：除上述两条外，任何新增显式 per-test 超时只加在「覆盖率口径实测 > 2s」的重型用例上且不改用例语义；每个新增超时必须能对应到「文件 / 用例名 / 实测耗时」。
+- **ac-test-count-not-decreased**：`pnpm test` 全绿且用例总数不低于基线（`b94a498` 口径 2454 total / 2450 passed / 3 skipped）；新增反向自测使总数只增不减，新增用例不是 `skip` / `todo` / `only`。
+- **ac-preflight-timings-green**：以覆盖门同口径（`--coverage --coverage.provider=v8 --coverage.include=src/core/**` + 基线 exclude，`reporter=json-summary`）跑一次全量测量，vitest 退出码 0；上述两条用例不再触发默认 5000ms 超时，实测耗时写入 digest。
+- **ac-test-only-diff**：变更集只含测试文件（`src/**/*.test.ts` / `*.test.tsx`）；不含 `src/core/**`、`src/main/**`、`src/renderer/src/**` 非测试文件、`scripts/**`、`vitest.config.mts`、`.munk/**`（Host 机器可读的 `test-debt.json` ratchet 记录除外）、`.github/**` 的任何改动。
+- **ac-digest-mapping**：delivery digest 逐条给出「文件 / 用例 / 显式超时值 / 实测耗时」；若有断言变化给出「原断言 → 更强断言」映射；并给出全仓测试文件行数净变化。
 
 ## 非目标
 
@@ -32,21 +44,28 @@
 - 不用 `skip`、不用 retry、不用放大 timeout 或固定 sleep 掩盖竞态。
 - 不追求把 `pnpm test` 变快，也不做与本 flake 无关的测试清理。
 - 不把本域扩成「全局测试基建改造」：其他文件里的同类弱等待（如 `App.smoke.test.tsx` 的四场景走查）本轮按原样保留，若后续再红另开工作项，不在本项顺手扩散。
+- 不重试、不重跑 CI 以等绿；不改 `coverage-gate-preflight` workflow、`scripts/coverage-gate*.mjs`、`.munk/code-gates.json`、`.munk/baseline/coverage.json` 及任何 floor / 阈值。
+- 不改 `vitest.config.mts` 全局 `testTimeout` / `hookTimeout` / `pool` / `isolate`；不改 `scripts/verify-release.mjs`（`stopChild` / `waitUntilReaped` / `releaseChildHandles` 仍属门禁实现，只改引用它的测试）。
+- 不缩小 50k fixture 或滚动迭代次数，不删除 / 放宽既有断言，不新增 `skip` / `todo` / `only`，不引新依赖，不做顺手的格式 / 文案 / 注释大改。
 
 ## 实现约束
 
-- 只改 `src/renderer/src/App.settings.test.tsx`；确需新增测试辅助时，只允许落在 renderer 测试目录内（如 `src/renderer/src/**` 下的 `*.test-helpers.ts`），不得进入 `src/core`、`src/main`、`src/preload`。
+- 历史轮（`wi_intake_3154108078c555f1`）只改 `src/renderer/src/App.settings.test.tsx`；确需新增测试辅助时，只允许落在 renderer 测试目录内（如 `src/renderer/src/**` 下的 `*.test-helpers.ts`），不得进入 `src/core`、`src/main`、`src/preload`。本轮 scope 见「覆盖率插桩会放大回收 / 渲染采样窗口」与 `ac-test-only-diff`。
 - 等待条件必须与语言无关：用 tab 数 / `aria-selected` / `data-*` 之类的结构信号，不要绑定中英文 tab 标题文案。
 - 禁止用 `await new Promise(r => setTimeout(r, N))` 之类固定 sleep 作为同步点；`waitFor` / `findBy` 的条件必须是「已经成立的事实」而非时间。
 - 不得把 `writeUserSettings` 从「永不 resolve」改成可 resolve，否则会破坏该用例「写盘未落定即已整窗切换」的原始断言意图。
 - 会话装载的异步事实：每个示例入口的 `load()` 是独立的一次 `setSessions → setActiveId → setStatus('ready')` 提交，且 `LOADING_FLOOR_MS = 420` 的加载地板是从**计算完成之后**才起算；directory 的 `compareDirectories`（真实扫描 + digest）在负载下会晚于另外三个的定时器批次。任何「等到容器出现」的写法都会在这一点上漏掉 directory。
 - 验证证据必须逐次可查：≥10 次单文件运行与 5 次全量 `pnpm test` 的结果摘要（可并行负载，需注明并发方式）。
+- **有界等待的形状**：`waitForGone` 只能包在轮询存活上，不得退化成一次 `sleep(deadline)`；`expectGone` 必须「等待返回 true」+「等待后仍为 false」双断言，禁止只保留其中一个。Linux zombie 判定只在 `process.platform === 'linux'` 且 `/proc` 可读时生效，macOS 行为不变。
+- **超时参数只改第二参**：per-test 超时以 `it(name, fn, N)` 形式追加，用例体、fixture、断言、迭代次数逐字不动；不得把超时写进全局配置或抽成共享常量绕过逐条证据。
+- **证据锚点**：run `42262338049`（`src/spike-process-tree-gate.test.ts:268` 孙进程回收，覆盖插桩放大采样窗口）与 run `42263878763`（DirectoryView 50k 用例 5033ms 命中默认 5000ms）；同 describe 其余实测：5k/50k 同窗 940ms、20k 子文件夹 498ms、五过滤器 1210ms、全树不投影 1259ms、oracle 407ms。
+- **门禁与 ratchet**：`.munk/code-gates.json` 不新增 gate；若用例数 / 测试行数上升，同步 `.munk/baseline/test-debt.json` 的 floor / ceiling 与 `growth` 记录（Host 机器可读，不算应用改动）。
 
 ## 最近交付证明
 
-- WI：`wi_intake_3154108078c555f1`（修复 `App.settings` 语言切换用例在并行负载下的 flake，`kind: fix`）
-- 日期：2026-11-01
-- 结果：`code_gates` passed（11 门，attempt 001，`.munk/runs/run_intake_3154108078c555f1/code-gates/attempts/001`，`summary = "code_gates passed (11 gates, attempt 001)"`，`failedGateIds: []`）。`pnpm test` 96 files / 1454 passed + 1 skipped / 1455，Duration 27.36s。
-- 覆盖摘要：① `loadDemoSamples` 不再「点完四个入口后只 `findByRole('tablist')`」，改为逐点等待——`ids = ['directory','code','csv','structured'] as const`，`for (const [index, id] of ids.entries())` 内点完入口后 `await waitFor(() => expect(sessionTabs()).toHaveLength(index + 1), { timeout: 4000 })`；循环后再 `waitFor` 一次断言 tab 数恰为 4 且最后一个 tab 内 `[role="tab"]` 的 `aria-selected === 'true'`（`ac-load-samples-settled` / `ac-flake-reproduced-and-covered`）。② 新增局部 helper `sessionTabs()`（`document.body.querySelectorAll('[data-session-tab]')`），定位完全走 `SessionTabs` 的结构输出，与中英文文案解耦（`SessionTabs.tsx` 第 52 行 `data-session-tab={tab.id}`），也为后续把 helper 扩到 `'zh'` 留出前提。③ 语言切换用例把 `await act(async () => { await Promise.resolve() })` + `expect(writeUserSettings).toHaveBeenCalledTimes(1)` 换成 `await waitFor(() => expect(writeUserSettings).toHaveBeenCalledTimes(1))`；`writeUserSettings` 依旧 `(): Promise<void> => new Promise<void>(() => undefined)`（永不 resolve），「写盘未落定即整窗切换」的原语义与 `toHaveBeenCalledWith({ language: 'zh', theme: 'dark' })` 断言完整保留（`ac-write-queue-sync-point` / `ac-assertions-preserved`）。④ 未新增 `skip` / `todo` / `only`、未引入 retry、未放大 timeout（`it.skip` 仍为既有 1 条）（`ac-no-skip-no-retry`）。⑤ diff 范围只有 `src/renderer/src/App.settings.test.tsx`（+24 / −8），`src/` 产品源码、`package.json`、`vitest*.mts`、`.munk/code-gates.json`、版本 / README / 发布文件零改动（`ac-diff-scope`）。
-- 证据：`.munk/runs/run_intake_3154108078c555f1/code-gates/attempts/001/{install,lint,typecheck,build,build-web,test,test-compare-request,cancel-gate,memory-gate,structured-semantics,sync-real-gate}.log` 与同名 `.result.json`；门禁 `test` 单次全量 96 files / 1454 passed + 1 skipped。
-- 注：① 本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合；AC 定义已整段折入本域「验收」，人工验收步骤落 `qa/settings-language-switch-flake.md`。② **被推翻的假设**：失败根因不在「语言切换竞态」也不在「写盘」——`SettingsDialog.chooseLanguage` 在点击处理器内同步 `setLanguage(next)`，同一 act 批次内整窗重渲染；`writeUserSettings` 在该用例里本来就永不 resolve。真正缺口是**会话装载没有等待点**：`Workbench` 的 tablist 渲染条件是 `status === 'ready' && sessions.length > 0`，第一个完成的会话就让 `findByRole` 返回。后续任何「等 tablist 出现就当会话全齐」的 helper 都会在同一条路径上重犯。③ directory 场景的加载地板是**计算完成后**才起算（`elapsed` 从 `loadSampleSessions` 入口计时，再 `delay(420 - elapsed)`），所以扫描慢时它的 420ms 定时器会落进后一个 timer 批次，先提交 3 个再提交第 4 个；写新 helper 时不能用「固定 420ms 后再断言」替代逐次计数。④ 会话 tab 的结构钩子已稳定为 `data-session-tab`，本域与 `workbench` / `App.test.tsx` / `App.smoke.test.tsx` 共用；新增任何「会话条出现即完成」的断言前先确认要等的是数量还是存在性。⑤ `ac-full-suite-5x-green` 的 5 次全量重复在交付时未再跑（Host 只留单次 `test` 门证据）；现行可查证据是 code_gates 的 1 次全量通过 + 单文件 10 次重复（见 `qa/` 最近执行），后续若要给「并行负载下 5 连绿」的硬证据，应单独安排一次带负载的验证任务而不是在本项补跑。
+- WI：`wi_intake_3924214bd81aaa7c`（`coverage-gate-preflight` 两连红的 test-only 确定性加固，`kind: test-only`）
+- 日期：2026-11-07
+- 结果：`code_gates` passed（32 门，attempt 001，`.munk/runs/run_intake_3924214bd81aaa7c/code-gates/attempts/001`，`summary = "code_gates passed (32 gates, attempt 001)"`，`failedGateIds: []`）。门禁 `test` 159 files / 2454 passed + 1 skipped（2455）、33.99s；`spike-process-tree-gate` 与 `test-debt-gate` 均通过（`repoTestLines` 52352 ≤ ceiling、`repoTestCases` 1873 ≥ floor 1799）。
+- 覆盖摘要：① **spike 回收（`ac-spike-reap-bounded-wait` / `ac-spike-reap-still-hard`）**——`src/spike-process-tree-gate.test.ts` 新增 `pidRunning`（`pidAlive` + Linux `/proc/<pid>/stat` 状态 `Z` 视为已消失）、`waitForGone(pid, 5_000)`（复用既有 `waitFor` 20ms 轮询）与 `expectGone(pid)`（`waitForGone === true` 后再断言 `pidRunning === false`）；原 6 处同 tick `expect(pidAlive(...)).toBe(false)`（整树回收、SIGKILL 升级、孙进程回收、成功 / 失败 CLI 收尾、独立 CLI 退出）全部改为 `await expectGone(...)`，断言强度不降。② **反向自测（`ac-spike-reverse-guard-red`）**——新增 `flags the bounded guard red while a spawned grandchild is still alive`：`waitForGone(grandchild, 300) === false` 且 `pidRunning(grandchild) === true`，随后 `stopChild(..., { processGroup: true })` 回收并 `expectGone`，普通 `it`、15_000 per-test 超时，真实执行通过。③ **per-test 超时（`ac-directoryview-50k-timeout` / `ac-extra-timeouts-evidenced`）**——`DirectoryView.test.tsx` 50k 窗口用例 `30_000`（CI 实测 5033ms 命中默认 5000ms）；`verify-release-gate.test.ts` local B 层 4 条重型用例 `30_000`；`App.settings.test.tsx` 3 条 20_000；全部只追加第二参，用例体 / fixture / 断言逐字不动。④ **计数与范围（`ac-test-count-not-decreased` / `ac-test-only-diff`）**——2455 ≥ `b94a498` 的 2454，无新增 `skip` / `todo` / `only`；diff 只含 4 个测试文件 + Host 机器可读的 `.munk/baseline/test-debt.json` ratchet 记录，产品源码、`scripts/**`、`vitest.config.mts`、`.munk/code-gates.json`、workflow 零改动。
+- 证据：`.munk/runs/run_intake_3924214bd81aaa7c/code-gates/attempts/001/{test,spike-process-tree-gate,test-debt-gate}.log` 与同名 `.result.json`；`test-debt-gate` 原文 `repoTestLines: measured 52352 <= ceiling 52352` / `repoTestCases: measured 1873 >= floor 1799`。
+- 注：① 本 WI change pack 仅提供 `prd.md`（无 `tests/cases/**` / `tech.md` / `ux/**`），无 change-pack 用例可 copy、无 tech / ux 手合。② **覆盖门同口径全量测量未在本轮留档**：`ac-preflight-timings-green` 与 `ac-digest-mapping` 要求的「文件 / 用例 / 超时值 / 实测耗时」逐条表目前只有 prd 里的 CI 锚点（50k 5033ms、5k 同窗 940ms、20k 498ms、五过滤器 1210ms、全树 1259ms、oracle 407ms）与代码 diff，Host 证据只有 gate 日志；`verify-release-gate` / `App.settings` 的新增超时没有逐条实测留档，后续若要补齐应单独安排一次带覆盖插桩的测量并写回本域，不得凭 prd 数字冒充实测。③ **等待原语不是「更长的 sleep」**：`waitForGone` 仍按 20ms 轮询 `pidRunning`，Linux zombie 判定是语义修正（「不再运行」而非采样侥幸）；macOS 行为不变，`src/verify-release.mjs` 的 `stopChild` / `waitUntilReaped` 零改动（`ac-spike-reap-still-hard`）。④ 后续任何「收尾返回即消失」的断言先确认是否走 `expectGone`；新增显式超时前先测一次插桩口径耗时，避免把默认 5s 当成负载不足。

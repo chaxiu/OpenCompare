@@ -122,7 +122,7 @@ describe('settings entry', () => {
     const entry = screen.getByRole('button', { name: 'Open settings' })
     expect((entry as HTMLButtonElement).disabled).toBe(false)
     expect(openSettings('en')).toBeDefined()
-  })
+  }, 20_000)
 
   it('stays reachable while a directory scan is running', async () => {
     const base = createWebPlatformPort()
@@ -288,7 +288,7 @@ describe('language switch', () => {
     expect(screen.getByRole('tablist', { name: 'Sessions' })).toBeDefined()
     expect(screen.getByRole('contentinfo').textContent).toContain('JSON nodes (left)')
     expect(settingsDialog('en')).toBeDefined()
-  })
+  }, 20_000)
 
   it('writes serially so the last choice is the one read back', async () => {
     const web = createWebPlatformPort()
@@ -368,7 +368,7 @@ describe('language switch', () => {
     fireEvent.click(within(settingsDialog('en')).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(within(openSettings('en')).queryByRole('alert')).toBeNull()
-  })
+  }, 20_000)
 
   it('re-translates the notice already on screen without extra platform work', async () => {
     const base = createWebPlatformPort()
