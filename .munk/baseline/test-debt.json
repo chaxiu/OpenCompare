@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 52352
+    "repoTestLines": 52395
   },
   "floors": {
     "appTestCases": 97,
@@ -31,9 +31,9 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 52324,
-      "to": 52352,
-      "reason": "coverage-gate-preflight determinism: spike-process-tree-gate.test.ts reaps through one bounded waitForGone / expectGone primitive plus a still-alive reverse guard; measured >2s suites (DirectoryView 50k window, local B layer, App settings language switch) get explicit per-test timeouts",
+      "from": 52352,
+      "to": 52395,
+      "reason": "coverage preflight determinism: body gate spawn outcomes now carry status/error/signal plus the stdout/stderr tail, one bounded environment-only retry with an explicit maxBuffer, and per-test timeouts so an instrumented red is attributable instead of flaky",
       "addedCases": 1
     },
     {

@@ -8,7 +8,7 @@ OpenCompare 是对标 Beyond Compare 5 Pro 的现代跨平台桌面对比与三�
 - 桌面容器与构建：Electron `^37.10.3` + electron-vite（main / preload / renderer 三段构建）
 - UI：React 19 + TypeScript + Tailwind CSS v4（`@tailwindcss/vite`）+ Lucide React
 - 算法库：`diff`(jsdiff)、`node-diff3`、`papaparse`、`@tanstack/react-virtual`、`yaml`、`jsonc-parser`
-- 质量门禁：ESLint（flat config）、`tsc --noEmit`、vitest；包管理 `pnpm` 10
+- 质量门禁：ESLint（flat config）、`tsc --noEmit`、vitest；包管理 `pnpm` 10。覆盖率预检一次测量多次复用（commit/tree + 脚本哈希 + 被测文件集合 + 关键 env 作键，缺键或失配即 `cache miss` 重测），正负步骤复用同次 summary；插桩下 body gate 失败必须带 status/error/signal 与 stderr/stdout 尾部原文可归因，仅客观环境信号（网络/DNS/超时/被杀/磁盘满）最多重试 1 次，断言失败不重试也不靠重跑凑绿。
 
 ## 目录约定
 
