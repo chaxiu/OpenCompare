@@ -311,8 +311,8 @@ describe('theme switching', () => {
     installPlatform(portWithSettings({ language: 'en', theme: 'system' }))
     render(<App />)
     await screen.findByRole('heading', { name: EMPTY_EN })
-    expect(appliedTheme()).toBe('dark')
-    expect(scheme.listenerCount()).toBe(1)
+    await waitFor(() => expect(appliedTheme()).toBe('dark'))
+    await waitFor(() => expect(scheme.listenerCount()).toBe(1))
 
     act(() => scheme.setLight(true))
     expect(appliedTheme()).toBe('light')
