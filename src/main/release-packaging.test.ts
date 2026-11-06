@@ -5,6 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
+import {
+  bodyGateAttempts,
+  describeSpawnOutcome,
+  retryableEnvironmentReason,
+  type SpawnOutcomeLike
+} from '../../scripts/gate-spawn-outcome.mjs'
 import { UPLOAD_ASSET_GLOBS } from '../../scripts/verify-release.mjs'
 import { builder, currentTag, currentVersion, finalizeStep, gateStep, gatesSteps, macEntitlements, packageStep, pkg, repoRoot, workflow, yamlScalars } from './release-doc-fixtures.test-helpers'
 
@@ -94,11 +100,26 @@ const allRunText = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps
   .map((step) => step.run ?? '').join('\n')
 const allStepText = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? [])
   .map((step) => [step.run, step.uses, ...Object.entries(step.env ?? {}).map(([key, value]) => `${key}: ${value}`), ...Object.entries(step.with ?? {}).map(([key, value]) => `${key}: ${String(value)}`)].join('\n')).join('\n')
-const runInTemp = (run: (dir: string) => ReturnType<typeof spawnSync>): { status: number; output: string } => {
+interface SpawnOutcome extends SpawnOutcomeLike {
+  status: number | null
+  output: string
+}
+
+// Spawn failures keep status / error / signal plus the raw stdout+stderr so a
+// red body gate can be attributed instead of being called "flaky". Assertion
+// failures (a real non-zero exit with output) are never retried.
+const runInTemp = (run: (dir: string) => ReturnType<typeof spawnSync>): SpawnOutcome => {
   const dir = mkdtempSync(join(tmpdir(), 'opencompare-release-gate-'))
   try {
     const result = run(dir)
-    return { status: result.status ?? -1, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+    const error = (result as { error?: Error & { code?: string } }).error
+    return {
+      status: result.status,
+      signal: result.signal,
+      errorCode: typeof error?.code === 'string' ? error.code : null,
+      errorMessage: error?.message ?? null,
+      output: `${result.stdout ?? ''}${result.stderr ?? ''}`
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -248,7 +269,7 @@ describe('release workflow contracts', () => {
 describe('post-release verification dispatch gates', () => {
   const spec = fixture.postReleaseVerify
   const print = (text: string): string => `printf '%s\\n' '${text}'`
-  const runGate = (step: string, gh: string, extraEnv: Record<string, string> = {}, since = '1970-01-01T00:00:00Z'): { status: number; output: string } =>
+  const runGate = (step: string, gh: string, extraEnv: Record<string, string> = {}, since = '1970-01-01T00:00:00Z'): SpawnOutcome =>
     runInTemp((dir) => {
       writeFileSync(join(dir, 'gh'), `#!/usr/bin/env bash\n${gh}\n`, { mode: 0o755 })
       writeFileSync(join(dir, 'post-release-verify-run-id.txt'), '4242\n')
@@ -373,7 +394,7 @@ describe('public L1 after publish', () => {
     'case "$*" in', '  *"-w"*) printf "%s" "${FAKE_HTTP_CODE:-200}" ;;', 'esac', 'exit 0'
   ].join('\n')
   type ManifestMode = 'match' | 'mismatch' | 'missing' | 'orphan'
-  const runL1 = (options: { httpCode?: string; digest?: string; manifest?: ManifestMode } = {}): { status: number; output: string } =>
+  const runL1 = (options: { httpCode?: string; digest?: string; manifest?: ManifestMode } = {}): SpawnOutcome =>
     runInTemp((dir) => {
       const assets = [{ name: 'OpenCompare.dmg', browser_download_url: 'https://github.test/OpenCompare.dmg', size: payload.length, digest: options.digest ?? digestOf(payload) }]
       const meta = JSON.stringify({ draft: false, html_url: `https://github.test/releases/tag/${currentTag}`, assets })
@@ -509,7 +530,7 @@ describe('published release body gate', () => {
     [english, '', assembly.separator, '', assembly.foldOpen, '', chinese, '', assembly.foldClose, '',
       fill(assembly.changelog, { previous, tag: currentTag })].join('\n')
 
-  const runBodyGate = (body: string): { status: number; output: string } =>
+  const runBodyGateOnce = (body: string): SpawnOutcome =>
     runInTemp((dir) => {
       const fixturePath = join(dir, 'fixture-body.md')
       writeFileSync(fixturePath, body)
@@ -517,17 +538,33 @@ describe('published release body gate', () => {
       const script = join(dir, 'body-gate.sh')
       writeFileSync(script, finalizeStep(fixture.bodyGate.name)?.run ?? '')
       return spawnSync('bash', [script], {
-        cwd: dir, encoding: 'utf8',
+        cwd: dir, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
         env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, RUNNER_TEMP: dir, RELEASE_TAG: currentTag,
           GITHUB_REPOSITORY: 'chaxiu/OpenCompare', FAKE_RELEASE_BODY: fixturePath }
       })
     })
 
+  const runBodyGate = (body: string): SpawnOutcome & { attempts: number; retryReasons: string[] } => {
+    const retryReasons: string[] = []
+    const maxAttempts = bodyGateAttempts()
+    let outcome = runBodyGateOnce(body)
+    let attempts = 1
+    while (attempts < maxAttempts) {
+      const reason = retryableEnvironmentReason(outcome)
+      if (reason === null) break
+      retryReasons.push(`attempt ${attempts}: ${reason}`)
+      console.warn(`${describeSpawnOutcome(outcome, 'body gate retry')}\nretry reason: ${reason}`)
+      outcome = runBodyGateOnce(body)
+      attempts += 1
+    }
+    return { ...outcome, attempts, retryReasons }
+  }
+
   it('runs in finalize after the release is made public', () => {
     const publish = stepIndex('finalize', fixture.releaseBody.makePublicName)
     expect(finalizeStep(fixture.bodyGate.name)).toBeDefined()
     expect(stepIndex('finalize', fixture.bodyGate.name), fixture.bodyGate.name).toBeGreaterThan(publish)
-  })
+  }, 60_000)
 
   it.each(fixture.bodyGate.cases)('$id runs the body gate', (row) => {
     useRow(row.id)
@@ -542,11 +579,17 @@ describe('published release body gate', () => {
           previous
         )
     const result = runBodyGate(body)
-    if (row.status === 'zero') expect(result.status, row.id).toBe(0)
-    else expect(result.status, row.id).not.toBe(0)
+    const detail = describeSpawnOutcome(result, row.id)
+    expect(result.errorCode, `${detail}\nspawnSync environment failure: result is not attributable`).toBeNull()
+    if (row.status === 'zero') expect(result.status, detail).toBe(0)
+    else {
+      expect(result.status, `${detail}\nnegative case expected a real non-zero exit, not a spawn failure`).not.toBeNull()
+      expect(result.status, detail).not.toBe(0)
+    }
+    expect(result.output.trim(), `${detail}\nno stdout/stderr captured: result is not attributable`).not.toBe('')
     expectTokens(result.output, row.tokens.map((token) => fill(token, { tag: currentTag })), row.id)
     expectAbsent(result.output, row.absent, row.id)
-  })
+  }, 120_000)
 })
 
 describe('published release body link gate', () => {
