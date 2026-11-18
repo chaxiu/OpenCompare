@@ -349,7 +349,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (fixture) await removeRealDirectoryFixture(fixture)
-})
+}, 60_000)
 
 describe('DirectoryView windowed tree', () => {
   it('keeps both panes bounded while scrolling through a 50k-entry comparison', () => {

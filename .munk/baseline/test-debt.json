@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 53501
+    "repoTestLines": 53627
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 53102,
-      "to": 53501,
-      "reason": "xlsx workbench wiring: whitelist both directions, real xlsx/xlsm four-state alignment with cell highlighting, sequential two-side parse probe plus tab budget, size/zip-bomb rejection before any session commit, hidden row/column switch and per-sheet independent results",
-      "addedCases": 11
+      "from": 53501,
+      "to": 53627,
+      "reason": "second-instance launcher prefix coverage in src/main/launch.test.ts: a takeover spelling the dev entry absolutely (appEntry '.') still builds the positional pair, the reverse '.', relative-to-app path spelling, --left=/--right= parity, a lone positional staying request-free, and an explicitly typed directory/file pair reporting the typed paths",
+      "addedCases": 5
     }
   ]
 }
