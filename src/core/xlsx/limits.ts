@@ -13,6 +13,7 @@
  */
 
 import { inflateRawSync, constants as zlibConstants } from 'node:zlib'
+import { CFB } from 'xlsx'
 
 export const MIB = 1024 * 1024
 
@@ -398,22 +399,38 @@ function sharedStringsCount(head: string): number | undefined {
 
 const HEAD_COMPRESSED_BYTES = 8 * 1024
 const HEAD_OUTPUT_BYTES = 64 * 1024
+// TextDecoder is available in both Node and the sandboxed Electron renderer;
+// `Buffer` is not (`sandbox: true` / `nodeIntegration: false`).
+const utf8 = new TextDecoder('utf-8')
+// SheetJS ships a pure-JS raw inflater; the browser build externalizes
+// `node:zlib`, so the head checks fall back to it instead of being skipped.
+const cfbInflate = (CFB as { utils?: { _inflateRaw?: (bytes: Uint8Array, size: number) => Uint8Array } })
+  .utils?._inflateRaw
+
+function inflateHead(raw: Uint8Array): Uint8Array | undefined {
+  try {
+    return inflateRawSync(raw, {
+      finishFlush: zlibConstants.Z_SYNC_FLUSH,
+      maxOutputLength: HEAD_OUTPUT_BYTES
+    })
+  } catch {
+    if (cfbInflate === undefined) return undefined
+    try {
+      return cfbInflate(raw, HEAD_OUTPUT_BYTES)
+    } catch {
+      return undefined
+    }
+  }
+}
 
 /** Inflate just enough of one entry to read XML attributes. */
 function readEntryHead(bytes: Uint8Array, entry: XlsxZipEntry): string {
   const raw = bytes.subarray(entry.dataOffset, entry.dataOffset + entry.compressedBytes)
   if (entry.method === 0) {
-    return Buffer.from(raw.subarray(0, HEAD_OUTPUT_BYTES)).toString('utf8')
+    return utf8.decode(raw.subarray(0, HEAD_OUTPUT_BYTES))
   }
-  try {
-    const head = inflateRawSync(raw.subarray(0, HEAD_COMPRESSED_BYTES), {
-      finishFlush: zlibConstants.Z_SYNC_FLUSH,
-      maxOutputLength: HEAD_OUTPUT_BYTES
-    })
-    return Buffer.from(head).toString('utf8')
-  } catch {
-    return ''
-  }
+  const head = inflateHead(raw.subarray(0, HEAD_COMPRESSED_BYTES))
+  return head === undefined ? '' : utf8.decode(head)
 }
 
 const EOCD_SIGNATURE = 0x06054b50
@@ -450,9 +467,7 @@ export function readXlsxZipDirectory(bytes: Uint8Array): XlsxZipDirectory | null
     const extraLength = view.getUint16(position + 30, true)
     const commentLength = view.getUint16(position + 32, true)
     const localOffset = view.getUint32(position + 42, true)
-    const name = Buffer.from(
-      bytes.subarray(position + 46, position + 46 + nameLength)
-    ).toString('utf8')
+    const name = utf8.decode(bytes.subarray(position + 46, position + 46 + nameLength))
 
     if (decompressedBytes === ZIP64_SIZE || compressedBytes === ZIP64_SIZE) {
       const extraStart = position + 46 + nameLength
