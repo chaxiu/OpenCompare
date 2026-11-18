@@ -22,6 +22,18 @@
 import * as XLSX from 'xlsx'
 import type { CellObject, DenseWorkSheet, WorkBook } from 'xlsx'
 
+import {
+  assertSheetBounds,
+  assertSheetXmlLimit,
+  assertSharedStringsLimit,
+  checkXlsxWatermark,
+  effectiveXlsxCaps,
+  XlsxLimitExceededError,
+  inspectXlsxContainer,
+  resolveXlsxBudget,
+  type XlsxBudgetMode
+} from './limits'
+
 /** Table shape that `alignCsvTables` accepts, plus the xlsx-only parse facts. */
 export interface XlsxTableData {
   readonly header: readonly string[]
@@ -47,6 +59,8 @@ export interface XlsxTableMeta {
   readonly hiddenColumns: readonly string[]
   /** Merged ranges, e.g. `A4:B5`. */
   readonly mergedRanges: readonly string[]
+  /** Runtime watermark warnings (§5.5); empty when the parse stayed under 60%. */
+  readonly warnings: readonly string[]
 }
 
 /** One left/right sheet pair matched by name (case-insensitive). */
@@ -65,6 +79,14 @@ export interface XlsxSheetPairing {
 export interface XlsxParseOptions {
   /** Sheet to parse; case-insensitive. Defaults to the workbook's first sheet. */
   readonly sheetName?: string
+  /** Concurrent tabs held by the comparison; picks the §5.1 budget. Default 1. */
+  readonly tabCount?: 1 | 3
+  /** Read mode driving the §5.1 amplification factor. Default `dense`. */
+  readonly mode?: XlsxBudgetMode
+  /** RSS probe (bytes); injected so the §5.5 watermark is testable. */
+  readonly rssProbe?: () => number
+  /** Startup RSS baseline; defaults to the first probe sample. */
+  readonly baselineRss?: number
 }
 
 const READ_OPTIONS = {
@@ -91,6 +113,26 @@ export function parseXlsxSheet(bytes: Uint8Array, sheetName: string): XlsxTableD
 
 /** Parse a workbook's first sheet, or the sheet named in `options`. */
 export function parseXlsxTable(bytes: Uint8Array, options: XlsxParseOptions = {}): XlsxTableData {
+  const budget = resolveXlsxBudget({
+    tabCount: options.tabCount ?? 1,
+    mode: options.mode ?? 'dense'
+  })
+  if (!budget.supported) {
+    throw new XlsxLimitExceededError(
+      { tier: 'budget', rule: 'unsupported-combination', threshold: 0 },
+      0
+    )
+  }
+
+  // Container gates first: central directory only, nothing inflated yet.
+  const report = inspectXlsxContainer(bytes, budget)
+  const caps = effectiveXlsxCaps(budget)
+  const warnings: string[] = []
+  const probe = options.rssProbe ?? (() => process.memoryUsage().rss)
+  const baselineRss = options.baselineRss ?? probe()
+  const usedBytes = (): number => Math.max(report.decompressedBytes, probe() - baselineRss)
+  checkXlsxWatermark(usedBytes(), budget.decompressedBytes, warnings)
+
   const requested = options.sheetName
   const sheetNames = listSheets(bytes)
   if (requested !== undefined && !sheetNames.some((name) => sameSheetName(name, requested))) {
@@ -114,18 +156,32 @@ export function parseXlsxTable(bytes: Uint8Array, options: XlsxParseOptions = {}
         uncachedFormulaCells: 0,
         hiddenRows: [],
         hiddenColumns: [],
-        mergedRanges: []
+        mergedRanges: [],
+        warnings
       },
       [],
       []
     )
   }
 
+  assertSheetXmlLimit(report, bytes, sheetName, caps)
+  assertSharedStringsLimit(report, bytes, caps)
+
   const workbook = XLSX.read(bytes, { ...READ_OPTIONS, sheets: sheetName })
   const sheet = workbook.Sheets[sheetName] as DenseWorkSheet | undefined
   const date1904 = Boolean(workbook.Workbook?.WBProps?.date1904)
 
-  return buildTable(workbook, sheetName, sheet, date1904)
+  const range = sheetRef(sheet)
+  if (range !== undefined) {
+    assertSheetBounds({
+      rows: range.e.r - range.s.r + 1,
+      columns: range.e.c - range.s.c + 1,
+      nonEmptyCells: countNonEmptyCells(sheet?.['!data'] ?? [], range)
+    })
+  }
+  checkXlsxWatermark(usedBytes(), budget.decompressedBytes, warnings)
+
+  return buildTable(workbook, sheetName, sheet, date1904, warnings)
 }
 
 /**
@@ -166,6 +222,27 @@ function sameSheetName(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase()
 }
 
+function sheetRef(sheet: DenseWorkSheet | undefined): XLSX.Range | undefined {
+  const ref = sheet?.['!ref']
+  return ref === undefined ? undefined : XLSX.utils.decode_range(ref)
+}
+
+/** Cells carrying any value inside the range; merged blanks and stubs do not count. */
+function countNonEmptyCells(
+  data: readonly (readonly CellObject[])[],
+  range: XLSX.Range
+): number {
+  let count = 0
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    const row = data[r]
+    if (row === undefined) continue
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      if (row[c]?.v != null) count += 1
+    }
+  }
+  return count
+}
+
 function buildMetaTable(
   meta: XlsxTableMeta,
   header: readonly string[],
@@ -178,7 +255,8 @@ function buildTable(
   workbook: WorkBook,
   sheetName: string,
   sheet: DenseWorkSheet | undefined,
-  date1904: boolean
+  date1904: boolean,
+  warnings: readonly string[]
 ): XlsxTableData {
   const sheetNames = [...workbook.SheetNames]
   const mergeRanges: XLSX.Range[] = sheet?.['!merges'] ?? []
@@ -191,7 +269,8 @@ function buildTable(
     uncachedFormulaCells: 0,
     hiddenRows: [],
     hiddenColumns: [],
-    mergedRanges
+    mergedRanges,
+    warnings
   }
 
   const ref = sheet?.['!ref']
