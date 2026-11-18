@@ -48,6 +48,11 @@
       "command": "pnpm test src/core/xlsx/limits.test.ts src/core/xlsx/parse.test.ts"
     },
     {
+      "id": "xlsx-workbench-gate",
+      "cwd": ".",
+      "command": "pnpm test src/core/xlsx/hidden.test.ts src/renderer/src/workbench/xlsxCompare.test.ts src/renderer/src/views/XlsxCompareView.dom.test.tsx"
+    },
+    {
       "id": "syntax-core",
       "cwd": ".",
       "command": "pnpm test src/core/syntax src/core/theme/contrast.test.ts"

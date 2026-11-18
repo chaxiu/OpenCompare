@@ -96,7 +96,7 @@ OpenCompare 的多会话工作台壳层：视觉基线（token + 基础组件）
 
 - **不做任何对比 / 合并算法**：目录树差异计算、行级与字符级 Diff、3-way 冲突求解、CSV 主键对齐、JSON/YAML 语义 diff 一律不在本域；除目录会话四态计数（运行时按过滤档派生）外，视图统计与标签取自样本 answer key。
 - **不做各视图内的对比 / 合并 / 保存业务**：合并结果保存、原位写回、快照导出归 `code-diff-merge` / `snapshot` 域；本域只提供会话 `dirty` 与壳层编排（导出经 `handleExportSnapshot` 调 `PlatformPort.saveFile`）。
-- 不做 Electron 侧把样本落盘真实临时目录；不做增量同步、跨层级模板归位提取器、远端 FTP / SFTP、Hex 二进制对比、`.xlsx` 解析。
+- 不做 Electron 侧把样本落盘真实临时目录；不做增量同步、跨层级模板归位提取器、远端 FTP / SFTP、Hex 二进制对比、xlsx 单表已纳入（值提取后复用 CSV 对齐）；仍不做公式求值 / 样式·批注·条件格式 diff / 合并区逐格展开 / `.xls` BIFF。
 - 不做快捷键体系与命令面板（分栏拖拽在范围内）：只保留 `Cmd/Ctrl+N` 与对话框内 `Enter` / `Esc`，不做 `Cmd+W`、可配置键位。
 - 不做路径输入增强：无最近打开、补全、历史、书签、字段级内联校验样式或 notice 改版；错误只用一行 `role="alert"` 且只展示 `compareRequest` 给出原因；不引路径沙箱 / 白名单，不做启动参数 / `opencompare://` 注入（归 `compare-request`）。
 - 不做浅色主题成品与主题切换 UI；不做组件大全、HTML 设计稿；不改 `.munk/baseline/**`（由 Delivery 折入）。

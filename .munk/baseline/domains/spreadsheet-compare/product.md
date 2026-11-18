@@ -1,11 +1,11 @@
 # Domain: spreadsheet-compare
 
-xlsx / xlsm（Excel OOXML 表格）对比解析域。两部分现行口径：① 评估结论（`docs/plans/2026-11-18-xlsx-xlsm-comparison-assessment.md`）——冻结语义边界、选型与发行源结论、由静置护栏反推的体积/内存上限、供应链责任与验证边界；② **已落地的值提取层 `src/core/xlsx/`**——把工作簿读成与 `CsvTableData` 同形状的 `{header, rows, meta}`，供上层原样复用 `alignCsvTables`。上限 / zip bomb 与运行时水位已落地（`src/core/xlsx/limits.ts`），工作台接入**仍未落地**，`csv-align` / `structured` / `workbench` / `directory` 现有「不做 `.xlsx`」非目标在接入类 WI 通过前继续有效。
+xlsx / xlsm（Excel OOXML 表格）对比解析域。两部分现行口径：① 评估结论（`docs/plans/2026-11-18-xlsx-xlsm-comparison-assessment.md`）——冻结语义边界、选型与发行源结论、由静置护栏反推的体积/内存上限、供应链责任与验证边界；② **已落地的值提取层 `src/core/xlsx/`**——把工作簿读成与 `CsvTableData` 同形状的 `{header, rows, meta}`，供上层原样复用 `alignCsvTables`。W1 解析层（`src/core/xlsx/parse.ts`）、W2 上限层（`src/core/xlsx/limits.ts`）与 W3 工作台接入（`src/renderer/src/workbench/xlsxCompare.ts` + `src/renderer/src/views/XlsxCompareView.tsx`）均已落地（上限 / zip bomb 与运行时水位随之生效）；拖两个 `.xlsx` / `.xlsm` 即并入 CSV 同一链路出四态，`csv-align` / `structured` / `workbench` / `directory` / `code-diff-merge` 的「不做 `.xlsx`」非目标已按上述口径收窄。
 
 ## 范围
 
 - **评估文档**：`docs/plans/2026-11-18-xlsx-xlsm-comparison-assessment.md`，中文、表格化、结论先行（当前 122 行），按「语义边界 → 选型与供应链 → 非矩形 → 复用边界 → 上限 → 工作量 → 证据 → 验证边界」排序。
-- **值提取层（`src/core/xlsx/`，已落地）**：入口 `parseXlsxTable(bytes, options?)`（默认取工作簿首个 sheet）、`parseXlsxSheet(bytes, sheetName)`（按名取表）、`listSheets(bytes)`、`matchXlsxSheets(left, right)`（两侧按名大小写不敏感配对 + 左右差集）。输出 `{ header, rows, meta }`：`header` 与所有单元格均为字符串，可直接喂 `alignCsvTables(left, right, keyColumns)` 不经二次转换。`meta` 只放解析事实、不参与 diff：`sheetName` / `sheetNames` / `headerRow` / `date1904` / `uncachedFormulaCells` / `hiddenRows` / `hiddenColumns` / `mergedRanges`。`dense: true` 读入；空表头按列字母（`A`/`B`…）补齐并按「首个同名保留」去重；隐藏行列默认参与比较、仅在 `meta` 标注（供上层做「忽略隐藏」开关）；`.xlsm` 一律 `bookVBA: false`。
+- **值提取层（`src/core/xlsx/`，已落地）**：入口 `parseXlsxTable(bytes, options?)`（默认取工作簿首个 sheet）、`parseXlsxSheet(bytes, sheetName)`（按名取表）、`listSheets(bytes)`、`matchXlsxSheets(left, right)`（两侧按名大小写不敏感配对 + 左右差集）。输出 `{ header, rows, meta }`：`header` 与所有单元格均为字符串，可直接喂 `alignCsvTables(left, right, keyColumns)` 不经二次转换。`meta` 只放解析事实、不参与 diff：`sheetName` / `sheetNames` / `headerRow` / `date1904` / `uncachedFormulaCells` / `hiddenRows` / `hiddenColumns` / `hiddenColumnIndexes`（隐藏列在 `header` / 行数组中的下标，供上层「忽略隐藏」重算）/ `mergedRanges` / `warnings`。`dense: true` 读入；空表头按列字母（`A`/`B`…）补齐并按「首个同名保留」去重；隐藏行列默认参与比较、仅在 `meta` 标注（供上层做「忽略隐藏」开关）；`.xlsm` 一律 `bookVBA: false`。
 - **上限与拒绝层（`src/core/xlsx/limits.ts`，已落地）**：`resolveXlsxBudget({tabCount, mode})` 按 §5.1 返回双栏收紧值（①1 tab dense 300 MiB / 容器 40 MiB、②1 tab 普通 171 / 20 MiB、③3 tab dense 100 / 13 MiB），3 tab + 普通返回 `supported: false` 而不给预算；`inspectXlsxContainer` 只读 zip 中央目录即判容器 / 条目数 / 单条目 / 压缩比 / 累计解压预算（未解压即拒绝），`assertSheetXmlLimit` / `assertSharedStringsLimit` / `assertSheetBounds` 管单 sheet 与共享字符串，`checkXlsxWatermark` 在水位 60% 记 warning 进 `meta.warnings`、80% 中止并丢弃已产出对象。任何拒绝统一抛 `XLSX_LIMIT_EXCEEDED` 并带 `{ limit, observed }`，不产出 rows、不写任何会话状态。
 - **语义边界（后续实现的可执行口径，本轮冻结）**：
   - ① 公式：只读 `<c><v>` 缓存值（`cellFormula: false`），不求值、不解析公式文本；无缓存值统一按 `''` 处理，解析摘要记 `uncachedFormulaCells`，非 0 时 UI 提示「N 个公式无缓存值，按空比较」。
@@ -15,9 +15,10 @@ xlsx / xlsm（Excel OOXML 表格）对比解析域。两部分现行口径：①
   - ⑤ 数字与日期：日期按 `date1904` 基准 + `numFmt` 判定后归一化为 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:mm:ss`（无时区）；浮点 `toPrecision(15)` 后去尾零再 diff；`.xlsm` 一律只读数据、绝不执行宏（`bookVBA: false`），「必须执行宏才能取值」的文件类型直接排除。
 - **选型结论**：选 SheetJS CE，但**换发行源**——用 SheetJS 官方 CDN 的 `xlsx` 0.20.3 tarball（锁版本 + sha256，CI 校验），不用 npm 上的 0.18.5；CDN 不可得时退到自研 zip+XML，禁止回退 npm 0.18.5。三路径（SheetJS CE / exceljs 4.4.0 / 自研）已并列比较 license、活跃度、包体、只读流式、内存放大。
 - **供应链责任（§2.2）**：责任人为本产品负责人，maintain 态随月度巡检只读探测 CDN 版本线（只记录、不自动升级），纳入开发后由该项实现负责人承接；任何升级须负责人批准并作为独立工作项，升级前复跑五项断言（sha256 与 lockfile `integrity` 一致 / 对照 Advisory 确认不在 `CVE-2023-30533` 范围 `< 0.19.3` / `xlsx.mjs` 与 `dist/*.js` 的 `eval(`、`new Function` 扫描 0 命中 / §8 六类解析层单测全绿 / 典型样本四态计数与升级前逐项一致）；退自研触发 = 巡检 404 或连续 30 天 CDN 不可得或哈希校验失败且无官方替代源，期间不得回退 npm 0.18.5。§6 风险列已指向 §2.2。
-- **验证边界（§8）**：工作台接入仍未落地，Host 记的 `not-applicable` 只表示「未运行」，**不是通过、不是合规证据**，不得对外写「已支持 xlsx」。已落地部分（语义解析层 + 依赖钉版 + 上限拒绝层）进 `code_gates`：`xlsx-parse-semantics`（`src/core/xlsx/parse.test.ts`）、`xlsx-dep-integrity`（`src/xlsx-dep-gate.test.ts`）与 `xlsx-limit-gate`（`src/core/xlsx/limits.test.ts` + `parse.test.ts`）。§8 六类中的 zip bomb 拒绝与四类超限拒绝（含 `{limit, observed}`）已由上限项补齐；工作台接入前仍不得把 xlsx 支持写成「已支持」。
-- **`alignCsvTables` 复用边界**：xlsx 解析只作前置层，输出 `{header, rows}` 后原样复用 `src/core/csv/align.ts`，`align.ts` 保持零改动；类型只收字符串这一缺口由解析层归一化在入口吸收，上限与 zip bomb 判定仍留给解析层入口（未落地）。
+- **验证边界（§8）**：工作台接入已落地，`xlsx-workbench-gate`（`src/core/xlsx/hidden.test.ts` + `src/renderer/src/workbench/xlsxCompare.test.ts` + `src/renderer/src/views/XlsxCompareView.dom.test.tsx`）覆盖隐藏行列策略、会话层顺序解析、预算档位、拒绝不建 tab 与逐表四态；Host 记的 `not-applicable` 只表示「未运行」，**不是通过、不是合规证据**，不得对外写「已支持 xlsx」。已落地部分（语义解析层 + 依赖钉版 + 上限拒绝层）进 `code_gates`：`xlsx-parse-semantics`（`src/core/xlsx/parse.test.ts`）、`xlsx-dep-integrity`（`src/xlsx-dep-gate.test.ts`）与 `xlsx-limit-gate`（`src/core/xlsx/limits.test.ts` + `parse.test.ts`）。§8 六类中的 zip bomb 拒绝与四类超限拒绝（含 `{limit, observed}`）已由上限项补齐；工作台接入已落地，但对外仍**不得**把 xlsx 支持写成「已支持」（README / Issue / 对外文案零改动）。
+- **`alignCsvTables` 复用边界**：xlsx 解析只作前置层，输出 `{header, rows}` 后原样复用 `src/core/csv/align.ts`，`align.ts` 保持零改动；类型只收字符串这一缺口由解析层归一化在入口吸收，上限与 zip bomb 判定由解析层入口统一承担（已落地，会话层只调既有导出、不重写阈值）。
 - **非矩形四类结论**：稀疏行只发射有非空单元格的行（原行号进 `sourceRow` 旁路，不参与主键）；隐藏行列默认参与比较并提示计数，提供「忽略隐藏」开关；多 sheet 按 sheet 名精确配对（大小写不敏感），不做跨 sheet 合并，多选时逐 sheet 独立出结果并汇总；主键列与合并区相交时解析层直接报可操作错误，不产出误导性 added/removed。
+- **工作台接入（`src/renderer/src/workbench/xlsxCompare.ts` + `src/renderer/src/views/XlsxCompareView.tsx`，已落地）**：扩展名白名单唯一入口 `src/shared/fileExtensions.ts`（`XLSX_FILE_EXTENSIONS` = `xlsx` / `xlsm`；`.xls` / `.xlsb` 仍拒），`openFilePairSession` 见到 `family === 'xlsx'` 即转 `openXlsxPairSession`，不走 CSV 文本分支。两侧严格顺序：左整本读完、逐表归一化后丢字节，再读右；预算取 `resolveXlsxBudget({tabCount, mode})`（默认 1 tab + dense），3 tab + 普通在读数前即拒绝。会话多存 `xlsx: { sheets, leftOnly, rightOnly, budget }`，`adhoc.tables` 镜像首张配对表以复用 CSV 四态与单元格高亮；`XLSX_LIMIT_EXCEEDED` 由 `filePairErrorMessage` 统一转「文件超出对比上限：<limit>」，不建 tab、不写会话状态。
 
 ## 验收
 
@@ -48,11 +49,20 @@ xlsx / xlsm（Excel OOXML 表格）对比解析域。两部分现行口径：①
 - ac-no-static-eval：新增代码与 vendored 产物 `eval(` / `new Function` 静态扫描 0 命中，ESLint `no-eval` / `no-new-func` 保持开启。
 - ac-align-untouched：`src/core/csv/align.ts` 零改动（`git diff` 不含该文件）。
 - ac-tab-caliber：本文件 ④「四情形」标签须与 §5.1 的 3 tab 反推口径一致（并发 tab 数为 3，不是 2）；133 / 67 MiB 只在 3 tab 下成立（并发 2 tab 时每 tab 200 MiB、双栏 171 MiB），不得回退为两 tab 表述，其余数字（400 / 200 / 133 / 67、40 / 20 / 13 / 7、1,300 / ≈1,569、300 / 171 / 100 / 57）保持原样。
+- ac-whitelist：扩展名白名单只在 `src/shared/fileExtensions.ts` 变更（`XLSX_FILE_EXTENSIONS` + `extensionFamily`）；`.xlsx` / `.xlsm` 入会话，`.xls` / `.xlsb` 与 `notes.xlsx.txt` 仍按原规则被拒，`src/shared/fileExtensions.test.ts` 两向断言。
+- ac-four-state：真实 `.xlsx` / `.xlsm` 对经 `openXlsxPairSession` → `alignCsvTables` 得到与 CSV 一致的 same / added / removed / modified 计数与单元格高亮；`src/core/csv/align.ts` 零改动。
+- ac-sequential：双栏解析严格顺序（左完成才起右），`onParse` 探针断言两侧不同时解析；1 tab 与 3 tab 各取对应预算，3 tab + 普通在读数前拒绝。
+- ac-reject-ui：超限与 zip bomb 走同一文案入口「文件超出对比上限：<limit>」（`limit` 取错误自带档位 / 阈值），不建 tab、无部分渲染、会话状态不变，已有会话仍可切回。
+- ac-formula-hidden：`meta.uncachedFormulaCells > 0` 显示「N 个公式无缓存值，按空比较」；隐藏行列默认参与且摘要给计数，「忽略隐藏行列」开关经 `applyXlsxHiddenPolicy` 重算（不重读文件）。
+- ac-sheets：多 sheet 按名（大小写不敏感）配对，两侧差集单列，多选逐表各出四态，不合并成一张表。
+- ac-six-classes：§8 六类单测（zip bomb / 四类超限 / 合并区 / 日期序列化 / 隐藏行列 / 多 sheet 按名配对）齐备全绿，并由 `xlsx-parse-semantics` / `xlsx-limit-gate` / `xlsx-workbench-gate` 三项在 `code_gates` 可见；W1 / W2 既有断言不得削弱。
+- ac-baseline-lines：各域基线「不做 `.xlsx`」只改该行（`code-diff-merge` / `directory` / `workbench` / `structured` / `csv-align`），统一改为「xlsx 单表已纳入（值提取后复用 CSV 对齐）；仍不做公式求值 / 样式·批注·条件格式 diff / 合并区逐格展开 / `.xls` BIFF」，其余段落与数字零改动。
+- ac-no-public-claim：README、Issue、对外文案零改动，不出现「已支持 xlsx」。
 
 ## 非目标
 
 - 上限三档、zip bomb 与运行时水位已由 `wi_intake_b61f0a79e2e7df93` 在 `src/core/xlsx/limits.ts` 独立交付；本域不再接受会话层另写一套阈值。
-- 不接工作台：不改扩展名白名单、不改拖拽 / 文件选择入口、不加任何 UI 文案与提示（不得写「已支持 xlsx」）。
+- 工作台接入已由 `wi_intake_892f6a7dfaf916c2` 交付（扩展名白名单、会话入口、`XlsxCompareView` 摘要 / 开关 / 逐表四态）；本域后续不再接受第二套扩展名判定或 UI 侧阈值判断，对外文案仍不得写「已支持 xlsx」。
 - 不做公式求值、样式 / 批注 / 条件格式 diff、合并区逐格展开、多 sheet 合并成一张表、`.xls` BIFF、流式 / 临时文件解析、多 sheet 自动配对 UI。
 - 不改 `src/core/csv/align.ts`，不改 `docs/plans/2026-11-18-xlsx-xlsm-comparison-assessment.md` 的任何数字。
 - 不新增第二个 xlsx 库、不回退 npm `xlsx` 0.18.x、不做 CDN 运行期拉取或冷启动联网。
@@ -71,8 +81,8 @@ xlsx / xlsm（Excel OOXML 表格）对比解析域。两部分现行口径：①
 
 ## 最近交付证明
 
-- WI：`wi_intake_b61f0a79e2e7df93`（xlsx 解析上限、zip bomb 拒绝与运行时水位）
+- WI：`wi_intake_892f6a7dfaf916c2`（拖两个 xlsx 出四态并拒绝超限）
 - 日期：2026-11-18
-- 结果：`xlsx-limit-gate`（`src/core/xlsx/limits.test.ts` + `parse.test.ts`）与 `xlsx-parse-semantics` / `xlsx-dep-integrity` 同批入矩阵，全绿。
-- 覆盖摘要：`src/core/xlsx/limits.ts` 交付 `resolveXlsxBudget`（四情形 300 / 171 / 100 / 57 MiB、容器 40 / 20 / 13 / 7 MiB，3 tab + 普通不支持）、中央目录预检（容器 / 条目数 / 单条目 / 压缩比 / 累计解压预算）、单 sheet 行列与 2,000,000 非空格、sheet XML 与共享字符串 1,000,000 条 / 256 MiB、水位 60% warning / 80% 中止（可注入 RSS 探针）；`parseXlsxTable` 在展开前先过闸门，拒绝统一 `XLSX_LIMIT_EXCEEDED` + `{ limit, observed }`，无 rows、无会话状态；`src/core/csv/align.ts` 与评估文档 §5 数字零改动。
-- 注：工作台接入仍留给下一项；change pack 无 `tech.md` / `ux/**` / `tests/cases/**`，本轮 tech/ux 与 QA fold 无源文件可折。
+- 结果：`xlsx-workbench-gate`（`src/core/xlsx/hidden.test.ts` + `src/renderer/src/workbench/xlsxCompare.test.ts` + `src/renderer/src/views/XlsxCompareView.dom.test.tsx`）入矩阵，36 门全绿（`src/munk-gates.test.ts` 期望矩阵同步为三十六个）。
+- 覆盖摘要：`src/shared/fileExtensions.ts` 只加 `XLSX_FILE_EXTENSIONS`（`xlsx` / `xlsm`，`.xls` 仍拒）；`openXlsxPairSession` 顺序解析两侧、只留归一化表、按 `resolveXlsxBudget` 定预算并用 `matchXlsxSheets` 配对；`src/core/xlsx/hidden.ts` 提供隐藏行列计数与「忽略隐藏」重算（`meta.hiddenColumnIndexes` 为新增下标旁路）；`XlsxCompareView` 出逐表四态、无缓存公式提示与差集列表；`XLSX_LIMIT_EXCEEDED` 经 `filePairErrorMessage` 统一出可读文案，不建 tab、不写会话状态。`src/core/csv/align.ts`、`src/core/xlsx/limits.ts` 与评估文档 §5 数字零改动。
+- 注：change pack 无 `tech.md` / `ux/**` / `tests/cases/**`，本轮 tech/ux 与 QA fold 无源文件可折。
