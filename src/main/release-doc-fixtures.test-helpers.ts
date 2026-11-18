@@ -207,6 +207,12 @@ const verifiedTags = [
 /** Newest verified or explicitly announced tag. */
 export const publishedTag = [...verifiedTags, announcedPublicTag].sort(compareTags).at(-1) ?? ''
 
+/** Announced tag whose evidence row / ledger entry has not been written back yet. */
+const pendingEvidenceTags =
+  announcedPublicTag !== '' && !evidenceFacts.some((entry) => entry.tag === announcedPublicTag)
+    ? [announcedPublicTag]
+    : []
+
 // The single read of the real repository facts. Pure assertions consume this
 // object; no `expect` may live in this module.
 export const releaseFacts = {
@@ -235,6 +241,7 @@ export const releaseFacts = {
   history: {
     currentTag,
     headings: [...changelog.matchAll(/^## (.+)$/gm)].map((match) => match[1]),
-    evidence: evidenceFacts
+    evidence: evidenceFacts,
+    pendingEvidence: pendingEvidenceTags
   }
 }
