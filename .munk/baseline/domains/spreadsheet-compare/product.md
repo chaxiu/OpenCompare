@@ -9,7 +9,7 @@ xlsx / xlsm（Excel OOXML 表格）对比解析的**方案评估域**。只交�
   - ① 公式：只读 `<c><v>` 缓存值（`cellFormula: false`），不求值、不解析公式文本；无缓存值统一按 `''` 处理，解析摘要记 `uncachedFormulaCells`，非 0 时 UI 提示「N 个公式无缓存值，按空比较」。
   - ② 合并单元格：只取合并区左上锚点值，区内其余格一律 `''`；不做拆分扩展（不把锚点值复制到每格），行数不变。
   - ③ 样式 / 共享字符串：样式（`styles.xml`、字体、填充、条件格式、批注）不参与 diff；`sharedStrings.xml` 仅作值解析中间层，解析后丢弃索引表，不留 `s=` 痕迹。
-  - ④ 体积与内存：上限（容器 / 累计解压字节 / 单 sheet / 共享字符串表）按 §5.1 **由 1,300 MiB 静置护栏反推**，不是任意常数。反推口径：基线 renderer 99.3 MiB、appTotal 369.1 MiB（`docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json` 的 `samples[0].phase=startup`），renderer 可用 1,200 MiB 与 app 可用 2,191 MiB 取小 → 预算由 renderer 侧 1,200 MiB 约束；公式为 D = 1,200 MiB ÷ 并发 tab 数 ÷ 最坏放大倍数（dense 3× / 普通 6×），容器体积按约 10:1 估算、判定以逐条目 inflate 累计字节为准。四情形（1 tab dense / 1 tab 普通 / 2 tab dense / 2 tab 普通）允许解压 400 / 200 / 133 / 67 MiB，容器 40 / 20 / 13 / 7 MiB，峰值 renderer 1,300 MiB、app ≈1,569 MiB；双栏对比两侧顺序解析再收紧至 300 / 171 / 100 / 57 MiB，基线偏离 >10% 须重算。超限一律拒绝解析，不截断、不降级、不部分渲染。
+  - ④ 体积与内存：上限（容器 / 累计解压字节 / 单 sheet / 共享字符串表）按 §5.1 **由 1,300 MiB 静置护栏反推**，不是任意常数。反推口径：基线 renderer 99.3 MiB、appTotal 369.1 MiB（`docs/perf/evidence/dawnchat-zenmind-20261022-post-fix-3rounds.json` 的 `samples[0].phase=startup`），renderer 可用 1,200 MiB 与 app 可用 2,191 MiB 取小 → 预算由 renderer 侧 1,200 MiB 约束；公式为 D = 1,200 MiB ÷ 并发 tab 数 ÷ 最坏放大倍数（dense 3× / 普通 6×），容器体积按约 10:1 估算、判定以逐条目 inflate 累计字节为准。四情形（1 tab dense / 1 tab 普通 / 3 tab dense / 3 tab 普通）允许解压 400 / 200 / 133 / 67 MiB，容器 40 / 20 / 13 / 7 MiB，峰值 renderer 1,300 MiB、app ≈1,569 MiB；双栏对比两侧顺序解析再收紧至 300 / 171 / 100 / 57 MiB，基线偏离 >10% 须重算。超限一律拒绝解析，不截断、不降级、不部分渲染。
   - ⑤ 数字与日期：日期按 `date1904` 基准 + `numFmt` 判定后归一化为 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:mm:ss`（无时区）；浮点 `toPrecision(15)` 后去尾零再 diff；`.xlsm` 一律只读数据、绝不执行宏（`bookVBA: false`），「必须执行宏才能取值」的文件类型直接排除。
 - **选型结论**：选 SheetJS CE，但**换发行源**——用 SheetJS 官方 CDN 的 `xlsx` 0.20.3 tarball（锁版本 + sha256，CI 校验），不用 npm 上的 0.18.5；CDN 不可得时退到自研 zip+XML，禁止回退 npm 0.18.5。三路径（SheetJS CE / exceljs 4.4.0 / 自研）已并列比较 license、活跃度、包体、只读流式、内存放大。
 - **供应链责任（§2.2）**：责任人为本产品负责人，maintain 态随月度巡检只读探测 CDN 版本线（只记录、不自动升级），纳入开发后由该项实现负责人承接；任何升级须负责人批准并作为独立工作项，升级前复跑五项断言（sha256 与 lockfile `integrity` 一致 / 对照 Advisory 确认不在 `CVE-2023-30533` 范围 `< 0.19.3` / `xlsx.mjs` 与 `dist/*.js` 的 `eval(`、`new Function` 扫描 0 命中 / §8 六类解析层单测全绿 / 典型样本四态计数与升级前逐项一致）；退自研触发 = 巡检 404 或连续 30 天 CDN 不可得或哈希校验失败且无官方替代源，期间不得回退 npm 0.18.5。§6 风险列已指向 §2.2。
@@ -29,6 +29,7 @@ xlsx / xlsm（Excel OOXML 表格）对比解析的**方案评估域**。只交�
 - ac-verify：新增 §8，写明 `not-applicable` = 未运行、不是通过、不得写「32 门全通过」，并逐条列出六类实现期单测。
 - ac-nonrectangular：稀疏行、隐藏行列、多 sheet 选择语义、合并区域对主键对齐影响四类都有结论。
 - ac-surface：`git diff --stat` 只有 `docs/plans/2026-11-18-xlsx-xlsm-comparison-assessment.md` 一个文件；`src/`、`package.json`、lockfile、CI、测试、`docs/perf/evidence/*` 零改动，无依赖安装痕迹。
+- ac-tab-caliber：本文件 ④「四情形」标签须与 §5.1 的 3 tab 反推口径一致（并发 tab 数为 3，不是 2）；133 / 67 MiB 只在 3 tab 下成立（并发 2 tab 时每 tab 200 MiB、双栏 171 MiB），不得回退为两 tab 表述，其余数字（400 / 200 / 133 / 67、40 / 20 / 13 / 7、1,300 / ≈1,569、300 / 171 / 100 / 57）保持原样。
 
 ## 非目标
 
@@ -47,8 +48,8 @@ xlsx / xlsm（Excel OOXML 表格）对比解析的**方案评估域**。只交�
 
 ## 最近交付证明
 
-- WI：`wi_intake_4a04ca92f46d7815`（xlsx 评估文档内存上限与供应链责任修正，doc-only）
+- WI：`wi_intake_0393cfcbc068ed65`（订正本域 ④「四情形」tab 口径，docs-only）
 - 日期：2026-11-18
 - 结果：code_gates passed。
-- 覆盖摘要：仅改 `docs/plans/2026-11-18-xlsx-xlsm-comparison-assessment.md`（docs-only）：§5 重写为由 1,300 MiB 静置护栏反推的上限（反推口径 / 四情形表 / 双栏收紧 / 运行时水位 / zip bomb 拒绝），§1 ④ 引用改准；新增 §2.2 供应链责任（责任人 / 升级复跑五项断言 / 退自研触发）并让 §6 风险列指向之；新增 §8 验证边界（`not-applicable` = 未运行 ≠ 通过、六类实现期单测）。`src/`、`package.json`、lockfile、CI、测试、`docs/perf/evidence/*` 零改动。
+- 覆盖摘要：仅改本文件 ④ 一行——「四情形」标签的并发 tab 数由 2 改为 3（两处「2」→「3」），使 133 / 67 MiB 与 §5.1 的 3 tab 反推口径对齐；该句其余字符与全部数字逐字未动，评估文档、`src/`、`package.json`、lockfile、CI、测试零改动。
 - 注：change pack 未提供 `tech.md` / `ux/**` 与 `tests/cases/**`，本轮 tech/ux 与 QA fold 无源文件可折。
