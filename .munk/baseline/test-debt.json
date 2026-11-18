@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 53501
+    "repoTestLines": 53579
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 53102,
-      "to": 53501,
-      "reason": "xlsx workbench wiring: whitelist both directions, real xlsx/xlsm four-state alignment with cell highlighting, sequential two-side parse probe plus tab budget, size/zip-bomb rejection before any session commit, hidden row/column switch and per-sheet independent results",
-      "addedCases": 11
+      "from": 53501,
+      "to": 53579,
+      "reason": "xlsx renderer-safe guard in src/xlsx-dep-gate.test.ts: scans src/core/xlsx production sources plus every core module imported directly by the renderer for Buffer / process. globals, asserts the current tree passes and an injected global fails with file:line",
+      "addedCases": 3
     }
   ]
 }
