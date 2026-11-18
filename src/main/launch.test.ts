@@ -19,6 +19,8 @@ vi.mock('../shared/compareRequest', async (importOriginal) => {
 
 const EXEC = '/opt/OpenCompare.app/Contents/MacOS/OpenCompare'
 const APP_PATH = '/repo/opencompare'
+/** A dev app directory whose basename does not look like an executable. */
+const DEV_APP_DIR = '/tmp/opencompare-src'
 
 interface WindowStub extends LaunchWindow {
   readonly calls: string[]
@@ -51,6 +53,8 @@ interface HarnessOptions {
   readonly lock?: boolean
   readonly isPackaged?: boolean
   readonly defaultApp?: boolean
+  readonly appPath?: string
+  readonly appEntry?: string
   readonly appReady?: boolean
 }
 
@@ -63,7 +67,8 @@ function harness(options: HarnessOptions = {}) {
   const bindings = {
     argv: options.argv ?? [],
     execPath: EXEC,
-    appPath: APP_PATH,
+    appPath: options.appPath ?? APP_PATH,
+    appEntry: options.appEntry,
     defaultApp: options.defaultApp ?? false,
     cwd: options.cwd ?? '/work',
     homeDir: '/home/tester',
@@ -172,6 +177,98 @@ describe('second-instance takeover', () => {
     ])
   })
 
+  it('strips the absolute app path a takeover carries instead of the dev entry `.`', async () => {
+    // First launch: `electron .`; the takeover argv names the same entry
+    // absolutely. The entry must not survive as the left side.
+    const h = harness({
+      probe: probeOf({
+        '/tmp/a.txt': 'file',
+        '/tmp/b.txt': 'file',
+        [DEV_APP_DIR]: 'directory'
+      }),
+      defaultApp: true,
+      appPath: DEV_APP_DIR,
+      appEntry: '.'
+    })
+    const controller = startLaunch(h.bindings)
+
+    await controller?.onSecondInstance([EXEC, DEV_APP_DIR, '/tmp/a.txt', '/tmp/b.txt'], '/work')
+    controller?.onRendererReady()
+
+    expect(h.sent).toHaveLength(1)
+    expectRequest(h.sent[0])
+  })
+
+  it('strips the resolved `.` when the takeover names the entry both ways', async () => {
+    const h = harness({
+      probe: FILE_PAIR,
+      defaultApp: true,
+      appPath: DEV_APP_DIR,
+      appEntry: DEV_APP_DIR
+    })
+    const controller = startLaunch(h.bindings)
+
+    await controller?.onSecondInstance([EXEC, '.', '/tmp/a.txt', '/tmp/b.txt'], DEV_APP_DIR)
+    controller?.onRendererReady()
+
+    expectRequest(h.sent[0])
+  })
+
+  it('keeps `--left=` / `--right=` working with a dev launcher prefix', async () => {
+    const h = harness({
+      probe: FILE_PAIR,
+      defaultApp: true,
+      appPath: DEV_APP_DIR,
+      appEntry: '.'
+    })
+    const controller = startLaunch(h.bindings)
+
+    await controller?.onSecondInstance(
+      [EXEC, DEV_APP_DIR, '--left=/tmp/a.txt', '--right=/tmp/b.txt'],
+      '/work'
+    )
+    controller?.onRendererReady()
+
+    expectRequest(h.sent[0])
+  })
+
+  it('drops a lone positional instead of comparing the app directory', async () => {
+    const h = harness({
+      probe: probeOf({ '/tmp/a.txt': 'file', [DEV_APP_DIR]: 'directory' }),
+      defaultApp: true,
+      appPath: DEV_APP_DIR,
+      appEntry: '.'
+    })
+    const controller = startLaunch(h.bindings)
+
+    await controller?.onSecondInstance([EXEC, DEV_APP_DIR, '/tmp/a.txt'], '/work')
+    controller?.onRendererReady()
+
+    expect(h.sent).toEqual([])
+    expect(controller?.pendingCount()).toBe(0)
+  })
+
+  it('reports an explicitly requested directory / file pair against the typed paths', async () => {
+    const h = harness({
+      probe: probeOf({ '/tmp/dir': 'directory', '/tmp/a.txt': 'file', [DEV_APP_DIR]: 'directory' }),
+      defaultApp: true,
+      appPath: DEV_APP_DIR,
+      appEntry: '.'
+    })
+    const controller = startLaunch(h.bindings)
+
+    await controller?.onSecondInstance([EXEC, DEV_APP_DIR, '/tmp/dir', '/tmp/a.txt'], '/work')
+    controller?.onRendererReady()
+
+    const payload = h.sent[0]
+    expect(payload.ok).toBe(false)
+    if (payload.ok) return
+    expect(payload.message).toContain('类型不一致')
+    expect(payload.message).toContain('/tmp/dir')
+    expect(payload.message).not.toContain(DEV_APP_DIR)
+    expect(payload).not.toHaveProperty('request')
+  })
+
   it('creates a window when all were closed, then delivers after it is ready', async () => {
     const h = harness({ probe: FILE_PAIR })
     const controller = startLaunch(h.bindings)
@@ -215,6 +312,35 @@ describe('argv intake', () => {
     expect(
       stripLauncherPrefix([EXEC, '.', '/tmp/a.txt', '/tmp/b.txt'], {
         execPath: EXEC,
+        appEntry: '.',
+        defaultApp: true
+      })
+    ).toEqual(['/tmp/a.txt', '/tmp/b.txt'])
+
+    // A takeover spells that same dev entry absolutely.
+    expect(
+      stripLauncherPrefix([EXEC, DEV_APP_DIR, '/tmp/a.txt', '/tmp/b.txt'], {
+        execPath: EXEC,
+        appPath: DEV_APP_DIR,
+        appEntry: '.',
+        defaultApp: true
+      })
+    ).toEqual(['/tmp/a.txt', '/tmp/b.txt'])
+
+    // …and the reverse spelling resolves against the invoking directory.
+    expect(
+      stripLauncherPrefix(
+        [EXEC, '.', '/tmp/a.txt', '/tmp/b.txt'],
+        { execPath: EXEC, appPath: DEV_APP_DIR, appEntry: DEV_APP_DIR, defaultApp: true },
+        DEV_APP_DIR
+      )
+    ).toEqual(['/tmp/a.txt', '/tmp/b.txt'])
+
+    // A real first side is never mistaken for the entry.
+    expect(
+      stripLauncherPrefix([EXEC, '/tmp/a.txt', '/tmp/b.txt'], {
+        execPath: EXEC,
+        appPath: DEV_APP_DIR,
         appEntry: '.',
         defaultApp: true
       })
