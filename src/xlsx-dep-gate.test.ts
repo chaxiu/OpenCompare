@@ -62,6 +62,7 @@ describe('vendored xlsx dependency', () => {
 describe('no static eval in the new layer or the vendored bundle', () => {
   const sources = [
     'src/core/xlsx/parse.ts',
+    'src/core/xlsx/limits.ts',
     'src/core/xlsx/dependency.ts',
     'node_modules/xlsx/xlsx.mjs',
     'node_modules/xlsx/xlsx.js'

@@ -32,6 +32,10 @@ const EXPECTED_GATES = [
   { id: 'xlsx-parse-semantics', command: 'pnpm test src/core/xlsx/parse.test.ts' },
   { id: 'xlsx-dep-integrity', command: 'pnpm test src/xlsx-dep-gate.test.ts' },
   {
+    id: 'xlsx-limit-gate',
+    command: 'pnpm test src/core/xlsx/limits.test.ts src/core/xlsx/parse.test.ts'
+  },
+  {
     id: 'syntax-core',
     command: 'pnpm test src/core/syntax src/core/theme/contrast.test.ts'
   },
@@ -206,16 +210,16 @@ function gateById(manifest: GateManifest, id: string): GateEntry | undefined {
 }
 
 describe('default code-gates matrix', () => {
-  it('is version 1 with exactly thirty-four pure gates in order and no perf-gate', () => {
+  it('is version 1 with exactly thirty-five pure gates in order and no perf-gate', () => {
     expect(defaultManifest.version).toBe(1)
-    expect(defaultManifest.gates).toHaveLength(34)
+    expect(defaultManifest.gates).toHaveLength(35)
     expect(defaultManifest.gates.map((gate) => gate.id)).toEqual(
       EXPECTED_GATES.map((gate) => gate.id)
     )
     expect(gateById(defaultManifest, 'perf-gate')).toBeUndefined()
   })
 
-  it('keeps the thirty-four commands verbatim with cwd "."', () => {
+  it('keeps the thirty-five commands verbatim with cwd "."', () => {
     expect(defaultManifest.gates.map((gate) => ({ id: gate.id, command: gate.command }))).toEqual(
       EXPECTED_GATES.map((gate) => ({ id: gate.id, command: gate.command }))
     )
