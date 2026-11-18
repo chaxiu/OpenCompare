@@ -42,3 +42,7 @@
 - `code_gates` 跑在已 install 的 worktree（或先 `pnpm install --frozen-lockfile`），不把主检出未安装依赖的红当产品回归。
 - 禁止长采样与 sleep 轮询 CI；不改门禁阈值、不缩样本。
 - 交付须给出：`git diff --stat`、六类单测用例名、`code_gates` evidence attempt 与 cwd、域基线「原句 → 新句」映射、`git diff` 证明 `align.ts` 与 `limits.ts` 阈值未改。
+
+## 测试豁免
+
+- path: src/munk-gates.test.ts | reason: 新增第 36 个门禁 `xlsx-workbench-gate` 后，`default code-gates matrix` 里两条矩阵回声用例的标题必须由 thirty-five 改为 thirty-six，`toHaveLength(36)` 与 `EXPECTED_GATES` 同步扩容；用例本体保留（版本 1、顺序逐条相等、无 perf-gate、命令原文逐字相等且 cwd 为 `.`），属改名而非删除，无 `.skip` / `.only`，断言强度未削弱。
