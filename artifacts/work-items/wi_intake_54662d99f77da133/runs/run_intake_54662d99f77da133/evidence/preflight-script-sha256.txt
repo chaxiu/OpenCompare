@@ -1,0 +1,3 @@
+8e3c024d44c9686ff59acc5f21286519fc392e19550c37bb65cd10d769891459  scripts/coverage-gate.mjs
+a67750c833c6d4589c329726f215f550934b49fbf6fcd899da665345daa59165  scripts/coverage-gate-preflight.mjs
+eada357149e6b5c0f7e7f45024e01d8a6561e4212b93f4324abd672dabe1f551  scripts/coverage-gate-preflight-cache.mjs

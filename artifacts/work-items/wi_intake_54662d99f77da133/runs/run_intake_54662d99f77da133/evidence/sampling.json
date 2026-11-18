@@ -1,0 +1,44 @@
+{
+  "workItemId": "wi_intake_54662d99f77da133",
+  "runId": "run_intake_54662d99f77da133",
+  "samplePoint": {
+    "commit": "3d300b7069a00beee506115df14d1e3143bab7a3",
+    "tree": "cd7413b22c8ed746b31f84e2bf617ccebf7a21f6"
+  },
+  "commitReachableFromHead": true,
+  "commitsAheadOfSample": 0,
+  "commitsAfterV0224": 39,
+  "startedAtEpochSeconds": 1795019406,
+  "endedAtEpochSeconds": 1795019450,
+  "endedAtUtc": "2026-11-18T16:30:50Z",
+  "measuredAtDate": "2026-11-18T16:30:50.000Z",
+  "reportsDirectory": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports",
+  "freshSummary": "/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports/coverage-summary.json",
+  "freshSummarySha256": "see fresh-coverage-summary.sha256",
+  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports",
+  "provider": "v8",
+  "scope": {
+    "include": "src/core/**",
+    "exclude": [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/__fixtures__/**"
+    ]
+  },
+  "ignoreDirectives": {
+    "v8": 0,
+    "c8": 0
+  },
+  "reuseKey": {
+    "tree": "cd7413b22c8ed746b31f84e2bf617ccebf7a21f6",
+    "measuredFiles": "32 src/core modules in the fresh summary",
+    "preflightScriptHashes": "see preflight-script-sha256.txt",
+    "environment": {
+      "node": "v24.4.1",
+      "pnpm": "10.18.3",
+      "vitest": "5.0.5",
+      "os": "darwin"
+    }
+  },
+  "note": "Cold run in this worktree; the fresh summary was produced by this run and copied into evidence, never reused from a historical sample. Test files are excluded from the measured scope, so the xlsx test additions lift src/core branches while the denominators stay production-only."
+}

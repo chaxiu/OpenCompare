@@ -1,0 +1,39 @@
+3d300b7 munk delivery: merge wi_intake_484cf84d5e872418
+5ab89bb chore(change-pack): record prd for wi_intake_484cf84d5e872418
+efb0234 chore(baseline): record .munk/baseline/domains/release-version-anchor + .github + CHANGELOG.md + docs for wi_intake_484cf84d5e872418
+1002037 chore(release): converge 0.2.25 version anchor, bilingual notes and changelog
+50a5de3 merge wi_intake_56e94a818c731f15: renderer-safe xlsx parse (no Buffer/process globals) with static guard
+7cde6a3 merge tip into wi_intake_56e94a818c731f15: combine test-debt growth (launch +126 lines with xlsx guard +3 cases)
+954d468 chore(change-pack): record prd for wi_intake_56e94a818c731f15
+622df63 chore(baseline): record .munk/baseline/domains/spreadsheet-compare for wi_intake_56e94a818c731f15
+3b4391b fix(xlsx): open workbook pairs in the sandboxed renderer build (drop Buffer/process globals)
+67cbb6f munk delivery: merge wi_intake_54a556cf0ed7e584
+83759a6 chore(change-pack): record prd for wi_intake_54a556cf0ed7e584
+1f91ab6 chore(baseline): record .munk/baseline/domains/launch for wi_intake_54a556cf0ed7e584
+1f16d53 fix(launch): strip the app entry in either spelling on second-instance takeover
+0eaed05 munk delivery: merge wi_intake_a25bb3a690f292dc
+be443ee chore(baseline): record .munk/baseline/domains/release-version-anchor for wi_intake_a25bb3a690f292dc
+3aaab86 chore(docs): re-pin screenshot provenance to 3870893 and record xlsx test waiver
+3870893 merge wi_intake_892f6a7dfaf916c2: xlsx workbook pair in the workbench (four-state results, limit rejection, per-sheet compare)
+a407b6e chore(change-pack): record prd for wi_intake_892f6a7dfaf916c2
+4c2585c chore(baseline): record .munk/baseline/domains/code-diff-merge + .munk/baseline/domains/csv-align + .munk/baseline/domains/directory + .munk/baseline/domains/spreadsheet-compare + +3 more for wi_intake_892f6a7dfaf916c2
+a67d9f9 feat(xlsx): open workbook pairs in the workbench with four-state results and limit rejection
+e5cc6d9 munk delivery: merge wi_intake_b61f0a79e2e7df93
+6ca31d6 chore(change-pack): record prd for wi_intake_b61f0a79e2e7df93
+1836d84 chore(baseline): record .munk/baseline/domains/spreadsheet-compare + .munk for wi_intake_b61f0a79e2e7df93
+56d1ead feat(core): add xlsx parse limits, zip-bomb rejection and runtime watermark
+f4ac360 munk delivery: merge wi_intake_175722c24cf0bc7f
+d933f4d chore(change-pack): record prd for wi_intake_175722c24cf0bc7f
+f51f5cd chore(baseline): record .munk/baseline/domains/quality-gates + .munk/baseline/domains/spreadsheet-compare + .munk for wi_intake_175722c24cf0bc7f
+865b0bc feat(core): add xlsx value-extraction layer with vendored SheetJS 0.20.3
+417213a munk delivery: merge wi_intake_0393cfcbc068ed65
+1242042 chore(change-pack): record prd for wi_intake_0393cfcbc068ed65
+8471328 chore(baseline): record .munk/baseline/domains/spreadsheet-compare for wi_intake_0393cfcbc068ed65
+259776f munk delivery: merge wi_intake_4a04ca92f46d7815
+49465d0 chore(change-pack): record prd for wi_intake_4a04ca92f46d7815
+850bfa1 chore(baseline): record .munk/baseline/domains/spreadsheet-compare + docs for wi_intake_4a04ca92f46d7815
+6fea38b munk delivery: merge wi_intake_8596d9bd1aa25b79
+676f237 chore(change-pack): record prd for wi_intake_8596d9bd1aa25b79
+736a75c chore(baseline): record .munk/baseline/domains/spreadsheet-compare + docs for wi_intake_8596d9bd1aa25b79
+8d573b1 munk delivery: merge wi_intake_a462b7ec3982d6a5
+8a023a9 docs(release): point README latest release at v0.2.24 and sync announced-tag fixture; fold release-version-anchor baseline

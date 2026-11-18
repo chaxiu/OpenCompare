@@ -1,0 +1,11 @@
+POSITIVE (release.yml gates job shape, default in-repo baseline):
+node scripts/coverage-gate.mjs --summary /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports/coverage-summary.json --started-at 1795019406 --include 'src/core/**' --exclude '**/*.test.ts' --exclude '**/*.test.tsx' --exclude '**/__fixtures__/**'
+
+NEGATIVE FLOOR (temp baseline outside the repo: floors.totals.lines 97 -> 96, no floorLedger entry):
+node scripts/coverage-gate.mjs --summary /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports/coverage-summary.json --started-at 1795019406 --include 'src/core/**' --exclude '**/*.test.ts' --exclude '**/*.test.tsx' --exclude '**/__fixtures__/**' --baseline /var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/negative-floor-baseline.json
+
+COLD MEASUREMENT (produced fresh-coverage-summary.json for this run):
+pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports
+
+TEST DEBT (ceiling moved 53705 -> 54015 via a declared growth entry, 16 added cases):
+node scripts/test-debt-gate.mjs

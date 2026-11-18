@@ -1,0 +1,4 @@
+src/core/xlsx/dependency.ts lines 100 branches 100 functions 100 statements 100
+src/core/xlsx/hidden.ts lines 100 branches 100 functions 100 statements 100
+src/core/xlsx/limits.ts lines 99.35 branches 96.59 functions 100 statements 98.83
+src/core/xlsx/parse.ts lines 97.4 branches 87.06 functions 100 statements 97.28

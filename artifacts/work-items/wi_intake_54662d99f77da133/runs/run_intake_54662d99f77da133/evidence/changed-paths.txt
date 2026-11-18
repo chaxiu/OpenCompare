@@ -1,0 +1,6 @@
+.munk/baseline/coverage.json
+.munk/baseline/domains/coverage-baseline/product.md
+.munk/baseline/test-debt.json
+src/core/xlsx/hidden.test.ts
+src/core/xlsx/limits.test.ts
+src/core/xlsx/parse.test.ts

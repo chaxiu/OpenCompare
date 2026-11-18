@@ -254,5 +254,45 @@ describe('parseXlsxTable headers, hidden rows and sheets', () => {
       leftOnly: ['Data'],
       rightOnly: ['Other']
     })
+
+    expect(matchXlsxSheets(['Main'], ['MAIN', 'main'])).toEqual({
+      pairs: [{ left: 'Main', right: 'MAIN' }],
+      leftOnly: [],
+      rightOnly: ['main']
+    })
+  })
+
+  it('returns an empty table when the sheet carries no cell range', () => {
+    const parsed = parseXlsxTable(writeWorkbook([{ name: 'Main', sheet: {} }]))
+
+    expect(parsed.header).toEqual([])
+    expect(parsed.rows).toEqual([])
+    expect(parsed.meta.sheetName).toBe('Main')
+  })
+
+  it('walks a declared range that is wider than the dense data', () => {
+    const sheet = sheetFromRows([['id', 'val']])
+    sheet['!ref'] = 'A1:B3'
+
+    const parsed = parseXlsxTable(writeWorkbook([{ name: 'Main', sheet }]))
+
+    expect(parsed.header).toEqual(['id', 'val'])
+    expect(parsed.rows).toEqual([])
+  })
+
+  it('renders boolean and error cells as header text', () => {
+    const cells = [
+      [{ t: 's', v: 'id' }, { t: 'b', v: true }, { t: 'e', v: '#DIV/0!' }, { t: 'n', v: 1.5 }],
+      [{ t: 's', v: 'k' }, { t: 'b', v: false }, { t: 'e', v: 7 }, { t: 'n', v: 2.5 }]
+    ]
+    const sheet: XLSX.WorkSheet = {
+      '!ref': 'A1:D2',
+      '!data': cells
+    } as unknown as XLSX.WorkSheet
+
+    const parsed = parseXlsxTable(writeWorkbook([{ name: 'Main', sheet }]))
+
+    expect(parsed.header).toEqual(['id', 'TRUE', 'C', '1.5'])
+    expect(parsed.rows).toEqual([['k', 'FALSE', '', '2.5']])
   })
 })
