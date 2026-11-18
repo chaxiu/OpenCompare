@@ -40,6 +40,9 @@ export function classifyFamily(family: FileFamily): DrilldownTarget {
       return { kind: 'csv', label: 'csv', delimiter: ',' }
     case 'tsv':
       return { kind: 'csv', label: 'tsv', delimiter: '\t' }
+    case 'xlsx':
+      // Values are extracted by the xlsx parser; the tab still renders as CSV.
+      return { kind: 'csv', label: 'xlsx' }
     case 'json':
       return { kind: 'structured', label: 'json', format: 'json' }
     case 'yaml':

@@ -55,9 +55,11 @@ export const CSV_FILE_EXTENSIONS: ReadonlySet<string> = new Set(['csv'])
 export const TSV_FILE_EXTENSIONS: ReadonlySet<string> = new Set(['tsv'])
 export const JSON_FILE_EXTENSIONS: ReadonlySet<string> = new Set(['json', 'jsonc', 'json5'])
 export const YAML_FILE_EXTENSIONS: ReadonlySet<string> = new Set(['yaml', 'yml'])
+/** Single-sheet xlsx / xlsm workbooks; the legacy binary `.xls` stays out. */
+export const XLSX_FILE_EXTENSIONS: ReadonlySet<string> = new Set(['xlsx', 'xlsm'])
 
 /** A view family a comparison can render. Mirrors the renderer's `FileKind`. */
-export type FileFamily = 'code' | 'csv' | 'tsv' | 'json' | 'yaml'
+export type FileFamily = 'code' | 'csv' | 'tsv' | 'json' | 'yaml' | 'xlsx'
 
 /** A byte probe's content verdict: only text reaches a comparison view. */
 export type FileContentVerdict = 'text' | 'binary'
@@ -84,6 +86,7 @@ export function extensionFamily(name: string): FileFamily | null {
   if (TSV_FILE_EXTENSIONS.has(extension)) return 'tsv'
   if (JSON_FILE_EXTENSIONS.has(extension)) return 'json'
   if (YAML_FILE_EXTENSIONS.has(extension)) return 'yaml'
+  if (XLSX_FILE_EXTENSIONS.has(extension)) return 'xlsx'
   if (TEXT_FILE_EXTENSIONS.has(extension)) return 'code'
   return null
 }

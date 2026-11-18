@@ -8,6 +8,14 @@ describe('extensionFamily', () => {
     expect(extensionFamily('a.tsv')).toBe('tsv')
     expect(extensionFamily('a.JSON')).toBe('json')
     expect(extensionFamily('a.yml')).toBe('yaml')
+    expect(extensionFamily('a.xlsx')).toBe('xlsx')
+    expect(extensionFamily('report.XLSM')).toBe('xlsx')
+  })
+
+  it('keeps the legacy binary .xls outside the whitelist', () => {
+    expect(extensionFamily('legacy.xls')).toBeNull()
+    expect(extensionFamily('legacy.xlsb')).toBeNull()
+    expect(extensionFamily('notes.xlsx.txt')).toBe('code')
   })
 
   it('treats extension-less names and dotfiles as code', () => {

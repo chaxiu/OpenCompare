@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 53102
+    "repoTestLines": 53501
   },
   "floors": {
     "appTestCases": 97,
@@ -30,18 +30,18 @@
   },
   "growth": [
     {
-      "metric": "repoTestLines",
-      "from": 52738,
-      "to": 53102,
-      "reason": "xlsx parse limits: §5.1 budget table, §5.3 container/entry/sheet/shared-strings caps, §5.4 zip-bomb rejection and §5.5 watermark at 60% warning / 80% abort, each asserted with synthetic zip fixtures and injected RSS probes",
-      "addedCases": 16
-    },
-    {
       "metric": "appTestLines",
       "from": 2959,
       "to": 2988,
       "reason": "unknown-extension content fallback coverage in App.test.tsx: manual dialog opens a .vue text pair with UTF-8 status, binary .vue reports the failing side with the new copy, tree double-click opens a .vue text file and a binary drilldown shows the readable notice without a blank tab, plus the sample hex-dump .png now opens as text",
       "addedCases": 3
+    },
+    {
+      "metric": "repoTestLines",
+      "from": 53102,
+      "to": 53501,
+      "reason": "xlsx workbench wiring: whitelist both directions, real xlsx/xlsm four-state alignment with cell highlighting, sequential two-side parse probe plus tab budget, size/zip-bomb rejection before any session commit, hidden row/column switch and per-sheet independent results",
+      "addedCases": 11
     }
   ]
 }

@@ -164,6 +164,7 @@ export const shell = {
     '左右两侧类型不一致：左侧是{leftKind}（{left}），右侧是{rightKind}（{right}）。',
   'shell.compare.error.UNSUPPORTED_FILE_TYPE':
     '不支持的文件类型：{side}「{path}」。扩展名无法识别时按内容判断，二进制文件不支持。',
+  'shell.compare.error.XLSX_LIMIT_EXCEEDED': '文件超出对比上限：{limit}',
   'shell.compare.error.ACCESS_DENIED': '无法访问{side}路径：{path}（权限不足或不可读）。',
   'shell.merge.error.EMPTY_PATH': '{side}路径为空，请输入有效路径。',
   'shell.merge.error.NOT_FOUND': '{side} 路径不存在：{path}',

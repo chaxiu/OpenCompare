@@ -9,6 +9,8 @@ import Papa from 'papaparse'
 import type { CsvSample, FixtureSession, SampleComposition, TextSample } from '@shared/fixtures'
 import type { TextFileFacts } from '@shared/platform/types'
 import type { DirectoryComparison } from '@core/directory/compare'
+import type { XlsxBudgetMode } from '@core/xlsx/limits'
+import type { XlsxTableMeta } from '@core/xlsx/parse'
 import type { ComparisonSides } from './snapshotOps'
 
 export interface CsvTable {
@@ -19,6 +21,35 @@ export interface CsvTable {
 export interface CsvTables {
   readonly left: CsvTable
   readonly right: CsvTable
+}
+
+/** One xlsx sheet side: the normalized CSV-shaped table plus its parse facts. */
+export interface XlsxSheetSide {
+  readonly table: CsvTable
+  readonly meta: XlsxTableMeta
+}
+
+/** One sheet pair matched by name (case-insensitive), each side independent. */
+export interface XlsxSheetCompare {
+  readonly name: string
+  readonly left: XlsxSheetSide
+  readonly right: XlsxSheetSide
+}
+
+/** The §5.1 budget a session was opened under; pinned for the summary. */
+export interface XlsxBudgetFact {
+  readonly tabCount: 1 | 3
+  readonly mode: XlsxBudgetMode
+}
+
+/** Everything an xlsx session keeps after the files were parsed. */
+export interface XlsxSessionView {
+  readonly sheets: readonly XlsxSheetCompare[]
+  /** Sheet names present only on the left side. */
+  readonly leftOnly: readonly string[]
+  /** Sheet names present only on the right side. */
+  readonly rightOnly: readonly string[]
+  readonly budget: XlsxBudgetFact
 }
 
 /** Left/right text bodies of a file-level comparison. */
@@ -77,6 +108,11 @@ export interface WorkbenchSession extends FixtureSession {
   readonly composition?: SampleComposition
   /** Parsed CSV/TSV tables, present for the CSV scene only. */
   readonly tables?: CsvTables
+  /**
+   * Per-sheet xlsx results, present only for a workbook pair. The tables above
+   * mirror the first paired sheet, so the single-sheet path needs no special case.
+   */
+  readonly xlsx?: XlsxSessionView
   readonly adhoc?: AdhocFilePair
   /**
    * The three real merge inputs of a three-way merge session. Present only for

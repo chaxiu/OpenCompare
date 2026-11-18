@@ -88,7 +88,7 @@ function CsvCell({ cell }: { readonly cell: CsvAlignedCell }): JSX.Element {
 }
 
 /** Virtualised aligned table: only the rows in the viewport reach the DOM. */
-function CsvAlignedTable({
+export function CsvAlignedTable({
   columns,
   rows
 }: {

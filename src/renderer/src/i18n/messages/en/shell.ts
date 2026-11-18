@@ -190,6 +190,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
     'The two sides differ in type: the left side is {leftKind} ({left}) and the right side is {rightKind} ({right}).',
   'shell.compare.error.UNSUPPORTED_FILE_TYPE':
     'Unsupported file type: {side} "{path}". When the extension is unknown the content is checked; binary files are not supported.',
+  'shell.compare.error.XLSX_LIMIT_EXCEEDED': 'File exceeds the comparison limit: {limit}',
   'shell.compare.error.ACCESS_DENIED':
     'Cannot access the {side} path: {path} (permission denied or unreadable).',
   'shell.merge.error.EMPTY_PATH': 'The {side} path is empty. Enter a valid path.',

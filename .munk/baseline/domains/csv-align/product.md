@@ -50,7 +50,7 @@ CSV/TSV 场景的**主键列对齐对比**域：`src/core/csv/` 纯算法对齐�
 - **不做数值/内容归一化比较**：字符串精确比较，`19.50` 与 `19.5` 视为不同；不做大小写/去空格/类型转换容差。
 - **不做模糊主键匹配、主键自动推荐、复合键表达式或键归一化**。
 - **不做重复主键的歧义裁决 UI**（只在结果与统计里体现）。
-- **不做 `.xlsx` / Excel、不做超大表分页 / 流式加载 / Web Worker 卸载**。
+- **xlsx 单表已纳入（值提取后复用 CSV 对齐）；仍不做公式求值 / 样式·批注·条件格式 diff / 合并区逐格展开 / `.xls` BIFF、不做超大表分页 / 流式加载 / Web Worker 卸载**。
 - **不改 `src/core/directory`、`src/core/text` 与目录 / 代码 / 结构化视图的行为**；文件对话框能力由 `PlatformPort.selectFile` / `saveFile`（`foundation` 域）提供，本域只做 `CsvView` 顶栏接线，不新增多文件选择 / 目录批量 IO。
 - **不新增第三方依赖**（`@tanstack/react-virtual`、`papaparse` 已在 `package.json`）。
 - **不做快捷键、命令面板、主题切换、浅色皮肤**；不改 `.munk/baseline/**`（由 Delivery 折入）。

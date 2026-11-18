@@ -29,5 +29,6 @@ export const common: Record<keyof typeof zhCommon, string> = {
   'common.fileKind.csv': 'CSV',
   'common.fileKind.tsv': 'TSV',
   'common.fileKind.json': 'JSON',
-  'common.fileKind.yaml': 'YAML'
+  'common.fileKind.yaml': 'YAML',
+  'common.fileKind.xlsx': 'XLSX / XLSM'
 }

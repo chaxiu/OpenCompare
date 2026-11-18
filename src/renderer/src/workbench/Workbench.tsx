@@ -28,6 +28,7 @@ import type { TemplateResolvedPlan } from '@core/directory/template'
 import { resolveComparisonSwitches } from '@core/text/normalize'
 import type { ComparisonSwitches } from '@core/text/normalize'
 import { isOperationCancelled } from '@core/io'
+import { isXlsxLimitExceeded } from '@core/xlsx/limits'
 import { IconButton, ToolbarButton } from '@renderer/components/Button'
 import { Dialog } from '@renderer/components/Dialog'
 import { Icon } from '@renderer/components/Icon'
@@ -41,6 +42,7 @@ import type { MessageKey } from '@renderer/i18n/messages'
 import { CodeView } from '@renderer/views/CodeView'
 import type { CodeMergeState, CodeMode } from '@renderer/views/CodeView'
 import { CsvView } from '@renderer/views/CsvView'
+import { XlsxCompareView } from '@renderer/views/XlsxCompareView'
 import type { CsvAlignState } from '@renderer/views/CsvView'
 import { DirectoryView } from '@renderer/views/DirectoryView'
 import { StructuredView } from '@renderer/views/StructuredView'
@@ -107,6 +109,7 @@ import {
 import type { ComparisonSides, SidePosition } from './snapshotOps'
 import { snapshotContentCopy, snapshotImportCopy } from './snapshotCopy'
 import { syncRefreshReasonCopy, syncTargetFailureCopy } from './syncFailureCopy'
+import { xlsxLimitLabel } from './xlsxCompare'
 import {
   historyCandidate,
   historyIdFor,
@@ -305,6 +308,12 @@ function sidesAreRealDirectories(sides: ComparisonSides): boolean {
  * original message as the diagnostic detail.
  */
 function filePairErrorMessage(cause: unknown, t: Translate): string {
+  // Every xlsx gate (zip bomb and the four size gates) lands on this one copy.
+  if (isXlsxLimitExceeded(cause)) {
+    return t('shell.compare.error.XLSX_LIMIT_EXCEEDED', {
+      limit: xlsxLimitLabel(cause.limit, cause.observed)
+    })
+  }
   if (cause instanceof FilePairError) {
     if (cause.code === 'UNSUPPORTED_FILE_TYPE') {
       const side = cause.params.side
@@ -1762,6 +1771,18 @@ export function Workbench({
           />
         )
       case 'csv': {
+        if (session.xlsx) {
+          return (
+            <XlsxCompareView
+              key={session.id}
+              sessionId={session.id}
+              xlsx={session.xlsx}
+              leftPath={session.adhoc?.pair.left.path ?? ''}
+              rightPath={session.adhoc?.pair.right.path ?? ''}
+              onAlignStateChange={handleCsvAlign}
+            />
+          )
+        }
         if (session.adhoc) {
           const { pair, delimiter, tables } = session.adhoc
           if (!tables) return null
