@@ -1,0 +1,30 @@
+DELIVERY FIXUP: baseline `decision` block restored
+
+Observed at delivery fold time: the resampled `.munk/baseline/coverage.json` had dropped the
+top-level `decision` object (present in the previous resample `baaa8bc` / commit `82c32a80`).
+PRD scope line lists `decision` in the baseline shape and `ac-baseline-decision` requires
+`decision.floor === true`, `decision.gate === "release-ci"` and a reason carrying the measured
+totals, so the field was restored verbatim in shape with this round's numbers:
+
+  "decision": {
+    "floor": true,
+    "gate": "release-ci",
+    "reason": "Measured lines 98.26 / branches 90.44 / functions 99.6; pin those measured values as a release-CI-only hard gate, never part of the delivery matrix."
+  }
+
+Only that key was added; `totals` / `modules` / `floors` / `floorLedger` / `scope` / `measuredAt`
+are byte-identical to the cold-run result. The gate script does not read `decision`
+(`grep -c decision scripts/coverage-gate.mjs` -> 0), so this restore cannot mask a red.
+
+Compensating evidence re-run against the final delivered baseline (same fresh summary, same
+`--started-at 1795019406` as the original positive run):
+
+- positive-fixup.stdout.txt / positive-fixup.stderr.txt / positive-fixup.exit.txt
+  node scripts/coverage-gate.mjs --summary <T>/coverage-gate-20261118T163006Z/reports/coverage-summary.json --started-at 1795019406 ...
+  -> exit 0, "module set: 32 modules match baseline", "baseline freshness: measuredAt.commit 3d300b7069a0 is at or after v0.2.24", "coverage gate passed in 0.14s"
+- negative-floor-fixup.stdout.txt / negative-floor-fixup.stderr.txt / negative-floor-fixup.exit.txt
+  temp baseline outside the repo with floors.totals.lines 97 -> 96
+  -> exit 1, "FAIL floor ratchet previous committed baseline: lines 97 -> 96 needs a matching floorLedger entry"
+
+baseline-after.json / baseline-after.sha256 were regenerated from the final file, so the evidence
+snapshot again matches `.munk/baseline/coverage.json` byte for byte.

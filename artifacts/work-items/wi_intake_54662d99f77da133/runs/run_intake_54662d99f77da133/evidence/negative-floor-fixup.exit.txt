@@ -1,0 +1,1 @@
+negative-floor fixup exit=1 (expected)

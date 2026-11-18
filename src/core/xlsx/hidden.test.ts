@@ -40,4 +40,11 @@ describe('applyXlsxHiddenPolicy', () => {
     expect(filtered.rows).toEqual([['k1', 'alpha']])
     expect(applyXlsxHiddenPolicy(parsed, parsed.meta, true)).toEqual(filtered)
   })
+
+  it('keeps the table when the switch is on but nothing is annotated', () => {
+    const parsed = workbookWithHidden()
+    const meta = { ...parsed.meta, hiddenRows: [], hiddenColumns: [], hiddenColumnIndexes: [] }
+
+    expect(applyXlsxHiddenPolicy(parsed, meta, true)).toBe(parsed)
+  })
 })

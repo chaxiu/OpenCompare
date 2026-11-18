@@ -1,0 +1,9 @@
+totals.lines: 98.24 -> 98.26 (covered/total 2290/2331 -> 2609/2655), floor 97
+totals.branches: 90.31 -> 90.44 (covered/total 1474/1632 -> 1666/1842), floor 90
+totals.functions: 99.54 -> 99.6 (covered/total 439/441 -> 507/509), floor 99
+totals.statements: 96.33 -> 96.55 (covered/total 2579/2677 -> 2946/3051), floor undefined
+moduleBranchesMin: 75 -> 75
+moduleBranchesMinExempt: ["src/core/directory/hash.ts","src/core/text/lines.ts"]
+ignoreDirectivesMax: 0 -> 0
+scope unchanged: true
+floorLedger unchanged: true

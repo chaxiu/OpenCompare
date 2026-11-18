@@ -1,0 +1,2 @@
+git merge-base --is-ancestor v0.2.24 3d300b7069a00beee506115df14d1e3143bab7a3 -> exit 0
+git merge-base --is-ancestor 3d300b7069a00beee506115df14d1e3143bab7a3 HEAD -> exit 0

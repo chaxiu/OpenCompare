@@ -1,0 +1,22 @@
+ok   ceiling appTestLines: measured 2988 <= ceiling 2988
+ok   ceiling syncRealGateLines: measured 1961 <= ceiling 1991
+ok   ceiling pairLines: measured 4949 <= ceiling 4950
+ok   ceiling repoTestLines: measured 54015 <= ceiling 54015
+ok   floor appTestCases: measured 97 >= floor 97
+ok   floor syncRealGateCases: measured 32 >= floor 32
+ok   floor repoTestCases: measured 1958 >= floor 1799
+ok   collected src/renderer/src/App.test.tsx: 97 cases
+ok   collected src/sync-real-gate.test.ts: 32 cases
+ok   collected repo total: 1958 cases across 167 files
+ok   harness budget: 1 file(s), 393/400 total lines
+ok   version literal (0.2.25): 0 hits in .ts/.tsx
+ok   asset sha256 literals: 6 hit(s), 6 standard vector(s) whitelisted
+ok   doc-reading assertions: 23 test file(s) named docs/.yml, 0 whole-sentence hits
+ok   baseline ceiling appTestLines: 2988 -> 2988 (tightened or unchanged)
+ok   baseline ceiling syncRealGateLines: 1991 -> 1991 (tightened or unchanged)
+ok   baseline ceiling pairLines: 4950 -> 4950 (tightened or unchanged)
+ok   ALLOWED growth: repoTestLines 53705->54015 (+310 lines, +16 cases, 0.2.25 coverage resample: src/core/xlsx/* must join the module set at the 75% branch floor while the unchanged 97 lines / 90 branches / 99 functions totals stay green. Adds pre-inflate zip64 and central-directory edges, shared-strings counter fallbacks, sparse declared ranges, empty sheets and boolean / error header cells in src/core/xlsx/{limits,hidden,parse}.test.ts (+310 lines, 16 cases))
+ok   baseline floor appTestCases: 97 -> 97 (raised or unchanged)
+ok   baseline floor syncRealGateCases: 32 -> 32 (raised or unchanged)
+ok   baseline floor repoTestCases: 1799 -> 1799 (raised or unchanged)
+test-debt gate passed in 1.48s

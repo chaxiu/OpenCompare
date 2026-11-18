@@ -1,0 +1,4 @@
+measuredAt.commit 3d300b7069a00beee506115df14d1e3143bab7a3 40-char lowercase sha: true
+measuredAt.date 2026-11-18T16:30:50.000Z valid ISO: true
+v0.2.24 is ancestor of sample: true (exit 0)
+sample is ancestor of HEAD: true (exit 0)

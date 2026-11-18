@@ -11,6 +11,7 @@ import {
   inspectXlsxContainer,
   isXlsxLimitExceeded,
   MIB,
+  readXlsxZipDirectory,
   resolveXlsxBudget,
   XLSX_BUDGET_TABLE,
   XLSX_TIER3_LIMITS,
@@ -58,6 +59,12 @@ interface ZipFixtureEntry {
   readonly method?: 0 | 8
   /** Central-directory size to declare; lets a case target one gate alone. */
   readonly declaredUncompressed?: number
+  /** Declared compressed size; defaults to the payload length. */
+  readonly declaredCompressed?: number
+  /** Central-directory extra field (e.g. a zip64 size block). */
+  readonly extra?: Buffer
+  /** Declared local-header offset; defaults to the real one. */
+  readonly declaredLocalOffset?: number
 }
 
 /**
@@ -75,6 +82,8 @@ function buildZip(entries: readonly ZipFixtureEntry[]): Uint8Array {
     const method = entry.method ?? 0
     const payload = Buffer.from(entry.data)
     const uncompressed = entry.declaredUncompressed ?? payload.length
+    const compressed = entry.declaredCompressed ?? payload.length
+    const extra = entry.extra ?? Buffer.alloc(0)
 
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0)
@@ -90,11 +99,12 @@ function buildZip(entries: readonly ZipFixtureEntry[]): Uint8Array {
     central.writeUInt16LE(20, 4)
     central.writeUInt16LE(20, 6)
     central.writeUInt16LE(method, 10)
-    central.writeUInt32LE(payload.length, 20)
+    central.writeUInt32LE(compressed, 20)
     central.writeUInt32LE(uncompressed, 24)
     central.writeUInt16LE(name.length, 28)
-    central.writeUInt32LE(offset, 42)
-    centrals.push(central, name)
+    central.writeUInt16LE(extra.length, 30)
+    central.writeUInt32LE(entry.declaredLocalOffset ?? offset, 42)
+    centrals.push(central, name, extra)
 
     offset += local.length + name.length + payload.length
   }
@@ -355,5 +365,258 @@ describe('xlsx runtime watermark (§5.5)', () => {
     expect(Object.keys(error.limit).sort()).toEqual(['rule', 'threshold', 'tier'])
     expect(typeof error.observed).toBe('number')
     expect(error.message).not.toContain('/')
+  })
+})
+
+function directoryOf(bytes: Uint8Array) {
+  const directory = readXlsxZipDirectory(bytes)
+  if (directory === null) throw new Error('expected a zip central directory')
+  return directory
+}
+
+describe('xlsx pre-inflate edge cases (§5.3)', () => {
+  const CAPS = effectiveXlsxCaps(DENSE_1)
+
+  it('refuses a budget case that is not in the table', () => {
+    expect(() =>
+      resolveXlsxBudget({ tabCount: 1, mode: 'streaming' as unknown as XlsxBudgetMode })
+    ).toThrow(RangeError)
+  })
+
+  it('treats bytes that are not a zip container as an empty directory', () => {
+    const report = inspectXlsxContainer(new Uint8Array(64), DENSE_1)
+
+    expect(report.entryCount).toBe(0)
+    expect(report.decompressedBytes).toBe(0)
+    expect(report.directory.entries).toEqual([])
+  })
+
+  it('stops the walk at a zip64 entry count marker', () => {
+    const bytes = Buffer.alloc(22)
+    bytes.writeUInt32LE(0x06054b50, 0)
+    bytes.writeUInt16LE(0xffff, 10)
+
+    expect(readXlsxZipDirectory(new Uint8Array(bytes))).toEqual({ entryCount: 0xffff, entries: [] })
+    const error = limitError(() => inspectXlsxContainer(new Uint8Array(bytes), DENSE_1))
+    expect(error.limit.rule).toBe('entry-count')
+  })
+
+  it('stops the central-directory walk at a truncated header or a bad signature', () => {
+    const truncated = Buffer.alloc(22)
+    truncated.writeUInt32LE(0x06054b50, 0)
+    truncated.writeUInt16LE(1, 10)
+    truncated.writeUInt32LE(30, 16)
+
+    expect(readXlsxZipDirectory(new Uint8Array(truncated))).toEqual({
+      entryCount: 1,
+      entries: []
+    })
+
+    const badSignature = Buffer.alloc(64)
+    badSignature.writeUInt32LE(0x06054b50, 42)
+    badSignature.writeUInt16LE(1, 52)
+    badSignature.writeUInt32LE(0, 58)
+
+    expect(readXlsxZipDirectory(new Uint8Array(badSignature))).toEqual({
+      entryCount: 1,
+      entries: []
+    })
+  })
+
+  it('finds the end-of-central-directory record behind a trailing comment', () => {
+    const bytes = buildZip([{ name: 'xl/workbook.xml', data: Buffer.from('<workbook/>') }])
+    const shifted = Buffer.concat([Buffer.from(bytes), Buffer.alloc(4)])
+
+    expect(directoryOf(new Uint8Array(shifted)).entries).toHaveLength(1)
+  })
+
+  it('measures the zip-bomb ratio from declared sizes, including a zero-byte entry', () => {
+    const empty = buildZip([{ name: 'xl/empty.bin', data: Buffer.alloc(0) }])
+    expect(inspectXlsxContainer(empty, DENSE_1).decompressedBytes).toBe(0)
+
+    const declared = buildZip([
+      { name: 'xl/empty.bin', data: Buffer.alloc(0), declaredUncompressed: 10 }
+    ])
+    expect(inspectXlsxContainer(declared, DENSE_1).decompressedBytes).toBe(10)
+  })
+
+  it('resolves zip64 sizes from the central-directory extra field', () => {
+    const zip64Extra = (values: readonly bigint[]): Buffer => {
+      const extra = Buffer.alloc(4 + values.length * 8)
+      extra.writeUInt16LE(0x0001, 0)
+      extra.writeUInt16LE(values.length * 8, 2)
+      values.forEach((value, index) => extra.writeBigUInt64LE(value, 4 + index * 8))
+      return extra
+    }
+    const filler = Buffer.alloc(6)
+    filler.writeUInt16LE(0x5855, 0)
+    filler.writeUInt16LE(2, 2)
+
+    const both = buildZip([
+      {
+        name: 'xl/a.bin',
+        data: Buffer.alloc(0),
+        declaredCompressed: 0xffffffff,
+        declaredUncompressed: 0xffffffff,
+        extra: Buffer.concat([filler, zip64Extra([2048n, 512n])])
+      }
+    ])
+    expect(directoryOf(both).entries[0]).toMatchObject({
+      compressedBytes: 512,
+      decompressedBytes: 2048
+    })
+
+    const compressedOnly = buildZip([
+      {
+        name: 'xl/b.bin',
+        data: Buffer.alloc(0),
+        declaredCompressed: 0xffffffff,
+        declaredUncompressed: 1024,
+        extra: zip64Extra([256n])
+      }
+    ])
+    expect(directoryOf(compressedOnly).entries[0]).toMatchObject({
+      compressedBytes: 256,
+      decompressedBytes: 1024
+    })
+
+    const uncompressedOnly = buildZip([
+      {
+        name: 'xl/c.bin',
+        data: Buffer.alloc(0),
+        declaredCompressed: 64,
+        declaredUncompressed: 0xffffffff,
+        extra: zip64Extra([4096n])
+      }
+    ])
+    expect(directoryOf(uncompressedOnly).entries[0]).toMatchObject({
+      compressedBytes: 64,
+      decompressedBytes: 4096
+    })
+
+    const clamped = buildZip([
+      {
+        name: 'xl/d.bin',
+        data: Buffer.alloc(0),
+        declaredCompressed: 32,
+        declaredUncompressed: 0xffffffff,
+        extra: zip64Extra([BigInt(Number.MAX_SAFE_INTEGER) + 10n])
+      }
+    ])
+    expect(directoryOf(clamped).entries[0]?.decompressedBytes).toBe(Number.MAX_SAFE_INTEGER)
+  })
+
+  it('falls back to the file start for an out-of-range local header offset', () => {
+    const bytes = buildZip([
+      { name: 'xl/a.bin', data: Buffer.from('x'), declaredLocalOffset: 0xfffffff0 }
+    ])
+
+    expect(directoryOf(bytes).entries[0]?.dataOffset).toBe(0)
+  })
+
+  it('reads stored parts and accepts a rels target without the xl/ prefix', () => {
+    const sheetXml = Buffer.from('<worksheet><sheetData/></worksheet>')
+    const bytes = buildZip([
+      {
+        name: 'xl/workbook.xml',
+        data: Buffer.from('<workbook><sheets><sheet name="Main" r:id="rId1"/></sheets></workbook>')
+      },
+      {
+        name: 'xl/_rels/workbook.xml.rels',
+        data: Buffer.from(
+          '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'
+        )
+      },
+      { name: 'xl/worksheets/sheet1.xml', data: sheetXml }
+    ])
+    const report = inspectXlsxContainer(bytes, DENSE_1)
+
+    expect(assertSheetXmlLimit(report, bytes, 'main', CAPS)).toBe(sheetXml.length)
+    expect(assertSheetXmlLimit(report, bytes, 'Missing', CAPS)).toBe(0)
+  })
+
+  it('ignores a workbook without rels, sheet tags, matching rels or an r:id', () => {
+    const cases: readonly (readonly ZipFixtureEntry[])[] = [
+      [{ name: 'xl/workbook.xml', data: Buffer.from('<workbook/>') }],
+      [
+        { name: 'xl/workbook.xml', data: Buffer.from('<workbook/>') },
+        { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships/>') }
+      ],
+      [
+        {
+          name: 'xl/workbook.xml',
+          data: Buffer.from(
+            '<workbook><sheets><sheet name="Main" r:id="rId9"/></sheets></workbook>'
+          )
+        },
+        {
+          name: 'xl/_rels/workbook.xml.rels',
+          data: Buffer.from(
+            '<Relationships><Relationship Id="rId1" Target="xl/worksheets/sheet1.xml"/></Relationships>'
+          )
+        }
+      ],
+      [
+        {
+          name: 'xl/workbook.xml',
+          data: Buffer.from('<workbook><sheets><sheet name="Main"/></sheets></workbook>')
+        },
+        { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships/>') }
+      ]
+    ]
+
+    for (const entries of cases) {
+      const bytes = buildZip(entries)
+      expect(assertSheetXmlLimit(inspectXlsxContainer(bytes, DENSE_1), bytes, 'Main', CAPS)).toBe(0)
+    }
+  })
+
+  it('inflates a deflated part and falls back when the head exceeds the zlib cap', () => {
+    const smallXml = Buffer.from(
+      '<workbook><sheets><sheet name="Main" r:id="rId1"/></sheets></workbook>'
+    )
+    const rels = {
+      name: 'xl/_rels/workbook.xml.rels',
+      data: Buffer.from(
+        '<Relationships><Relationship Id="rId1" Target="xl/worksheets/sheet1.xml"/></Relationships>'
+      )
+    }
+    const deflated = buildZip([
+      {
+        name: 'xl/workbook.xml',
+        data: deflateRawSync(smallXml),
+        method: 8,
+        declaredUncompressed: smallXml.length
+      },
+      rels,
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from('<worksheet/>') }
+    ])
+    expect(assertSheetXmlLimit(inspectXlsxContainer(deflated, DENSE_1), deflated, 'Main', CAPS)).toBe(
+      12
+    )
+
+    const largeXml = Buffer.from(
+      `<workbook><sheets><sheet name="Main" r:id="rId1"/></sheets>${'x'.repeat(70_000)}</workbook>`
+    )
+    const capped = buildZip([
+      {
+        name: 'xl/workbook.xml',
+        data: deflateRawSync(largeXml),
+        method: 8,
+        declaredUncompressed: largeXml.length
+      },
+      rels,
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from('<worksheet/>') }
+    ])
+    expect(assertSheetXmlLimit(inspectXlsxContainer(capped, DENSE_1), capped, 'Main', CAPS)).toBe(12)
+  })
+
+  it('skips a shared strings part without a readable sst root or counter', () => {
+    for (const data of ['<sstx/>', '<sst count="5"></sst>', '<sst uniqueCount="abc"></sst>']) {
+      const bytes = buildZip([{ name: 'xl/sharedStrings.xml', data: Buffer.from(data) }])
+      expect(() =>
+        assertSharedStringsLimit(inspectXlsxContainer(bytes, DENSE_1), bytes, CAPS)
+      ).not.toThrow()
+    }
   })
 })
