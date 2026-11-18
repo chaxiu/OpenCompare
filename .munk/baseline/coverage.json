@@ -1,11 +1,11 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "82c32a8005f5af521a63288dc69b14842a5505fe",
-    "date": "2026-11-05T09:11:25.000Z"
+    "commit": "3d300b7069a00beee506115df14d1e3143bab7a3",
+    "date": "2026-11-18T16:30:50.000Z"
   },
   "provider": "v8",
-  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T//coverage-gate-20261105T091047Z/reports",
+  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports",
   "scope": {
     "include": "src/core/**",
     "exclude": [
@@ -41,24 +41,24 @@
   ],
   "totals": {
     "lines": {
-      "pct": 98.24,
-      "covered": 2290,
-      "total": 2331
+      "pct": 98.26,
+      "covered": 2609,
+      "total": 2655
     },
     "branches": {
-      "pct": 90.31,
-      "covered": 1474,
-      "total": 1632
+      "pct": 90.44,
+      "covered": 1666,
+      "total": 1842
     },
     "functions": {
-      "pct": 99.54,
-      "covered": 439,
-      "total": 441
+      "pct": 99.6,
+      "covered": 507,
+      "total": 509
     },
     "statements": {
-      "pct": 96.33,
-      "covered": 2579,
-      "total": 2677
+      "pct": 96.55,
+      "covered": 2946,
+      "total": 3051
     }
   },
   "modules": {
@@ -677,11 +677,99 @@
         "covered": 60,
         "total": 65
       }
+    },
+    "src/core/xlsx/dependency.ts": {
+      "lines": {
+        "pct": 100,
+        "covered": 1,
+        "total": 1
+      },
+      "branches": {
+        "pct": 100,
+        "covered": 0,
+        "total": 0
+      },
+      "functions": {
+        "pct": 100,
+        "covered": 0,
+        "total": 0
+      },
+      "statements": {
+        "pct": 100,
+        "covered": 1,
+        "total": 1
+      }
+    },
+    "src/core/xlsx/hidden.ts": {
+      "lines": {
+        "pct": 100,
+        "covered": 14,
+        "total": 14
+      },
+      "branches": {
+        "pct": 100,
+        "covered": 6,
+        "total": 6
+      },
+      "functions": {
+        "pct": 100,
+        "covered": 6,
+        "total": 6
+      },
+      "statements": {
+        "pct": 100,
+        "covered": 18,
+        "total": 18
+      }
+    },
+    "src/core/xlsx/limits.ts": {
+      "lines": {
+        "pct": 99.35,
+        "covered": 154,
+        "total": 155
+      },
+      "branches": {
+        "pct": 96.59,
+        "covered": 85,
+        "total": 88
+      },
+      "functions": {
+        "pct": 100,
+        "covered": 28,
+        "total": 28
+      },
+      "statements": {
+        "pct": 98.83,
+        "covered": 169,
+        "total": 171
+      }
+    },
+    "src/core/xlsx/parse.ts": {
+      "lines": {
+        "pct": 97.4,
+        "covered": 150,
+        "total": 154
+      },
+      "branches": {
+        "pct": 87.06,
+        "covered": 101,
+        "total": 116
+      },
+      "functions": {
+        "pct": 100,
+        "covered": 34,
+        "total": 34
+      },
+      "statements": {
+        "pct": 97.28,
+        "covered": 179,
+        "total": 184
+      }
     }
   },
   "decision": {
     "floor": true,
     "gate": "release-ci",
-    "reason": "Measured lines 98.24 / branches 90.31 / functions 99.54; pin those measured values as a release-CI-only hard gate, never part of the delivery matrix."
+    "reason": "Measured lines 98.26 / branches 90.44 / functions 99.6; pin those measured values as a release-CI-only hard gate, never part of the delivery matrix."
   }
 }
