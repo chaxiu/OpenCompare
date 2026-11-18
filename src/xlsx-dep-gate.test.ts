@@ -4,7 +4,7 @@
  * lockfile integrity or the no-eval/no-new-func rules drift.
  */
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -79,5 +79,83 @@ describe('no static eval in the new layer or the vendored bundle', () => {
     expect(eslintConfig).toContain('js.configs.recommended')
     expect(eslintConfig).not.toMatch(/['"]no-eval['"]\s*:\s*['"]off['"]/)
     expect(eslintConfig).not.toMatch(/['"]no-new-func['"]\s*:\s*['"]off['"]/)
+  })
+})
+
+interface SourceFile {
+  readonly path: string
+  readonly source: string
+}
+
+function walk(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(directory, entry.name)
+    return entry.isDirectory() ? walk(full) : [full]
+  })
+}
+
+function resolveCoreModule(specifier: string): string | undefined {
+  const base = specifier.replace(/^@core\//, 'src/core/')
+  return [`${base}.ts`, `${base}/index.ts`].find((candidate) =>
+    existsSync(join(root, candidate))
+  )
+}
+
+/** `src/core/xlsx/**` plus every core module the renderer sources import directly. */
+function rendererReachableSources(): SourceFile[] {
+  const paths = new Set<string>()
+  for (const name of readdirSync(join(root, 'src/core/xlsx'))) {
+    if (name.endsWith('.ts') && !name.endsWith('.test.ts')) {
+      paths.add(`src/core/xlsx/${name}`)
+    }
+  }
+  for (const file of walk(join(root, 'src/renderer/src'))) {
+    if (!/\.(ts|tsx)$/.test(file) || file.includes('.test.')) continue
+    const source = readFileSync(file, 'utf8')
+    for (const match of source.matchAll(/['"](@core\/[^'"]+)['"]/g)) {
+      const resolved = resolveCoreModule(match[1])
+      if (resolved !== undefined) paths.add(resolved)
+    }
+  }
+  return [...paths].sort().map((path) => ({ path, source: read(path) }))
+}
+
+/** `file:line` entries for Node-only globals that crash the sandboxed renderer. */
+function nodeGlobalViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = []
+  for (const file of files) {
+    file.source.split('\n').forEach((line, index) => {
+      const code = line.replace(/\/\/.*$/, '')
+      if (/\bBuffer\b/.test(code)) violations.push(`${file.path}:${index + 1}: Buffer`)
+      if (/(^|[^.\w])process\s*\./.test(code)) violations.push(`${file.path}:${index + 1}: process.`)
+    })
+  }
+  return violations
+}
+
+describe('renderer-reachable core modules use no Node globals', () => {
+  const files = rendererReachableSources()
+  const paths = files.map((file) => file.path)
+
+  it('covers the xlsx layer and the renderer-imported core modules', () => {
+    expect(paths).toContain('src/core/xlsx/limits.ts')
+    expect(paths).toContain('src/core/xlsx/parse.ts')
+  })
+
+  it('reports no Buffer / process. usage in the current tree', () => {
+    expect(nodeGlobalViolations(files)).toEqual([])
+  })
+
+  it('flags an injected Node global with its file and line', () => {
+    const violations = nodeGlobalViolations([
+      {
+        path: 'src/core/xlsx/sample.ts',
+        source: ['const ok = 1', 'Buffer.from(ok)', 'process.memoryUsage()'].join('\n')
+      }
+    ])
+    expect(violations).toEqual([
+      'src/core/xlsx/sample.ts:2: Buffer',
+      'src/core/xlsx/sample.ts:3: process.'
+    ])
   })
 })

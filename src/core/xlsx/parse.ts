@@ -113,6 +113,18 @@ export function parseXlsxSheet(bytes: Uint8Array, sheetName: string): XlsxTableD
   return parseXlsxTable(bytes, { sheetName })
 }
 
+/**
+ * RSS probe for the runtime watermark. `process` only exists outside the
+ * sandboxed Electron renderer; without it the probe reports 0 and the watermark
+ * falls back to the central-directory decompressed byte count alone. The
+ * thresholds themselves are unchanged.
+ */
+function defaultRssProbe(): number {
+  const host = globalThis as { process?: { memoryUsage?: () => { rss?: number } } }
+  const rss = host.process?.memoryUsage?.()?.rss
+  return typeof rss === 'number' ? rss : 0
+}
+
 /** Parse a workbook's first sheet, or the sheet named in `options`. */
 export function parseXlsxTable(bytes: Uint8Array, options: XlsxParseOptions = {}): XlsxTableData {
   const budget = resolveXlsxBudget({
@@ -130,7 +142,7 @@ export function parseXlsxTable(bytes: Uint8Array, options: XlsxParseOptions = {}
   const report = inspectXlsxContainer(bytes, budget)
   const caps = effectiveXlsxCaps(budget)
   const warnings: string[] = []
-  const probe = options.rssProbe ?? (() => process.memoryUsage().rss)
+  const probe = options.rssProbe ?? defaultRssProbe
   const baselineRss = options.baselineRss ?? probe()
   const usedBytes = (): number => Math.max(report.decompressedBytes, probe() - baselineRss)
   checkXlsxWatermark(usedBytes(), budget.decompressedBytes, warnings)
