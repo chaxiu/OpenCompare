@@ -20,6 +20,7 @@ import type { AdhocFilePair, FilePair, FilePairProbes, WorkbenchSession } from '
 import { countTextLines, parseCsvTable } from './session'
 import type { ComparisonSides } from './snapshotOps'
 import { readSideFile, readSideFileProbe, type SideFileFacts } from './snapshotOps'
+import { openXlsxPairSession } from './xlsxCompare'
 
 /** Known file-pair failures the shell localizes from a stable code. */
 export type FilePairErrorCode = 'UNSUPPORTED_FILE_TYPE' | 'mixed-family'
@@ -518,6 +519,12 @@ export async function openFilePairSession(
       { left: left.name, right: right.name, leftKind: left.family, rightKind: right.family },
       `Mixed file types: ${left.name} is ${left.family}, ${right.name} is ${right.family}.`
     )
+  }
+
+  // Workbooks are binary and parse one side after the other; the CSV text path
+  // below never runs for them.
+  if (left.family === 'xlsx') {
+    return openXlsxPairSession(platform, leftPath, rightPath, left.name, right.name)
   }
 
   const target = classifyFamily(left.family)

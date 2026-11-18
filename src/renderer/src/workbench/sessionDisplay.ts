@@ -139,7 +139,8 @@ const FILE_KIND_KEYS: Record<FileKind, MessageKey> = {
   csv: 'common.fileKind.csv',
   tsv: 'common.fileKind.tsv',
   json: 'common.fileKind.json',
-  yaml: 'common.fileKind.yaml'
+  yaml: 'common.fileKind.yaml',
+  xlsx: 'common.fileKind.xlsx'
 }
 
 /** Dictionary key of one stable file-family identity. */
@@ -148,6 +149,7 @@ export function fileKindMessageKey(kind: FileKind): MessageKey {
 }
 
 function fileKindKey(session: WorkbenchSession): MessageKey {
+  if (session.xlsx !== undefined) return 'common.fileKind.xlsx'
   const adhoc = session.adhoc
   if (adhoc?.scene === 'csv') {
     return adhoc.delimiter === '\t' ? 'common.fileKind.tsv' : 'common.fileKind.csv'

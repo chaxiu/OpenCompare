@@ -31,5 +31,6 @@ export const common = {
   'common.fileKind.csv': 'CSV',
   'common.fileKind.tsv': 'TSV',
   'common.fileKind.json': 'JSON',
-  'common.fileKind.yaml': 'YAML'
+  'common.fileKind.yaml': 'YAML',
+  'common.fileKind.xlsx': 'Excel 表格（XLSX / XLSM）'
 } as const

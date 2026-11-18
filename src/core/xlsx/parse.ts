@@ -57,6 +57,8 @@ export interface XlsxTableMeta {
   readonly hiddenRows: readonly number[]
   /** Column letters flagged hidden; they still take part in the compare. */
   readonly hiddenColumns: readonly string[]
+  /** Indexes into `header` / each row of the hidden columns above. */
+  readonly hiddenColumnIndexes: readonly number[]
   /** Merged ranges, e.g. `A4:B5`. */
   readonly mergedRanges: readonly string[]
   /** Runtime watermark warnings (§5.5); empty when the parse stayed under 60%. */
@@ -156,6 +158,7 @@ export function parseXlsxTable(bytes: Uint8Array, options: XlsxParseOptions = {}
         uncachedFormulaCells: 0,
         hiddenRows: [],
         hiddenColumns: [],
+        hiddenColumnIndexes: [],
         mergedRanges: [],
         warnings
       },
@@ -269,6 +272,7 @@ function buildTable(
     uncachedFormulaCells: 0,
     hiddenRows: [],
     hiddenColumns: [],
+    hiddenColumnIndexes: [],
     mergedRanges,
     warnings
   }
@@ -296,6 +300,12 @@ function buildTable(
 
   const columns = resolveColumns(rowTexts[headerIndex], range.s.c)
   const header = columns.map((column) => column.name)
+  const hiddenColumns = collectHiddenColumns(sheet, range)
+  // The table drops duplicate header names, so the sheet letter has to be
+  // mapped back onto the column's current position.
+  const hiddenColumnIndexes = columns.flatMap((column, index) =>
+    hiddenColumns.includes(XLSX.utils.encode_col(range.s.c + column.index)) ? [index] : []
+  )
   const rows = rowTexts
     .slice(headerIndex + 1, lastDataIndex + 1)
     .map((row) => columns.map((column) => row[column.index]))
@@ -306,7 +316,8 @@ function buildTable(
       headerRow: range.s.r + headerIndex + 1,
       uncachedFormulaCells,
       hiddenRows: collectHiddenRows(sheet, range),
-      hiddenColumns: collectHiddenColumns(sheet, range)
+      hiddenColumns,
+      hiddenColumnIndexes
     },
     header,
     rows
