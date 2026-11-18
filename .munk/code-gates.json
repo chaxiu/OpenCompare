@@ -33,6 +33,16 @@
       "command": "pnpm test"
     },
     {
+      "id": "xlsx-parse-semantics",
+      "cwd": ".",
+      "command": "pnpm test src/core/xlsx/parse.test.ts"
+    },
+    {
+      "id": "xlsx-dep-integrity",
+      "cwd": ".",
+      "command": "pnpm test src/xlsx-dep-gate.test.ts"
+    },
+    {
       "id": "syntax-core",
       "cwd": ".",
       "command": "pnpm test src/core/syntax src/core/theme/contrast.test.ts"

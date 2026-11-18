@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 52395
+    "repoTestLines": 52738
   },
   "floors": {
     "appTestCases": 97,
@@ -31,10 +31,10 @@
   "growth": [
     {
       "metric": "repoTestLines",
-      "from": 52352,
-      "to": 52395,
-      "reason": "coverage preflight determinism: body gate spawn outcomes now carry status/error/signal plus the stdout/stderr tail, one bounded environment-only retry with an explicit maxBuffer, and per-test timeouts so an instrumented red is attributable instead of flaky",
-      "addedCases": 1
+      "from": 52395,
+      "to": 52738,
+      "reason": "xlsx/xlsm value-extraction layer: pure parseXlsxTable/listSheets/matchXlsxSheets semantics for cached-only formulas, merged anchors, 1900/1904 dates, 15-digit floats, hidden rows/cols and sheet-name diffing, plus the vendored xlsx 0.20.3 sha256 and lockfile integrity gate",
+      "addedCases": 18
     },
     {
       "metric": "appTestLines",
