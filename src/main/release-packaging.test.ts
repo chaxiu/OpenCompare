@@ -6,9 +6,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
-  bodyGateAttempts,
   describeSpawnOutcome,
-  retryableEnvironmentReason,
+  runWithEnvironmentRetry,
   type SpawnOutcomeLike
 } from '../../scripts/gate-spawn-outcome.mjs'
 import { UPLOAD_ASSET_GLOBS } from '../../scripts/verify-release.mjs'
@@ -544,20 +543,15 @@ describe('published release body gate', () => {
       })
     })
 
-  const runBodyGate = (body: string): SpawnOutcome & { attempts: number; retryReasons: string[] } => {
-    const retryReasons: string[] = []
-    const maxAttempts = bodyGateAttempts()
-    let outcome = runBodyGateOnce(body)
-    let attempts = 1
-    while (attempts < maxAttempts) {
-      const reason = retryableEnvironmentReason(outcome)
-      if (reason === null) break
-      retryReasons.push(`attempt ${attempts}: ${reason}`)
-      console.warn(`${describeSpawnOutcome(outcome, 'body gate retry')}\nretry reason: ${reason}`)
-      outcome = runBodyGateOnce(body)
-      attempts += 1
-    }
-    return { ...outcome, attempts, retryReasons }
+  const runBodyGate = (body: string): SpawnOutcome & { attempts: number; retryReasons: string[]; attemptDetails: string[] } => {
+    const { outcome, attempts, retryReasons, attemptDetails } = runWithEnvironmentRetry(
+      () => runBodyGateOnce(body),
+      {
+        onRetry: (failed, reason) =>
+          console.warn(`${describeSpawnOutcome(failed, 'body gate retry')}\nretry reason: ${reason}`)
+      }
+    )
+    return { ...outcome, attempts, retryReasons, attemptDetails }
   }
 
   it('runs in finalize after the release is made public', () => {
@@ -579,7 +573,7 @@ describe('published release body gate', () => {
           previous
         )
     const result = runBodyGate(body)
-    const detail = describeSpawnOutcome(result, row.id)
+    const detail = [row.id, ...result.attemptDetails, ...result.retryReasons.map((reason) => `retry reason: ${reason}`)].join('\n')
     expect(result.errorCode, `${detail}\nspawnSync environment failure: result is not attributable`).toBeNull()
     if (row.status === 'zero') expect(result.status, detail).toBe(0)
     else {

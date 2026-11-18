@@ -242,3 +242,7 @@ v0.2.6 实测：
 - 修复口径：`spawnCapturedChild` 新增 `waitForExit()`，在父进程 `exit` / `close` 时 settle，受 `SPIKE_PROCESS_EXIT_BUDGET_MS=5000` 有界约束（超时返回当前状态，可能仍为 `null`，由既有 `exitCode===0` 断言 fail-closed，不 sleep / 不重试 / 不调预算）；`launchApp` 在 `reason==='process-exited'` 时先 `await waitForExit()` 再构造 diagnostics。`stopChild` 的 SIGTERM→SIGKILL 语义与进程组回收仍只有一份实现。
 - 稳定性证据：`scripts/spike-process-tree-soak.mjs` 默认 100 轮重复跑真实的 `process-exited contract` 用例，首红非零退出并打印该轮输出；`release.yml` 的 `gates` 在 `pnpm test` 之后、Coverage gate / `pnpm build` / Pre-create release 之前加 `ubuntu-latest` 50 轮同镜像 soak；只读 `spike-process-tree-preflight.yml`（`pull_request` + `workflow_dispatch`，`contents: read`）用于推 tag 前在发布同镜像上预演并留 run 记录。发布顺序 / `needs: gates` / finalize 均未改。
 - 断言位置：`src/spike-process-tree-gate.test.ts`（`.munk/code-gates.json` 的 `spike-process-tree-gate`），`src/main/release-packaging.test.ts` 钉 gates 步骤顺序，`src/main/__fixtures__/release-packaging.json` 同步新增 soak 腿。
+
+## 16. 2026-11-19 spawn 结果分类必须覆盖 shell 透出的 128+N 信号退出
+
+- shell 经 `bash -c` 报信号退出时 `spawnSync` 给 `status=128+N`、`signal=null`（管道断开即 `status=141`）；分类必须按 `status-128` 映射信号名并归入「客观环境类失败最多重试 1 次」，两次原始 outcome 都进失败 detail，否则偶发红会被当成正文断言失败（v0.2.25 两连红，前例 run 42305357918）；断言失败（status<128）与 `OPENCOMPARE_GATE_SPAWN_RETRIES=0` 仍零重试。
