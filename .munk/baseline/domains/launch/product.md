@@ -21,7 +21,9 @@
 - **ac-single-instance-lock**：启动编排以注入的锁结果 `false` 运行时，`quit()` 被调用一次，`createWindow` 与 IPC 注册调用次数均为 0；锁结果为 `true` 时才开始注册与建窗。
 - **ac-second-instance-focus**：已有窗口时收到 `second-instance` → 现有窗口 `restore`/`show`/`focus` 被调用，`createWindow` 调用 0 次，不新开窗口。
 - **ac-second-instance-base-dir**：`second-instance` 携带的相对路径以该事件的 `workingDirectory` 作为 `baseDir` 解析；冷启动以进程 cwd 作为 `baseDir`。
-- **ac-argv-prefix-stripped**：传入以 `process.execPath` 开头的 argv（dev 下还含 app 入口参数）时，该前缀被移除；随后的裸双路径仍解析为左、右两路径。
+- **ac-argv-prefix-stripped**：传入以 `process.execPath` 开头的 argv（dev 下还含 app 入口参数）时，该前缀被移除；随后的裸双路径仍解析为左、右两路径。app 入口的拼写不以首实例为准：`appEntry === '.'` 时 argv 里写成绝对 app 路径、以及 `appEntry` 为绝对路径时 argv 里写成 `.`（相对基准为 argv 来源目录，二级实例取 `workingDirectory`），两种形态都要被剥掉；比较复用 `normalizePathValue` 做词法等价判定，不新增第二套路径解码 / 规范化；真实第一侧路径（如 `/tmp/a.txt`）不会被误判成入口。
+- **ac-second-instance-positional-pair**：应用已打开时二次启动 `opencompare a.xlsx b.xlsx`（argv 携带绝对 app 路径、`appEntry === '.'`）→ 前缀被剥离后按裸双位置参数建出左右对，不把 app 目录当成左路径、不报「左侧是目录」。
+- **ac-launch-flag-parity**：带 dev 启动器前缀（绝对 app 路径 + `appEntry === '.'`）时 `--left=/--right=` 与 `--left/--right` 两种写法结果不变；剥离前缀只作用于启动器部分，不影响显式侧标志。
 - **ac-url-in-argv-wins**：argv 同时含 `--left/--right` 与 `opencompare://compare?…` 时按 URL 解析；含两个 `opencompare://` 时以最后一个为准；URL 内容不被当作路径侧值。
 - **ac-cold-start-queued-until-ready**：renderer 未 ready 时投递请求 → 发送 0 次且队列长度 1；ready 之后发送 1 次，payload 为解析后的 `CompareRequest`（左右路径与 kind 完整）。
 - **ac-queue-order-once**：ready 前连续入队两个有效请求 → ready 后按入队顺序发送两次，队列清空；再次收到 ready 不重复发送。
@@ -60,7 +62,7 @@
 - **时序硬约束**：`requestSingleInstanceLock()` 在任何 `BrowserWindow` 创建与 `registerPlatformIpc()` 之前执行；`open-url` 监听在 `app.whenReady()` 之前注册（macOS 冷启动 URL 会早于 ready 到达）；`second-instance` 监听在持锁后立即注册。
 - **解析唯一入口**：只用 `src/shared/compareRequest.ts` 的 `parseCompareArgv` / `parseCompareUrl` / `resolveCompareRequest`。主进程注入 `homeDir = app.getPath('home')`、`baseDir = process.cwd()`（冷启动）或 `second-instance` 事件的 `workingDirectory`；shared 层仍不读环境变量。
 - **探测复用**：`src/main/platform/electron-platform.ts` 内的 `statPath`（含 `/samples` 挂载语义）导出为可复用函数，IPC handler 与启动注入共用同一实现，禁止第二份 `fs.stat` 分支导致 `/samples` 与权限语义漂移。
-- **argv 前缀清理**：交给解析前先去掉 `process.execPath`，`process.defaultApp` 为真时再去掉 app 入口参数；清理逻辑（`stripLauncherPrefix`）在纯编排模块内，可单测。
+- **argv 前缀清理**：交给解析前先去掉 `process.execPath`，`process.defaultApp` 为真时再去掉 app 入口参数；入口参数与 `appEntry` / `appPath` 两种记录形态按词法归一后比较（`normalizePathValue`，基准是 argv 来源目录），因此 `.` 与绝对 app 路径互相能被识别为同一入口。清理逻辑（`stripLauncherPrefix(argv, bindings, baseDir?)`）在纯编排模块内，可单测；冷启动传 `bindings.cwd`，二级实例传事件的 `workingDirectory`。
 - **IPC 契约**：channel 名只加到 `src/shared/platform/channels.ts`（一个 main→renderer 事件 + 一个 renderer→main 的 ready invoke）。payload 是判别式联合 `CompareRequestPayload`：成功携带已解析探测完成的 `CompareRequest`，失败只携带可读中文 `message`；不把原始 argv/URL、异常对象或文件系统细节穿过 IPC。
 - **PlatformPort 扩展为可选成员**（避免破坏既有测试端口）：`onCompareRequest(listener): () => void` 与 `compareRequestsReady(): Promise<void>`。Electron 实现经 preload 白名单桥接；Web 实现提供 no-op 桩；renderer 在缺失时按「无注入」处理且不报错。
 - **preload 安全**：仍只用 `contextBridge.exposeInMainWorld('openComparePlatform', …)`，不解除 `contextIsolation` / `sandbox`，不暴露 `ipcRenderer` 本体，事件回调只在订阅后转发。
@@ -71,16 +73,11 @@
 
 ## 最近交付证明
 
-- WI：`wi_ws_1049cda9d94e3506`（启动参数与 URL scheme 注入 + 单实例接管，`kind: feature`）
-- 日期：2026-10-20
-- 结果：code_gates passed（install / lint / typecheck / build / build:web / test 全绿；`needSelfTest=false`，跳过 UI 自测）。
+- WI：`wi_intake_54a556cf0ed7e584`（二次启动带位置参数时把应用目录当左路径）
+- 日期：2026-11-18
+- 结果：code_gates passed（36 项含 install / lint / typecheck / build / build:web / test / spike-launch-gate 全绿；`needSelfTest=false`）。
 - 覆盖摘要：
-  - 新增 `src/main/launch.ts`（245 行，零 Electron import）：`startLaunch(bindings)` 先 `requestSingleInstanceLock()`，失败即 `quit()` 并返回 `null`；持锁后按 `isPackaged` 注册协议客户端（dev 带 `execPath` + app 入口）；`coldStart` 从清理过前缀的 argv 取请求，`onSecondInstance(argv, workingDirectory)` 先聚焦/建窗再以事件 cwd 解析，`onOpenUrl` 在 ready 前也入队；`onRendererReady` 按入队顺序 flush 一次并置 ready，`pendingCount` 可断言；`stripLauncherPrefix` 单独导出可单测。
-  - `src/main/index.ts`：`startLaunch` 调用移到建窗与 `registerPlatformIpc` 之前；`second-instance` / `open-url` 监听在持锁后立即挂载（`open-url` 早于 `whenReady`）；`whenReady` 仅在持锁时建首窗（`launch.onAppReady()`）；`activate` 重建窗口后 `notifyWindowCreated()` 重置 ready。
-  - `src/main/platform/electron-platform.ts`：`statPath` 改为导出（启动探测与 IPC 共用同一实现，含 `/samples` 语义）；`registerPlatformIpc({ onCompareRequestsReady })` 新增 `platform:compare-requests-ready` handler。
-  - `src/shared/platform/channels.ts` 增 `compareRequest` / `compareRequestsReady` 两个白名单 channel；`types.ts` 的 `PlatformPort` 增可选 `onCompareRequest` / `compareRequestsReady`；`compareRequest.ts` 增 `CompareRequestPayload` 判别式联合（成功带 request，失败只带 message）。
-  - `src/preload/index.ts`：`onCompareRequest` 只在调用后 `ipcRenderer.on` 并返回 `removeListener` 的 unsubscribe；`compareRequestsReady` 走白名单 invoke；仍只 `exposeInMainWorld('openComparePlatform', …)`。
-  - `Workbench.tsx`：挂载副作用订阅一次（`platform.onCompareRequest?.(…)`，无此能力即无注入），订阅后 `compareRequestsReady?.()`；handler 存在 ref 里以避开重复订阅，成功走既有 `openCompareRequest`，失败只 `report(message)`；cleanup 退订。
-  - `src/renderer/src/platform/web-platform.ts`：`onCompareRequest: () => () => undefined`、`compareRequestsReady: async () => undefined`。
-  - 测试：新增 `src/main/launch.test.ts`（24 条，覆盖锁、接管聚焦、`workingDirectory` 基准、前缀剥离、URL 优先与末位获胜、无参数不注入、队列顺序一次送达、`open-url` 解码、错误只提示、建窗时机、协议客户端两种入参、shared 解析唯一入口与「无第二份解码/规范化」）；`src/preload/index.test.ts`（5 条白名单 / 不泄漏 Node / 订阅后转发 + unsubscribe / ready channel）；`App.test.tsx` 新增「launch request injection」7 条；`web-platform.test.ts` 增同构桩 1 条；`release-packaging.test.ts` 增协议声明 2 条。
-- 注：本域为新增域（上一轮 `compare-request` 明确把单实例/协议接管列为后续项）。本 WI change pack 未提供 `tests/cases/**` / `tech.md` / `ux/**`，无新增折叠用例、无 tech/ux 手合；打包侧 `protocols` / Linux `MimeType` 的 AC 定义落在 `release` 域。未新增依赖，未改 `appId` / 发布流程 / 会话模型。
+  - `src/main/launch.ts`：`stripLauncherPrefix(argv, bindings, baseDir?)` 新增可选 `baseDir`；入口判定改为对 `appEntry` 与 `appPath` 两种记录形态都做词法比较（`isLauncherEntry` 复用 `normalizePathValue`），使 `.` 与绝对 app 路径（及其相对解析形态）互相识别；冷启动传 `bindings.cwd`，`onSecondInstance` 传事件 `workingDirectory`。真实第一侧路径不参与入口匹配。
+  - `src/main/launch.test.ts`：新增 5 条——绝对 app 路径 + `appEntry='.'` 建出位置参数对、反向 `.` 相对解析形态、`--left=/--right=` 在前缀下不回归、单位置参数不产生请求、显式目录 + 文件按键入路径报「类型不一致」（不出现 app 目录）；`stripLauncherPrefix` 三组直接断言不含入口残留。
+  - `src/renderer/src/views/DirectoryView.test.tsx`：`afterAll` 清理真实目录夹具的 hook 超时放宽到 60s（gate 内偶发清理超时，非行为改动）。
+- 注：本 WI change pack 未提供 `tests/cases/**` / `tech.md` / `ux/**`，无新增折叠用例、无 tech/ux 手合。未改 `CompareErrorCode` 语义与提示文案、未动 URL scheme 解析与 singleInstance 生命周期，未新增依赖、未升版本。

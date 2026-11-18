@@ -8,6 +8,7 @@
  * deliberately no second URI decoder or path normaliser here.
  */
 import {
+  normalizePathValue,
   parseCompareArgv,
   parseCompareUrl,
   resolveCompareRequest
@@ -74,18 +75,44 @@ export interface LaunchController {
 }
 
 /**
+ * One app entry spelling in the form the argument carries it. A first launch
+ * started as `electron .` and a re-launch handed to the running instance as
+ * `electron /abs/app` name the same entry, so the shared lexical normaliser
+ * (never a second path decoder) has to see them as equal.
+ */
+function isLauncherEntry(
+  argument: string,
+  entry: string,
+  baseDir: string | undefined
+): boolean {
+  if (argument === entry) return true
+  const context = baseDir === undefined ? {} : { baseDir }
+  const normalizedArgument = normalizePathValue(argument, context)
+  return normalizedArgument !== null && normalizedArgument === normalizePathValue(entry, context)
+}
+
+/**
  * Drops the runtime prefix `process.argv` carries: the executable, then the app
  * entry when electron is running the project directly (`defaultApp`).
+ *
+ * The entry may be spelled `.`, an absolute project path or a resolved variant
+ * of either — a second launch does not necessarily reuse the first launch's
+ * spelling — so both recorded forms are compared, relative to the directory the
+ * arguments came from (the second launch's cwd for a takeover).
  */
 export function stripLauncherPrefix(
   argv: readonly string[],
-  bindings: Pick<LaunchBindings, 'execPath' | 'appPath' | 'appEntry' | 'defaultApp'>
+  bindings: Pick<LaunchBindings, 'execPath' | 'appPath' | 'appEntry' | 'defaultApp'>,
+  baseDir?: string
 ): readonly string[] {
   let start = 0
   if (argv[0] === bindings.execPath) start = 1
-  const entry = bindings.appEntry ?? bindings.appPath
-  if (start === 1 && bindings.defaultApp && entry !== undefined && argv[start] === entry) {
-    start += 1
+  const argument = argv[start]
+  if (start === 1 && bindings.defaultApp && argument !== undefined) {
+    const entries = [bindings.appEntry, bindings.appPath]
+    if (entries.some((entry) => entry !== undefined && isLauncherEntry(argument, entry, baseDir))) {
+      start += 1
+    }
   }
   return argv.slice(start)
 }
@@ -200,7 +227,7 @@ export function startLaunch(bindings: LaunchBindings): LaunchController | null {
 
   const controller: LaunchController = {
     coldStart: requestFromArgv(
-      stripLauncherPrefix(bindings.argv, bindings),
+      stripLauncherPrefix(bindings.argv, bindings, bindings.cwd),
       context(bindings.cwd)
     ).then((payload) => {
       if (payload !== null) enqueue(payload)
@@ -213,7 +240,7 @@ export function startLaunch(bindings: LaunchBindings): LaunchController | null {
     async onSecondInstance(argv, workingDirectory) {
       focusOrCreate()
       const payload = await requestFromArgv(
-        stripLauncherPrefix(argv, bindings),
+        stripLauncherPrefix(argv, bindings, workingDirectory),
         // The second launch resolves its relative paths against its own cwd.
         context(workingDirectory)
       )
