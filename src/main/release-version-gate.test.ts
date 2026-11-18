@@ -158,8 +158,8 @@ describe('repository release facts', () => {
   })
 
   const noteFacts: Array<[string, readonly string[]]> = [
-    [releaseFacts.notes.englishLines.join('\n'), ['ignore whitespace', 'off by default', 'spaces', 'tabs', 'one comparison result', 'status bar', 'same session', 'scroll position and switches', 'keeps the previous result', 'swap', 'ruler and counts', 'restores']],
-    [releaseFacts.notes.chineseLines.join('\n'), ['忽略空白差异', '默认关闭', '空格', '制表符', '同一份比较结果', '状态栏', '不新建会话', '滚动位置与开关状态', '保留上一次结果', '交换', '指示条与计数', '复原']],
+    [releaseFacts.notes.englishLines.join('\n'), ['ignore whitespace', 'off by default', 'spaces', 'tabs', 'one comparison result', 'status bar', 'same session', 'scroll position and switches', 'keeps the previous result', 'swap', 'ruler and counts', 'restores', '.xlsx', 'SheetJS', 'XLSX_LIMIT_EXCEEDED', 'zip bomb', 'four-state', 'Buffer', 'second launch']],
+    [releaseFacts.notes.chineseLines.join('\n'), ['忽略空白差异', '默认关闭', '空格', '制表符', '同一份比较结果', '状态栏', '不新建会话', '滚动位置与开关状态', '保留上一次结果', '交换', '指示条与计数', '复原', '工作簿', 'SheetJS', 'XLSX_LIMIT_EXCEEDED', 'zip bomb', '四态', 'Buffer', '二次启动']],
     [markdownSection(changelog, currentTag), ['忽略空白差异', '默认关闭', '重载', '交换']]
   ]
   it.each(noteFacts)('states the current release facts', (markdown, tokens) => {

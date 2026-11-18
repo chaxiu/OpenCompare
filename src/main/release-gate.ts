@@ -202,6 +202,8 @@ export interface ReleaseHistoryFacts {
   currentTag: string
   headings: readonly string[]
   evidence: readonly EvidenceStatusFact[]
+  /** Public tags announced before their evidence row lands, e.g. the tag the READMEs point at. */
+  pendingEvidence?: readonly string[]
 }
 
 const TAG = /^v\d+\.\d+\.\d+$/
@@ -221,6 +223,9 @@ export const judgeReleaseHistory = (facts: ReleaseHistoryFacts): GateVerdict => 
   const issues: GateIssue[] = []
   const headings = facts.headings
   const evidenceTags = new Set(facts.evidence.map((entry) => entry.tag))
+  // A tag whose release is already public but whose evidence writeback has not
+  // landed yet stays pending, exactly like the tag still converging.
+  const pendingTags = new Set([facts.currentTag, ...(facts.pendingEvidence ?? [])])
   if (headings.length === 0) {
     issues.push({ path: 'CHANGELOG.md', code: 'changelog-empty' })
   } else if (headings[0] !== facts.currentTag) {
@@ -245,8 +250,9 @@ export const judgeReleaseHistory = (facts: ReleaseHistoryFacts): GateVerdict => 
       issues.push({ path: 'CHANGELOG.md', code: 'changelog-order', detail: heading })
     }
     // The current tag is still converging: evidence may be written after the
-    // tag ships. Every historical entry stays fail-closed.
-    if (heading !== 'v0.1.2' && heading !== facts.currentTag && !evidenceTags.has(heading)) {
+    // tag ships. A publicly announced tag whose evidence row is still pending
+    // is exempt the same way. Every other historical entry stays fail-closed.
+    if (heading !== 'v0.1.2' && !pendingTags.has(heading) && !evidenceTags.has(heading)) {
       issues.push({ path: `docs/release-evidence/${heading}.md`, code: 'evidence-missing' })
     }
   }
