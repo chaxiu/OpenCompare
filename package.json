@@ -51,6 +51,7 @@
     "papaparse": "^5.7.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

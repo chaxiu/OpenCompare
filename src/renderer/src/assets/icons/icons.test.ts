@@ -183,6 +183,7 @@ describe('dependency set', () => {
       'papaparse',
       'react',
       'react-dom',
+      'xlsx',
       'yaml'
     ])
     expect(read('pnpm-lock.yaml')).not.toContain('lucide-react')
