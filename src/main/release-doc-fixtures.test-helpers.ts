@@ -185,16 +185,16 @@ const ledgerFacts = existsSync(ledgerPath)
   : []
 
 /**
- * Public tag announced in the READMEs before the matching evidence row lands.
- * Kept in a data fixture because the test-debt gate bans current-version
- * literals in `.ts` files.
+ * Public tags announced before the matching evidence row lands, newest is the
+ * one the READMEs point at. Kept in a data fixture because the test-debt gate
+ * bans current-version literals in `.ts` files.
  */
-const announcedPublicTag =
+const announcedPublicTags =
   (
     JSON.parse(
       readFileSync(join(repoRoot, 'src/main/__fixtures__/release-announced-tag.json'), 'utf8')
-    ) as { tag?: string }
-  ).tag ?? ''
+    ) as { tags?: string[] }
+  ).tags ?? []
 
 /** Every verified tag recorded in the evidence ledger and the evidence directory. */
 const verifiedTags = [
@@ -205,13 +205,13 @@ const verifiedTags = [
   .map((entry) => entry.tag)
 
 /** Newest verified or explicitly announced tag. */
-export const publishedTag = [...verifiedTags, announcedPublicTag].sort(compareTags).at(-1) ?? ''
+export const publishedTag =
+  [...verifiedTags, ...announcedPublicTags].sort(compareTags).at(-1) ?? ''
 
-/** Announced tag whose evidence row / ledger entry has not been written back yet. */
-const pendingEvidenceTags =
-  announcedPublicTag !== '' && !evidenceFacts.some((entry) => entry.tag === announcedPublicTag)
-    ? [announcedPublicTag]
-    : []
+/** Announced tags whose evidence row / ledger entry has not been written back yet. */
+const pendingEvidenceTags = announcedPublicTags.filter(
+  (tag) => !evidenceFacts.some((entry) => entry.tag === tag)
+)
 
 // The single read of the real repository facts. Pure assertions consume this
 // object; no `expect` may live in this module.
