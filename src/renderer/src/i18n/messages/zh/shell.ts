@@ -16,8 +16,7 @@ export const shell = {
   'shell.toolbar.openFolderTitle': '依次选择左右两个真实文件夹开始对比',
   'shell.toolbar.more': '更多',
   'shell.empty.title': '打开真实文件或文件夹开始对比',
-  'shell.empty.description':
-    '在「新建对比」中直接输入或粘贴左右两个真实路径，全程不弹系统对话框；也可以经系统选择器依次选择两侧，或直接把两个真实路径拖入窗口。',
+  'shell.empty.description': '拖入左右两侧的文件或文件夹，或点「新建对比」手动填路径。',
   'shell.empty.hint':
     '拖入 2 个同类路径（两个文件或两个文件夹）可直接开始；想看内置示例？在「设置 → 示例与调试」中打开，不影响真实对比。',
   'shell.loading.title': '正在载入样本…',
@@ -196,5 +195,7 @@ export const shell = {
   'shell.history.side.theirs': 'theirs',
   'shell.history.clear': '清空历史',
   'shell.history.clearConfirm': '确认清空',
-  'shell.history.clearTitle': '清空全部最近对比'
+  'shell.history.clearTitle': '清空全部最近对比',
+  'shell.history.showAll': '全部 {count}',
+  'shell.history.showAllTitle': '全部 {count} 条最近对比'
 } as const

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComparisonSwitches } from '@core/text/normalize'
 import type { ComparisonHistoryEntry, ComparisonHistoryKind, ComparisonHistorySwitches } from '@shared/history/types'
@@ -18,6 +18,9 @@ const DIRECTORY = makeEntry('directory', [A, B], BASE_TIME)
 const FILE = makeEntry('file', ['/work/left.ts', '/work/right.ts'], BASE_TIME - 60_000)
 const MERGE = makeEntry('merge', ['/repo/base.ts', '/repo/ours.ts', '/repo/theirs.ts'], BASE_TIME - 120_000)
 const ENTRIES: readonly ComparisonHistoryEntry[] = [DIRECTORY, FILE, MERGE]
+const MANY: readonly ComparisonHistoryEntry[] = Array.from({ length: 20 }, (_, index) =>
+  makeEntry('file', [`/work/many-left-${index}.ts`, `/work/many-right-${index}.ts`], BASE_TIME - index * 1000)
+)
 const el = (selector: string): HTMLElement => document.querySelector<HTMLElement>(selector)!
 const actionLabel = (key: 'shell.history.reopenTitle' | 'shell.history.removeTitle', entry: ComparisonHistoryEntry): string => interpolate(zh[key], { paths: historyPathsText(entry) })
 
@@ -100,5 +103,37 @@ describe('HistoryHome', () => {
     const reopen = screen.getByLabelText(actionLabel('shell.history.reopenTitle', DIRECTORY))
     const remove = screen.getByLabelText(actionLabel('shell.history.removeTitle', DIRECTORY))
     expect([(reopen as HTMLButtonElement).disabled, (remove as HTMLButtonElement).disabled]).toEqual([true, true])
+  })
+  it('caps the home list at five rows in a token-height scroll container', () => {
+    renderHome(MANY)
+    const rows = [...document.querySelectorAll('[data-history-entry]')]
+    expect(rows).toHaveLength(5)
+    expect(rows.map((row) => row.getAttribute('data-history-entry'))).toEqual(MANY.slice(0, 5).map((entry) => entry.id))
+    const list = document.querySelector('section ul')
+    expect(list?.className).toContain('max-h-[var(--height-history-list)]')
+    expect(list?.className).toContain('overflow-y-auto')
+  })
+  it('opens all entries in a scrollable dialog and returns focus to the trigger on Escape', async () => {
+    renderHome(MANY)
+    const trigger = screen.getByRole('button', { name: interpolate(zh['shell.history.showAllTitle'], { count: 20 }) })
+    expect(trigger.textContent).toBe(interpolate(zh['shell.history.showAll'], { count: 20 }))
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog', { name: interpolate(zh['shell.history.showAllTitle'], { count: 20 }) })
+    const all = [...dialog.querySelectorAll('[data-history-entry]')]
+    expect(all).toHaveLength(20)
+    expect(all.map((row) => row.getAttribute('data-history-entry'))).toEqual(MANY.map((entry) => entry.id))
+    expect(dialog.querySelector('.overflow-auto')).not.toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+  it('keeps the dialog row actions wired to the same callbacks', () => {
+    const { onReopen, onRemove } = renderHome(MANY)
+    fireEvent.click(screen.getByRole('button', { name: interpolate(zh['shell.history.showAllTitle'], { count: 20 }) }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByLabelText(actionLabel('shell.history.reopenTitle', MANY[6]!)))
+    fireEvent.click(within(dialog).getByLabelText(actionLabel('shell.history.removeTitle', MANY[6]!)))
+    expect(onReopen).toHaveBeenCalledWith(MANY[6])
+    expect(onRemove).toHaveBeenCalledWith(MANY[6]!.id)
   })
 })
