@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Checkbox } from './Checkbox'
+import { StateView } from './StateView'
 
 /**
  * Control contracts for the visual baseline item. The assertions read the
@@ -130,5 +131,32 @@ describe('segmented control height contract', () => {
     expect(text).toContain('px-1 py-0')
     expect(text).not.toMatch(/\bp-1\b/)
     expect(text).toContain('border-line-subtle')
+  })
+})
+
+describe('state view scroll contract', () => {
+  it('top-aligns the scroll container and lets short content centre with my-auto', () => {
+    const markup = renderToStaticMarkup(
+      <StateView icon={<span />} title="Title" description="Body" />
+    )
+    expect(markup).toContain('items-start justify-center overflow-auto')
+    expect(markup).toContain('my-auto')
+    expect(markup).not.toContain('items-center justify-center overflow-auto')
+  })
+
+  it('keeps the empty, loading and error shapes distinguishable', () => {
+    const loading = renderToStaticMarkup(
+      <StateView icon={<span />} title="Loading" description="Reading" />
+    )
+    const error = renderToStaticMarkup(
+      <StateView tone="danger" icon={<span />} title="Error" description="Failed" action={<button>Retry</button>} />
+    )
+    expect(loading).not.toContain('border-danger/40')
+    expect(error).toContain('border-danger/40')
+    expect(error).toContain('Retry')
+  })
+
+  it('defines the history list height as a theme token', () => {
+    expect(source('assets/main.css')).toMatch(/--height-history-list:\s*\d+px;/)
   })
 })

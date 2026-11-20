@@ -24,8 +24,8 @@ export function StateView({
   extra
 }: StateViewProps): JSX.Element {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-8">
-      <div className="flex max-w-md flex-col items-center gap-3 text-center">
+    <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto p-8">
+      <div className="my-auto flex max-w-md flex-col items-center gap-3 text-center">
         <span
           className={cx(
             'flex size-11 items-center justify-center rounded-lg border',

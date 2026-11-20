@@ -20,7 +20,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.toolbar.more': 'More',
   'shell.empty.title': 'Open real files or folders to start comparing',
   'shell.empty.description':
-    'Type or paste two real paths in "New comparison" without any system dialog, pick both sides through the system pickers, or drop two real paths onto the window.',
+    'Drag files or folders into both sides, or click "New comparison" to enter the paths.',
   'shell.empty.hint':
     'Drop two paths of the same kind (two files or two folders) to start right away. Want to see the built-in samples? Open Settings → Samples & debugging; they never get in the way of real comparisons.',
   'shell.loading.title': 'Loading demo samples…',
@@ -226,5 +226,7 @@ export const shell: Record<keyof typeof zhShell, string> = {
   'shell.history.side.theirs': 'theirs',
   'shell.history.clear': 'Clear history',
   'shell.history.clearConfirm': 'Confirm clear',
-  'shell.history.clearTitle': 'Clear all recent comparisons'
+  'shell.history.clearTitle': 'Clear all recent comparisons',
+  'shell.history.showAll': 'All {count}',
+  'shell.history.showAllTitle': 'All {count} recent comparisons'
 }

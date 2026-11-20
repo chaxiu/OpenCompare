@@ -8,7 +8,7 @@
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 54015
+    "repoTestLines": 54080
   },
   "floors": {
     "appTestCases": 97,
@@ -38,10 +38,10 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 53705,
-      "to": 54015,
-      "reason": "0.2.25 coverage resample: src/core/xlsx/* must join the module set at the 75% branch floor while the unchanged 97 lines / 90 branches / 99 functions totals stay green. Adds pre-inflate zip64 and central-directory edges, shared-strings counter fallbacks, sparse declared ranges, empty sheets and boolean / error header cells in src/core/xlsx/{limits,hidden,parse}.test.ts (+310 lines, 16 cases)",
-      "addedCases": 16
+      "from": 54015,
+      "to": 54080,
+      "reason": "Empty-state home UX coverage: src/renderer/src/workbench/historyHome.test.tsx adds the 5-row home cap with the token-height scroll container, the 'All N' dialog listing the stored 20 entries inside a scroll body, Escape close focus return and dialog row actions; src/renderer/src/workbench/historySafety.dom.test.tsx re-pins the home row count to 5 and the dialog to 20 across the 25-record cap and path-privacy flows; src/renderer/src/components/visualContracts.test.tsx pins StateView short-content centring / long-content top-aligned scroll, the distinguishable empty/loading/error shapes and the history-list height theme token (+65 lines, 6 cases)",
+      "addedCases": 6
     }
   ]
 }

@@ -91,6 +91,8 @@
   --height-control-sm: 28px;
   --height-control-md: 32px;
   --height-control-lg: 36px;
+  /* Empty-state home: at most five history rows before the list scrolls */
+  --height-history-list: 150px;
 
   /* Elevation */
   --shadow-panel: 0 10px 24px -18px rgb(0 0 0 / 0.9);
