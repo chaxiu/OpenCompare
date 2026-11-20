@@ -7,7 +7,7 @@ old image or composed artwork is used.
 
 ## Captured commit
 
-- commit: `387089395b9c02258044c1fadfd408e8e095e293`
+- commit: `6e59cfa6da73d611f072d2a377be2503acecd15a`
 - all four images were captured from a `pnpm build` made on a clean working tree
   at exactly that commit (`HEAD` equalled this commit and `git status
   --porcelain` reported nothing under `src/**` before the build), then
@@ -15,9 +15,7 @@ old image or composed artwork is used.
   This recorded commit is the build the images came from; `src/renderer` has a
   zero diff from it to `HEAD`. The `src/core` large-file threshold follow-up is
   allowed to differ — only the renderer (the part that decides pixels) is pinned.
-- Re-capture at this commit (after the xlsx workbook view landed) reproduced all
-  four images byte for byte, so every `Bytes` / `sha256` row below is unchanged
-  from the previous capture; the two captured scenes do not render the new view.
+- Re-capture at this commit (after the empty-state home list and copy landed) reproduced all four images byte for byte, so every `Bytes` / `sha256` row below is unchanged from the previous capture; neither captured scene renders the home empty state.
 
 ## Language pinning
 
