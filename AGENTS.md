@@ -49,3 +49,10 @@ OpenCompare 是对标 Beyond Compare 5 Pro 的现代跨平台桌面对比与三�
 | TypeScript 类型设计 | `.agents/skills/typescript-advanced/SKILL.md` |
 | Tailwind CSS v4 工具类与配置 | `.agents/skills/tailwind-4-docs/SKILL.md` |
 | vitest 单测编写 | `.agents/skills/vitest/SKILL.md` |
+
+## 近期结论
+
+- **外部目录访问**：外部目录（含 ops 项目）一律用工具的 `workdir` 或绝对路径访问，禁止在 bash 里 `cd` 进外部目录——逐条 `cd` 会触发 external_directory 审批。
+- **覆盖率天花板不足**：走 baseline growth 机制（`ceilings` 抬到实测值 + `growth` 条目：from 取上一版基线、addedCases 写真实新增用例数、reason 点名文件与行为），禁止压断言或删用例换绿。
+- **维护态发版**：必须由人给出日期并做一次人工过首页；缺人工过首页不得宣称可发布。
+
