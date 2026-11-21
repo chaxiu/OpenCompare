@@ -1,11 +1,11 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "3d300b7069a00beee506115df14d1e3143bab7a3",
-    "date": "2026-11-18T16:30:50.000Z"
+    "commit": "d4ed4f872b0002dfa52acad027a4b36d7eb73ffb",
+    "date": "2026-11-21T16:22:31.000Z"
   },
   "provider": "v8",
-  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261118T163006Z/reports",
+  "command": "pnpm exec vitest run --coverage --coverage.provider=v8 --coverage.include='src/core/**' --coverage.exclude='**/*.test.ts' --coverage.exclude='**/*.test.tsx' --coverage.exclude='**/__fixtures__/**' --coverage.reporter=json-summary --coverage.reportsDirectory=/var/folders/hn/rqf4yrcj4yn53l0vghdcgjcr0000gn/T/coverage-gate-20261122T002300Z/reports",
   "scope": {
     "include": "src/core/**",
     "exclude": [
