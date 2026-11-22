@@ -23,10 +23,10 @@
  * - the measured scope literals equal the baseline scope, literally and in
  *   order;
  * - the floors ratchet: lowers require a matching `floorLedger` entry;
- * - baseline freshness: `measuredAt.commit` is reachable from HEAD and is at
- *   or after the previous semver tag. A tag on HEAD itself must be excluded:
- *   on a release-tag checkout it would otherwise make "baseline = previous
- *   tag" look stale.
+ * - baseline freshness: `measuredAt.commit` is a valid sha reachable from HEAD.
+ *   The previous semver tag is *not* a freshness boundary: tagging a release
+ *   must never make a still-reachable baseline stale, otherwise every release
+ *   would need an extra resampling ticket.
  *
  * All failures are printed together and exit non-zero. Every floor number is
  * read from the baseline; only measurement conventions live in this file
@@ -503,20 +503,7 @@ function evaluateBaselineFreshness(baseline, cwd = ROOT) {
     problems.push(`baseline stale: measuredAt.commit ${commit} is not reachable from HEAD ${head}`)
     return { problems, messages }
   }
-  const previousTag = previousReleaseTag(cwd)
-  if (previousTag === null) {
-    messages.push(
-      `baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is reachable from HEAD (no semver tag)`
-    )
-    return { problems, messages }
-  }
-  if (!isAncestor(previousTag.sha, commit, cwd)) {
-    problems.push(
-      `baseline stale: measuredAt.commit ${commit} is older than the previous semver tag ${previousTag.tag} (${previousTag.sha})`
-    )
-    return { problems, messages }
-  }
-  messages.push(`baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is at or after ${previousTag.tag}`)
+  messages.push(`baseline freshness: measuredAt.commit ${commit.slice(0, 12)} is reachable from HEAD`)
   return { problems, messages }
 }
 
