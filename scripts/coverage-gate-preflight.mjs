@@ -24,6 +24,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   assessCacheEntry,
   computeCacheKey,
@@ -31,7 +32,7 @@ import {
   fileSetFingerprint,
   scriptHash
 } from './coverage-gate-preflight-cache.mjs'
-import { evaluateBaselineFreshness, previousReleaseTag } from './coverage-gate.mjs'
+import { evaluateBaselineFreshness } from './coverage-gate.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const BASELINE_PATH = join(ROOT, '.munk/baseline/coverage.json')
@@ -46,8 +47,46 @@ const KEYED_SCRIPTS = [
 ]
 const GIT_SHA = /^[0-9a-f]{40,64}$/
 
-function git(args) {
-  return spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' })
+function git(args, options = {}) {
+  return spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', ...options })
+}
+
+/**
+ * Build a dangling commit from HEAD's tree so the stale probe uses a real
+ * commit object that is guaranteed not to be an ancestor of HEAD. W2 removed
+ * the previous-semver-tag freshness boundary, so any commit reachable from HEAD
+ * (e.g. a previous tag's parent) is a valid baseline and must not be used here.
+ * `commit-tree` writes only a loose object -- no ref, tag or remote is touched.
+ */
+export function createUnreachableCommit(run = git) {
+  const tree = run(['rev-parse', 'HEAD^{tree}'])
+  const treeSha = (tree.stdout ?? '').trim()
+  if (tree.status !== 0 || !GIT_SHA.test(treeSha)) {
+    throw new Error(`cannot resolve HEAD tree: ${(tree.stderr ?? '').trim()}`)
+  }
+  const identity = {
+    GIT_AUTHOR_NAME: 'coverage-preflight',
+    GIT_AUTHOR_EMAIL: 'coverage-preflight@example.invalid',
+    GIT_COMMITTER_NAME: 'coverage-preflight',
+    GIT_COMMITTER_EMAIL: 'coverage-preflight@example.invalid'
+  }
+  const created = run(['commit-tree', treeSha, '-m', 'coverage preflight stale probe'], {
+    env: { ...process.env, ...identity }
+  })
+  const sha = (created.stdout ?? '').trim()
+  if (created.status !== 0 || !GIT_SHA.test(sha)) {
+    throw new Error(`cannot create dangling stale commit: ${(created.stderr ?? '').trim()}`)
+  }
+  return sha
+}
+
+/**
+ * The stale probe passes only when the gate rejects the sample specifically as
+ * unreachable. A reachable sample that merely fails for another reason (or a
+ * gate that still green-lights it) must not count as a proof of staleness.
+ */
+export function staleProbePassed(run) {
+  return run.status !== 0 && run.output.includes('is not reachable from HEAD')
 }
 
 function deleteRehearsalTag() {
@@ -257,7 +296,6 @@ function main() {
     process.exit(2)
   }
 
-  const previous = previousReleaseTag()
   const workDir = mkdtempSync(join(tmpdir(), 'coverage-gate-preflight-'))
   const baselineDir = join(workDir, 'baselines')
   mkdirSync(baselineDir, { recursive: true })
@@ -340,21 +378,11 @@ function main() {
 
       const staleBaselinePath = join(baselineDir, 'baseline-stale.json')
       const staleBaseline = JSON.parse(realBaselineBytes.toString('utf8'))
-      let olderCommit = '0'.repeat(40)
-      if (previous !== null) {
-        const parent = git(['rev-parse', `${previous.sha}^`])
-        if (parent.status === 0 && /^[0-9a-f]{40}$/.test(parent.stdout.trim())) {
-          olderCommit = parent.stdout.trim()
-        }
-      }
-      staleBaseline.measuredAt.commit = olderCommit
+      staleBaseline.measuredAt.commit = createUnreachableCommit()
       writeFileSync(staleBaselinePath, `${JSON.stringify(staleBaseline, null, 2)}\n`)
       const staleRun = runNode(gateArgs(staleBaselinePath))
       printOutput('negative stale', staleRun)
-      results.stale =
-        staleRun.status !== 0 &&
-        (staleRun.output.includes('older than the previous semver tag') ||
-          staleRun.output.includes('not reachable from HEAD'))
+      results.stale = staleProbePassed(staleRun)
       console.log(`PREFLIGHT negative stale: ${results.stale ? 'PASS' : 'FAIL'}`)
     }
   } finally {
@@ -377,9 +405,11 @@ function main() {
   process.exit(passed ? 0 : 1)
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(`PREFLIGHT error: ${error.message}`)
-  process.exit(1)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main()
+  } catch (error) {
+    console.error(`PREFLIGHT error: ${error.message}`)
+    process.exit(1)
+  }
 }
