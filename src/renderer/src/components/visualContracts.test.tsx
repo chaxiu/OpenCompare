@@ -157,6 +157,6 @@ describe('state view scroll contract', () => {
   })
 
   it('defines the history list height as a theme token', () => {
-    expect(source('assets/main.css')).toMatch(/--height-history-list:\s*\d+px;/)
+    expect(source('assets/main.css')).toMatch(/--height-history-list:\s*calc\([^;]*var\(--height-history-row\)[^;]*\);/)
   })
 })

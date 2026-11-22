@@ -91,8 +91,12 @@
   --height-control-sm: 28px;
   --height-control-md: 32px;
   --height-control-lg: 36px;
-  /* Empty-state home: at most five history rows before the list scrolls */
-  --height-history-list: 150px;
+  /* History row box: control-sm (28) + py-1 top/bottom (8) + border (2) = 38px */
+  --height-history-row: calc(var(--height-control-sm) + 2 * var(--spacing) + 2px);
+  /* gap-1 between rows */
+  --height-history-gap: var(--spacing);
+  /* Empty-state home: HISTORY_HOME_VISIBLE_LIMIT (5) whole rows + their 4 gaps = 206px */
+  --height-history-list: calc(5 * var(--height-history-row) + 4 * var(--height-history-gap));
 
   /* Elevation */
   --shadow-panel: 0 10px 24px -18px rgb(0 0 0 / 0.9);
