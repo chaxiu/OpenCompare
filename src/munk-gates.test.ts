@@ -145,6 +145,48 @@ describe('default code-gates matrix', () => {
     expect(existsSync(resolve(process.cwd(), 'scripts/test-debt-gate.mjs'))).toBe(true)
   })
 
+  it('keeps every gate command out of the verdict of another gate', () => {
+    const commands = defaultManifest.gates.map((gate) => gate.command)
+    expect(new Set(commands).size).toBe(commands.length)
+    for (const gate of defaultManifest.gates) {
+      expect(gate.command.startsWith('pnpm ') || gate.command.startsWith('node ')).toBe(true)
+    }
+  })
+
+  it('maps each pnpm gate command onto a declared package.json script', () => {
+    const manifest = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')
+    ) as { scripts: Record<string, string> }
+    // `pnpm install` is a package-manager builtin, every other pnpm gate is a script.
+    const scriptGates = defaultManifest.gates.filter(
+      (gate) => gate.command.startsWith('pnpm ') && gate.command !== 'pnpm install'
+    )
+    expect(scriptGates.map((gate) => gate.id)).toEqual([
+      'lint',
+      'typecheck',
+      'build',
+      'build-web',
+      'test'
+    ])
+    for (const gate of scriptGates) {
+      const script = gate.command.slice('pnpm '.length)
+      expect(manifest.scripts[script], `package.json script ${script}`).toBeTypeOf('string')
+    }
+    expect(manifest.scripts['test']).toBe('vitest run')
+  })
+
+  it('makes pnpm test collect the retained per-file suites', () => {
+    const config = readFileSync(resolve(process.cwd(), 'vitest.config.mts'), 'utf8').replace(
+      /\s+/g,
+      ''
+    )
+    expect(config).toContain("include:['src/**/*.test.ts'")
+    for (const relativePath of RETAINED_SUITES) {
+      expect(relativePath.startsWith('src/'), `${relativePath} lives under src/`).toBe(true)
+      expect(relativePath).toMatch(/\.test\.tsx?$/)
+    }
+  })
+
   it('retires every single-file duplicate gate and keeps its suite file', () => {
     for (const id of RETIRED_GATES) {
       expect(gateById(defaultManifest, id), `retired gate ${id}`).toBeUndefined()
