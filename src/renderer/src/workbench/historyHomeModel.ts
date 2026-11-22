@@ -10,6 +10,9 @@ import type { Language } from '@shared/platform/types'
 import type { ComparisonSwitches } from '@core/text/normalize'
 import type { MessageKey } from '@renderer/i18n/messages'
 
+/** Rows rendered on the empty-state home; the full list lives in the dialog. */
+export const HISTORY_HOME_VISIBLE_LIMIT = 5
+
 /** Localized type label of one history row; `merge` is reserved for later waves. */
 export const HISTORY_KIND_KEYS = {
   directory: 'shell.history.kind.directory',

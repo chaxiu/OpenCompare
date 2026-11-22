@@ -7,13 +7,11 @@ import { useI18n } from '@renderer/i18n/context'
 import {
   formatHistoryTime,
   HISTORY_ERROR_BADGE_KEYS,
+  HISTORY_HOME_VISIBLE_LIMIT,
   HISTORY_KIND_KEYS,
   historyErrorCode,
   historyPathsText
 } from './historyHomeModel'
-
-/** Rows rendered on the empty-state home; the full list lives in the dialog. */
-const HISTORY_HOME_VISIBLE_LIMIT = 5
 
 export interface HistoryHomeProps {
   readonly entries: readonly ComparisonHistoryEntry[]
