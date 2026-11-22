@@ -58,10 +58,10 @@ describe('evaluateBaselineFreshness', () => {
     const { problems, messages } = evaluateBaselineFreshness(baselineAt(previous), repo.dir)
 
     expect(problems).toEqual([])
-    expect(messages.join('\n')).toContain('is at or after v1.0.0')
+    expect(messages.join('\n')).toContain('is reachable from HEAD')
   })
 
-  it('fails when the baseline predates the previous tag', () => {
+  it('passes when the baseline predates the previous tag but is still reachable from HEAD', () => {
     const repo = makeRepo()
     const older = commit(repo, 'a.txt')
     const previous = commit(repo, 'b.txt')
@@ -69,10 +69,10 @@ describe('evaluateBaselineFreshness', () => {
     commit(repo, 'c.txt')
     tag(repo, 'v1.1.0')
 
-    const { problems } = evaluateBaselineFreshness(baselineAt(older), repo.dir)
+    const { problems, messages } = evaluateBaselineFreshness(baselineAt(older), repo.dir)
 
-    expect(problems).toHaveLength(1)
-    expect(problems[0]).toContain('older than the previous semver tag v1.0.0')
+    expect(problems).toEqual([])
+    expect(messages.join('\n')).toContain('is reachable from HEAD')
   })
 
   it('passes with no semver tag when the baseline equals HEAD', () => {
@@ -82,19 +82,20 @@ describe('evaluateBaselineFreshness', () => {
     const { problems, messages } = evaluateBaselineFreshness(baselineAt(head), repo.dir)
 
     expect(problems).toEqual([])
-    expect(messages.join('\n')).toContain('no semver tag')
+    expect(messages.join('\n')).toContain('is reachable from HEAD')
   })
 
-  it('passes when HEAD is tagged and the baseline equals HEAD', () => {
+  it('fails when the baseline commit is not reachable from HEAD', () => {
     const repo = makeRepo()
-    const previous = commit(repo, 'a.txt')
-    tag(repo, 'v1.0.0', previous)
-    const head = commit(repo, 'b.txt')
-    tag(repo, 'v1.1.0', head)
+    commit(repo, 'a.txt')
+    const orphaned = commit(repo, 'b.txt')
+    repo.git('reset', '-q', '--hard', 'HEAD~1')
+    const head = commit(repo, 'c.txt')
+    tag(repo, 'v1.0.0', head)
 
-    const { problems, messages } = evaluateBaselineFreshness(baselineAt(head), repo.dir)
+    const { problems } = evaluateBaselineFreshness(baselineAt(orphaned), repo.dir)
 
-    expect(problems).toEqual([])
-    expect(messages.join('\n')).toContain('is at or after v1.0.0')
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('is not reachable from HEAD')
   })
 })
