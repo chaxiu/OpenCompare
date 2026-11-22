@@ -394,14 +394,25 @@ describe('deterministic CLI exit', () => {
 })
 
 describe('gate registration and run evidence', () => {
-  it('registers the process-tree gate in the default matrix', () => {
+  it('runs this suite through the one pnpm test gate instead of a per-file duplicate', () => {
     const manifest = JSON.parse(readFileSync(join(repoRoot, '.munk/code-gates.json'), 'utf8')) as {
       version: number
       gates: Array<{ id: string; cwd: string; command: string }>
     }
     expect(manifest.version).toBe(1)
-    const gate = manifest.gates.find((entry) => entry.id === 'spike-process-tree-gate')
-    expect(gate).toEqual({ id: 'spike-process-tree-gate', cwd: '.', command: 'pnpm test src/spike-process-tree-gate.test.ts' })
+    expect(manifest.gates.map((entry) => entry.id)).toEqual([
+      'install',
+      'lint',
+      'typecheck',
+      'build',
+      'build-web',
+      'test',
+      'test-debt-gate'
+    ])
+    expect(manifest.gates.filter((entry) => entry.command.includes('pnpm test'))).toEqual([
+      { id: 'test', cwd: '.', command: 'pnpm test' }
+    ])
+    expect(manifest.gates.some((entry) => entry.id === 'spike-process-tree-gate')).toBe(false)
     expect(existsSync(join(repoRoot, 'src/spike-process-tree-gate.test.ts'))).toBe(true)
   })
 

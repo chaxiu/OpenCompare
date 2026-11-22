@@ -1,14 +1,14 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "3131f4f6f681d383a1ffd97c4c92b19c5740af28",
-    "date": "2026-11-05"
+    "commit": "1cc9d0e",
+    "date": "2026-11-22"
   },
   "ceilings": {
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 54154
+    "repoTestLines": 53965
   },
   "floors": {
     "appTestCases": 97,

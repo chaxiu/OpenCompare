@@ -6,7 +6,9 @@
  *
  * - ceilings (lines) may only go down, floors (collected cases) only up;
  *   every number comes from `.munk/baseline/test-debt.json` (the script keeps
- *   no copy of them), and the committed baseline itself may only tighten.
+ *   no copy of them), and the committed baseline itself may only tighten. A
+ *   ceiling may rise only through a bounded `growth` entry and a floor may
+ *   drop only through a reasoned `floorCalibration` entry.
  * - case counts come from `vitest list --json` (collection only, no run).
  * - zero-tolerance literals: the current `package.json#version` and any
  *   64-char lowercase hex sha256 outside the standard-vector whitelist.
@@ -408,10 +410,43 @@ function parseGrowth(baseline) {
 }
 
 /**
+ * Parses the baseline `floorCalibration` declarations. A floor may only drop
+ * below the **previous committed** value when one declaration states where the
+ * drop starts, where it ends and why; a pure test-file consolidation keeps the
+ * collected suites while folding several self-proof cases into fewer ones.
+ */
+function parseFloorCalibrations(baseline) {
+  const entries = Array.isArray(baseline.floorCalibration) ? baseline.floorCalibration : []
+  const byMetric = new Map()
+  for (const entry of entries) {
+    const valid =
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof entry.metric === 'string' &&
+      entry.metric.length > 0 &&
+      Number.isInteger(entry.from) &&
+      Number.isInteger(entry.to) &&
+      typeof entry.reason === 'string' &&
+      entry.reason.trim().length > 0
+    if (!valid) {
+      fail(`floor calibration entry malformed: ${JSON.stringify(entry)}`)
+      continue
+    }
+    if (byMetric.has(entry.metric)) {
+      fail(`floor calibration entry duplicated: ${entry.metric}`)
+      continue
+    }
+    byMetric.set(entry.metric, entry)
+  }
+  return byMetric
+}
+
+/**
  * The baseline is a ratchet against the **previous committed** version:
  * ceilings only go down, floors only go up. A ceiling that rises needs a
- * matching `growth` entry bounded by {@link GROWTH_MAX_LINES}, and every
- * allowed rise is printed so it can never pass silently.
+ * matching `growth` entry bounded by {@link GROWTH_MAX_LINES}; a floor that
+ * drops needs a matching, reasoned `floorCalibration` entry. Every allowed
+ * move is printed so it can never pass silently.
  */
 function checkBaselineTightenOnly(baseline) {
   const previous = previousBaseline()
@@ -420,6 +455,7 @@ function checkBaselineTightenOnly(baseline) {
     return
   }
   const growth = parseGrowth(baseline)
+  const floorCalibrations = parseFloorCalibrations(baseline)
 
   for (const [metric, ceiling] of Object.entries(baseline.ceilings ?? {})) {
     const anchor = previous.ceilings?.[metric]
@@ -459,10 +495,29 @@ function checkBaselineTightenOnly(baseline) {
   for (const [metric, floor] of Object.entries(baseline.floors ?? {})) {
     const anchor = previous.floors?.[metric]
     if (!Number.isInteger(anchor)) continue
-    if (floor < anchor) {
-      fail(`baseline only tighten: floor ${metric} lowered to ${floor}, previous committed value ${anchor}`)
-    } else {
+    if (floor >= anchor) {
       ok(`baseline floor ${metric}: ${anchor} -> ${floor} (raised or unchanged)`)
+      continue
+    }
+    const calibration = floorCalibrations.get(metric)
+    if (calibration === undefined) {
+      fail(`baseline only tighten: floor ${metric} lowered to ${floor}, previous committed value ${anchor}`)
+    } else if (calibration.from !== anchor) {
+      fail(
+        `floor calibration ${metric}: from ${calibration.from} must equal previous committed floor ${anchor}`
+      )
+    } else if (calibration.to !== floor) {
+      fail(`floor calibration ${metric}: to ${calibration.to} must equal the new floor ${floor}`)
+    } else {
+      ok(
+        `ALLOWED floor calibration: ${metric} ${calibration.from}->${calibration.to} (${calibration.reason})`
+      )
+    }
+  }
+
+  for (const metric of floorCalibrations.keys()) {
+    if (!(metric in (baseline.floors ?? {}))) {
+      fail(`floor calibration ${metric}: no matching floor`)
     }
   }
 }
