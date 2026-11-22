@@ -1,14 +1,14 @@
 {
   "version": 1,
   "measuredAt": {
-    "commit": "3131f4f6f681d383a1ffd97c4c92b19c5740af28",
-    "date": "2026-11-05"
+    "commit": "1cc9d0e",
+    "date": "2026-11-22"
   },
   "ceilings": {
     "appTestLines": 2988,
     "syncRealGateLines": 1991,
     "pairLines": 4950,
-    "repoTestLines": 54154
+    "repoTestLines": 54007
   },
   "floors": {
     "appTestCases": 97,
@@ -38,9 +38,9 @@
     },
     {
       "metric": "repoTestLines",
-      "from": 54080,
-      "to": 54154,
-      "reason": "Home history list fits its visible rows: src/renderer/src/workbench/historyHomeLayout.test.ts evaluates the shipped @theme chain (--height-history-row from control-sm + py-1 + border, --height-history-gap from --spacing, --height-history-list = 5 rows + 4 gaps) and asserts the container is at least HISTORY_HOME_VISIBLE_LIMIT row boxes plus the gaps between them and that the CSS multipliers equal that TS limit (+74 lines, 3 cases); the 150px token would fail with 'expected 150 to be greater than or equal to 206'",
+      "from": 53965,
+      "to": 54007,
+      "reason": "code-gates slimming keeps test-case parity: src/munk-gates.test.ts regains the three gate-matrix proof cases that the 7-gate rewrite folded away (unique commands, every pnpm gate maps to a package.json script, pnpm test collects the retained src suites), so no collected case or suite file is lost",
       "addedCases": 3
     }
   ]

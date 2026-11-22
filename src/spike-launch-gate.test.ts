@@ -349,25 +349,28 @@ describe('workflow parity', () => {
 })
 
 describe('gate registration and lessons', () => {
-  it('registers spike-launch-gate between diff-normalize-real and the process-tree gate', () => {
+  it('runs this suite through the one pnpm test gate instead of a per-file duplicate', () => {
     const manifest = JSON.parse(readFileSync(join(repoRoot, '.munk/code-gates.json'), 'utf8')) as {
       version: number
       gates: Array<{ id: string; cwd: string; command: string }>
     }
-    const gate = manifest.gates.find((entry) => entry.id === 'spike-launch-gate')
-    expect(gate).toEqual({
-      id: 'spike-launch-gate',
-      cwd: '.',
-      command: 'pnpm test src/spike-launch-gate.test.ts'
-    })
-    expect(existsSync(join(repoRoot, 'src/spike-launch-gate.test.ts'))).toBe(true)
-    const ids = manifest.gates.map((entry) => entry.id)
-    expect(ids.indexOf('spike-launch-gate')).toBe(ids.indexOf('diff-normalize-real') + 1)
-    expect(ids[ids.indexOf('spike-launch-gate') + 1]).toBe('spike-process-tree-gate')
-    expect(ids[ids.indexOf('spike-process-tree-gate') + 1]).toBe('template-default-unchecked')
-    expect(ids.slice(-2)).toEqual(['verify-release-gate', 'test-debt-gate'])
     expect(manifest.version).toBe(1)
-    for (const forbidden of ['&&', '||', '|', ';']) expect(gate?.command).not.toContain(forbidden)
+    expect(manifest.gates.map((entry) => entry.id)).toEqual([
+      'install',
+      'lint',
+      'typecheck',
+      'build',
+      'build-web',
+      'test',
+      'test-debt-gate'
+    ])
+    const fullSuite = manifest.gates.filter((entry) => entry.command.includes('pnpm test'))
+    expect(fullSuite).toEqual([{ id: 'test', cwd: '.', command: 'pnpm test' }])
+    expect(manifest.gates.some((entry) => entry.id === 'spike-launch-gate')).toBe(false)
+    expect(existsSync(join(repoRoot, 'src/spike-launch-gate.test.ts'))).toBe(true)
+    for (const forbidden of ['&&', '||', '|', ';']) {
+      expect(fullSuite[0]?.command).not.toContain(forbidden)
+    }
   })
 
   it('records the Linux evidence, the descriptor and the reason contract in lessons', () => {

@@ -919,12 +919,25 @@ describe('post-release-verify workflow', () => {
 })
 describe('gate matrix', () => {
   const manifest = readJson<{ version: number; gates: Array<{ id: string; cwd: string; command: string }> }>(join(repoRoot, '.munk/code-gates.json'))
-  it('registers verify-release-gate with a single argv command, keeps version 1 and one test gate', () => {
-    const gate = manifest.gates.find((entry) => entry.id === 'verify-release-gate')
-    expect(gate).toEqual({ id: 'verify-release-gate', cwd: '.', command: 'pnpm test src/verify-release-gate.test.ts' })
-    for (const forbidden of ['&&', '||', '|', ';']) expect(gate?.command.includes(forbidden), forbidden).toBe(false)
+  it('keeps the seven core gates with pnpm test as the single full-suite entry', () => {
+    expect(manifest.version).toBe(1)
+    expect(manifest.gates).toEqual([
+      { id: 'install', cwd: '.', command: 'pnpm install' },
+      { id: 'lint', cwd: '.', command: 'pnpm lint' },
+      { id: 'typecheck', cwd: '.', command: 'pnpm typecheck' },
+      { id: 'build', cwd: '.', command: 'pnpm build' },
+      { id: 'build-web', cwd: '.', command: 'pnpm build:web' },
+      { id: 'test', cwd: '.', command: 'pnpm test' },
+      { id: 'test-debt-gate', cwd: '.', command: 'node scripts/test-debt-gate.mjs' }
+    ])
+    expect(manifest.gates.filter((entry) => entry.id === 'test')).toHaveLength(1)
+    expect(manifest.gates.filter((entry) => entry.command.includes('pnpm test'))).toEqual([
+      { id: 'test', cwd: '.', command: 'pnpm test' }
+    ])
+    const debtGate = manifest.gates.find((entry) => entry.id === 'test-debt-gate')
+    for (const forbidden of ['&&', '||', '|', ';']) expect(debtGate?.command.includes(forbidden), forbidden).toBe(false)
     expect(existsSync(join(repoRoot, 'src/verify-release-gate.test.ts'))).toBe(true)
-    expect(manifest.version).toBe(1); expect(manifest.gates.filter((entry) => entry.id === 'test')).toHaveLength(1)
+    expect(existsSync(join(repoRoot, 'scripts/test-debt-gate.mjs'))).toBe(true)
   })
 })
 describe('lessons', () => {
